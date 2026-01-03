@@ -187,3 +187,118 @@ All task specifications must:
 ## Implementation Approach
 
 Tasks are implemented iteratively following the epic structure. Each task builds upon the previous work, gradually constructing the complete system according to the comprehensive specifications in `docs/tasks/`.
+
+## Test-Driven Development (TDD) - MANDATORY
+
+**You MUST follow strict Test-Driven Development with no exceptions.**
+
+### Absolute Rules (Non-Negotiable)
+
+1. **Red → Green → Refactor, always**
+   - You MUST write a failing test first (RED)
+   - Then write the minimum production code to pass (GREEN)
+   - Then refactor while keeping tests green (REFACTOR)
+   - **No production code without a failing test first**
+   - Exception: Trivial wiring required to compile/run tests (must justify explicitly and keep minimal)
+
+2. **One behavior at a time**
+   - Each commit must introduce exactly one observable behavior change
+   - No "big bang" commits
+   - Small commits with clean messages: `test: ...`, `feat: ...`, `refactor: ...`, `chore: ...`
+
+3. **Tests must be deterministic**
+   - No network calls in tests
+   - No time dependence
+   - No randomness
+   - Any time/UUID/random must be injected behind an interface and faked in tests
+
+4. **No mocking internals. Mock boundaries.**
+   - Mock only external boundaries (filesystem, process runner, git, docker, cloud, clock)
+   - Prefer fakes over mocks when reasonable
+   - Do not mock internal implementation details
+
+5. **Coverage is not optional**
+   - Every new public method/class must have tests
+   - Critical paths must have unit + integration tests
+   - Define acceptance tests up front
+
+### Required Workflow for Each Feature
+
+For each task/subtask you implement, follow this loop:
+
+#### A) Plan (write before coding)
+- Summarize the behavior you're adding in 3–6 bullet points
+- List the public API surface you will introduce or change
+- List the tests you will write (names + intent)
+- Identify boundaries (what gets mocked/faked)
+
+#### B) RED
+- Add/modify tests FIRST
+- Run tests and show the failure output
+- Ensure the failure is meaningful (not a compile error unless the compile error is the minimal necessary red step)
+
+#### C) GREEN
+- Implement the smallest amount of code required
+- Run tests and show passing results
+
+#### D) REFACTOR
+- Refactor for clarity and architecture boundaries
+- Run tests again and show they still pass
+
+#### E) Document
+- Update docs/README/config docs if behavior impacts user workflow
+- Add notes on how to verify manually
+
+### Reporting Requirements (Must Include in Every Response)
+
+For every iteration, your response must include:
+
+1. **What you're implementing now** (one sentence)
+2. **Tests added/changed** (file paths + test names)
+3. **Command(s) run** (exact CLI commands, e.g., `dotnet test`)
+4. **Result** (failing output for RED, passing summary for GREEN)
+5. **Production code changed** (file paths + short explanation)
+6. **Next step** (what the next RED test will be)
+
+### Project-Specific TDD Constraints
+
+- This is **local-first**. No OpenAI/Anthropic APIs. No external LLM calls.
+- Respect **operating modes** and **safety posture**:
+  - Default is safe/deny-by-default
+  - Shell/process execution must be mediated and testable
+- Keep **boundaries clean**: Domain → Application → Infrastructure → CLI
+- **If you need to create a new class, you must first create a test that fails due to the class not existing, then implement it**
+- Avoid snapshot tests unless approved; prefer explicit assertions
+- **No direct DateTime.Now, Guid.NewGuid(), Random, Environment.GetEnvironmentVariable in production code—wrap behind interfaces**
+- Include at least:
+  - 1 unit test for parsing
+  - 1 integration test for CLI invocation
+  - 1 failure-mode test (invalid config)
+
+### Do Not Skip Steps
+
+Do not skip steps. Do not implement ahead of tests. If you deviate, stop and explain exactly why, then return to TDD immediately.
+
+### Git Workflow
+
+**IMPORTANT**: Commit and push code after EVERY complete unit of work (task / subtask completion).
+
+- Each task/subtask should result in at least one commit
+- Use meaningful commit messages following Conventional Commits
+- Push to feature branch after each commit
+- One task objective per commit preferred (may have multiple commits per task if complex)
+
+Example workflow:
+```bash
+# After completing Task 000.a
+git add .
+git commit -m "feat(task-000a): create .NET solution and project structure"
+git push origin feature/task-000-project-bootstrap
+
+# After completing Task 000.b
+git add .
+git commit -m "feat(task-000b): add baseline documentation"
+git push origin feature/task-000-project-bootstrap
+
+# etc.
+```
