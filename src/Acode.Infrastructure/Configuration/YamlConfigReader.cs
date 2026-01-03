@@ -18,6 +18,7 @@ public sealed class YamlConfigReader : IConfigReader
         _deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .IgnoreUnmatchedProperties()
+            .WithNodeDeserializer(new ReadOnlyCollectionNodeDeserializer(), s => s.Before<YamlDotNet.Serialization.NodeDeserializers.CollectionNodeDeserializer>())
             .Build();
     }
 
