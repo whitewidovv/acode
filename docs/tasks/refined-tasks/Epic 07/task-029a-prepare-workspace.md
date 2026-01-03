@@ -225,51 +225,281 @@ Target.PrepareWorkspaceAsync(config)
 
 ## Implementation Prompt
 
-### Interface
+You are implementing workspace preparation for compute targets. This handles code sync, dependency installation, and environment setup. Follow Clean Architecture and TDD.
+
+### Part 1: File Structure and Domain Models
+
+#### File Structure
+
+```
+src/Acode.Domain/
+├── Compute/
+│   └── Workspace/
+│       ├── PreparationPhase.cs
+│       ├── PreparationProgress.cs
+│       ├── WorkspaceConfig.cs
+│       ├── EcosystemType.cs
+│       └── Events/
+│           ├── PreparationStartedEvent.cs
+│           ├── SyncProgressEvent.cs
+│           ├── DependencyInstalledEvent.cs
+│           └── PreparationCompletedEvent.cs
+
+src/Acode.Application/
+├── Compute/
+│   └── Workspace/
+│       ├── IWorkspacePreparation.cs
+│       ├── IEcosystemDetector.cs
+│       ├── IDependencyInstaller.cs
+│       ├── ISourceSyncer.cs
+│       └── ICacheManager.cs
+
+src/Acode.Infrastructure/
+├── Compute/
+│   └── Workspace/
+│       ├── WorkspacePreparation.cs
+│       ├── EcosystemDetector.cs
+│       ├── SourceSyncer/
+│       │   ├── LocalSourceSyncer.cs
+│       │   ├── GitSourceSyncer.cs
+│       │   └── RsyncSourceSyncer.cs
+│       ├── DependencyInstaller/
+│       │   ├── DotNetDependencyInstaller.cs
+│       │   ├── NodeDependencyInstaller.cs
+│       │   └── PythonDependencyInstaller.cs
+│       └── Cache/
+│           ├── DependencyCacheManager.cs
+│           └── CacheInvalidator.cs
+
+tests/Acode.Domain.Tests/
+├── Compute/
+│   └── Workspace/
+│       ├── WorkspaceConfigTests.cs
+│       └── PreparationProgressTests.cs
+
+tests/Acode.Infrastructure.Tests/
+├── Compute/
+│   └── Workspace/
+│       ├── WorkspacePreparationTests.cs
+│       ├── EcosystemDetectorTests.cs
+│       ├── SourceSyncer/
+│       │   ├── LocalSourceSyncerTests.cs
+│       │   └── GitSourceSyncerTests.cs
+│       └── DependencyInstaller/
+│           ├── DotNetDependencyInstallerTests.cs
+│           ├── NodeDependencyInstallerTests.cs
+│           └── PythonDependencyInstallerTests.cs
+
+tests/Acode.Integration.Tests/
+├── Compute/
+│   └── Workspace/
+│       ├── FullPreparationTests.cs
+│       ├── LargeRepoSyncTests.cs
+│       └── MultiEcosystemTests.cs
+```
+
+#### Domain Models
 
 ```csharp
-public record WorkspaceConfig(
-    string Source,
-    string Ref,
-    string WorktreePath,
-    bool CleanBeforeSync,
-    CacheConfig? Cache,
-    DependencyConfig? Dependencies,
-    IReadOnlyList<string>? PrepareCommands);
-
-public record CacheConfig(
-    bool Enabled,
-    string CachePath);
-
-public record DependencyConfig(
-    bool AutoDetect,
-    IReadOnlyList<string>? CustomCommands);
-
-public interface IWorkspacePreparation
-{
-    Task PrepareAsync(IComputeTarget target, 
-        WorkspaceConfig config,
-        IProgress<PreparationProgress>? progress = null,
-        CancellationToken ct = default);
-}
-
-public record PreparationProgress(
-    PreparationPhase Phase,
-    double PercentComplete,
-    string Message);
+// src/Acode.Domain/Compute/Workspace/PreparationPhase.cs
+namespace Acode.Domain.Compute.Workspace;
 
 public enum PreparationPhase
 {
-    Creating,
-    Cleaning,
-    Syncing,
-    CheckingOut,
-    InstallingDependencies,
-    RunningCommands,
-    Completed
+    NotStarted = 0,
+    Creating = 1,
+    Cleaning = 2,
+    Syncing = 3,
+    CheckingOut = 4,
+    UpdatingSubmodules = 5,
+    DetectingEcosystems = 6,
+    InstallingDependencies = 7,
+    RunningCommands = 8,
+    Completed = 9,
+    Failed = 10
 }
+
+// src/Acode.Domain/Compute/Workspace/PreparationProgress.cs
+namespace Acode.Domain.Compute.Workspace;
+
+public sealed record PreparationProgress
+{
+    public required PreparationPhase Phase { get; init; }
+    public required double PercentComplete { get; init; }
+    public required string Message { get; init; }
+    public long? BytesTransferred { get; init; }
+    public long? TotalBytes { get; init; }
+    public TimeSpan? EstimatedRemaining { get; init; }
+    public string? CurrentFile { get; init; }
+}
+
+// src/Acode.Domain/Compute/Workspace/EcosystemType.cs
+namespace Acode.Domain.Compute.Workspace;
+
+[Flags]
+public enum EcosystemType
+{
+    None = 0,
+    DotNet = 1,
+    Node = 2,
+    Python = 4,
+    Go = 8,
+    Rust = 16,
+    Java = 32
+}
+
+// src/Acode.Domain/Compute/Workspace/Events/PreparationStartedEvent.cs
+namespace Acode.Domain.Compute.Workspace.Events;
+
+public sealed record PreparationStartedEvent(
+    ComputeTargetId TargetId,
+    WorkspaceConfig Config,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/Compute/Workspace/Events/SyncProgressEvent.cs
+namespace Acode.Domain.Compute.Workspace.Events;
+
+public sealed record SyncProgressEvent(
+    ComputeTargetId TargetId,
+    long BytesTransferred,
+    long TotalBytes,
+    int FilesTransferred,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/Compute/Workspace/Events/PreparationCompletedEvent.cs
+namespace Acode.Domain.Compute.Workspace.Events;
+
+public sealed record PreparationCompletedEvent(
+    ComputeTargetId TargetId,
+    TimeSpan Duration,
+    EcosystemType DetectedEcosystems,
+    DateTimeOffset Timestamp) : IDomainEvent;
 ```
 
----
+**End of Task 029.a Specification - Part 1/4**
 
-**End of Task 029.a Specification**
+### Part 2: Application Layer Interfaces
+
+```csharp
+// src/Acode.Application/Compute/Workspace/IWorkspacePreparation.cs
+namespace Acode.Application.Compute.Workspace;
+
+public interface IWorkspacePreparation
+{
+    Task PrepareAsync(
+        IComputeTarget target,
+        WorkspaceConfig config,
+        IProgress<PreparationProgress>? progress = null,
+        CancellationToken ct = default);
+    
+    Task<bool> ValidateWorkspaceAsync(
+        string workspacePath,
+        CancellationToken ct = default);
+    
+    Task CleanupAsync(
+        string workspacePath,
+        CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Workspace/IEcosystemDetector.cs
+namespace Acode.Application.Compute.Workspace;
+
+public interface IEcosystemDetector
+{
+    EcosystemType Detect(string workspacePath);
+    IReadOnlyList<EcosystemInfo> GetDetailedInfo(string workspacePath);
+}
+
+public sealed record EcosystemInfo(
+    EcosystemType Type,
+    string RootPath,
+    string? LockFile,
+    string? ConfigFile);
+
+// src/Acode.Application/Compute/Workspace/IDependencyInstaller.cs
+namespace Acode.Application.Compute.Workspace;
+
+public interface IDependencyInstaller
+{
+    EcosystemType SupportedEcosystem { get; }
+    
+    Task InstallAsync(
+        string workspacePath,
+        DependencyConfig? config,
+        IProgress<DependencyProgress>? progress = null,
+        CancellationToken ct = default);
+    
+    Task<bool> IsInstalledAsync(string workspacePath, CancellationToken ct = default);
+}
+
+public sealed record DependencyProgress(
+    string Message,
+    double PercentComplete,
+    int PackagesInstalled,
+    int TotalPackages);
+
+// src/Acode.Application/Compute/Workspace/ISourceSyncer.cs
+namespace Acode.Application.Compute.Workspace;
+
+public interface ISourceSyncer
+{
+    bool CanHandle(string sourcePath);
+    
+    Task SyncAsync(
+        string source,
+        string destination,
+        string? gitRef,
+        SyncOptions options,
+        IProgress<SyncProgress>? progress = null,
+        CancellationToken ct = default);
+}
+
+public sealed record SyncOptions(
+    bool Incremental = true,
+    bool IncludeSubmodules = true,
+    int SubmoduleDepth = 1,
+    IReadOnlyList<string>? ExcludePatterns = null);
+
+public sealed record SyncProgress(
+    long BytesTransferred,
+    long TotalBytes,
+    int FilesTransferred,
+    int TotalFiles,
+    string? CurrentFile);
+
+// src/Acode.Application/Compute/Workspace/ICacheManager.cs
+namespace Acode.Application.Compute.Workspace;
+
+public interface ICacheManager
+{
+    Task<string?> GetCachePathAsync(
+        EcosystemType ecosystem,
+        string lockFileHash,
+        CancellationToken ct = default);
+    
+    Task StoreCacheAsync(
+        EcosystemType ecosystem,
+        string dependencyPath,
+        string lockFileHash,
+        CancellationToken ct = default);
+    
+    Task<bool> RestoreCacheAsync(
+        string cachePath,
+        string destinationPath,
+        CancellationToken ct = default);
+    
+    Task InvalidateCacheAsync(
+        EcosystemType ecosystem,
+        CancellationToken ct = default);
+    
+    Task<CacheStats> GetStatsAsync(CancellationToken ct = default);
+}
+
+public sealed record CacheStats(
+    long TotalSize,
+    int EntryCount,
+    DateTimeOffset OldestEntry,
+    IReadOnlyDictionary<EcosystemType, long> SizeByEcosystem);
+```
+
+**End of Task 029.a Specification - Part 2/4**
