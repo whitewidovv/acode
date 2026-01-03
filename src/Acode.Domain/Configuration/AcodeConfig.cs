@@ -168,7 +168,7 @@ public sealed record ModelParametersConfig
     /// <summary>
     /// Gets the top-p parameter.
     /// </summary>
-    public double TopP { get; init; } = 0.95;
+    public double TopP { get; init; } = ConfigDefaults.DefaultTopP;
 }
 
 /// <summary>

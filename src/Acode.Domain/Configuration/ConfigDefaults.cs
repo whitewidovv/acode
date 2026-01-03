@@ -65,6 +65,12 @@ public static class ConfigDefaults
     public const int DefaultMaxTokens = 4096;
 
     /// <summary>
+    /// Default top_p parameter.
+    /// Per FR-002b-102.
+    /// </summary>
+    public const double DefaultTopP = 0.95;
+
+    /// <summary>
     /// Default timeout in seconds.
     /// Per FR-002b-103.
     /// </summary>

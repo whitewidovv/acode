@@ -38,7 +38,7 @@ public class CommandSpecTests
     }
 
     [Fact]
-    public void CommandSpec_DefaultWorkingDirectory_ShouldBeCurrentDirectory()
+    public void CommandSpec_DefaultCwd_ShouldBeCurrentDirectory()
     {
         // Arrange & Act
         var spec = new CommandSpec
@@ -47,11 +47,11 @@ public class CommandSpecTests
         };
 
         // Assert
-        spec.WorkingDirectory.Should().Be(".", "default is current directory");
+        spec.Cwd.Should().Be(".", "default is current directory");
     }
 
     [Fact]
-    public void CommandSpec_DefaultTimeoutSeconds_ShouldBe300()
+    public void CommandSpec_DefaultTimeout_ShouldBe300()
     {
         // Arrange & Act
         var spec = new CommandSpec
@@ -60,11 +60,11 @@ public class CommandSpecTests
         };
 
         // Assert
-        spec.TimeoutSeconds.Should().Be(300, "per FR-002c-120: default timeout is 300 seconds");
+        spec.Timeout.Should().Be(300, "per FR-002c-120: default timeout is 300 seconds");
     }
 
     [Fact]
-    public void CommandSpec_DefaultRetryCount_ShouldBeZero()
+    public void CommandSpec_DefaultRetry_ShouldBeZero()
     {
         // Arrange & Act
         var spec = new CommandSpec
@@ -73,7 +73,7 @@ public class CommandSpecTests
         };
 
         // Assert
-        spec.RetryCount.Should().Be(0, "per FR-002c-126: default retry is 0");
+        spec.Retry.Should().Be(0, "per FR-002c-126: default retry is 0");
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class CommandSpecTests
     }
 
     [Fact]
-    public void CommandSpec_DefaultEnvironment_ShouldBeEmpty()
+    public void CommandSpec_DefaultEnv_ShouldBeEmpty()
     {
         // Arrange & Act
         var spec = new CommandSpec
@@ -99,8 +99,8 @@ public class CommandSpecTests
         };
 
         // Assert
-        spec.Environment.Should().NotBeNull();
-        spec.Environment.Should().BeEmpty();
+        spec.Env.Should().NotBeNull();
+        spec.Env.Should().BeEmpty();
     }
 
     [Fact]
@@ -110,20 +110,20 @@ public class CommandSpecTests
         var spec = new CommandSpec
         {
             Run = "pytest tests/",
-            WorkingDirectory = "backend",
-            Environment = new Dictionary<string, string> { ["CI"] = "true" },
-            TimeoutSeconds = 600,
-            RetryCount = 3,
+            Cwd = "backend",
+            Env = new Dictionary<string, string> { ["CI"] = "true" },
+            Timeout = 600,
+            Retry = 3,
             ContinueOnError = true,
             PlatformVariants = new Dictionary<string, string> { ["windows"] = "pytest.exe tests/" }
         };
 
         // Assert
         spec.Run.Should().Be("pytest tests/");
-        spec.WorkingDirectory.Should().Be("backend");
-        spec.Environment.Should().ContainKey("CI");
-        spec.TimeoutSeconds.Should().Be(600);
-        spec.RetryCount.Should().Be(3);
+        spec.Cwd.Should().Be("backend");
+        spec.Env.Should().ContainKey("CI");
+        spec.Timeout.Should().Be(600);
+        spec.Retry.Should().Be(3);
         spec.ContinueOnError.Should().BeTrue();
         spec.PlatformVariants.Should().ContainKey("windows");
     }
@@ -137,15 +137,15 @@ public class CommandSpecTests
         var spec1 = new CommandSpec
         {
             Run = "npm build",
-            TimeoutSeconds = 120,
-            Environment = envDict
+            Timeout = 120,
+            Env = envDict
         };
 
         var spec2 = new CommandSpec
         {
             Run = "npm build",
-            TimeoutSeconds = 120,
-            Environment = envDict
+            Timeout = 120,
+            Env = envDict
         };
 
         // Act & Assert - records support value-based equality when using same instances
@@ -155,8 +155,8 @@ public class CommandSpecTests
         var spec3 = new CommandSpec
         {
             Run = "npm test",
-            TimeoutSeconds = 120,
-            Environment = envDict
+            Timeout = 120,
+            Env = envDict
         };
 
         spec1.Should().NotBe(spec3);
