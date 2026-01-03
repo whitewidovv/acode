@@ -112,10 +112,24 @@ The following items are explicitly excluded from Task 013.c:
 
 ### Precedence
 
-- FR-023: CLI overrides config
-- FR-024: Config overrides defaults
+- FR-023: CLI overrides config for non-deny decisions (e.g., allow vs prompt)
+- FR-024: Config overrides defaults for non-deny decisions
 - FR-025: Specific overrides general
-- FR-026: Deny overrides allow
+- FR-026: Deny overrides allow across all sources and levels of specificity. After applying FR-023–FR-025 to determine the most specific non-deny behavior, if any applicable rule is an explicit deny, the final result MUST be deny.
+
+**Precedence Example:**
+
+If the defaults say `file_write = prompt`, the config file says `file_write = deny`, and the CLI is invoked with `--yes=file_write` (allow), the operation **MUST be denied**.
+
+Explanation:
+1. FR-023 allows CLI to override config for non-deny behaviors
+2. FR-026 and the global rule "Deny always wins" mean that an explicit deny in any source cannot be bypassed by CLI `--yes`
+3. This prevents `--yes` from becoming a security bypass mechanism
+
+**Conflict Resolution Order:**
+1. Check all sources (defaults, config, CLI) for explicit deny → If found, **deny wins**
+2. If no deny found, apply FR-023–FR-025 to find most specific non-deny behavior
+3. Use the resulting behavior (allow, prompt, or reject)
 
 ### Validation
 

@@ -200,6 +200,21 @@ The following items are explicitly excluded from Task 012.b:
 - FR-075: Path validation MUST occur
 - FR-076: Command allowlist MUST be checked
 - FR-077: Secrets MUST be redacted in logs
+- FR-077a: Secrets in tool parameters and results (e.g., API keys, passwords, tokens) MUST be redacted or omitted from persisted state, traces, and error messages
+
+**Secret Protection Scope:**
+- Log files (FR-077)
+- Tool invocation parameters (FR-077a)
+- Tool execution results (FR-077a)
+- Persisted task state/database records (FR-077a)
+- Error messages and stack traces (FR-077a)
+- Debug output and traces (FR-077a)
+
+**Secret Detection:**
+- Pattern matching for common secret formats (API keys, tokens, passwords)
+- Environment variable references (e.g., `${API_KEY}`)
+- Explicit secret marking in tool schemas
+- Redaction: Replace with `[REDACTED]` or omit entirely
 
 ### Completion Detection
 

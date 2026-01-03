@@ -110,8 +110,19 @@ The following items are explicitly excluded from Task 012.a:
 - FR-020: Tasks MUST decompose into steps
 - FR-021: Each task MUST have unique ID
 - FR-022: Each step MUST have unique ID
-- FR-023: IDs MUST be UUID v7
+- FR-023: IDs SHOULD be UUID v7 for time-ordered identifiers
+  - Implementations MUST either:
+    - (a) Use a UUID library that supports UUID v7 (RFC 9562, May 2024), OR
+    - (b) Document and use a fallback strategy (e.g., UUID v4 combined with explicit `created_at` timestamps) in environments where UUID v7 is not yet available
+  - .NET 9.0+ has native UUID v7 support via `Guid.CreateVersion7()`
+  - .NET 8.0 and earlier: Use NuGet package or fallback to UUID v4 + timestamp
 - FR-024: Decomposition MUST be logged
+
+**UUID v7 Rationale:**
+- Time-ordered for efficient database indexing
+- Sortable by creation time without additional fields
+- Better than UUID v4 for distributed systems
+- Fallback preserves functionality in older runtimes
 
 ### Task Definition
 

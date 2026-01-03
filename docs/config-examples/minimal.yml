@@ -1,8 +1,25 @@
 # Minimal .agent/config.yml
 # This is the absolute minimum configuration required for Acode
 
-schema_version: "1.0.0"
+schema_version: "1.0.0"  # REQUIRED - Only field that must be present
 
-project:
+# All sections below are OPTIONAL
+# Acode will use sensible defaults if omitted
+
+project:                   # Optional - Project metadata
   name: my-project
   type: dotnet
+
+# mode:                    # Optional - Defaults to 'local-only'
+#   default: local-only
+
+# model:                   # Optional - Uses operating mode defaults
+#   provider: ollama       # Default provider for local-only mode
+#   name: codellama:7b     # Default model for Ollama
+
+# paths:                   # Optional - Uses standard paths
+#   workspace: .acode
+
+# security:                # Optional - Secure defaults enabled
+#   sandbox:
+#     enabled: true
