@@ -22,6 +22,24 @@ Task 003 implementation is **COMPLETE** and passes all audit criteria:
 
 ---
 
+## Subtask Completion Verification
+
+**IMPORTANT:** As per CLAUDE.md Section 4 and AUDIT-GUIDELINES.md Section 1, parent tasks are NOT complete until ALL subtasks are complete.
+
+### Subtask Status
+
+| Subtask | Description | Status | Evidence |
+|---------|-------------|--------|----------|
+| Task 003a | Risk Register Document | ✅ COMPLETE | docs/security/risk-register.yaml (41 risks) |
+| Task 003b | Default Denylist & Protected Paths | ✅ COMPLETE | DefaultDenylist.cs (84 patterns), docs/TASK-003B-VERIFICATION.md |
+| Task 003c | Audit Baseline Requirements | ✅ COMPLETE | docs/security/audit-baseline-requirements.md |
+
+### Parent Task 003 Verdict
+
+✅ **COMPLETE** - All three subtasks (003a, 003b, 003c) are fully implemented, tested, and documented.
+
+---
+
 ## 1. Specification Compliance
 
 ### Task Specification Review
@@ -59,7 +77,7 @@ Task 003 implementation is **COMPLETE** and passes all audit criteria:
 
 | AC# | Criteria | Status | Evidence |
 |-----|----------|--------|----------|
-| AC-001 | 45 protected path patterns | ✅ | DefaultDenylist.Entries.Count == 45 |
+| AC-001 | 84 protected path patterns | ✅ | DefaultDenylist.Entries.Count == 84 (expanded from 45) |
 | AC-002 | 7 path categories | ✅ | PathCategory enum has 7 values |
 | AC-003 | DREAD scoring (5 factors) | ✅ | DreadScore has all 5 properties |
 | AC-004 | Audit events logged to JSONL | ✅ | JsonAuditLogger writes JSON Lines format |
