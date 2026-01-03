@@ -9,4 +9,10 @@
     <PackageReference Include="NJsonSchema" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\data\config-schema.json">
+      <Link>Resources\config-schema.json</Link>
+      <LogicalName>Acode.Infrastructure.Resources.config-schema.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 </Project>

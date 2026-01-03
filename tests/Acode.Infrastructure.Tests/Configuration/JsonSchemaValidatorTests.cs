@@ -14,6 +14,16 @@ public class JsonSchemaValidatorTests
     private const string SchemaPath = "/mnt/c/Users/neilo/source/local coding agent/data/config-schema.json";
 
     [Fact]
+    public async Task CreateFromEmbeddedResourceAsync_ShouldCreateValidator()
+    {
+        // Arrange & Act
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
+
+        // Assert
+        validator.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task CreateAsync_WithValidSchemaPath_ShouldCreateValidator()
     {
         // Arrange & Act
@@ -32,6 +42,24 @@ public class JsonSchemaValidatorTests
         // Act & Assert
         await Assert.ThrowsAsync<FileNotFoundException>(
             async () => await JsonSchemaValidator.CreateAsync(invalidPath).ConfigureAwait(true)).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task ValidateYaml_WithEmbeddedSchema_ShouldValidateCorrectly()
+    {
+        // Arrange
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
+        var yaml = @"
+schema_version: ""1.0.0""
+";
+
+        // Act
+        var result = validator.ValidateYaml(yaml);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsValid.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
     }
 
     [Fact]

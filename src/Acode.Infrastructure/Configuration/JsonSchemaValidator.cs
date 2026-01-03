@@ -1,3 +1,4 @@
+using System.Reflection;
 using Acode.Application.Configuration;
 using Newtonsoft.Json;
 using NJsonSchema;
@@ -11,6 +12,7 @@ namespace Acode.Infrastructure.Configuration;
 /// </summary>
 public sealed class JsonSchemaValidator
 {
+    private const string EmbeddedResourceName = "Acode.Infrastructure.Resources.config-schema.json";
     private readonly JsonSchema _schema;
 
     /// <summary>
@@ -23,7 +25,26 @@ public sealed class JsonSchemaValidator
     }
 
     /// <summary>
-    /// Creates a new instance of the <see cref="JsonSchemaValidator"/> asynchronously.
+    /// Creates a new instance from embedded resource.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A new validator instance.</returns>
+    public static async Task<JsonSchemaValidator> CreateFromEmbeddedResourceAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        using var stream = assembly.GetManifestResourceStream(EmbeddedResourceName)
+            ?? throw new InvalidOperationException($"Embedded resource not found: {EmbeddedResourceName}");
+
+        using var reader = new StreamReader(stream);
+        var schemaJson = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        var schema = await JsonSchema.FromJsonAsync(schemaJson, cancellationToken).ConfigureAwait(false);
+
+        return new JsonSchemaValidator(schema);
+    }
+
+    /// <summary>
+    /// Creates a new instance of the <see cref="JsonSchemaValidator"/> asynchronously from a file path.
     /// </summary>
     /// <param name="schemaPath">Path to the JSON Schema file.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
