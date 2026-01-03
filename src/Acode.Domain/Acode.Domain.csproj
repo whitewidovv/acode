@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Domain layer: No external dependencies -->
+  <!-- All configuration inherited from Directory.Build.props -->
+</Project>

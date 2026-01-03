@@ -584,3 +584,567 @@ A: On Unix, `/bin/sh`. On Windows, `cmd.exe` (or `pwsh.exe` if configured).
 
 ---
 
+## Acceptance Criteria / Definition of Done
+
+### Command Group Definitions (30 items)
+
+- [ ] Six command groups defined: setup, build, test, lint, format, start
+- [ ] All command groups are optional in config
+- [ ] Missing group returns clear error when invoked
+- [ ] setup group installs dependencies
+- [ ] setup group is idempotent
+- [ ] build group compiles/bundles project
+- [ ] build group produces artifacts
+- [ ] test group runs test suite
+- [ ] test group returns non-zero on failure
+- [ ] lint group checks code quality
+- [ ] lint group does not modify files
+- [ ] format group auto-formats code
+- [ ] format group is idempotent
+- [ ] start group runs application
+- [ ] start group supports long-running processes
+- [ ] All groups log execution start
+- [ ] All groups log execution end
+- [ ] All groups log exit code
+- [ ] All groups capture stdout
+- [ ] All groups capture stderr
+- [ ] All groups respect timeout
+- [ ] Groups have clear semantics documented
+- [ ] Group names are case-insensitive
+- [ ] Group aliases not supported (explicit)
+- [ ] Groups are independent (no implicit dependencies)
+- [ ] Group execution is synchronous by default
+- [ ] Group execution order is deterministic
+- [ ] Group re-execution is allowed
+- [ ] Group status is queryable
+- [ ] Group history is logged
+
+### Command Specification Formats (25 items)
+
+- [ ] String format supported
+- [ ] String format executes single command
+- [ ] Array format supported
+- [ ] Array format executes commands in sequence
+- [ ] Array format stops on first failure
+- [ ] Object format supported
+- [ ] Object format requires "run" property
+- [ ] Object format supports "cwd" property
+- [ ] Object format supports "env" property
+- [ ] Object format supports "timeout" property
+- [ ] Object format supports "retry" property
+- [ ] Object format supports "continue_on_error" property
+- [ ] Object format supports "platforms" property
+- [ ] Mixed formats supported in arrays
+- [ ] Empty string rejected
+- [ ] Empty array allowed (no-op)
+- [ ] Whitespace-only string rejected
+- [ ] Commands trimmed before execution
+- [ ] Multi-line strings supported
+- [ ] Arguments preserved in parsing
+- [ ] Quotes handled correctly
+- [ ] Escape sequences handled
+- [ ] Command validation at load time
+- [ ] Invalid format rejected with clear error
+- [ ] Format examples documented
+
+### Working Directory Handling (20 items)
+
+- [ ] Default is repository root
+- [ ] Configurable per command
+- [ ] Relative to repository root
+- [ ] Absolute paths rejected
+- [ ] Path traversal (../) rejected
+- [ ] Non-existent directory causes error
+- [ ] Working directory logged
+- [ ] Environment variables supported in path
+- [ ] Paths normalized (forward slashes)
+- [ ] Validated before execution
+- [ ] Symlinks followed
+- [ ] Circular symlinks detected
+- [ ] Directory creation optional
+- [ ] Creation requires explicit flag
+- [ ] Validation under 10ms
+- [ ] Path too long handled
+- [ ] Unicode paths supported
+- [ ] Spaces in path supported
+- [ ] Special characters handled
+- [ ] Path casing handled per platform
+
+### Environment Variables (20 items)
+
+- [ ] Process environment inherited
+- [ ] Additional env vars supported
+- [ ] Additional vars override inherited
+- [ ] Env var names validated
+- [ ] Env var values are strings
+- [ ] Interpolation from config works
+- [ ] Sensitive vars redacted in logs
+- [ ] ACODE_MODE set
+- [ ] ACODE_ROOT set
+- [ ] ACODE_COMMAND set
+- [ ] PATH includes tool paths
+- [ ] Env vars immutable during execution
+- [ ] Env var count logged
+- [ ] Empty value allowed
+- [ ] Null value rejected
+- [ ] Env vars documented
+- [ ] Common vars documented
+- [ ] Custom vars documented
+- [ ] Env var conflicts handled
+- [ ] Env var encoding is UTF-8
+
+### Exit Code Handling (20 items)
+
+- [ ] Exit code 0 is success
+- [ ] Non-zero is failure
+- [ ] Exit code logged
+- [ ] Exit code returned to caller
+- [ ] Exit code preserved (not normalized)
+- [ ] Signal termination returns 128 + signal
+- [ ] Timeout returns 124
+- [ ] Exit code in error message
+- [ ] Common codes have descriptions
+- [ ] Exit code 1 is "General error"
+- [ ] Exit code 2 is "Misuse"
+- [ ] Exit code 126 is "Not executable"
+- [ ] Exit code 127 is "Not found"
+- [ ] Exit code 130 is "Interrupted"
+- [ ] Exit code mapping extensible
+- [ ] Exit codes documented
+- [ ] Exit code 0 skips retry
+- [ ] All codes handled
+- [ ] Negative codes handled (Windows)
+- [ ] Exit code history available
+
+### Timeout and Retry (20 items)
+
+- [ ] All commands have timeout
+- [ ] Default timeout is 300 seconds
+- [ ] Timeout configurable per group
+- [ ] Timeout configurable per command
+- [ ] Timeout 0 means no timeout
+- [ ] Timeout kills process tree
+- [ ] Timeout logs warning first
+- [ ] Retry count configurable
+- [ ] Default retry is 0
+- [ ] Retry uses exponential backoff
+- [ ] Base delay is 1 second
+- [ ] Max delay is 30 seconds
+- [ ] Retry attempts logged
+- [ ] Final failure returns last exit code
+- [ ] Retry respects timeout budget
+- [ ] Retry only on failure (not success)
+- [ ] Retry logged with attempt number
+- [ ] Retry backoff documented
+- [ ] Max retry count is 10
+- [ ] Retry can be disabled
+
+### Platform Variants (15 items)
+
+- [ ] Platform variants supported
+- [ ] Platform identifiers: windows, linux, macos
+- [ ] Platform auto-detected
+- [ ] Variant overrides default
+- [ ] Missing variant uses default
+- [ ] Platform logged
+- [ ] Detection deterministic
+- [ ] Cross-platform uses default
+- [ ] Windows uses cmd.exe
+- [ ] Unix uses /bin/sh
+- [ ] Shell configurable
+- [ ] Platform documented
+- [ ] Platform examples provided
+- [ ] Invalid platform rejected
+- [ ] Platform case-insensitive
+
+### Security (20 items)
+
+- [ ] No elevated/root execution
+- [ ] No access outside repository
+- [ ] Shell injection prevented
+- [ ] Environment sanitized
+- [ ] Sensitive vars redacted
+- [ ] Output scanned for secrets
+- [ ] Secrets redacted in storage
+- [ ] No Acode modification
+- [ ] No network in Airgapped mode
+- [ ] Process isolation maintained
+- [ ] Child processes tracked
+- [ ] Orphans killed on timeout
+- [ ] Temp files cleaned up
+- [ ] Permissions not elevated
+- [ ] Runs as current user
+- [ ] Security audit documented
+- [ ] Attack vectors documented
+- [ ] Mitigations documented
+- [ ] Security tests exist
+- [ ] Penetration test passed
+
+### Performance (15 items)
+
+- [ ] Startup overhead under 100ms
+- [ ] Output capture low latency
+- [ ] Output buffer bounded (10MB)
+- [ ] Large output truncated
+- [ ] Memory proportional to output
+- [ ] Process kill under 5 seconds
+- [ ] Command parsing under 10ms
+- [ ] Platform detection under 1ms
+- [ ] Directory validation under 10ms
+- [ ] Environment setup under 50ms
+- [ ] No resource leaks
+- [ ] Streaming under 100ms latency
+- [ ] Parallel scales linearly
+- [ ] Benchmarks documented
+- [ ] Performance tests exist
+
+---
+## Testing Requirements
+
+### Unit Tests
+
+| ID | Test Case | Expected Result |
+|----|-----------|-----------------|
+| UT-002c-01 | Parse string command | Returns CommandSpec |
+| UT-002c-02 | Parse array command | Returns CommandSpec[] |
+| UT-002c-03 | Parse object command | Returns CommandSpec with options |
+| UT-002c-04 | Parse mixed array | Returns mixed CommandSpec[] |
+| UT-002c-05 | Reject empty string | Returns validation error |
+| UT-002c-06 | Accept empty array | Returns empty CommandSpec[] |
+| UT-002c-07 | Reject whitespace-only | Returns validation error |
+| UT-002c-08 | Trim command string | Whitespace removed |
+| UT-002c-09 | Preserve multi-line | Lines preserved |
+| UT-002c-10 | Validate working directory | Path validated |
+| UT-002c-11 | Reject absolute path | Returns error |
+| UT-002c-12 | Reject path traversal | Returns error |
+| UT-002c-13 | Parse environment variables | Env vars extracted |
+| UT-002c-14 | Validate timeout value | Positive integer required |
+| UT-002c-15 | Validate retry value | Non-negative integer required |
+| UT-002c-16 | Detect platform variants | Correct platform selected |
+| UT-002c-17 | Fall back to default | No variant uses default |
+| UT-002c-18 | Exit code mapping | Codes mapped to messages |
+| UT-002c-19 | Timeout to exit code 124 | Correct exit code |
+| UT-002c-20 | Calculate backoff delay | Exponential backoff correct |
+| UT-002c-21 | Command equality | Equal specs are equal |
+| UT-002c-22 | Command serialization | Serializes to JSON |
+| UT-002c-23 | All groups parseable | All six groups parse |
+| UT-002c-24 | Missing group handled | Returns null/error appropriately |
+| UT-002c-25 | Command validation | Invalid commands rejected |
+
+### Integration Tests
+
+| ID | Test Case | Expected Result |
+|----|-----------|-----------------|
+| IT-002c-01 | Load config with all command groups | All groups accessible |
+| IT-002c-02 | Execute simple command | Exit code 0 |
+| IT-002c-03 | Execute failing command | Non-zero exit code |
+| IT-002c-04 | Execute command with timeout | Timeout kills process |
+| IT-002c-05 | Execute command with retry | Retry attempts logged |
+| IT-002c-06 | Execute command with env vars | Vars available in process |
+| IT-002c-07 | Execute command with cwd | Correct working directory |
+| IT-002c-08 | Execute command on Windows | cmd.exe used |
+| IT-002c-09 | Execute command on Linux | /bin/sh used |
+| IT-002c-10 | Execute array of commands | Sequence executed |
+| IT-002c-11 | Array stops on failure | Remaining commands skipped |
+| IT-002c-12 | Continue on error | Sequence continues |
+| IT-002c-13 | Platform variant selected | Correct variant used |
+| IT-002c-14 | Output captured | stdout/stderr captured |
+| IT-002c-15 | Large output handled | Truncated with warning |
+
+### End-to-End Tests
+
+| ID | Test Case | Expected Result |
+|----|-----------|-----------------|
+| E2E-002c-01 | acode run setup | Runs setup commands |
+| E2E-002c-02 | acode run build | Runs build commands |
+| E2E-002c-03 | acode run test | Runs test commands |
+| E2E-002c-04 | acode run lint | Runs lint commands |
+| E2E-002c-05 | acode run format | Runs format commands |
+| E2E-002c-06 | acode run start | Runs start command |
+| E2E-002c-07 | acode run (missing group) | Clear error message |
+| E2E-002c-08 | acode run setup build test | Runs sequence |
+| E2E-002c-09 | acode run test --timeout 60 | Timeout overridden |
+| E2E-002c-10 | acode run test -- --filter X | Arguments passed |
+| E2E-002c-11 | acode run start --background | Process backgrounded |
+| E2E-002c-12 | acode config show commands | Shows command config |
+
+### Performance / Benchmarks
+
+| ID | Benchmark | Target | Measurement Method |
+|----|-----------|--------|-------------------|
+| PERF-002c-01 | Command startup overhead | < 100ms | Stopwatch |
+| PERF-002c-02 | Command parsing | < 10ms | Stopwatch, 1000 iterations |
+| PERF-002c-03 | Platform detection | < 1ms | Stopwatch, 10000 iterations |
+| PERF-002c-04 | Directory validation | < 10ms | Stopwatch, 1000 iterations |
+| PERF-002c-05 | Environment setup | < 50ms | Stopwatch, 100 iterations |
+| PERF-002c-06 | Process kill (tree) | < 5s | Stopwatch |
+| PERF-002c-07 | Output streaming latency | < 100ms | End-to-end measurement |
+| PERF-002c-08 | Memory per command | < 10MB | Memory profiler |
+
+### Regression / Impacted Areas
+
+| Area | Impact | Regression Test |
+|------|--------|-----------------|
+| Config loading | Command parsing | Commands parse correctly |
+| CLI | Run command | All groups executable |
+| Mode enforcement | Network in commands | Airgapped blocks network |
+| Logging | Command logging | All events logged |
+| Error handling | Command failures | Errors reported correctly |
+| Process management | Timeouts | Processes killed |
+| Platform support | Platform variants | Variants selected correctly |
+
+---
+
+## User Verification Steps
+
+### Scenario 1: Simple String Command
+1. Create config with `commands: { build: "echo hello" }`
+2. Run `acode run build`
+3. **Verify:** Output shows "hello"
+4. **Verify:** Exit code is 0
+
+### Scenario 2: Array of Commands
+1. Create config with `commands: { setup: ["echo first", "echo second"] }`
+2. Run `acode run setup`
+3. **Verify:** Output shows "first" then "second"
+4. **Verify:** Both commands executed
+
+### Scenario 3: Array Stops on Failure
+1. Create config with `commands: { test: ["exit 1", "echo never"] }`
+2. Run `acode run test`
+3. **Verify:** Exit code is 1
+4. **Verify:** "never" not in output
+
+### Scenario 4: Continue on Error
+1. Create config with array including `{ run: "exit 1", continue_on_error: true }`
+2. Run command group
+3. **Verify:** Subsequent commands still run
+
+### Scenario 5: Custom Working Directory
+1. Create config with `commands: { build: { run: "pwd", cwd: "src" } }`
+2. Run `acode run build`
+3. **Verify:** Output shows `*/src` path
+
+### Scenario 6: Environment Variables
+1. Create config with `commands: { test: { run: "echo $MY_VAR", env: { MY_VAR: "hello" } } }`
+2. Run `acode run test`
+3. **Verify:** Output shows "hello"
+
+### Scenario 7: Acode Environment Variables
+1. Create any command
+2. Run with `echo $ACODE_MODE`
+3. **Verify:** Mode is displayed (local-only, etc.)
+
+### Scenario 8: Timeout
+1. Create config with `commands: { test: { run: "sleep 60", timeout: 2 } }`
+2. Run `acode run test`
+3. **Verify:** Command killed after ~2 seconds
+4. **Verify:** Exit code is 124
+
+### Scenario 9: Retry on Failure
+1. Create config with `commands: { setup: { run: "exit 1", retry: 2 } }`
+2. Run `acode run setup`
+3. **Verify:** Output shows retry attempts
+4. **Verify:** Total of 3 attempts (1 + 2 retries)
+
+### Scenario 10: Platform Variant
+1. Create config with platform-specific commands
+2. Run on current platform
+3. **Verify:** Correct variant executed
+
+### Scenario 11: Missing Command Group
+1. Remove "build" from commands section
+2. Run `acode run build`
+3. **Verify:** Clear error message about missing group
+
+### Scenario 12: Pass Arguments
+1. Create config with `commands: { test: "npm test" }`
+2. Run `acode run test -- --watch`
+3. **Verify:** `npm test --watch` executed
+
+### Scenario 13: Background Process
+1. Create config with `commands: { start: "sleep 100" }`
+2. Run `acode run start --background`
+3. **Verify:** Command returns immediately
+4. **Verify:** Process running in background
+
+### Scenario 14: Command Output Capture
+1. Run any command
+2. Run `acode logs show --last`
+3. **Verify:** stdout and stderr captured
+
+### Scenario 15: Long Output Truncation
+1. Create command that outputs >10MB
+2. Run command
+3. **Verify:** Output truncated with warning
+
+---
+
+## Implementation Prompt for Claude
+
+### Objective
+
+Define the command group specifications for Acode's `.agent/config.yml` file. This defines how commands are specified, parsed, and what semantics each group has.
+
+### Architecture Constraints
+
+- **Clean Architecture:** Domain models in Domain layer
+- **Immutability:** Command specifications are immutable
+- **Validation:** All commands validated at config load time
+
+### File Structure
+
+```
+src/
+├── Acode.Domain/
+│   └── Commands/
+│       ├── CommandGroup.cs           # Enum for groups
+│       ├── CommandSpec.cs            # Command specification
+│       ├── CommandOptions.cs         # Execution options
+│       ├── CommandResult.cs          # Execution result
+│       ├── ExitCodeDescriptions.cs   # Exit code mappings
+│       └── PlatformVariant.cs        # Platform-specific
+├── Acode.Application/
+│   └── Commands/
+│       ├── ICommandParser.cs
+│       ├── ICommandExecutor.cs
+│       ├── CommandParser.cs
+│       ├── CommandValidator.cs
+│       ├── RetryPolicy.cs
+│       └── TimeoutPolicy.cs
+└── data/
+    └── exit-codes.json              # Exit code descriptions
+```
+
+### Interface Contracts
+
+```csharp
+// CommandGroup.cs
+public enum CommandGroup
+{
+    Setup,
+    Build,
+    Test,
+    Lint,
+    Format,
+    Start
+}
+
+// CommandSpec.cs
+public sealed record CommandSpec
+{
+    public required string Run { get; init; }
+    public string WorkingDirectory { get; init; } = ".";
+    public IReadOnlyDictionary<string, string> Environment { get; init; } = 
+        new Dictionary<string, string>();
+    public int TimeoutSeconds { get; init; } = 300;
+    public int RetryCount { get; init; } = 0;
+    public bool ContinueOnError { get; init; } = false;
+    public IReadOnlyDictionary<string, string>? PlatformVariants { get; init; }
+}
+
+// CommandResult.cs
+public sealed record CommandResult
+{
+    public required int ExitCode { get; init; }
+    public required string Stdout { get; init; }
+    public required string Stderr { get; init; }
+    public required TimeSpan Duration { get; init; }
+    public required bool TimedOut { get; init; }
+    public required int AttemptCount { get; init; }
+    public bool Success => ExitCode == 0;
+}
+```
+
+### Exit Code Constants
+
+```csharp
+public static class ExitCodes
+{
+    public const int Success = 0;
+    public const int GeneralError = 1;
+    public const int Misuse = 2;
+    public const int Timeout = 124;
+    public const int NotExecutable = 126;
+    public const int NotFound = 127;
+    public const int Interrupted = 130;
+    
+    public static string GetDescription(int exitCode) => exitCode switch
+    {
+        0 => "Success",
+        1 => "General error",
+        2 => "Misuse of command",
+        124 => "Command timed out",
+        126 => "Command not executable",
+        127 => "Command not found",
+        130 => "Interrupted (Ctrl+C)",
+        _ when exitCode > 128 => $"Killed by signal {exitCode - 128}",
+        _ => $"Failed with exit code {exitCode}"
+    };
+}
+```
+
+### Logging Schema
+
+```csharp
+public static class CommandLogFields
+{
+    public const string CommandGroup = "command_group";
+    public const string Command = "command";
+    public const string WorkingDirectory = "working_directory";
+    public const string ExitCode = "exit_code";
+    public const string DurationMs = "duration_ms";
+    public const string Attempt = "attempt";
+    public const string TimedOut = "timed_out";
+    public const string Platform = "platform";
+    public const string EnvVarCount = "env_var_count";
+}
+```
+
+### Validation Checklist Before Merge
+
+- [ ] All 120 functional requirements implemented
+- [ ] All 40 non-functional requirements verified
+- [ ] All 6 command groups documented
+- [ ] All 25 unit tests passing
+- [ ] All 15 integration tests passing
+- [ ] All 12 E2E tests passing
+- [ ] All 8 performance benchmarks met
+- [ ] Exit code mapping complete
+- [ ] Platform detection working
+- [ ] Timeout handling working
+- [ ] Retry logic working
+- [ ] Environment variable handling working
+- [ ] Working directory validation working
+- [ ] Security checks in place
+- [ ] Documentation complete
+
+### Rollout Plan
+
+1. **Phase 1: Domain Models**
+   - Define CommandGroup enum
+   - Define CommandSpec record
+   - Define CommandResult record
+   - Add unit tests
+
+2. **Phase 2: Parsing**
+   - Implement command parser
+   - Support all formats (string, array, object)
+   - Add validation
+   - Add integration tests
+
+3. **Phase 3: Execution**
+   - Implement command executor
+   - Add timeout handling
+   - Add retry logic
+   - Add E2E tests
+
+4. **Phase 4: Polish**
+   - Add platform variants
+   - Add environment variable handling
+   - Add exit code descriptions
+   - Document all features
+
+---
+
+**END OF TASK 002.c**
