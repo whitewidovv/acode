@@ -285,33 +285,110 @@ The following items are explicitly excluded from Task 017:
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-017-01 to NFR-017-20)
 
-- NFR-001: Index 1000 files < 30s
-- NFR-002: Incremental update < 100ms/file
-- NFR-003: Query < 50ms
-- NFR-004: Batch insert < 1ms/symbol
-- NFR-005: Parallel indexing with workers
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-01 | Performance | Full index of 1000 files MUST complete in < 30s |
+| NFR-017-02 | Performance | Full index of 10,000 files MUST complete in < 5 min |
+| NFR-017-03 | Performance | Incremental update per file MUST complete in < 100ms |
+| NFR-017-04 | Performance | Incremental update for 100 files MUST complete in < 5s |
+| NFR-017-05 | Performance | Name search MUST complete in < 50ms |
+| NFR-017-06 | Performance | Fuzzy search MUST complete in < 100ms |
+| NFR-017-07 | Performance | Filtered search MUST complete in < 75ms |
+| NFR-017-08 | Performance | Symbol resolution by ID MUST complete in < 10ms |
+| NFR-017-09 | Performance | Batch insert MUST achieve > 1000 symbols/s |
+| NFR-017-10 | Performance | Index load MUST complete in < 2s |
+| NFR-017-11 | Performance | Memory usage during indexing MUST be < 1GB |
+| NFR-017-12 | Performance | Memory usage for loaded index MUST be < 200MB |
+| NFR-017-13 | Performance | Parallel indexing MUST use configurable workers |
+| NFR-017-14 | Performance | Default worker count MUST be CPU cores - 1 |
+| NFR-017-15 | Performance | Database queries MUST use prepared statements |
+| NFR-017-16 | Performance | Database MUST use WAL mode |
+| NFR-017-17 | Performance | Database indexes MUST cover common queries |
+| NFR-017-18 | Performance | Connection pooling MUST be used |
+| NFR-017-19 | Performance | Extraction MUST stream large files |
+| NFR-017-20 | Performance | Progress reporting MUST NOT slow indexing |
 
-### Scalability
+### Scalability (NFR-017-21 to NFR-017-30)
 
-- NFR-006: Handle 100K files
-- NFR-007: Handle 1M symbols
-- NFR-008: Memory-efficient streaming
-- NFR-009: Pagination for large results
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-21 | Scalability | Index MUST handle 100,000 files |
+| NFR-017-22 | Scalability | Index MUST handle 1,000,000 symbols |
+| NFR-017-23 | Scalability | Queries MUST remain < 100ms at 1M symbols |
+| NFR-017-24 | Scalability | Pagination MUST work at any offset |
+| NFR-017-25 | Scalability | Large result sets MUST be streamed |
+| NFR-017-26 | Scalability | Index file size MUST scale linearly |
+| NFR-017-27 | Scalability | Memory MUST NOT scale with symbol count |
+| NFR-017-28 | Scalability | Concurrent queries MUST be supported |
+| NFR-017-29 | Scalability | Concurrent updates MUST be serialized |
+| NFR-017-30 | Scalability | Large files (>1MB) MUST NOT block |
 
-### Reliability
+### Reliability (NFR-017-31 to NFR-017-45)
 
-- NFR-010: Survive parse errors
-- NFR-011: Partial results on failure
-- NFR-012: Consistent index state
-- NFR-013: Crash recovery
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-31 | Reliability | Parse errors MUST NOT stop indexing |
+| NFR-017-32 | Reliability | Extractor crash MUST NOT crash host |
+| NFR-017-33 | Reliability | Partial results MUST be returned on failure |
+| NFR-017-34 | Reliability | Index state MUST remain consistent |
+| NFR-017-35 | Reliability | Interrupted build MUST be resumable |
+| NFR-017-36 | Reliability | Corruption MUST be detected on load |
+| NFR-017-37 | Reliability | Corruption MUST trigger rebuild prompt |
+| NFR-017-38 | Reliability | Crash during update MUST NOT corrupt index |
+| NFR-017-39 | Reliability | Database transactions MUST be atomic |
+| NFR-017-40 | Reliability | Rollback MUST restore previous state |
+| NFR-017-41 | Reliability | File locks MUST be handled |
+| NFR-017-42 | Reliability | Network errors (if any) MUST retry |
+| NFR-017-43 | Reliability | Out of disk space MUST be handled |
+| NFR-017-44 | Reliability | Symbols MUST have unique IDs |
+| NFR-017-45 | Reliability | Duplicate detection MUST prevent conflicts |
 
-### Accuracy
+### Accuracy (NFR-017-46 to NFR-017-55)
 
-- NFR-014: No duplicate symbols
-- NFR-015: Correct locations
-- NFR-016: Valid relationships
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-46 | Accuracy | Symbol names MUST match source exactly |
+| NFR-017-47 | Accuracy | Symbol locations MUST be precise |
+| NFR-017-48 | Accuracy | Line numbers MUST be 1-based |
+| NFR-017-49 | Accuracy | Column numbers MUST be 1-based |
+| NFR-017-50 | Accuracy | Containment MUST reflect actual structure |
+| NFR-017-51 | Accuracy | Visibility MUST match source |
+| NFR-017-52 | Accuracy | Signatures MUST be parseable |
+| NFR-017-53 | Accuracy | Deleted file symbols MUST be removed |
+| NFR-017-54 | Accuracy | Renamed files MUST update correctly |
+| NFR-017-55 | Accuracy | No orphaned symbols after update |
+
+### Maintainability (NFR-017-56 to NFR-017-65)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-56 | Maintainability | Schema MUST be versioned |
+| NFR-017-57 | Maintainability | Schema migrations MUST be automatic |
+| NFR-017-58 | Maintainability | All interfaces MUST have XML docs |
+| NFR-017-59 | Maintainability | Code coverage MUST be > 80% |
+| NFR-017-60 | Maintainability | Cyclomatic complexity MUST be < 10 |
+| NFR-017-61 | Maintainability | Dependencies MUST be injected |
+| NFR-017-62 | Maintainability | Extractors MUST be pluggable |
+| NFR-017-63 | Maintainability | Adding language MUST NOT modify core |
+| NFR-017-64 | Maintainability | Configuration MUST be documented |
+| NFR-017-65 | Maintainability | Error codes MUST be documented |
+
+### Observability (NFR-017-66 to NFR-017-75)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-66 | Observability | Build progress MUST be logged |
+| NFR-017-67 | Observability | Extraction errors MUST be logged |
+| NFR-017-68 | Observability | Query operations MUST log at Debug |
+| NFR-017-69 | Observability | Metrics MUST track indexed file count |
+| NFR-017-70 | Observability | Metrics MUST track symbol count |
+| NFR-017-71 | Observability | Metrics MUST track build duration |
+| NFR-017-72 | Observability | Metrics MUST track query latency |
+| NFR-017-73 | Observability | Metrics MUST track extraction errors |
+| NFR-017-74 | Observability | Structured logging MUST be used |
+| NFR-017-75 | Observability | Correlation IDs MUST be propagated |
 
 ---
 

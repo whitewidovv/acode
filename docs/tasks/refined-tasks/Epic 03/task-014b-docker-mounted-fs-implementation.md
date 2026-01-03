@@ -10,23 +10,75 @@
 
 ## Description
 
-Task 014.b implements the Docker-mounted file system provider. This enables acode to work with files inside Docker containers. It extends the reach of the agent to containerized environments.
+### Business Value
 
-Docker mounts present unique challenges. Files are accessed through Docker's mount mechanism. Latency is higher than local. Permissions can differ. The file system may be Linux even on Windows.
+The Docker-Mounted File System implementation extends Agentic Coding Bot's reach to containerized development environments, enabling the agent to modify files within Docker containers. As container-based development becomes standard practice, this capability is essential for supporting modern development workflows.
 
-Two modes are supported. First, bind mounts where host files are mounted into containers. Second, volume mounts where files live in Docker volumes. Both work through this implementation.
+Many development teams run their applications in containers for consistency between development and production environments. Without Docker FS support, developers would need to manually copy files between the host and container, breaking the seamless agent experience. This implementation enables the agent to work directly with containerized codebases, maintaining the same user experience as local development.
 
-The implementation uses docker exec for file operations. This avoids complex Docker API integration. It works with any Docker setup. Performance is acceptable for typical operations.
+The Docker FS implementation addresses the unique challenges of container file access: higher latency than local I/O, potential permission differences, path translation between host and container, and the transient nature of container environments. Caching, intelligent error handling, and clear diagnostics ensure reliable operation despite these challenges.
 
-Path translation is critical. The host path differs from the container path. The implementation maps between them. Configuration specifies the mount relationship.
+### Scope
 
-Caching improves performance. Directory listings are cached. File existence is cached. Writes invalidate cache. This reduces Docker exec calls.
+This task delivers the complete Docker-mounted file system implementation:
 
-Error handling maps Docker errors to domain errors. Container not running. Mount not found. Permission denied inside container. Each has clear handling.
+1. **DockerFileSystem Class:** IRepoFS implementation that executes file operations via `docker exec` commands. Provides the same interface as LocalFS while handling Docker-specific concerns.
 
-The implementation shares behavior with local FS where possible. Reading uses the same encoding detection. Writing uses similar atomic patterns. This ensures consistency.
+2. **Docker Command Executor:** Secure execution of `docker exec` commands with proper shell escaping, timeout handling, and exit code interpretation.
 
-Security is enforced at the container boundary. Path traversal within container is prevented. Only mounted paths are accessible. Container isolation is respected.
+3. **Mount Path Translation:** Bidirectional mapping between host paths and container paths. Supports multiple mount configurations for complex container setups.
+
+4. **Operation Caching:** Reduces Docker exec overhead by caching directory listings and existence checks. Automatic invalidation on write operations with configurable TTL.
+
+5. **Container Health Detection:** Verifies container availability and mount accessibility before operations, providing clear diagnostics when containers are unavailable.
+
+### Integration Points
+
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Task 014 (RepoFS) | Interface Implementation | Implements IRepoFS interface contract |
+| Task 014.a (Local FS) | Behavior Sharing | Shares encoding detection and atomic write patterns |
+| Task 014.c (Patching) | File Access | Patch applicator uses DockerFS for container-hosted repositories |
+| Task 003 (DI) | Dependency Injection | Registered as alternative IRepoFS when Docker mode configured |
+| Task 002 (Config) | Configuration | Docker settings from `repo.docker` config section |
+| Task 011 (Session) | Session Context | Session determines container and mount configuration |
+| Task 003.c (Audit) | Audit Logging | All container operations logged with container ID |
+
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Container not found | All operations fail | Verify container at startup, clear error message |
+| Container not running | All operations fail | Health check before operations, suggest `docker start` |
+| Mount not accessible | Path operations fail | Validate mount configuration, report mapping issues |
+| Permission denied in container | Read/write blocked | Report user context, suggest container permissions |
+| Command timeout | Operation blocked | Configurable timeout, suggest container health check |
+| Shell injection attempt | Security violation | Strict argument escaping, reject suspicious input |
+| High latency | Slow operations | Aggressive caching, batch operations where possible |
+| Container restart mid-operation | Transient failure | Retry with exponential backoff, cache invalidation |
+
+### Assumptions
+
+1. Docker daemon is running and accessible on the local machine
+2. The target container is running and has the repository mounted
+3. The container has `cat`, `find`, `stat`, `rm`, and `mkdir` commands available
+4. Docker exec operations complete within configurable timeout
+5. Mount paths are correctly configured in the agent configuration
+6. The agent process has permission to execute Docker commands
+7. File paths inside the container use forward slashes (Linux containers)
+8. Container environment remains stable during operation sequences
+
+### Security Considerations
+
+1. **Shell Injection Prevention:** All arguments passed to `docker exec` MUST be properly escaped. Command construction MUST use safe builder patterns.
+
+2. **Container Boundary Enforcement:** Operations MUST be limited to configured mount paths. Path traversal within container MUST be prevented.
+
+3. **Container Name Validation:** Container names/IDs MUST be validated against expected patterns to prevent injection.
+
+4. **Credential Protection:** Docker commands MUST NOT expose sensitive information in process arguments or logs.
+
+5. **Minimum Privilege:** Operations SHOULD use non-root container users where possible. Write access SHOULD be explicit.
 
 ---
 
@@ -69,103 +121,137 @@ The following items are explicitly excluded from Task 014.b:
 
 ## Functional Requirements
 
-### Docker Detection
+### Docker Detection (FR-014b-01 to FR-014b-04)
 
-- FR-001: Detect if Docker available
-- FR-002: Verify container exists
-- FR-003: Verify container running
-- FR-004: Verify mount accessible
+| ID | Requirement |
+|----|-------------|
+| FR-014b-01 | System MUST detect if Docker daemon is available and accessible |
+| FR-014b-02 | System MUST verify specified container exists |
+| FR-014b-03 | System MUST verify container is in running state |
+| FR-014b-04 | System MUST verify configured mount paths are accessible in container |
 
-### File Reading
+### File Reading (FR-014b-05 to FR-014b-09)
 
-- FR-005: ReadFileAsync via docker exec
-- FR-006: cat command for reading
-- FR-007: Base64 for binary
-- FR-008: Handle missing file
-- FR-009: Handle permission denied
+| ID | Requirement |
+|----|-------------|
+| FR-014b-05 | ReadFileAsync MUST execute via `docker exec cat` command |
+| FR-014b-06 | Text file reading MUST use `cat` command with proper encoding |
+| FR-014b-07 | Binary file reading MUST use base64 encoding for transport |
+| FR-014b-08 | ReadFileAsync MUST throw FileNotFoundException for missing files |
+| FR-014b-09 | ReadFileAsync MUST throw AccessDeniedException for permission failures |
 
-### File Writing
+### File Writing (FR-014b-10 to FR-014b-14)
 
-- FR-010: WriteFileAsync via docker exec
-- FR-011: Temp file then rename
-- FR-012: mkdir -p for parents
-- FR-013: Base64 for binary
-- FR-014: Handle write errors
+| ID | Requirement |
+|----|-------------|
+| FR-014b-10 | WriteFileAsync MUST execute via `docker exec` commands |
+| FR-014b-11 | Writes MUST use temp-file-then-rename pattern for atomicity |
+| FR-014b-12 | WriteFileAsync MUST create parent directories via `mkdir -p` |
+| FR-014b-13 | Binary file writing MUST use base64 encoding for transport |
+| FR-014b-14 | Write failures MUST be reported with clear error messages |
 
-### File Deletion
+### File Deletion (FR-014b-15 to FR-014b-18)
 
-- FR-015: DeleteFileAsync via rm
-- FR-016: DeleteDirectoryAsync via rm -rf
-- FR-017: Handle missing gracefully
-- FR-018: Handle permission errors
+| ID | Requirement |
+|----|-------------|
+| FR-014b-15 | DeleteFileAsync MUST execute via `docker exec rm` command |
+| FR-014b-16 | DeleteDirectoryAsync MUST execute via `docker exec rm -rf` command |
+| FR-014b-17 | DeleteFileAsync MUST NOT throw error for non-existent files |
+| FR-014b-18 | Delete operations MUST handle permission errors gracefully |
 
-### Directory Enumeration
+### Directory Enumeration (FR-014b-19 to FR-014b-23)
 
-- FR-019: List via find command
-- FR-020: Parse find output
-- FR-021: Handle large directories
-- FR-022: Filter support
-- FR-023: Recursive support
+| ID | Requirement |
+|----|-------------|
+| FR-014b-19 | EnumerateFilesAsync MUST use `find` command for listing |
+| FR-014b-20 | System MUST parse `find` command output correctly |
+| FR-014b-21 | Enumeration MUST handle large directories efficiently |
+| FR-014b-22 | EnumerateFilesAsync MUST support glob pattern filtering |
+| FR-014b-23 | EnumerateFilesAsync MUST support recursive option |
 
-### Metadata
+### Metadata (FR-014b-24 to FR-014b-28)
 
-- FR-024: ExistsAsync via test
-- FR-025: GetMetadataAsync via stat
-- FR-026: Size from stat
-- FR-027: Modified time from stat
-- FR-028: File type detection
+| ID | Requirement |
+|----|-------------|
+| FR-014b-24 | ExistsAsync MUST use `test` command for checking |
+| FR-014b-25 | GetMetadataAsync MUST use `stat` command for details |
+| FR-014b-26 | Metadata MUST include file size parsed from stat output |
+| FR-014b-27 | Metadata MUST include modified timestamp parsed from stat output |
+| FR-014b-28 | Metadata MUST correctly identify file vs directory type |
 
-### Path Translation
+### Path Translation (FR-014b-29 to FR-014b-32)
 
-- FR-029: Host to container mapping
-- FR-030: Container to host mapping
-- FR-031: Configuration of mappings
-- FR-032: Multiple mount support
+| ID | Requirement |
+|----|-------------|
+| FR-014b-29 | System MUST translate host paths to container paths |
+| FR-014b-30 | System MUST translate container paths to host paths |
+| FR-014b-31 | Mount mappings MUST be configurable via configuration |
+| FR-014b-32 | System MUST support multiple mount point mappings |
 
-### Caching
+### Caching (FR-014b-33 to FR-014b-37)
 
-- FR-033: Directory listing cache
-- FR-034: Existence cache
-- FR-035: Cache invalidation on write
-- FR-036: TTL expiration
-- FR-037: Cache disable option
+| ID | Requirement |
+|----|-------------|
+| FR-014b-33 | Directory listings MUST be cached to reduce Docker exec calls |
+| FR-014b-34 | File existence checks MUST be cached |
+| FR-014b-35 | Cache MUST be invalidated on write or delete operations |
+| FR-014b-36 | Cache MUST support TTL-based expiration |
+| FR-014b-37 | Cache MUST support manual disable option |
 
-### Error Handling
+### Error Handling (FR-014b-38 to FR-014b-42)
 
-- FR-038: Container not found
-- FR-039: Container not running
-- FR-040: Mount not found
-- FR-041: Permission denied
-- FR-042: Command timeout
+| ID | Requirement |
+|----|-------------|
+| FR-014b-38 | ContainerNotFoundException MUST be thrown when container not found |
+| FR-014b-39 | ContainerNotRunningException MUST be thrown when container stopped |
+| FR-014b-40 | MountNotFoundException MUST be thrown for invalid mount paths |
+| FR-014b-41 | AccessDeniedException MUST be thrown for permission failures |
+| FR-014b-42 | TimeoutException MUST be thrown when command exceeds timeout |
 
-### Security
+### Security (FR-014b-43 to FR-014b-45)
 
-- FR-043: Shell escape arguments
-- FR-044: Path traversal prevention
-- FR-045: Boundary enforcement
+| ID | Requirement |
+|----|-------------|
+| FR-014b-43 | All command arguments MUST be properly shell-escaped |
+| FR-014b-44 | Path traversal within container MUST be prevented |
+| FR-014b-45 | Operations MUST be restricted to configured mount boundaries |
 
 ---
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-014b-01 to NFR-014b-04)
 
-- NFR-001: Read < 100ms + docker latency
-- NFR-002: Write < 150ms + docker latency
-- NFR-003: Cache hit < 5ms
-- NFR-004: List < 200ms for 1000 files
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014b-01 | Performance | File read MUST complete in < 100ms plus Docker latency |
+| NFR-014b-02 | Performance | File write MUST complete in < 150ms plus Docker latency |
+| NFR-014b-03 | Performance | Cache hit operations MUST complete in < 5ms |
+| NFR-014b-04 | Performance | Directory listing of 1000 files MUST complete in < 200ms |
 
-### Reliability
+### Reliability (NFR-014b-05 to NFR-014b-07)
 
-- NFR-005: Handle container restarts
-- NFR-006: Retry transient errors
-- NFR-007: Timeout prevention
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014b-05 | Reliability | System MUST handle container restarts gracefully |
+| NFR-014b-06 | Reliability | Transient Docker errors MUST trigger automatic retry |
+| NFR-014b-07 | Reliability | Operations MUST timeout to prevent indefinite blocking |
 
-### Security
+### Security (NFR-014b-08 to NFR-014b-10)
 
-- NFR-008: Safe command building
-- NFR-009: No shell injection
-- NFR-010: Boundary enforcement
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014b-08 | Security | Command building MUST use safe escaping patterns |
+| NFR-014b-09 | Security | Shell injection attacks MUST be prevented |
+| NFR-014b-10 | Security | Mount boundary MUST be enforced on all operations |
+
+### Observability (NFR-014b-11 to NFR-014b-13)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014b-11 | Observability | All Docker exec commands MUST be logged |
+| NFR-014b-12 | Observability | Cache hit/miss ratios MUST be trackable |
+| NFR-014b-13 | Observability | Command latency MUST be measurable for diagnostics |
 
 ---
 

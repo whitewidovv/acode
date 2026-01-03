@@ -10,25 +10,78 @@
 
 ## Description
 
-Task 014.c implements atomic patch application for RepoFS. Patches are the primary way the agent modifies files. Atomicity ensures patches either fully apply or don't apply at all.
+### Business Value
 
-The agent generates patches as unified diffs. These patches describe changes to make. A patch might add lines, remove lines, or modify lines. Multiple files can be in one patch.
+Atomic patch application is the mechanism by which Agentic Coding Bot safely modifies source files. When the agent generates code changes, those changes are expressed as unified diff patches and applied through this subsystem. Atomicity guarantees that file modifications are never partially applied—critical for maintaining codebase integrity.
 
-Atomic application is critical for safety. A half-applied patch corrupts files. If the agent crashes mid-patch, files must remain consistent. Atomicity provides this guarantee.
+The agent's primary value comes from its ability to make code changes. Without robust patch application, those changes could corrupt files: a crash mid-modification could leave files in an inconsistent state, breaking builds and requiring manual recovery. This implementation ensures that every change either fully succeeds or leaves files completely unchanged.
 
-The patch system parses unified diff format. This is the standard format from git diff. It includes context lines for matching. Hunks describe individual changes.
+Beyond safety, this subsystem enables powerful development workflows: dry-run previews let developers review changes before applying them, rollback capabilities provide an undo mechanism for recent changes, and transactional multi-file patches ensure related changes across files stay synchronized. These capabilities transform the agent from a code suggestion tool into a reliable code modification system.
 
-Before applying, patches are validated. Does the context match the current file? Are the line numbers reasonable? Does the file exist? Validation catches problems early.
+### Scope
 
-Dry run mode previews changes. See what would change without actually changing. Review the impact. Catch errors before they affect real files.
+This task delivers the complete atomic patch application subsystem:
 
-Rollback enables recovery. After applying a patch, the original state is preserved. If something goes wrong, rollback restores. The rollback window is configurable.
+1. **Unified Diff Parser:** Parses standard unified diff format (as produced by `git diff`). Extracts file paths, hunks, context lines, additions, and removals into structured patch objects.
 
-Multi-file patches apply transactionally. Either all files change or none change. This prevents partial updates that leave the codebase inconsistent.
+2. **Patch Validator:** Validates patches before application. Verifies context lines match current file content, detects conflicts, and reports validation errors with clear diagnostics.
 
-Conflict detection identifies problems. If the file changed since the patch was generated, there's a conflict. Conflicts are reported clearly. Manual resolution may be needed.
+3. **Atomic Patch Applicator:** Applies patches with all-or-nothing semantics. Creates backups before modification, applies hunks in correct order, and rolls back on any failure.
 
-Fuzz matching handles minor line number drift. If the exact line isn't found, nearby lines are checked. Configurable fuzz factor controls how far to search.
+4. **Dry Run Preview:** Executes full validation and shows what would change without modifying files. Enables review before committing to changes.
+
+5. **Rollback Support:** Maintains backups of modified files for configurable retention period. Enables undoing recent patch applications.
+
+6. **Fuzz Matching:** Handles minor line number drift when file has changed slightly since patch generation. Configurable fuzz factor controls matching tolerance.
+
+### Integration Points
+
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Task 014 (RepoFS) | Interface Extension | Adds ApplyPatchAsync, PreviewPatchAsync, RollbackPatchAsync to IRepoFS |
+| Task 014.a (Local FS) | File Operations | Uses LocalFS for reading, writing, and backup storage |
+| Task 014.b (Docker FS) | File Operations | Uses DockerFS when applying patches to containerized repos |
+| Task 025 (File Tool) | Tool Integration | apply_patch tool uses this subsystem |
+| Task 011 (Session) | Transaction Context | Session manages patch transaction boundaries |
+| Task 016 (Context) | Change Tracking | Context packer tracks pending patch changes |
+| Task 003.c (Audit) | Audit Logging | All patch applications logged with before/after content |
+| LLM Output | Patch Source | Agent-generated patches in unified diff format |
+
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Context mismatch | Patch cannot apply | Report conflicting lines, suggest regeneration |
+| File modified since patch | Conflict detected | Clear conflict report, suggest re-analysis |
+| Malformed patch | Parse failure | Validate format, report syntax errors |
+| Disk full during apply | Partial state possible | Backup first, rollback on failure |
+| Multi-file partial failure | Inconsistent state | Transaction rollback restores all files |
+| Backup creation fails | No rollback possible | Abort before making changes |
+| Encoding mismatch | Garbled content | Detect encoding, apply with matching encoding |
+| Binary file in patch | Unsupported operation | Detect and reject, report clear error |
+
+### Assumptions
+
+1. Patches are in standard unified diff format (as produced by git diff)
+2. Patches are generated against the current file content (no stale patches)
+3. Files are text files with supported encodings (no binary file patches)
+4. Line endings are consistent within files (LF or CRLF, not mixed)
+5. Sufficient disk space exists for backup files
+6. File system supports atomic rename (required for atomic writes)
+7. Patches are applied sequentially (no concurrent patch application)
+8. Rollback window is reasonable (minutes to hours, not days)
+
+### Security Considerations
+
+1. **Patch Content Validation:** Patch file paths MUST be validated against repository boundary. Patches targeting files outside repository MUST be rejected.
+
+2. **Backup Protection:** Backup files MUST be stored securely with appropriate permissions. Backup location MUST be within repository boundary.
+
+3. **Path Injection Prevention:** File paths extracted from patches MUST be sanitized for path traversal attempts and null byte injection.
+
+4. **Resource Limits:** Patch size and hunk count MUST be limited to prevent resource exhaustion attacks.
+
+5. **Audit Trail:** All patch applications MUST be logged with sufficient detail for forensic analysis if needed.
 
 ---
 
