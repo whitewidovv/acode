@@ -3,4 +3,8 @@
     <ProjectReference Include="..\Acode.Domain\Acode.Domain.csproj" />
     <ProjectReference Include="..\Acode.Application\Acode.Application.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="NJsonSchema" />
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
 </Project>
