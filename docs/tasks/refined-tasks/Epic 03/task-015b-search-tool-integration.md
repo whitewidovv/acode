@@ -26,6 +26,63 @@ The search tool integrates with context budgeting. Results count toward token li
 
 Error handling is comprehensive. Index not ready. Search too broad. No results. Each case has clear handling and messaging.
 
+### Business Value
+
+Search is the primary mechanism by which the AI agent discovers and understands code in the repository. Without effective search tools, the agent would be limited to files explicitly provided by the user, dramatically reducing its ability to understand context, find related implementations, and make informed changes across a codebase. The search tool integration transforms a passive index into an active capability that the agent can leverage autonomously.
+
+The business value is multiplied by the tool interface approach. By exposing search as a standard tool with well-defined inputs and outputs, the agent can reason about when and how to search. It can formulate queries based on its current understanding, interpret results, and refine searches iteratively. This creates a feedback loop where the agent becomes progressively better at finding relevant code as it explores the repository.
+
+Rate limiting and error handling protect both the user and the system from pathological behavior. An agent that searches too aggressively can slow down the entire interaction, while poor error messages leave the agent unable to recover. By providing clear limits and actionable error information, the search tools enable robust, predictable agent behavior even in edge cases.
+
+### Scope
+
+1. **Text Search Tool** - Content-based search across indexed files with relevance scoring, snippet extraction, and configurable result limits
+2. **File Search Tool** - Path-based search with glob pattern support for finding files by name or location
+3. **Grep Tool** - Pattern matching search with regex support for finding specific text patterns across the codebase
+4. **Rate Limiting** - Per-session and configurable limits on search frequency with informative feedback to the agent
+5. **Result Formatting** - Structured JSON output with snippets, line numbers, context, and relevance scores optimized for LLM consumption
+
+### Integration Points
+
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Tool Registry | Registration | Search tools register with the central tool registry for agent discovery |
+| Index Service | Dependency | All search tools query the index service for fast search execution |
+| Logging Service | Integration | Tool invocations and results are logged for debugging and analytics |
+| Metrics Service | Integration | Search latency, result counts, and rate limit hits are recorded as metrics |
+| Context Budget | Consumer | Search tools respect token budgets and adjust result counts accordingly |
+| Agent Orchestrator | Consumer | Agent orchestrator invokes search tools during planning and execution |
+
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Index not ready | Search cannot execute | Return clear error with retry guidance; suggest index build |
+| Search query too broad | Excessive results, slow response | Apply result caps, suggest query refinement in response |
+| No results found | Agent lacks needed information | Provide helpful message with alternative search suggestions |
+| Rate limit exceeded | Agent blocked from searching | Return retry-after time, allow agent to adjust strategy |
+| Search timeout | Long-running search abandoned | Return partial results if available, timeout notification |
+| Invalid regex pattern | Grep tool fails | Validate regex before search, return syntax error with position |
+
+### Assumptions
+
+1. The index service is available and has been built before search tools are invoked
+2. The agent understands the tool interface and can formulate valid search queries
+3. Rate limits are sufficient for typical agent workflows without causing excessive blocking
+4. JSON result format is optimal for LLM consumption and token efficiency
+5. Relevance scoring from the index service accurately reflects result quality
+6. Context lines around matches provide sufficient information for the agent to understand results
+7. The tool registry follows a standard pattern that search tools can integrate with
+8. Search performance depends on index quality and size; results are approximate not exhaustive
+
+### Security Considerations
+
+1. **Query Injection** - Search queries must be sanitized to prevent injection attacks if patterns are compiled to regex
+2. **Path Disclosure** - Search results must only include files within the repository; no system file exposure
+3. **Resource Exhaustion** - Rate limiting prevents denial of service through excessive search requests
+4. **Sensitive Content** - Search results may contain sensitive code; ensure access controls are respected
+5. **Log Sanitization** - Search queries logged for debugging must not expose sensitive search terms to unauthorized viewers
+
 ---
 
 ## Glossary / Terms
@@ -67,66 +124,82 @@ The following items are explicitly excluded from Task 015.b:
 
 ### Text Search Tool
 
-- FR-001: search_text tool MUST exist
-- FR-002: Query parameter required
-- FR-003: Return matching files
-- FR-004: Return line numbers
-- FR-005: Return snippets
-- FR-006: Return relevance scores
+| ID | Requirement |
+|----|-------------|
+| FR-015b-01 | The system MUST expose a search_text tool in the tool registry |
+| FR-015b-02 | The tool MUST require a query parameter specifying the search terms |
+| FR-015b-03 | The tool MUST return a list of matching files with their paths |
+| FR-015b-04 | The tool MUST return line numbers for each match location |
+| FR-015b-05 | The tool MUST return code snippets showing the matching content with context |
+| FR-015b-06 | The tool MUST return relevance scores for result ranking |
 
 ### File Search Tool
 
-- FR-007: search_files tool MUST exist
-- FR-008: Pattern parameter required
-- FR-009: Return matching paths
-- FR-010: Support wildcards
-- FR-011: Support directory filtering
+| ID | Requirement |
+|----|-------------|
+| FR-015b-07 | The system MUST expose a search_files tool in the tool registry |
+| FR-015b-08 | The tool MUST require a pattern parameter for matching file paths |
+| FR-015b-09 | The tool MUST return all matching file paths |
+| FR-015b-10 | The tool MUST support glob wildcards (* and **) in patterns |
+| FR-015b-11 | The tool MUST support optional directory filtering to scope the search |
 
 ### Grep Tool
 
-- FR-012: grep tool MUST exist
-- FR-013: Pattern parameter required
-- FR-014: Return all matches
-- FR-015: Support regex
-- FR-016: Support case options
+| ID | Requirement |
+|----|-------------|
+| FR-015b-12 | The system MUST expose a grep tool in the tool registry |
+| FR-015b-13 | The tool MUST require a pattern parameter for content matching |
+| FR-015b-14 | The tool MUST return all lines matching the pattern across all files |
+| FR-015b-15 | The tool MUST support regular expression patterns when regex flag is set |
+| FR-015b-16 | The tool MUST support case sensitivity options for pattern matching |
 
 ### Tool Parameters
 
-- FR-017: max_results parameter
-- FR-018: include_path filter
-- FR-019: exclude_path filter
-- FR-020: file_type filter
-- FR-021: context_lines parameter
+| ID | Requirement |
+|----|-------------|
+| FR-015b-17 | All search tools MUST support a max_results parameter to limit output |
+| FR-015b-18 | All search tools MUST support an include_path filter for scoping searches |
+| FR-015b-19 | All search tools MUST support an exclude_path filter for excluding paths |
+| FR-015b-20 | Text and grep tools MUST support a file_type filter for extension filtering |
+| FR-015b-21 | Text and grep tools MUST support a context_lines parameter for snippet size |
 
 ### Tool Results
 
-- FR-022: JSON result format
-- FR-023: File path in result
-- FR-024: Line number in result
-- FR-025: Content snippet in result
-- FR-026: Score in result
-- FR-027: Total count in result
+| ID | Requirement |
+|----|-------------|
+| FR-015b-22 | All tool results MUST be returned in structured JSON format |
+| FR-015b-23 | Each result MUST include the full relative file path |
+| FR-015b-24 | Content results MUST include the line number of the match |
+| FR-015b-25 | Content results MUST include a snippet of the matching content with context |
+| FR-015b-26 | Text search results MUST include a relevance score between 0 and 1 |
+| FR-015b-27 | All results MUST include a total count of matches found |
 
 ### Rate Limiting
 
-- FR-028: Per-session limits
-- FR-029: Configurable limits
-- FR-030: Limit notification
-- FR-031: Backoff suggestion
+| ID | Requirement |
+|----|-------------|
+| FR-015b-28 | The system MUST enforce per-session limits on search invocations |
+| FR-015b-29 | Rate limits MUST be configurable via .agent/config.yml |
+| FR-015b-30 | The system MUST notify the agent when rate limits are approached or exceeded |
+| FR-015b-31 | Rate limit responses MUST include a suggested backoff duration |
 
 ### Error Handling
 
-- FR-032: Index not ready error
-- FR-033: Invalid query error
-- FR-034: No results message
-- FR-035: Timeout handling
+| ID | Requirement |
+|----|-------------|
+| FR-015b-32 | The system MUST return a clear error when the index is not ready |
+| FR-015b-33 | The system MUST return a clear error for malformed or invalid queries |
+| FR-015b-34 | The system MUST return a meaningful message when no results are found |
+| FR-015b-35 | The system MUST handle search timeouts gracefully with partial results if available |
 
 ### Integration
 
-- FR-036: Tool registry integration
-- FR-037: Logging integration
-- FR-038: Metrics integration
-- FR-039: Budget integration
+| ID | Requirement |
+|----|-------------|
+| FR-015b-36 | All search tools MUST register with the central tool registry on startup |
+| FR-015b-37 | All search tool invocations MUST be logged with query, timing, and result count |
+| FR-015b-38 | All search tools MUST emit metrics for latency, result count, and error rate |
+| FR-015b-39 | Search tools MUST integrate with context budget and reduce results when budget is tight |
 
 ---
 
@@ -134,21 +207,43 @@ The following items are explicitly excluded from Task 015.b:
 
 ### Performance
 
-- NFR-001: Search < 100ms
-- NFR-002: Result formatting < 50ms
-- NFR-003: Total < 200ms
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-015b-01 | Performance | Text search execution MUST complete in less than 100ms for typical queries |
+| NFR-015b-02 | Performance | Result formatting and serialization MUST complete in less than 50ms |
+| NFR-015b-03 | Performance | Total tool execution time MUST be less than 200ms end-to-end |
 
 ### Reliability
 
-- NFR-004: Graceful degradation
-- NFR-005: Timeout handling
-- NFR-006: Error recovery
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-015b-04 | Reliability | Search tools MUST degrade gracefully when the index is unavailable |
+| NFR-015b-05 | Reliability | Search timeouts MUST be enforced to prevent runaway operations |
+| NFR-015b-06 | Reliability | The system MUST recover from individual search errors without affecting other operations |
 
 ### Usability
 
-- NFR-007: Clear error messages
-- NFR-008: Helpful result format
-- NFR-009: Good documentation
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-015b-07 | Usability | Error messages MUST be clear and actionable for the AI agent |
+| NFR-015b-08 | Usability | Result format MUST be optimized for LLM token efficiency |
+| NFR-015b-09 | Usability | Tool documentation MUST be comprehensive for agent understanding |
+
+### Maintainability
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-015b-10 | Maintainability | Search tools MUST follow the standard tool interface pattern |
+| NFR-015b-11 | Maintainability | Rate limiting logic MUST be reusable across different tool types |
+| NFR-015b-12 | Maintainability | Result formatting MUST be centralized for consistent output |
+
+### Observability
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-015b-13 | Observability | Search latency percentiles MUST be available in metrics |
+| NFR-015b-14 | Observability | Rate limit violations MUST be logged and counted |
+| NFR-015b-15 | Observability | Search queries MUST be traceable through the logging system |
 
 ---
 

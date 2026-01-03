@@ -124,108 +124,136 @@ The following items are explicitly excluded from Task 014.c:
 
 ## Functional Requirements
 
-### Patch Parsing
+### Patch Parsing (FR-014c-01 to FR-014c-05)
 
-- FR-001: Unified diff parsing MUST work
-- FR-002: Multiple file patches MUST work
-- FR-003: Hunk parsing MUST work
-- FR-004: Context line parsing MUST work
-- FR-005: Add/remove/modify detection
+| ID | Requirement |
+|----|-------------|
+| FR-014c-01 | System MUST parse standard unified diff format |
+| FR-014c-02 | Parser MUST support multi-file patches with multiple file entries |
+| FR-014c-03 | Parser MUST extract hunks with line number ranges |
+| FR-014c-04 | Parser MUST extract context lines for matching |
+| FR-014c-05 | Parser MUST distinguish between additions, removals, and unchanged context |
 
-### Patch Validation
+### Patch Validation (FR-014c-06 to FR-014c-10)
 
-- FR-006: Context matching MUST work
-- FR-007: Line number validation
-- FR-008: File existence check
-- FR-009: Encoding compatibility check
-- FR-010: Validation error messages
+| ID | Requirement |
+|----|-------------|
+| FR-014c-06 | Validator MUST verify context lines match current file content |
+| FR-014c-07 | Validator MUST verify line numbers are within file bounds |
+| FR-014c-08 | Validator MUST verify target files exist (for modification patches) |
+| FR-014c-09 | Validator MUST verify encoding compatibility with target files |
+| FR-014c-10 | Validation errors MUST include clear, actionable error messages |
 
-### Patch Application
+### Patch Application (FR-014c-11 to FR-014c-15)
 
-- FR-011: ApplyPatchAsync MUST work
-- FR-012: Line additions MUST work
-- FR-013: Line removals MUST work
-- FR-014: Line modifications MUST work
-- FR-015: Multiple hunks MUST work
+| ID | Requirement |
+|----|-------------|
+| FR-014c-11 | ApplyPatchAsync MUST apply validated patches to files |
+| FR-014c-12 | Application MUST correctly add new lines at specified positions |
+| FR-014c-13 | Application MUST correctly remove specified lines |
+| FR-014c-14 | Application MUST correctly handle line modifications (remove + add) |
+| FR-014c-15 | Application MUST handle patches with multiple hunks in single file |
 
-### Atomicity
+### Atomicity (FR-014c-16 to FR-014c-20)
 
-- FR-016: All-or-nothing application
-- FR-017: Failure rolls back changes
-- FR-018: No partial patches
-- FR-019: Multi-file transaction
-- FR-020: Backup before apply
+| ID | Requirement |
+|----|-------------|
+| FR-014c-16 | Patch application MUST be all-or-nothing (no partial application) |
+| FR-014c-17 | Any failure during application MUST trigger full rollback |
+| FR-014c-18 | Rollback MUST restore all files to pre-patch state |
+| FR-014c-19 | Multi-file patches MUST apply as single transaction |
+| FR-014c-20 | Backups MUST be created before any file modification |
 
-### Dry Run
+### Dry Run (FR-014c-21 to FR-014c-24)
 
-- FR-021: PreviewPatchAsync MUST work
-- FR-022: Show what would change
-- FR-023: Report potential conflicts
-- FR-024: No file modifications
+| ID | Requirement |
+|----|-------------|
+| FR-014c-21 | PreviewPatchAsync MUST show what changes would be made |
+| FR-014c-22 | Preview MUST show added and removed lines per file |
+| FR-014c-23 | Preview MUST report potential conflicts without modifying files |
+| FR-014c-24 | PreviewPatchAsync MUST NOT modify any files |
 
-### Rollback
+### Rollback (FR-014c-25 to FR-014c-28)
 
-- FR-025: RollbackPatchAsync MUST work
-- FR-026: Restore original content
-- FR-027: Rollback window configurable
-- FR-028: Cleanup after rollback
+| ID | Requirement |
+|----|-------------|
+| FR-014c-25 | RollbackPatchAsync MUST restore files to pre-patch state |
+| FR-014c-26 | Rollback MUST restore original content from backup |
+| FR-014c-27 | Rollback window (retention period) MUST be configurable |
+| FR-014c-28 | Rollback MUST cleanup backup files after successful restore |
 
-### Conflict Detection
+### Conflict Detection (FR-014c-29 to FR-014c-32)
 
-- FR-029: Context mismatch detection
-- FR-030: Line number drift detection
-- FR-031: File modification detection
-- FR-032: Clear conflict reports
+| ID | Requirement |
+|----|-------------|
+| FR-014c-29 | System MUST detect context line mismatches |
+| FR-014c-30 | System MUST detect when expected lines are at different positions |
+| FR-014c-31 | System MUST detect when file was modified since patch generation |
+| FR-014c-32 | Conflicts MUST be reported with specific line numbers and content |
 
-### Fuzz Matching
+### Fuzz Matching (FR-014c-33 to FR-014c-36)
 
-- FR-033: Fuzz factor configurable
-- FR-034: Default fuzz: 3 lines
-- FR-035: Offset tracking
-- FR-036: Offset reporting
+| ID | Requirement |
+|----|-------------|
+| FR-014c-33 | Fuzz factor MUST be configurable (number of lines to search) |
+| FR-014c-34 | Default fuzz factor MUST be 3 lines |
+| FR-014c-35 | System MUST track line offset when fuzz matching succeeds |
+| FR-014c-36 | Applied offset MUST be reported in patch result |
 
-### Multi-File Patches
+### Multi-File Patches (FR-014c-37 to FR-014c-40)
 
-- FR-037: Parse multi-file patches
-- FR-038: Apply transactionally
-- FR-039: Rollback all on failure
-- FR-040: Report per-file status
+| ID | Requirement |
+|----|-------------|
+| FR-014c-37 | Parser MUST correctly separate files in multi-file patches |
+| FR-014c-38 | Multi-file patches MUST apply as single atomic transaction |
+| FR-014c-39 | Failure in any file MUST rollback all files in patch |
+| FR-014c-40 | Result MUST report status for each file in patch |
 
-### Result Reporting
+### Result Reporting (FR-014c-41 to FR-014c-45)
 
-- FR-041: Success/failure indication
-- FR-042: Applied hunk count
-- FR-043: Rejected hunk details
-- FR-044: Offset information
-- FR-045: Conflict details
+| ID | Requirement |
+|----|-------------|
+| FR-014c-41 | PatchResult MUST indicate success or failure |
+| FR-014c-42 | PatchResult MUST include count of applied hunks |
+| FR-014c-43 | PatchResult MUST include details of any rejected hunks |
+| FR-014c-44 | PatchResult MUST include offset information if fuzz applied |
+| FR-014c-45 | PatchResult MUST include conflict details if validation failed |
 
 ---
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-014c-01 to NFR-014c-03)
 
-- NFR-001: Small patch < 10ms
-- NFR-002: Large patch < 100ms
-- NFR-003: Multi-file < 50ms/file
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014c-01 | Performance | Simple single-hunk patch MUST apply in < 10ms |
+| NFR-014c-02 | Performance | Complex multi-hunk patch MUST apply in < 100ms |
+| NFR-014c-03 | Performance | Multi-file patches MUST apply at < 50ms per file |
 
-### Reliability
+### Reliability (NFR-014c-04 to NFR-014c-06)
 
-- NFR-004: No partial application
-- NFR-005: Rollback always works
-- NFR-006: Corruption impossible
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014c-04 | Reliability | Partial patch application MUST never occur |
+| NFR-014c-05 | Reliability | Rollback MUST always succeed when backups exist |
+| NFR-014c-06 | Reliability | File corruption from patch operations MUST be impossible |
 
-### Safety
+### Safety (NFR-014c-07 to NFR-014c-09)
 
-- NFR-007: Backup before change
-- NFR-008: Validation before apply
-- NFR-009: Clear error messages
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014c-07 | Safety | Backup MUST be created before any file modification |
+| NFR-014c-08 | Safety | Patch MUST be fully validated before any modification |
+| NFR-014c-09 | Safety | Error messages MUST provide clear guidance for resolution |
 
-### Usability
+### Maintainability (NFR-014c-10 to NFR-014c-12)
 
-- NFR-010: Clear dry run output
-- NFR-011: Helpful conflict messages
-- NFR-012: Good logging
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014c-10 | Maintainability | Dry run output MUST clearly show intended changes |
+| NFR-014c-11 | Maintainability | Conflict messages MUST identify specific mismatched content |
+| NFR-014c-12 | Maintainability | All patch operations MUST be logged with sufficient detail |
 
 ---
 
