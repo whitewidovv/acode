@@ -10,25 +10,66 @@
 
 ## Description
 
-Task 017.c implements dependency mapping and retrieval APIs. Dependency mapping tracks relationships between symbols. Retrieval APIs enable querying these relationships.
+### Business Value
 
-Code understanding requires relationship knowledge. When the agent modifies `UserService`, it needs to know what depends on `UserService`. Dependency mapping provides this.
+Dependency mapping transforms isolated symbol data into an interconnected knowledge graph that reveals how code components relate to each other. Without dependency information, the agent can identify that `UserService` exists but cannot determine what calls it, what it depends on, or what would break if it were modified. This task implements the relationship layer that powers impact analysis, usage discovery, and intelligent context selection.
 
-Relationships are directional. `UserController` uses `UserService`. `UserService` is used by `UserController`. Both directions are valuable. Forward: "what does this use?" Reverse: "what uses this?"
+When a developer asks the agent to refactor a method, the dependency graph immediately identifies all callers that must be reviewed or updated. When the context packer selects code for a prompt, it can include relevant dependencies to provide complete context. When the agent modifies a class, it can warn about breaking changes based on what depends on the public interface. These capabilities are impossible without persistent, queryable dependency relationships.
 
-Dependency types vary. Method calls are dependencies. Type references are dependencies. Inheritance creates dependencies. Interface implementations create dependencies.
+The dependency graph persists across sessions and updates incrementally as code changes. When a file is modified, only its dependencies are re-extracted—the rest of the graph remains intact. This incremental approach enables near-instant queries even on large codebases, supporting the interactive response times users expect from a coding assistant.
 
-Static analysis discovers dependencies. Task 017.a and 017.b extract symbols. This task links them. Cross-language dependencies are out of scope.
+### Scope
 
-The dependency graph is persistent. It survives restarts. Incremental updates maintain it. Changes to files update affected relationships.
+This task delivers the following components:
 
-Retrieval APIs serve the context packer. When including a class, the packer can include callers. When the agent edits a method, it can see usages.
+1. **IDependency/Dependency** - Domain model representing a directional relationship between two symbols
+2. **DependencyKind** - Enumeration of relationship types (calls, uses, inherits, implements, references)
+3. **IDependencyStore/DependencyStore** - Persistence layer for storing and querying dependencies
+4. **DependencyExtractor** - Extracts dependencies from parsed symbols (integrates with Task 017.a and 017.b)
+5. **IDependencyGraph/DependencyGraph** - Graph operations including transitive queries, cycle detection, and path finding
+6. **DependencyQueryService** - High-level retrieval APIs for common query patterns
 
-APIs support multiple query patterns. Get all dependencies of a symbol. Get all dependents of a symbol. Get the full dependency chain. Filter by relationship type.
+### Integration Points
 
-Performance is critical. The graph can have millions of edges. Queries must be fast. Indexing and caching are essential.
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| C# Symbol Extractor (Task 017.a) | Producer | Provides symbols from which dependencies are extracted |
+| TS/JS Symbol Extractor (Task 017.b) | Producer | Provides symbols from which dependencies are extracted |
+| Symbol Index (Task 017) | Dependency | Resolves symbol IDs for dependency endpoints |
+| SQLite Database | Persistence | Stores dependency edges with indexes for fast queries |
+| Context Packer | Consumer | Queries dependencies to include related code in prompts |
+| CLI Commands | Consumer | Exposes dependency queries via `acode deps` commands |
+| File Watcher | Trigger | Triggers incremental updates when source files change |
 
-The graph supports cycle detection. Circular dependencies exist in real code. The API handles them gracefully. No infinite loops in traversal.
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Symbol not found in index | Dependency endpoint unresolved | Log warning, store with unresolved flag, retry on index update |
+| Circular dependency in query | Infinite loop potential | Cycle detection with visited set, max depth limits |
+| Database corruption | Data loss | Transaction-based writes, backup before rebuild |
+| Memory exhaustion on large graph | Query failure or crash | Streaming iterators, pagination, memory bounds |
+| Stale dependencies after file delete | Phantom edges remain | File deletion triggers edge cleanup |
+| Concurrent write conflicts | Inconsistent state | Write serialization per file, read-write locks |
+
+### Assumptions
+
+1. Symbol IDs from Task 017.a and 017.b are stable and deterministic
+2. Dependencies are extracted after symbols are indexed (ordered pipeline)
+3. Cross-language dependencies (C# → JS) are out of scope for this task
+4. Dependency resolution is best-effort—unresolved references are logged but not blocking
+5. The SQLite database has sufficient capacity for millions of edges
+6. Transitive query depth is configurable with a sensible default (10 levels)
+7. Cycle detection marks cycles rather than attempting to break them
+8. Dependency extraction runs in the same process as symbol extraction
+
+### Security Considerations
+
+1. **Query Limits** - All traversal queries MUST have configurable depth and node limits to prevent DoS
+2. **Input Validation** - Symbol IDs MUST be validated before database queries
+3. **No Code Execution** - Dependency extraction is pure data analysis with no code execution
+4. **Path Exposure** - File paths in dependencies MUST be relative to project root
+5. **Audit Trail** - Dependency graph modifications SHOULD be logged for debugging
 
 ---
 
@@ -69,106 +110,149 @@ The following items are explicitly excluded from Task 017.c:
 
 ## Functional Requirements
 
-### Dependency Model
+### Dependency Model (FR-017c-01 to FR-017c-11)
 
-- FR-001: Define IDependency interface
-- FR-002: Define DependencyKind enum
-- FR-003: Support calls relationship
-- FR-004: Support uses relationship
-- FR-005: Support inherits relationship
-- FR-006: Support implements relationship
-- FR-007: Support references relationship
-- FR-008: Store source symbol ID
-- FR-009: Store target symbol ID
-- FR-010: Store relationship kind
-- FR-011: Store source location
+| ID | Requirement |
+|----|-------------|
+| FR-017c-01 | System MUST define IDependency interface in Domain layer |
+| FR-017c-02 | System MUST define DependencyKind enum with all relationship types |
+| FR-017c-03 | DependencyKind MUST include Calls (method/function invocation) |
+| FR-017c-04 | DependencyKind MUST include Uses (type reference) |
+| FR-017c-05 | DependencyKind MUST include Inherits (class inheritance) |
+| FR-017c-06 | DependencyKind MUST include Implements (interface implementation) |
+| FR-017c-07 | DependencyKind MUST include References (any symbol usage) |
+| FR-017c-08 | Dependency MUST store source symbol ID (caller/user) |
+| FR-017c-09 | Dependency MUST store target symbol ID (callee/used) |
+| FR-017c-10 | Dependency MUST store relationship kind |
+| FR-017c-11 | Dependency MUST store source location (where the reference occurs) |
 
-### Dependency Store
+### Dependency Store (FR-017c-12 to FR-017c-22)
 
-- FR-012: Define IDependencyStore interface
-- FR-013: Add dependencies
-- FR-014: Remove dependencies
-- FR-015: Remove by source symbol
-- FR-016: Remove by target symbol
-- FR-017: Query by source
-- FR-018: Query by target
-- FR-019: Query by kind
-- FR-020: Batch operations
-- FR-021: Persist to database
-- FR-022: Load from database
+| ID | Requirement |
+|----|-------------|
+| FR-017c-12 | System MUST define IDependencyStore interface in Domain layer |
+| FR-017c-13 | Store MUST support adding single dependencies |
+| FR-017c-14 | Store MUST support removing single dependencies |
+| FR-017c-15 | Store MUST support removing all dependencies by source symbol |
+| FR-017c-16 | Store MUST support removing all dependencies by target symbol |
+| FR-017c-17 | Store MUST support querying dependencies by source symbol |
+| FR-017c-18 | Store MUST support querying dependencies by target symbol |
+| FR-017c-19 | Store MUST support querying dependencies by kind |
+| FR-017c-20 | Store MUST support batch add/remove operations for performance |
+| FR-017c-21 | Store MUST persist dependencies to SQLite database |
+| FR-017c-22 | Store MUST load dependencies from database on startup |
 
-### Dependency Extraction
+### Dependency Extraction (FR-017c-23 to FR-017c-30)
 
-- FR-023: Extract method calls
-- FR-024: Extract property accesses
-- FR-025: Extract field accesses
-- FR-026: Extract type references
-- FR-027: Extract base class
-- FR-028: Extract interfaces
-- FR-029: Extract constructor calls
-- FR-030: Link symbols by name
+| ID | Requirement |
+|----|-------------|
+| FR-017c-23 | Extractor MUST identify method/function calls and create Calls dependencies |
+| FR-017c-24 | Extractor MUST identify property accesses and create References dependencies |
+| FR-017c-25 | Extractor MUST identify field accesses and create References dependencies |
+| FR-017c-26 | Extractor MUST identify type references and create Uses dependencies |
+| FR-017c-27 | Extractor MUST identify base class and create Inherits dependencies |
+| FR-017c-28 | Extractor MUST identify interface implementations and create Implements dependencies |
+| FR-017c-29 | Extractor MUST identify constructor calls and create Calls dependencies |
+| FR-017c-30 | Extractor MUST link symbols by resolving names to symbol IDs |
 
-### Graph Operations
+### Graph Operations (FR-017c-31 to FR-017c-38)
 
-- FR-031: Get direct dependencies
-- FR-032: Get direct dependents
-- FR-033: Get transitive dependencies
-- FR-034: Get transitive dependents
-- FR-035: Detect cycles
-- FR-036: Get shortest path
-- FR-037: Limit depth
-- FR-038: Filter by kind
+| ID | Requirement |
+|----|-------------|
+| FR-017c-31 | Graph MUST support getting direct dependencies of a symbol |
+| FR-017c-32 | Graph MUST support getting direct dependents of a symbol |
+| FR-017c-33 | Graph MUST support getting transitive dependencies with depth limit |
+| FR-017c-34 | Graph MUST support getting transitive dependents with depth limit |
+| FR-017c-35 | Graph MUST detect cycles and mark them without infinite loops |
+| FR-017c-36 | Graph MUST support finding shortest path between two symbols |
+| FR-017c-37 | Graph MUST enforce configurable maximum depth for traversals |
+| FR-017c-38 | Graph MUST support filtering traversal results by dependency kind |
 
-### Retrieval APIs
+### Retrieval APIs (FR-017c-39 to FR-017c-45)
 
-- FR-039: GetDependencies(symbolId)
-- FR-040: GetDependents(symbolId)
-- FR-041: GetCallGraph(symbolId, depth)
-- FR-042: GetTypeHierarchy(symbolId)
-- FR-043: GetImplementors(interfaceId)
-- FR-044: GetUsages(symbolId)
-- FR-045: FindPath(fromId, toId)
+| ID | Requirement |
+|----|-------------|
+| FR-017c-39 | API MUST provide GetDependencies(symbolId) returning direct dependencies |
+| FR-017c-40 | API MUST provide GetDependents(symbolId) returning direct dependents |
+| FR-017c-41 | API MUST provide GetCallGraph(symbolId, depth) returning call tree |
+| FR-017c-42 | API MUST provide GetTypeHierarchy(symbolId) returning inheritance chain |
+| FR-017c-43 | API MUST provide GetImplementors(interfaceId) returning implementing classes |
+| FR-017c-44 | API MUST provide GetUsages(symbolId) returning all reference locations |
+| FR-017c-45 | API MUST provide FindPath(fromId, toId) returning dependency path if exists |
 
-### Update Management
+### Update Management (FR-017c-46 to FR-017c-50)
 
-- FR-046: Update on file change
-- FR-047: Remove stale edges
-- FR-048: Add new edges
-- FR-049: Incremental update
-- FR-050: Full rebuild
+| ID | Requirement |
+|----|-------------|
+| FR-017c-46 | System MUST update dependencies when source file changes |
+| FR-017c-47 | System MUST remove stale edges when symbols are deleted |
+| FR-017c-48 | System MUST add new edges when symbols are added |
+| FR-017c-49 | System MUST support incremental updates (file-level granularity) |
+| FR-017c-50 | System MUST support full rebuild of dependency graph |
 
-### Index Management
+### Index Management (FR-017c-51 to FR-017c-54)
 
-- FR-051: Index source-target pairs
-- FR-052: Index by kind
-- FR-053: Index by file
-- FR-054: Optimize for traversal
+| ID | Requirement |
+|----|-------------|
+| FR-017c-51 | Store MUST index source-target pairs for bidirectional queries |
+| FR-017c-52 | Store MUST index dependencies by kind for filtered queries |
+| FR-017c-53 | Store MUST index dependencies by file for incremental updates |
+| FR-017c-54 | Store MUST optimize index structure for graph traversal patterns |
 
 ---
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-017c-01 to NFR-017c-08)
 
-- NFR-001: Query direct deps < 10ms
-- NFR-002: Query dependents < 10ms
-- NFR-003: Transitive query < 100ms
-- NFR-004: Batch insert < 0.1ms/edge
-- NFR-005: Handle 1M edges
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017c-01 | Performance | Direct dependency query MUST complete in < 10ms |
+| NFR-017c-02 | Performance | Direct dependent query MUST complete in < 10ms |
+| NFR-017c-03 | Performance | Transitive query (depth 5) MUST complete in < 100ms |
+| NFR-017c-04 | Performance | Batch insert MUST achieve < 0.1ms per edge |
+| NFR-017c-05 | Performance | System MUST handle graphs with 1 million edges |
+| NFR-017c-06 | Performance | Index rebuild MUST NOT block read queries |
+| NFR-017c-07 | Performance | Incremental update MUST be < 100ms per file |
+| NFR-017c-08 | Performance | Path finding MUST use efficient graph algorithms (BFS/Dijkstra) |
 
-### Reliability
+### Reliability (NFR-017c-09 to NFR-017c-14)
 
-- NFR-006: Handle cycles
-- NFR-007: Handle missing symbols
-- NFR-008: Consistent state
-- NFR-009: Crash recovery
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017c-09 | Reliability | System MUST handle cycles without infinite loops |
+| NFR-017c-10 | Reliability | System MUST handle queries for missing symbols gracefully |
+| NFR-017c-11 | Reliability | Database state MUST remain consistent after crashes |
+| NFR-017c-12 | Reliability | Database transactions MUST be atomic for batch operations |
+| NFR-017c-13 | Reliability | Concurrent read/write MUST NOT cause data corruption |
+| NFR-017c-14 | Reliability | System MUST recover from database lock timeouts |
 
-### Accuracy
+### Security (NFR-017c-15 to NFR-017c-18)
 
-- NFR-010: No duplicate edges
-- NFR-011: Correct direction
-- NFR-012: Correct kinds
-- NFR-013: Stale edge cleanup
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017c-15 | Security | Symbol IDs MUST be validated before database queries |
+| NFR-017c-16 | Security | Query depth limits MUST be enforced to prevent resource exhaustion |
+| NFR-017c-17 | Security | File paths MUST be stored as relative paths only |
+| NFR-017c-18 | Security | SQL injection MUST be prevented via parameterized queries |
+
+### Maintainability (NFR-017c-19 to NFR-017c-22)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017c-19 | Maintainability | Domain interfaces MUST be independent of persistence implementation |
+| NFR-017c-20 | Maintainability | All public APIs MUST have XML documentation |
+| NFR-017c-21 | Maintainability | Database schema MUST be versioned with migrations |
+| NFR-017c-22 | Maintainability | Unit test coverage MUST exceed 80% |
+
+### Observability (NFR-017c-23 to NFR-017c-26)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017c-23 | Observability | Query execution time MUST be logged for performance monitoring |
+| NFR-017c-24 | Observability | Edge count and graph statistics MUST be available via metrics |
+| NFR-017c-25 | Observability | Cycle detection events MUST be logged with involved symbols |
+| NFR-017c-26 | Observability | Database maintenance operations MUST be logged |
 
 ---
 
