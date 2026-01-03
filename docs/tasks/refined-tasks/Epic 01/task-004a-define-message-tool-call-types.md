@@ -715,58 +715,12 @@ Check that:
 
 ## Testing Requirements
 
+> **Note:** MessageRole, ChatMessage, ToolCall, and ToolResult tests are implemented in Task 004 (MessageTypeTests.cs). This section covers only the types unique to Task 004.a.
+
 ### Unit Tests
 
 ```
 Tests/Unit/Domain/Models/Messages/
-├── MessageRoleTests.cs
-│   ├── Should_Have_System_Value()
-│   ├── Should_Have_User_Value()
-│   ├── Should_Have_Assistant_Value()
-│   ├── Should_Have_Tool_Value()
-│   ├── Should_Serialize_To_Lowercase()
-│   ├── Should_Parse_CaseInsensitive()
-│   └── Should_Throw_For_Unknown()
-│
-├── ChatMessageTests.cs
-│   ├── Should_Be_Immutable()
-│   ├── CreateSystem_Should_Work()
-│   ├── CreateUser_Should_Work()
-│   ├── CreateAssistant_Should_Work()
-│   ├── CreateToolResult_Should_Work()
-│   ├── Should_Require_Content_For_User()
-│   ├── Should_Require_Content_For_System()
-│   ├── Should_Require_ToolCallId_For_Tool()
-│   ├── Should_Allow_ToolCalls_Only_For_Assistant()
-│   ├── Should_Serialize_To_Json()
-│   ├── Should_Deserialize_From_Json()
-│   ├── Should_Omit_Null_Properties()
-│   ├── Should_Implement_Value_Equality()
-│   └── Should_Have_Meaningful_ToString()
-│
-├── ToolCallTests.cs
-│   ├── Should_Be_Immutable()
-│   ├── Should_Require_NonEmpty_Id()
-│   ├── Should_Require_NonEmpty_Name()
-│   ├── Should_Validate_Name_Characters()
-│   ├── Should_Validate_Name_Length()
-│   ├── Should_Require_Object_Arguments()
-│   ├── TryGetArgument_Should_Return_Value()
-│   ├── TryGetArgument_Should_Return_False_For_Missing()
-│   ├── GetArgumentsAs_Should_Deserialize()
-│   ├── Should_Serialize_To_Json()
-│   └── Should_Deserialize_From_Json()
-│
-├── ToolResultTests.cs
-│   ├── Should_Be_Immutable()
-│   ├── Should_Require_ToolCallId()
-│   ├── Should_Allow_Empty_Result()
-│   ├── Should_Default_IsError_False()
-│   ├── Success_Factory_Should_Work()
-│   ├── Error_Factory_Should_SetIsError()
-│   ├── Should_Serialize_To_Json()
-│   └── Should_Deserialize_From_Json()
-│
 ├── ToolDefinitionTests.cs
 │   ├── Should_Be_Immutable()
 │   ├── Should_Validate_Name()
@@ -775,13 +729,709 @@ Tests/Unit/Domain/Models/Messages/
 │   ├── Should_Default_Strict_True()
 │   ├── CreateFromType_Should_Generate_Schema()
 │   └── Should_Serialize_To_Json()
-│
+```
+
+#### ToolDefinitionTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models.Messages;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+public class ToolDefinitionTests
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    #region Immutability Tests
+
+    [Fact]
+    public void Should_Be_Immutable()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+        var definition = new ToolDefinition
+        {
+            Name = "read_file",
+            Description = "Read contents of a file",
+            Parameters = schema
+        };
+
+        // Act
+        var modified = definition with { Name = "write_file" };
+
+        // Assert
+        definition.Name.Should().Be("read_file");
+        modified.Name.Should().Be("write_file");
+        definition.Should().NotBeSameAs(modified);
+    }
+
+    #endregion
+
+    #region Name Validation Tests
+
+    [Fact]
+    public void Should_Validate_Name_NonEmpty()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+
+        // Act
+        var action = () => ToolDefinition.Create("", "Description", schema);
+
+        // Assert
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*name*empty*");
+    }
+
+    [Theory]
+    [InlineData("read_file")]
+    [InlineData("write_file")]
+    [InlineData("execute_command")]
+    [InlineData("search_codebase")]
+    [InlineData("tool123")]
+    public void Should_Accept_Valid_Names(string name)
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+
+        // Act
+        var definition = ToolDefinition.Create(name, "Description", schema);
+
+        // Assert
+        definition.Name.Should().Be(name);
+    }
+
+    [Theory]
+    [InlineData("read-file", "contains hyphen")]
+    [InlineData("read file", "contains space")]
+    [InlineData("read.file", "contains dot")]
+    [InlineData("read@file", "contains special char")]
+    public void Should_Reject_Invalid_Name_Characters(string name, string reason)
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+
+        // Act
+        var action = () => ToolDefinition.Create(name, "Description", schema);
+
+        // Assert
+        action.Should().Throw<ArgumentException>(
+            because: $"name {reason}");
+    }
+
+    [Fact]
+    public void Should_Enforce_Name_MaxLength()
+    {
+        // Arrange
+        var longName = new string('a', 65);
+        var schema = CreateValidSchema();
+
+        // Act
+        var action = () => ToolDefinition.Create(longName, "Description", schema);
+
+        // Assert
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*64*");
+    }
+
+    [Fact]
+    public void Should_Accept_Name_At_MaxLength()
+    {
+        // Arrange
+        var maxName = new string('a', 64);
+        var schema = CreateValidSchema();
+
+        // Act
+        var definition = ToolDefinition.Create(maxName, "Description", schema);
+
+        // Assert
+        definition.Name.Should().HaveLength(64);
+    }
+
+    #endregion
+
+    #region Description Validation Tests
+
+    [Fact]
+    public void Should_Require_Description()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+
+        // Act
+        var action = () => ToolDefinition.Create("tool", "", schema);
+
+        // Assert
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*description*");
+    }
+
+    [Fact]
+    public void Should_Require_Description_NonNull()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+
+        // Act
+        var action = () => ToolDefinition.Create("tool", null!, schema);
+
+        // Assert
+        action.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void Should_Warn_Long_Description()
+    {
+        // Arrange
+        var longDesc = new string('x', 1025);
+        var schema = CreateValidSchema();
+
+        // Act - should work but may log warning
+        var definition = ToolDefinition.Create("tool", longDesc, schema);
+
+        // Assert
+        definition.Description.Should().HaveLength(1025);
+    }
+
+    #endregion
+
+    #region Schema Validation Tests
+
+    [Fact]
+    public void Should_Require_Object_Schema()
+    {
+        // Arrange - schema with type: array instead of object
+        var arraySchema = JsonSerializer.SerializeToElement(new
+        {
+            type = "array",
+            items = new { type = "string" }
+        });
+
+        // Act
+        var action = () => ToolDefinition.Create("tool", "desc", arraySchema);
+
+        // Assert
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*object*");
+    }
+
+    [Fact]
+    public void Should_Accept_Valid_Schema()
+    {
+        // Arrange
+        var schema = JsonSerializer.SerializeToElement(new
+        {
+            type = "object",
+            properties = new
+            {
+                path = new { type = "string", description = "File path" },
+                content = new { type = "string", description = "Content" }
+            },
+            required = new[] { "path", "content" }
+        });
+
+        // Act
+        var definition = ToolDefinition.Create("write_file", "Writes a file", schema);
+
+        // Assert
+        definition.Parameters.GetProperty("type").GetString().Should().Be("object");
+    }
+
+    [Fact]
+    public void Should_Default_Strict_True()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+
+        // Act
+        var definition = ToolDefinition.Create("tool", "desc", schema);
+
+        // Assert
+        definition.Strict.Should().BeTrue(
+            because: "strict mode should be default for safety");
+    }
+
+    [Fact]
+    public void Should_Allow_Strict_False()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+
+        // Act
+        var definition = ToolDefinition.Create("tool", "desc", schema, strict: false);
+
+        // Assert
+        definition.Strict.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region CreateFromType Tests
+
+    [Fact]
+    public void CreateFromType_Should_Generate_Schema()
+    {
+        // Act
+        var definition = ToolDefinition.CreateFromType<WriteFileArgs>(
+            "write_file",
+            "Write content to a file"
+        );
+
+        // Assert
+        definition.Name.Should().Be("write_file");
+        definition.Description.Should().Be("Write content to a file");
+        definition.Parameters.GetProperty("type").GetString().Should().Be("object");
+        definition.Parameters.GetProperty("properties").EnumerateObject()
+            .Should().Contain(p => p.Name == "path" || p.Name == "Path");
+    }
+
+    [Fact]
+    public void CreateFromType_Should_Include_Required()
+    {
+        // Act
+        var definition = ToolDefinition.CreateFromType<WriteFileArgs>(
+            "write_file",
+            "Write content to a file"
+        );
+
+        // Assert
+        var required = definition.Parameters.GetProperty("required");
+        required.ValueKind.Should().Be(JsonValueKind.Array);
+        required.GetArrayLength().Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void CreateFromType_Should_Handle_Optional_Properties()
+    {
+        // Act
+        var definition = ToolDefinition.CreateFromType<ReadFileArgs>(
+            "read_file",
+            "Read file contents"
+        );
+
+        // Assert
+        var required = definition.Parameters.GetProperty("required");
+        var requiredProps = required.EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+        
+        // Optional properties should not be in required array
+        requiredProps.Should().NotContain("encoding");
+    }
+
+    public record WriteFileArgs(string Path, string Content);
+    public record ReadFileArgs(string Path, string? Encoding = null);
+
+    #endregion
+
+    #region Serialization Tests
+
+    [Fact]
+    public void Should_Serialize_To_Json()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+        var definition = ToolDefinition.Create("read_file", "Read a file", schema);
+
+        // Act
+        var json = JsonSerializer.Serialize(definition, JsonOptions);
+
+        // Assert
+        json.Should().Contain("\"name\":\"read_file\"");
+        json.Should().Contain("\"description\":\"Read a file\"");
+        json.Should().Contain("\"parameters\":");
+    }
+
+    [Fact]
+    public void Should_Serialize_Strict_When_False()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+        var definition = ToolDefinition.Create("tool", "desc", schema, strict: false);
+
+        // Act
+        var json = JsonSerializer.Serialize(definition, JsonOptions);
+
+        // Assert
+        json.Should().Contain("\"strict\":false");
+    }
+
+    [Fact]
+    public void Should_Deserialize_From_Json()
+    {
+        // Arrange
+        var json = """
+        {
+            "name": "execute_command",
+            "description": "Execute a shell command",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string" }
+                },
+                "required": ["command"]
+            },
+            "strict": true
+        }
+        """;
+
+        // Act
+        var definition = JsonSerializer.Deserialize<ToolDefinition>(json, JsonOptions);
+
+        // Assert
+        definition.Should().NotBeNull();
+        definition!.Name.Should().Be("execute_command");
+        definition.Description.Should().Be("Execute a shell command");
+        definition.Strict.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Should_Match_OpenAI_Function_Format()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+        var definition = ToolDefinition.Create("my_tool", "My tool description", schema);
+
+        // Act
+        var json = JsonSerializer.Serialize(definition, JsonOptions);
+        var doc = JsonDocument.Parse(json);
+
+        // Assert - matches OpenAI function calling format
+        doc.RootElement.TryGetProperty("name", out _).Should().BeTrue();
+        doc.RootElement.TryGetProperty("description", out _).Should().BeTrue();
+        doc.RootElement.TryGetProperty("parameters", out var parameters).Should().BeTrue();
+        parameters.TryGetProperty("type", out _).Should().BeTrue();
+    }
+
+    #endregion
+
+    #region Value Equality Tests
+
+    [Fact]
+    public void Should_Implement_Value_Equality()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+        var def1 = ToolDefinition.Create("tool", "desc", schema);
+        var def2 = ToolDefinition.Create("tool", "desc", schema);
+
+        // Assert
+        def1.Should().Be(def2);
+        def1.GetHashCode().Should().Be(def2.GetHashCode());
+    }
+
+    [Fact]
+    public void Should_Detect_Inequality()
+    {
+        // Arrange
+        var schema = CreateValidSchema();
+        var def1 = ToolDefinition.Create("tool1", "desc", schema);
+        var def2 = ToolDefinition.Create("tool2", "desc", schema);
+
+        // Assert
+        def1.Should().NotBe(def2);
+    }
+
+    #endregion
+
+    private static JsonElement CreateValidSchema()
+    {
+        return JsonSerializer.SerializeToElement(new
+        {
+            type = "object",
+            properties = new
+            {
+                path = new { type = "string" }
+            },
+            required = new[] { "path" }
+        });
+    }
+}
+```
+
+```
 ├── ToolCallDeltaTests.cs
 │   ├── Should_Be_Immutable()
 │   ├── Should_Have_Index()
 │   ├── Should_Allow_Partial_Properties()
 │   └── Should_Support_ArgumentsDelta()
-│
+```
+
+#### ToolCallDeltaTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models.Messages;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using Xunit;
+
+public class ToolCallDeltaTests
+{
+    #region Immutability Tests
+
+    [Fact]
+    public void Should_Be_Immutable()
+    {
+        // Arrange
+        var delta = new ToolCallDelta
+        {
+            Index = 0,
+            Id = "call_123",
+            Name = "read_file"
+        };
+
+        // Act
+        var modified = delta with { Index = 1 };
+
+        // Assert
+        delta.Index.Should().Be(0);
+        modified.Index.Should().Be(1);
+        delta.Should().NotBeSameAs(modified);
+    }
+
+    #endregion
+
+    #region Index Tests
+
+    [Fact]
+    public void Should_Have_Index()
+    {
+        // Arrange & Act
+        var delta = new ToolCallDelta { Index = 2 };
+
+        // Assert
+        delta.Index.Should().Be(2);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(5)]
+    [InlineData(10)]
+    public void Should_Accept_Valid_Index_Values(int index)
+    {
+        // Act
+        var delta = new ToolCallDelta { Index = index };
+
+        // Assert
+        delta.Index.Should().Be(index);
+    }
+
+    [Fact]
+    public void Index_Identifies_Which_ToolCall()
+    {
+        // Arrange - simulating multiple parallel tool calls
+        var delta0 = new ToolCallDelta { Index = 0, Name = "read_file" };
+        var delta1 = new ToolCallDelta { Index = 1, Name = "write_file" };
+
+        // Assert
+        delta0.Index.Should().NotBe(delta1.Index);
+    }
+
+    #endregion
+
+    #region Partial Properties Tests
+
+    [Fact]
+    public void Should_Allow_Only_Index()
+    {
+        // Arrange - delta with just index (continuation chunk)
+        var delta = new ToolCallDelta { Index = 0 };
+
+        // Assert
+        delta.Id.Should().BeNull();
+        delta.Name.Should().BeNull();
+        delta.ArgumentsDelta.Should().BeNull();
+    }
+
+    [Fact]
+    public void First_Delta_Should_Have_Id_And_Name()
+    {
+        // Arrange - first chunk introduces the tool call
+        var firstDelta = new ToolCallDelta
+        {
+            Index = 0,
+            Id = "call_abc123",
+            Name = "write_file"
+        };
+
+        // Assert
+        firstDelta.Id.Should().NotBeNull();
+        firstDelta.Name.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Subsequent_Deltas_Only_Need_ArgumentsDelta()
+    {
+        // Arrange - continuation chunks only have partial arguments
+        var continuationDelta = new ToolCallDelta
+        {
+            Index = 0,
+            ArgumentsDelta = "{\"pa"
+        };
+
+        // Assert
+        continuationDelta.Id.Should().BeNull();
+        continuationDelta.Name.Should().BeNull();
+        continuationDelta.ArgumentsDelta.Should().Be("{\"pa");
+    }
+
+    #endregion
+
+    #region ArgumentsDelta Tests
+
+    [Fact]
+    public void Should_Support_ArgumentsDelta()
+    {
+        // Arrange
+        var delta = new ToolCallDelta
+        {
+            Index = 0,
+            ArgumentsDelta = "th\": \"test.cs"
+        };
+
+        // Assert
+        delta.ArgumentsDelta.Should().Be("th\": \"test.cs");
+    }
+
+    [Fact]
+    public void ArgumentsDelta_Can_Be_Partial_Json()
+    {
+        // Arrange - simulating streaming JSON in chunks
+        var chunk1 = new ToolCallDelta { Index = 0, Id = "call_1", Name = "write_file", ArgumentsDelta = "{\"pa" };
+        var chunk2 = new ToolCallDelta { Index = 0, ArgumentsDelta = "th\": \"" };
+        var chunk3 = new ToolCallDelta { Index = 0, ArgumentsDelta = "test.cs\"}" };
+
+        // Act - combine to form complete JSON
+        var fullArgs = chunk1.ArgumentsDelta + chunk2.ArgumentsDelta + chunk3.ArgumentsDelta;
+
+        // Assert
+        fullArgs.Should().Be("{\"path\": \"test.cs\"}");
+    }
+
+    [Fact]
+    public void ArgumentsDelta_Can_Be_Empty_String()
+    {
+        // Arrange
+        var delta = new ToolCallDelta
+        {
+            Index = 0,
+            ArgumentsDelta = ""
+        };
+
+        // Assert
+        delta.ArgumentsDelta.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region Accumulation Pattern Tests
+
+    [Fact]
+    public void Should_Support_Accumulation_Pattern()
+    {
+        // Arrange - simulate streaming tool call
+        var deltas = new[]
+        {
+            new ToolCallDelta { Index = 0, Id = "call_xyz", Name = "search", ArgumentsDelta = "{" },
+            new ToolCallDelta { Index = 0, ArgumentsDelta = "\"query\"" },
+            new ToolCallDelta { Index = 0, ArgumentsDelta = ": \"test\"}" }
+        };
+
+        // Act - accumulate
+        string? id = null;
+        string? name = null;
+        var argsBuilder = new System.Text.StringBuilder();
+
+        foreach (var delta in deltas)
+        {
+            id ??= delta.Id;
+            name ??= delta.Name;
+            if (delta.ArgumentsDelta != null)
+                argsBuilder.Append(delta.ArgumentsDelta);
+        }
+
+        // Assert
+        id.Should().Be("call_xyz");
+        name.Should().Be("search");
+        argsBuilder.ToString().Should().Be("{\"query\": \"test\"}");
+    }
+
+    [Fact]
+    public void Should_Handle_Multiple_Parallel_ToolCalls()
+    {
+        // Arrange - model calling two tools simultaneously
+        var deltas = new[]
+        {
+            new ToolCallDelta { Index = 0, Id = "call_1", Name = "read_file" },
+            new ToolCallDelta { Index = 1, Id = "call_2", Name = "write_file" },
+            new ToolCallDelta { Index = 0, ArgumentsDelta = "{\"path\":\"a.cs\"}" },
+            new ToolCallDelta { Index = 1, ArgumentsDelta = "{\"path\":\"b.cs\"}" }
+        };
+
+        // Act - separate by index
+        var tool0Args = string.Join("", deltas.Where(d => d.Index == 0).Select(d => d.ArgumentsDelta ?? ""));
+        var tool1Args = string.Join("", deltas.Where(d => d.Index == 1).Select(d => d.ArgumentsDelta ?? ""));
+
+        // Assert
+        tool0Args.Should().Contain("a.cs");
+        tool1Args.Should().Contain("b.cs");
+    }
+
+    #endregion
+
+    #region Serialization Tests
+
+    [Fact]
+    public void Should_Serialize_To_Json()
+    {
+        // Arrange
+        var delta = new ToolCallDelta
+        {
+            Index = 0,
+            Id = "call_123",
+            Name = "read_file",
+            ArgumentsDelta = "{\"path\":\""
+        };
+
+        // Act
+        var json = System.Text.Json.JsonSerializer.Serialize(delta);
+
+        // Assert
+        json.Should().Contain("\"index\":0");
+        json.Should().Contain("\"id\":\"call_123\"");
+    }
+
+    [Fact]
+    public void Should_Omit_Null_Properties()
+    {
+        // Arrange
+        var delta = new ToolCallDelta { Index = 0 };
+        var options = new System.Text.Json.JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        };
+
+        // Act
+        var json = System.Text.Json.JsonSerializer.Serialize(delta, options);
+
+        // Assert
+        json.Should().NotContain("\"id\"");
+        json.Should().NotContain("\"name\"");
+    }
+
+    #endregion
+}
+```
+
+```
 └── ConversationHistoryTests.cs
     ├── Should_Start_Empty()
     ├── Should_Require_System_First()
@@ -792,6 +1442,423 @@ Tests/Unit/Domain/Models/Messages/
     ├── Should_Support_Clear()
     ├── Should_Be_ThreadSafe()
     └── Should_Serialize()
+```
+
+#### ConversationHistoryTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models.Messages;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+public class ConversationHistoryTests
+{
+    #region Initialization Tests
+
+    [Fact]
+    public void Should_Start_Empty()
+    {
+        // Act
+        var history = new ConversationHistory();
+
+        // Assert
+        history.Count.Should().Be(0);
+        history.GetMessages().Should().BeEmpty();
+        history.LastMessage.Should().BeNull();
+    }
+
+    #endregion
+
+    #region Message Order Validation Tests
+
+    [Fact]
+    public void Should_Require_System_First()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        var userMessage = ChatMessage.CreateUser("Hello");
+
+        // Act
+        var action = () => history.Add(userMessage);
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*system*first*");
+    }
+
+    [Fact]
+    public void Should_Accept_System_As_First_Message()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        var systemMessage = ChatMessage.CreateSystem("You are helpful.");
+
+        // Act
+        history.Add(systemMessage);
+
+        // Assert
+        history.Count.Should().Be(1);
+        history.LastMessage!.Role.Should().Be(MessageRole.System);
+    }
+
+    [Fact]
+    public void Should_Reject_Second_System_Message()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System 1"));
+
+        // Act
+        var action = () => history.Add(ChatMessage.CreateSystem("System 2"));
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*system*already*");
+    }
+
+    [Fact]
+    public void Should_Validate_User_Assistant_Alternation()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("User 1"));
+
+        // Act - try to add another user message
+        var action = () => history.Add(ChatMessage.CreateUser("User 2"));
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*user*assistant*alternate*");
+    }
+
+    [Fact]
+    public void Should_Accept_Valid_Alternation()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+
+        // Act
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("User 1"));
+        history.Add(ChatMessage.CreateAssistant("Assistant 1"));
+        history.Add(ChatMessage.CreateUser("User 2"));
+        history.Add(ChatMessage.CreateAssistant("Assistant 2"));
+
+        // Assert
+        history.Count.Should().Be(5);
+    }
+
+    [Fact]
+    public void Should_Allow_Tool_After_ToolCalls()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("Write a file"));
+
+        var toolCall = new ToolCall
+        {
+            Id = "call_123",
+            Name = "write_file",
+            Arguments = JsonSerializer.SerializeToElement(new { path = "test.cs" })
+        };
+        history.Add(ChatMessage.CreateAssistant(null, new[] { toolCall }));
+
+        // Act
+        var toolResult = ChatMessage.CreateToolResult("call_123", "Success");
+        history.Add(toolResult);
+
+        // Assert
+        history.Count.Should().Be(4);
+        history.LastMessage!.Role.Should().Be(MessageRole.Tool);
+    }
+
+    [Fact]
+    public void Should_Reject_Tool_Without_Preceding_ToolCalls()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("Hello"));
+        history.Add(ChatMessage.CreateAssistant("Hi there!")); // No tool calls
+
+        // Act
+        var action = () => history.Add(ChatMessage.CreateToolResult("call_123", "Result"));
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*tool*tool_calls*");
+    }
+
+    [Fact]
+    public void Should_Validate_ToolCallId_Matches()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("Do something"));
+
+        var toolCall = new ToolCall
+        {
+            Id = "call_abc",
+            Name = "my_tool",
+            Arguments = JsonSerializer.SerializeToElement(new { })
+        };
+        history.Add(ChatMessage.CreateAssistant(null, new[] { toolCall }));
+
+        // Act - tool result with wrong ID
+        var action = () => history.Add(ChatMessage.CreateToolResult("call_xyz", "Result"));
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*tool_call_id*");
+    }
+
+    [Fact]
+    public void Should_Allow_Multiple_Tool_Results_For_Multiple_Calls()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("Do tasks"));
+
+        var toolCalls = new[]
+        {
+            new ToolCall { Id = "call_1", Name = "tool1", Arguments = JsonSerializer.SerializeToElement(new { }) },
+            new ToolCall { Id = "call_2", Name = "tool2", Arguments = JsonSerializer.SerializeToElement(new { }) }
+        };
+        history.Add(ChatMessage.CreateAssistant(null, toolCalls));
+
+        // Act
+        history.Add(ChatMessage.CreateToolResult("call_1", "Result 1"));
+        history.Add(ChatMessage.CreateToolResult("call_2", "Result 2"));
+
+        // Assert
+        history.Count.Should().Be(5);
+    }
+
+    #endregion
+
+    #region Property Tests
+
+    [Fact]
+    public void Should_Track_Count()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+
+        // Act & Assert
+        history.Count.Should().Be(0);
+
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Count.Should().Be(1);
+
+        history.Add(ChatMessage.CreateUser("User"));
+        history.Count.Should().Be(2);
+    }
+
+    [Fact]
+    public void Should_Return_LastMessage()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+
+        // Act
+        var user = ChatMessage.CreateUser("Hello");
+        history.Add(user);
+
+        // Assert
+        history.LastMessage.Should().Be(user);
+    }
+
+    [Fact]
+    public void Should_Return_ImmutableList()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+
+        // Act
+        var messages = history.GetMessages();
+
+        // Assert
+        messages.Should().BeAssignableTo<IReadOnlyList<ChatMessage>>();
+    }
+
+    #endregion
+
+    #region Clear Tests
+
+    [Fact]
+    public void Should_Support_Clear()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("User"));
+
+        // Act
+        history.Clear();
+
+        // Assert
+        history.Count.Should().Be(0);
+        history.LastMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void Should_Accept_System_After_Clear()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System 1"));
+        history.Clear();
+
+        // Act
+        history.Add(ChatMessage.CreateSystem("System 2"));
+
+        // Assert
+        history.Count.Should().Be(1);
+    }
+
+    #endregion
+
+    #region Thread Safety Tests
+
+    [Fact]
+    public async Task Should_Be_ThreadSafe_ConcurrentReads()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("User"));
+        history.Add(ChatMessage.CreateAssistant("Assistant"));
+
+        // Act
+        var tasks = Enumerable.Range(0, 100).Select(_ => Task.Run(() =>
+        {
+            var messages = history.GetMessages();
+            var count = history.Count;
+            var last = history.LastMessage;
+            return (messages.Count, count, last);
+        }));
+
+        var results = await Task.WhenAll(tasks);
+
+        // Assert
+        results.Should().AllSatisfy(r =>
+        {
+            r.Item1.Should().Be(3);
+            r.count.Should().Be(3);
+        });
+    }
+
+    [Fact]
+    public async Task Should_Be_ThreadSafe_ConcurrentAdds()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+
+        // We'll add user/assistant pairs concurrently but need to handle ordering
+        var results = new List<bool>();
+        var addLock = new object();
+
+        // Act - simulate multiple threads trying to add (some will fail due to ordering)
+        var tasks = Enumerable.Range(0, 10).Select(async i =>
+        {
+            await Task.Delay(Random.Shared.Next(0, 10));
+            try
+            {
+                lock (addLock) // Serializing for order validation
+                {
+                    if (history.Count % 2 == 1) // After system or assistant
+                        history.Add(ChatMessage.CreateUser($"User {i}"));
+                    else
+                        history.Add(ChatMessage.CreateAssistant($"Assistant {i}"));
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        });
+
+        await Task.WhenAll(tasks);
+
+        // Assert - should have valid conversation
+        var messages = history.GetMessages();
+        messages[0].Role.Should().Be(MessageRole.System);
+    }
+
+    #endregion
+
+    #region Enumeration Tests
+
+    [Fact]
+    public void Should_Support_Enumeration()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("User"));
+
+        // Act
+        var roles = new List<MessageRole>();
+        foreach (var message in history)
+        {
+            roles.Add(message.Role);
+        }
+
+        // Assert
+        roles.Should().ContainInOrder(MessageRole.System, MessageRole.User);
+    }
+
+    [Fact]
+    public void Should_Support_LINQ()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("User 1"));
+        history.Add(ChatMessage.CreateAssistant("Assistant"));
+        history.Add(ChatMessage.CreateUser("User 2"));
+
+        // Act
+        var userMessages = history.Where(m => m.Role == MessageRole.User).ToList();
+
+        // Assert
+        userMessages.Should().HaveCount(2);
+    }
+
+    #endregion
+
+    #region Serialization Tests
+
+    [Fact]
+    public void Should_Serialize()
+    {
+        // Arrange
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("User"));
+
+        // Act
+        var json = JsonSerializer.Serialize(history.GetMessages());
+        var deserialized = JsonSerializer.Deserialize<List<ChatMessage>>(json);
+
+        // Assert
+        deserialized.Should().HaveCount(2);
+        deserialized![0].Role.Should().Be(MessageRole.System);
+    }
+
+    #endregion
+}
 ```
 
 ### Integration Tests
@@ -805,6 +1872,131 @@ Tests/Integration/Models/Messages/
 │   └── Should_Roundtrip_All_Types()
 ```
 
+#### SerializationCompatibilityTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Models.Messages;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+[Collection("Integration")]
+public class SerializationCompatibilityTests
+{
+    private static readonly JsonSerializerOptions SnakeCaseOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
+    [Fact]
+    public void Should_Match_Ollama_Format()
+    {
+        // Arrange
+        var message = ChatMessage.CreateUser("Write hello world");
+
+        // Act
+        var json = JsonSerializer.Serialize(message, SnakeCaseOptions);
+
+        // Assert - matches Ollama /api/chat format
+        json.Should().Contain("\"role\":\"user\"");
+        json.Should().Contain("\"content\":\"Write hello world\"");
+    }
+
+    [Fact]
+    public void Should_Match_Ollama_ToolCall_Format()
+    {
+        // Arrange
+        var toolCall = new ToolCall
+        {
+            Id = "call_1",
+            Name = "write_file",
+            Arguments = JsonSerializer.SerializeToElement(new { path = "test.cs", content = "code" })
+        };
+        var message = ChatMessage.CreateAssistant(null, new[] { toolCall });
+
+        // Act
+        var json = JsonSerializer.Serialize(message, SnakeCaseOptions);
+
+        // Assert
+        json.Should().Contain("\"tool_calls\"");
+        json.Should().Contain("\"name\":\"write_file\"");
+    }
+
+    [Fact]
+    public void Should_Match_vLLM_Format()
+    {
+        // vLLM uses OpenAI-compatible format
+        // Arrange
+        var message = ChatMessage.CreateAssistant("Here is your code.");
+
+        // Act
+        var json = JsonSerializer.Serialize(message, SnakeCaseOptions);
+
+        // Assert
+        json.Should().Contain("\"role\":\"assistant\"");
+        json.Should().Contain("\"content\":\"Here is your code.\"");
+    }
+
+    [Fact]
+    public void Should_Handle_Provider_Extensions()
+    {
+        // Some providers add extra fields - we should ignore them on deserialization
+        // Arrange
+        var jsonWithExtensions = """
+        {
+            "role": "assistant",
+            "content": "Hello",
+            "provider_specific_field": "ignored",
+            "metadata": { "model": "test" }
+        }
+        """;
+
+        // Act
+        var message = JsonSerializer.Deserialize<ChatMessage>(jsonWithExtensions, SnakeCaseOptions);
+
+        // Assert
+        message.Should().NotBeNull();
+        message!.Role.Should().Be(MessageRole.Assistant);
+        message.Content.Should().Be("Hello");
+    }
+
+    [Fact]
+    public void Should_Roundtrip_All_Types()
+    {
+        // Arrange
+        var messages = new List<ChatMessage>
+        {
+            ChatMessage.CreateSystem("You are a coding assistant."),
+            ChatMessage.CreateUser("Write a function"),
+            ChatMessage.CreateAssistant(null, new[]
+            {
+                new ToolCall
+                {
+                    Id = "call_1",
+                    Name = "write_file",
+                    Arguments = JsonSerializer.SerializeToElement(new { path = "func.cs" })
+                }
+            }),
+            ChatMessage.CreateToolResult("call_1", "File written"),
+            ChatMessage.CreateAssistant("Done! The file has been written.")
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(messages, SnakeCaseOptions);
+        var restored = JsonSerializer.Deserialize<List<ChatMessage>>(json, SnakeCaseOptions);
+
+        // Assert
+        restored.Should().HaveCount(5);
+        restored![0].Role.Should().Be(MessageRole.System);
+        restored[2].ToolCalls.Should().HaveCount(1);
+        restored[3].ToolCallId.Should().Be("call_1");
+    }
+}
+```
+
 ### Performance Tests
 
 ```
@@ -815,6 +2007,67 @@ Tests/Performance/Models/Messages/
 │   ├── Benchmark_Deserialization()
 │   ├── Benchmark_Equality()
 │   └── Benchmark_ConversationAdd()
+```
+
+#### MessageBenchmarks.cs
+
+```csharp
+namespace AgenticCoder.Tests.Performance.Models.Messages;
+
+using AgenticCoder.Domain.Models;
+using BenchmarkDotNet.Attributes;
+using System.Text.Json;
+
+[MemoryDiagnoser]
+[SimpleJob(warmupCount: 3, iterationCount: 10)]
+public class MessageBenchmarks
+{
+    private ChatMessage _message = null!;
+    private string _serializedMessage = null!;
+    private JsonSerializerOptions _options = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _message = ChatMessage.CreateUser("This is a typical user message with some content.");
+        _options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        _serializedMessage = JsonSerializer.Serialize(_message, _options);
+    }
+
+    [Benchmark(Description = "Create user message")]
+    public ChatMessage Benchmark_Construction()
+    {
+        return ChatMessage.CreateUser("Hello, world!");
+    }
+
+    [Benchmark(Description = "Serialize message")]
+    public string Benchmark_Serialization()
+    {
+        return JsonSerializer.Serialize(_message, _options);
+    }
+
+    [Benchmark(Description = "Deserialize message")]
+    public ChatMessage? Benchmark_Deserialization()
+    {
+        return JsonSerializer.Deserialize<ChatMessage>(_serializedMessage, _options);
+    }
+
+    [Benchmark(Description = "Message equality check")]
+    public bool Benchmark_Equality()
+    {
+        var other = ChatMessage.CreateUser("This is a typical user message with some content.");
+        return _message.Equals(other);
+    }
+
+    [Benchmark(Description = "Add to conversation")]
+    public void Benchmark_ConversationAdd()
+    {
+        var history = new ConversationHistory();
+        history.Add(ChatMessage.CreateSystem("System"));
+        history.Add(ChatMessage.CreateUser("User"));
+        history.Add(ChatMessage.CreateAssistant("Assistant"));
+    }
+}
 ```
 
 ---

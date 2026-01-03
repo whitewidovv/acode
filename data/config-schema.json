@@ -9,10 +9,9 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "pattern": "^\\d+\\.\\d+\\.\\d+$",
-      "description": "Schema version following semantic versioning (semver)",
-      "default": "1.0.0",
-      "examples": ["1.0.0", "1.1.0", "2.0.0"]
+      "enum": ["1.0.0"],
+      "description": "Schema version following semantic versioning (semver). Only 1.0.0 is currently supported.",
+      "default": "1.0.0"
     },
     "project": {
       "$ref": "#/definitions/project"

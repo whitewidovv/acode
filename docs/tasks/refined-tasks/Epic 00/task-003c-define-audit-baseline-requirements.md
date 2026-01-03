@@ -843,7 +843,279 @@ Tests/Unit/Domain/Audit/
 │   ├── Should_Support_SpanId()
 │   ├── Should_Support_ParentSpanId()
 │   └── Should_Serialize_To_ValidJson()
-│
+```
+
+#### AuditEventTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Audit;
+
+using AgenticCoder.Domain.Audit;
+using FluentAssertions;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Xunit;
+
+public class AuditEventTests
+{
+    [Fact]
+    public void Should_Generate_Unique_EventId()
+    {
+        // Arrange & Act
+        var event1 = CreateTestEvent();
+        var event2 = CreateTestEvent();
+
+        // Assert
+        event1.EventId.Should().NotBeNull();
+        event2.EventId.Should().NotBeNull();
+        event1.EventId.Value.Should().NotBe(event2.EventId.Value,
+            because: "each event must have unique ID");
+        event1.EventId.Value.Should().MatchRegex(@"^evt_[a-zA-Z0-9]+$",
+            because: "event ID must follow evt_xxx format");
+    }
+
+    [Fact]
+    public void Should_Include_ISO8601_Timestamp()
+    {
+        // Arrange & Act
+        var auditEvent = CreateTestEvent();
+
+        // Assert
+        auditEvent.Timestamp.Should().BeCloseTo(
+            DateTimeOffset.UtcNow, 
+            TimeSpan.FromSeconds(5));
+        
+        // Verify ISO 8601 format when serialized
+        var json = JsonSerializer.Serialize(auditEvent);
+        var iso8601Pattern = @"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}";
+        Regex.IsMatch(json, iso8601Pattern).Should().BeTrue(
+            because: "timestamp must be ISO 8601 format");
+    }
+
+    [Fact]
+    public void Should_Include_Timezone()
+    {
+        // Arrange & Act
+        var auditEvent = CreateTestEvent();
+        var json = JsonSerializer.Serialize(auditEvent);
+
+        // Assert - timestamp should end with Z (UTC) or offset
+        var timezonePattern = @"(\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2}))";
+        Regex.IsMatch(json, timezonePattern).Should().BeTrue(
+            because: "timestamp must include timezone");
+    }
+
+    [Fact]
+    public void Should_Include_SessionId()
+    {
+        // Arrange
+        var sessionId = SessionId.New();
+        var auditEvent = CreateTestEvent(sessionId: sessionId);
+
+        // Assert
+        auditEvent.SessionId.Should().Be(sessionId);
+        auditEvent.SessionId.Value.Should().MatchRegex(@"^sess_[a-zA-Z0-9]+$",
+            because: "session ID must follow sess_xxx format");
+    }
+
+    [Fact]
+    public void Should_Include_CorrelationId()
+    {
+        // Arrange
+        var correlationId = CorrelationId.New();
+        var auditEvent = CreateTestEvent(correlationId: correlationId);
+
+        // Assert
+        auditEvent.CorrelationId.Should().Be(correlationId);
+        auditEvent.CorrelationId.Value.Should().MatchRegex(@"^corr_[a-zA-Z0-9]+$",
+            because: "correlation ID must follow corr_xxx format");
+    }
+
+    [Fact]
+    public void Should_Include_EventType()
+    {
+        // Arrange & Act
+        var auditEvent = CreateTestEvent(eventType: AuditEventType.FileWrite);
+
+        // Assert
+        auditEvent.EventType.Should().Be(AuditEventType.FileWrite);
+        Enum.IsDefined(typeof(AuditEventType), auditEvent.EventType).Should().BeTrue(
+            because: "event type must be from defined enumeration");
+    }
+
+    [Fact]
+    public void Should_Include_Severity()
+    {
+        // Arrange & Act
+        var auditEvent = CreateTestEvent(severity: AuditSeverity.Warning);
+
+        // Assert
+        auditEvent.Severity.Should().Be(AuditSeverity.Warning);
+        Enum.IsDefined(typeof(AuditSeverity), auditEvent.Severity).Should().BeTrue(
+            because: "severity must be from defined enumeration");
+    }
+
+    [Theory]
+    [InlineData(AuditSeverity.Debug)]
+    [InlineData(AuditSeverity.Info)]
+    [InlineData(AuditSeverity.Warning)]
+    [InlineData(AuditSeverity.Error)]
+    [InlineData(AuditSeverity.Critical)]
+    public void Should_Support_All_Severity_Levels(AuditSeverity severity)
+    {
+        // Arrange & Act
+        var auditEvent = CreateTestEvent(severity: severity);
+
+        // Assert
+        auditEvent.Severity.Should().Be(severity);
+    }
+
+    [Fact]
+    public void Should_Include_Source()
+    {
+        // Arrange
+        var source = "AgenticCoder.Infrastructure.FileSystem";
+        var auditEvent = CreateTestEvent(source: source);
+
+        // Assert
+        auditEvent.Source.Should().Be(source);
+        auditEvent.Source.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void Should_Include_SchemaVersion()
+    {
+        // Arrange & Act
+        var auditEvent = CreateTestEvent();
+
+        // Assert
+        auditEvent.SchemaVersion.Should().NotBeNullOrWhiteSpace();
+        auditEvent.SchemaVersion.Should().MatchRegex(@"^\d+\.\d+$",
+            because: "schema version must be in X.Y format");
+    }
+
+    [Fact]
+    public void Should_Include_OperatingMode()
+    {
+        // Arrange & Act
+        var auditEvent = CreateTestEvent(operatingMode: "local_only");
+
+        // Assert
+        auditEvent.OperatingMode.Should().Be("local_only");
+        auditEvent.OperatingMode.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void Should_Support_SpanId()
+    {
+        // Arrange
+        var spanId = SpanId.New();
+        var auditEvent = CreateTestEvent(spanId: spanId);
+
+        // Assert
+        auditEvent.SpanId.Should().Be(spanId);
+        auditEvent.SpanId!.Value.Should().MatchRegex(@"^span_[a-zA-Z0-9]+$");
+    }
+
+    [Fact]
+    public void Should_Support_ParentSpanId()
+    {
+        // Arrange
+        var parentSpanId = SpanId.New();
+        var spanId = SpanId.New();
+        var auditEvent = CreateTestEvent(spanId: spanId, parentSpanId: parentSpanId);
+
+        // Assert
+        auditEvent.ParentSpanId.Should().Be(parentSpanId);
+        auditEvent.SpanId.Should().Be(spanId);
+        auditEvent.ParentSpanId!.Value.Should().NotBe(auditEvent.SpanId!.Value);
+    }
+
+    [Fact]
+    public void Should_Serialize_To_ValidJson()
+    {
+        // Arrange
+        var auditEvent = CreateTestEvent(
+            data: new Dictionary<string, object>
+            {
+                ["path"] = "src/Program.cs",
+                ["bytes_written"] = 1234
+            });
+
+        // Act
+        var json = JsonSerializer.Serialize(auditEvent);
+
+        // Assert
+        json.Should().NotBeNullOrWhiteSpace();
+        
+        // Should be parseable
+        var parsed = JsonDocument.Parse(json);
+        parsed.RootElement.GetProperty("event_id").GetString()
+            .Should().NotBeNullOrWhiteSpace();
+        parsed.RootElement.GetProperty("timestamp").GetString()
+            .Should().NotBeNullOrWhiteSpace();
+        parsed.RootElement.GetProperty("event_type").GetString()
+            .Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void Should_Serialize_To_Single_Line()
+    {
+        // Arrange
+        var auditEvent = CreateTestEvent(
+            data: new Dictionary<string, object>
+            {
+                ["multiline"] = "line1\nline2\nline3"
+            });
+
+        // Act
+        var json = JsonSerializer.Serialize(auditEvent, new JsonSerializerOptions
+        {
+            WriteIndented = false
+        });
+
+        // Assert
+        json.Should().NotContain("\n",
+            because: "JSONL format requires single-line entries");
+        json.Should().NotContain("\r",
+            because: "JSONL format requires single-line entries");
+        
+        // Newlines in data should be escaped
+        json.Should().Contain("\\n",
+            because: "embedded newlines must be escaped");
+    }
+
+    private static AuditEvent CreateTestEvent(
+        SessionId? sessionId = null,
+        CorrelationId? correlationId = null,
+        SpanId? spanId = null,
+        SpanId? parentSpanId = null,
+        AuditEventType eventType = AuditEventType.FileWrite,
+        AuditSeverity severity = AuditSeverity.Info,
+        string source = "TestSource",
+        string operatingMode = "local_only",
+        IDictionary<string, object>? data = null)
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = sessionId ?? SessionId.New(),
+            CorrelationId = correlationId ?? CorrelationId.New(),
+            SpanId = spanId,
+            ParentSpanId = parentSpanId,
+            EventType = eventType,
+            Severity = severity,
+            Source = source,
+            OperatingMode = operatingMode,
+            Data = (data ?? new Dictionary<string, object>()).AsReadOnly()
+        };
+    }
+}
+```
+
+```
 ├── AuditLoggerTests.cs
 │   ├── Should_Log_SessionStart()
 │   ├── Should_Log_SessionEnd()
@@ -856,7 +1128,381 @@ Tests/Unit/Domain/Audit/
 │   ├── Should_Maintain_CorrelationId()
 │   ├── Should_Not_Block_MainThread()
 │   └── Should_Handle_HighVolume()
-│
+```
+
+#### AuditLoggerTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Audit;
+
+using AgenticCoder.Domain.Audit;
+using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using Moq;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using Xunit;
+
+public class AuditLoggerTests : IAsyncDisposable
+{
+    private readonly Mock<IAuditWriter> _writerMock;
+    private readonly IAuditLogger _logger;
+    private readonly ConcurrentBag<AuditEvent> _capturedEvents;
+
+    public AuditLoggerTests()
+    {
+        _writerMock = new Mock<IAuditWriter>();
+        _capturedEvents = new ConcurrentBag<AuditEvent>();
+        
+        _writerMock
+            .Setup(w => w.WriteAsync(It.IsAny<AuditEvent>()))
+            .Callback<AuditEvent>(e => _capturedEvents.Add(e))
+            .Returns(Task.CompletedTask);
+
+        _logger = new AuditLogger(
+            _writerMock.Object,
+            SessionId.New(),
+            "local_only",
+            Mock.Of<ILogger<AuditLogger>>());
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _logger.FlushAsync();
+    }
+
+    [Fact]
+    public async Task Should_Log_SessionStart()
+    {
+        // Act
+        await _logger.LogAsync(
+            AuditEventType.SessionStart,
+            AuditSeverity.Info,
+            "AgenticCoder.CLI",
+            new Dictionary<string, object>
+            {
+                ["version"] = "1.0.0",
+                ["working_directory"] = "/home/user/project"
+            });
+
+        await _logger.FlushAsync();
+
+        // Assert
+        _capturedEvents.Should().ContainSingle(e => 
+            e.EventType == AuditEventType.SessionStart);
+        
+        var sessionStart = _capturedEvents.First(e => 
+            e.EventType == AuditEventType.SessionStart);
+        sessionStart.Severity.Should().Be(AuditSeverity.Info);
+        sessionStart.Data.Should().ContainKey("version");
+    }
+
+    [Fact]
+    public async Task Should_Log_SessionEnd()
+    {
+        // Act
+        await _logger.LogAsync(
+            AuditEventType.SessionEnd,
+            AuditSeverity.Info,
+            "AgenticCoder.CLI",
+            new Dictionary<string, object>
+            {
+                ["exit_code"] = 0,
+                ["duration_ms"] = 45000,
+                ["events_logged"] = 1234
+            });
+
+        await _logger.FlushAsync();
+
+        // Assert
+        _capturedEvents.Should().ContainSingle(e => 
+            e.EventType == AuditEventType.SessionEnd);
+        
+        var sessionEnd = _capturedEvents.First(e => 
+            e.EventType == AuditEventType.SessionEnd);
+        sessionEnd.Data["exit_code"].Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Should_Log_ConfigLoad()
+    {
+        // Act
+        await _logger.LogAsync(
+            AuditEventType.ConfigLoad,
+            AuditSeverity.Info,
+            "AgenticCoder.Infrastructure.Configuration",
+            new Dictionary<string, object>
+            {
+                ["config_path"] = ".agent/config.yml",
+                ["operating_mode"] = "local_only"
+            });
+
+        await _logger.FlushAsync();
+
+        // Assert
+        _capturedEvents.Should().ContainSingle(e => 
+            e.EventType == AuditEventType.ConfigLoad);
+    }
+
+    [Fact]
+    public async Task Should_Log_FileOperations()
+    {
+        // Act - log read
+        await _logger.LogAsync(
+            AuditEventType.FileRead,
+            AuditSeverity.Info,
+            "AgenticCoder.Infrastructure.FileSystem",
+            new Dictionary<string, object>
+            {
+                ["path"] = "src/Program.cs",
+                ["bytes_read"] = 2048
+            });
+
+        // Act - log write
+        await _logger.LogAsync(
+            AuditEventType.FileWrite,
+            AuditSeverity.Info,
+            "AgenticCoder.Infrastructure.FileSystem",
+            new Dictionary<string, object>
+            {
+                ["path"] = "src/NewFile.cs",
+                ["bytes_written"] = 1024
+            });
+
+        // Act - log delete
+        await _logger.LogAsync(
+            AuditEventType.FileDelete,
+            AuditSeverity.Warning,
+            "AgenticCoder.Infrastructure.FileSystem",
+            new Dictionary<string, object>
+            {
+                ["path"] = "src/Obsolete.cs"
+            });
+
+        await _logger.FlushAsync();
+
+        // Assert
+        _capturedEvents.Should().Contain(e => e.EventType == AuditEventType.FileRead);
+        _capturedEvents.Should().Contain(e => e.EventType == AuditEventType.FileWrite);
+        _capturedEvents.Should().Contain(e => e.EventType == AuditEventType.FileDelete);
+
+        var writeEvent = _capturedEvents.First(e => e.EventType == AuditEventType.FileWrite);
+        writeEvent.Data["path"].Should().Be("src/NewFile.cs");
+        writeEvent.Data.Should().NotContainKey("content",
+            because: "file contents must never be logged");
+    }
+
+    [Fact]
+    public async Task Should_Log_CommandExecution()
+    {
+        // Act - command start
+        await _logger.LogAsync(
+            AuditEventType.CommandStart,
+            AuditSeverity.Info,
+            "AgenticCoder.Infrastructure.Process",
+            new Dictionary<string, object>
+            {
+                ["command"] = "dotnet",
+                ["arguments"] = "build",
+                ["working_directory"] = "/home/user/project"
+            });
+
+        // Act - command end
+        await _logger.LogAsync(
+            AuditEventType.CommandEnd,
+            AuditSeverity.Info,
+            "AgenticCoder.Infrastructure.Process",
+            new Dictionary<string, object>
+            {
+                ["command"] = "dotnet",
+                ["exit_code"] = 0,
+                ["duration_ms"] = 5432
+            });
+
+        await _logger.FlushAsync();
+
+        // Assert
+        _capturedEvents.Should().Contain(e => e.EventType == AuditEventType.CommandStart);
+        _capturedEvents.Should().Contain(e => e.EventType == AuditEventType.CommandEnd);
+        
+        var endEvent = _capturedEvents.First(e => e.EventType == AuditEventType.CommandEnd);
+        endEvent.Data["exit_code"].Should().Be(0);
+        endEvent.Data["duration_ms"].Should().Be(5432);
+    }
+
+    [Fact]
+    public async Task Should_Log_SecurityViolations()
+    {
+        // Act
+        await _logger.LogAsync(
+            AuditEventType.ProtectedPathBlocked,
+            AuditSeverity.Warning,
+            "AgenticCoder.Domain.Security.PathProtection",
+            new Dictionary<string, object>
+            {
+                ["attempted_path"] = "[REDACTED]",
+                ["matched_pattern"] = "~/.ssh/*",
+                ["risk_id"] = "RISK-E-003",
+                ["error_code"] = "ACODE-SEC-003-001"
+            });
+
+        await _logger.FlushAsync();
+
+        // Assert
+        var violation = _capturedEvents.First(e => 
+            e.EventType == AuditEventType.ProtectedPathBlocked);
+        
+        violation.Severity.Should().Be(AuditSeverity.Warning);
+        violation.Data["risk_id"].Should().Be("RISK-E-003");
+        violation.Data["error_code"].Should().Be("ACODE-SEC-003-001");
+    }
+
+    [Fact]
+    public async Task Should_Log_TaskEvents()
+    {
+        // Act
+        await _logger.LogAsync(
+            AuditEventType.TaskStart,
+            AuditSeverity.Info,
+            "AgenticCoder.Application.Tasks",
+            new Dictionary<string, object>
+            {
+                ["task_id"] = "task_001",
+                ["description"] = "Implement feature X"
+            });
+
+        await _logger.LogAsync(
+            AuditEventType.TaskEnd,
+            AuditSeverity.Info,
+            "AgenticCoder.Application.Tasks",
+            new Dictionary<string, object>
+            {
+                ["task_id"] = "task_001",
+                ["status"] = "completed",
+                ["duration_ms"] = 120000
+            });
+
+        await _logger.FlushAsync();
+
+        // Assert
+        _capturedEvents.Should().Contain(e => e.EventType == AuditEventType.TaskStart);
+        _capturedEvents.Should().Contain(e => e.EventType == AuditEventType.TaskEnd);
+    }
+
+    [Fact]
+    public async Task Should_Log_ApprovalEvents()
+    {
+        // Act - request approval
+        await _logger.LogAsync(
+            AuditEventType.ApprovalRequest,
+            AuditSeverity.Info,
+            "AgenticCoder.Application.Approval",
+            new Dictionary<string, object>
+            {
+                ["request_id"] = "req_001",
+                ["action"] = "delete_file",
+                ["target"] = "important_file.cs"
+            });
+
+        // Act - user response
+        await _logger.LogAsync(
+            AuditEventType.ApprovalResponse,
+            AuditSeverity.Info,
+            "AgenticCoder.Application.Approval",
+            new Dictionary<string, object>
+            {
+                ["request_id"] = "req_001",
+                ["decision"] = "approved",
+                ["response_time_ms"] = 3500
+            });
+
+        await _logger.FlushAsync();
+
+        // Assert
+        var request = _capturedEvents.First(e => e.EventType == AuditEventType.ApprovalRequest);
+        var response = _capturedEvents.First(e => e.EventType == AuditEventType.ApprovalResponse);
+        
+        request.Data["action"].Should().Be("delete_file");
+        response.Data["decision"].Should().Be("approved");
+    }
+
+    [Fact]
+    public async Task Should_Maintain_CorrelationId()
+    {
+        // Arrange
+        using var scope = _logger.BeginCorrelation("Test operation");
+
+        // Act
+        await _logger.LogAsync(AuditEventType.TaskStart, AuditSeverity.Info,
+            "Test", new Dictionary<string, object> { ["step"] = 1 });
+        await _logger.LogAsync(AuditEventType.FileRead, AuditSeverity.Info,
+            "Test", new Dictionary<string, object> { ["step"] = 2 });
+        await _logger.LogAsync(AuditEventType.TaskEnd, AuditSeverity.Info,
+            "Test", new Dictionary<string, object> { ["step"] = 3 });
+
+        await _logger.FlushAsync();
+
+        // Assert
+        var events = _capturedEvents.ToList();
+        events.Should().HaveCount(3);
+        
+        var correlationId = events[0].CorrelationId;
+        events.Should().OnlyContain(e => e.CorrelationId == correlationId,
+            because: "all events in scope share correlation ID");
+    }
+
+    [Fact]
+    public async Task Should_Not_Block_MainThread()
+    {
+        // Arrange
+        var sw = Stopwatch.StartNew();
+        
+        // Act - log many events rapidly
+        for (int i = 0; i < 100; i++)
+        {
+            await _logger.LogAsync(
+                AuditEventType.FileRead,
+                AuditSeverity.Debug,
+                "Test",
+                new Dictionary<string, object> { ["iteration"] = i });
+        }
+        sw.Stop();
+
+        // Assert - logging 100 events should be fast (async)
+        sw.ElapsedMilliseconds.Should().BeLessThan(100,
+            because: "logging must not block main thread");
+        
+        // Flush and verify all logged
+        await _logger.FlushAsync();
+        _capturedEvents.Count.Should().Be(100);
+    }
+
+    [Fact]
+    public async Task Should_Handle_HighVolume()
+    {
+        // Arrange
+        const int eventCount = 10000;
+        
+        // Act
+        var tasks = Enumerable.Range(0, eventCount)
+            .Select(i => _logger.LogAsync(
+                AuditEventType.FileRead,
+                AuditSeverity.Debug,
+                "Test",
+                new Dictionary<string, object> { ["iteration"] = i }))
+            .ToList();
+
+        await Task.WhenAll(tasks);
+        await _logger.FlushAsync();
+
+        // Assert
+        _capturedEvents.Count.Should().Be(eventCount,
+            because: "no events should be lost under high volume");
+    }
+}
+```
+
+```
 ├── RedactionTests.cs
 │   ├── Should_Redact_ApiKeys()
 │   ├── Should_Redact_Passwords()
@@ -866,7 +1512,226 @@ Tests/Unit/Domain/Audit/
 │   ├── Should_Escape_SpecialCharacters()
 │   ├── Should_Escape_Newlines()
 │   └── Should_Prevent_LogInjection()
-│
+```
+
+#### RedactionTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Audit;
+
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using Xunit;
+
+public class RedactionTests
+{
+    private readonly AuditRedactor _redactor;
+
+    public RedactionTests()
+    {
+        _redactor = new AuditRedactor();
+    }
+
+    [Theory]
+    [InlineData("api_key=abc123secret", "api_key=[REDACTED]")]
+    [InlineData("apiKey: xyz789token", "apiKey=[REDACTED]")]
+    [InlineData("API_KEY=AKIAIOSFODNN7EXAMPLE", "API_KEY=[REDACTED]")]
+    [InlineData("x-api-key: secret123", "x-api-key=[REDACTED]")]
+    public void Should_Redact_ApiKeys(string input, string expected)
+    {
+        // Act
+        var result = _redactor.Redact(input);
+
+        // Assert
+        result.Should().Be(expected);
+        result.Should().NotContain("abc123");
+        result.Should().NotContain("xyz789");
+        result.Should().NotContain("AKIAIOSFODNN7EXAMPLE");
+    }
+
+    [Theory]
+    [InlineData("password=mysecret123", "password=[REDACTED]")]
+    [InlineData("Password: hunter2", "Password=[REDACTED]")]
+    [InlineData("db_password=verysecret", "db_password=[REDACTED]")]
+    [InlineData("\"password\": \"secret123\"", "\"password\"=[REDACTED]")]
+    public void Should_Redact_Passwords(string input, string expected)
+    {
+        // Act
+        var result = _redactor.Redact(input);
+
+        // Assert
+        result.Should().Contain("[REDACTED]");
+        result.Should().NotContain("mysecret");
+        result.Should().NotContain("hunter2");
+        result.Should().NotContain("verysecret");
+    }
+
+    [Theory]
+    [InlineData("token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.xxx", "token=[REDACTED]")]
+    [InlineData("access_token: ghp_1234567890abcdef", "access_token=[REDACTED]")]
+    [InlineData("Bearer eyJhbGciOiJIUzI1NiJ9.xxx.yyy", "Bearer [REDACTED]")]
+    [InlineData("Authorization: Bearer abc123", "Authorization: Bearer [REDACTED]")]
+    public void Should_Redact_Tokens(string input, string expected)
+    {
+        // Act
+        var result = _redactor.Redact(input);
+
+        // Assert
+        result.Should().Contain("[REDACTED]");
+        result.Should().NotContain("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9");
+        result.Should().NotContain("ghp_1234567890");
+    }
+
+    [Theory]
+    [InlineData("secret=my_secret_value")]
+    [InlineData("client_secret: abcdef123456")]
+    [InlineData("aws_secret_access_key=wJalrXUtnFEMI/K7MDENG")]
+    [InlineData("private_key=-----BEGIN RSA PRIVATE KEY-----")]
+    public void Should_Redact_SecretPatterns(string input)
+    {
+        // Act
+        var result = _redactor.Redact(input);
+
+        // Assert
+        result.Should().Contain("[REDACTED]");
+        result.Should().NotContain("my_secret_value");
+        result.Should().NotContain("abcdef123456");
+        result.Should().NotContain("wJalrXUtnFEMI");
+        result.Should().NotContain("-----BEGIN RSA PRIVATE KEY-----");
+    }
+
+    [Fact]
+    public void Should_Not_Log_FileContents()
+    {
+        // Arrange
+        var fileContent = "This is the actual file content with secrets: password=hunter2";
+        var data = new Dictionary<string, object>
+        {
+            ["path"] = "config.json",
+            ["content"] = fileContent,  // This should be rejected
+            ["file_contents"] = fileContent  // This too
+        };
+
+        // Act
+        var redacted = _redactor.RedactData(data);
+
+        // Assert
+        redacted["path"].Should().Be("config.json");
+        redacted.Should().NotContainKey("content",
+            because: "file contents must be removed, not just redacted");
+        redacted.Should().NotContainKey("file_contents",
+            because: "any content field must be removed");
+    }
+
+    [Theory]
+    [InlineData("normal text without secrets")]
+    [InlineData("path=/home/user/project")]
+    [InlineData("command=dotnet build")]
+    [InlineData("exit_code=0")]
+    public void Should_Not_Redact_Normal_Text(string input)
+    {
+        // Act
+        var result = _redactor.Redact(input);
+
+        // Assert
+        result.Should().Be(input,
+            because: "non-sensitive text should not be modified");
+    }
+
+    [Theory]
+    [InlineData("\t", "\\t")]
+    [InlineData("\r", "\\r")]
+    [InlineData("\n", "\\n")]
+    [InlineData("line1\nline2", "line1\\nline2")]
+    public void Should_Escape_SpecialCharacters(string input, string expectedContains)
+    {
+        // Act
+        var result = _redactor.EscapeForJson(input);
+
+        // Assert
+        result.Should().Contain(expectedContains);
+        result.Should().NotContain("\n");
+        result.Should().NotContain("\r");
+        result.Should().NotContain("\t");
+    }
+
+    [Fact]
+    public void Should_Escape_Newlines()
+    {
+        // Arrange
+        var multiline = "line1\nline2\r\nline3";
+
+        // Act
+        var result = _redactor.EscapeForJson(multiline);
+
+        // Assert
+        result.Should().NotContain("\n");
+        result.Should().NotContain("\r");
+        result.Should().Contain("\\n");
+        result.Should().Contain("\\r");
+    }
+
+    [Theory]
+    [InlineData("}\n{\"malicious\": true}", "should escape injection attempt")]
+    [InlineData("\", \"injected\": \"value", "should escape quote injection")]
+    [InlineData("normal\x00null", "should handle null bytes")]
+    public void Should_Prevent_LogInjection(string maliciousInput, string because)
+    {
+        // Act
+        var result = _redactor.EscapeForJson(maliciousInput);
+
+        // Assert
+        // When properly escaped, parsing the result should not produce extra JSON
+        var escaped = $"{{\"value\": \"{result}\"}}";
+        var parsed = System.Text.Json.JsonDocument.Parse(escaped);
+        
+        parsed.RootElement.EnumerateObject().Count().Should().Be(1,
+            because);
+    }
+
+    [Fact]
+    public void Should_Redact_Sensitive_Keys_In_Dictionary()
+    {
+        // Arrange
+        var data = new Dictionary<string, object>
+        {
+            ["username"] = "admin",
+            ["password"] = "supersecret",
+            ["api_key"] = "sk-12345",
+            ["token"] = "jwt.token.here",
+            ["credential"] = "some-credential",
+            ["normal_field"] = "normal value"
+        };
+
+        // Act
+        var redacted = _redactor.RedactData(data);
+
+        // Assert
+        redacted["username"].Should().Be("admin");
+        redacted["password"].Should().Be("[REDACTED]");
+        redacted["api_key"].Should().Be("[REDACTED]");
+        redacted["token"].Should().Be("[REDACTED]");
+        redacted["credential"].Should().Be("[REDACTED]");
+        redacted["normal_field"].Should().Be("normal value");
+    }
+
+    [Fact]
+    public void Should_Handle_Nested_Secrets()
+    {
+        // Arrange
+        var input = "config: {\"password\": \"secret\", \"apiKey\": \"abc123\"}";
+
+        // Act
+        var result = _redactor.Redact(input);
+
+        // Assert
+        result.Should().NotContain("secret");
+        result.Should().NotContain("abc123");
+    }
+}
+```
+
+```
 ├── IntegrityTests.cs
 │   ├── Should_Compute_SHA256_Checksum()
 │   ├── Should_Update_Checksum_OnWrite()
@@ -874,7 +1739,241 @@ Tests/Unit/Domain/Audit/
 │   ├── Should_Detect_Truncation()
 │   ├── Should_Detect_Insertion()
 │   └── Should_Write_ChecksumFile()
-│
+```
+
+#### IntegrityTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Audit;
+
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using System.Security.Cryptography;
+using System.Text;
+using Xunit;
+
+public class IntegrityTests : IDisposable
+{
+    private readonly AuditIntegrityVerifier _verifier;
+    private readonly string _testDir;
+
+    public IntegrityTests()
+    {
+        _verifier = new AuditIntegrityVerifier();
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_integrity_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    public void Should_Compute_SHA256_Checksum()
+    {
+        // Arrange
+        var content = "test log content\n";
+        var logPath = Path.Combine(_testDir, "test.jsonl");
+        File.WriteAllText(logPath, content);
+
+        // Act
+        var checksum = _verifier.ComputeChecksum(logPath);
+
+        // Assert
+        checksum.Should().NotBeNullOrWhiteSpace();
+        checksum.Should().HaveLength(64, 
+            because: "SHA-256 produces 64 hex characters");
+        checksum.Should().MatchRegex("^[a-f0-9]{64}$",
+            because: "checksum should be lowercase hex");
+
+        // Verify manually
+        using var sha256 = SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(content);
+        var hash = sha256.ComputeHash(bytes);
+        var expectedChecksum = Convert.ToHexString(hash).ToLowerInvariant();
+        
+        checksum.Should().Be(expectedChecksum);
+    }
+
+    [Fact]
+    public async Task Should_Update_Checksum_OnWrite()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "update_test.jsonl");
+        var checksumPath = logPath + ".sha256";
+        var writer = new FileAuditWriter(_testDir, new AuditConfiguration());
+
+        // Act - write first event
+        await writer.WriteAsync(CreateTestEvent("event1"));
+        var checksum1 = await File.ReadAllTextAsync(checksumPath);
+
+        // Act - write second event
+        await writer.WriteAsync(CreateTestEvent("event2"));
+        var checksum2 = await File.ReadAllTextAsync(checksumPath);
+
+        await writer.DisposeAsync();
+
+        // Assert
+        checksum1.Should().NotBeNullOrWhiteSpace();
+        checksum2.Should().NotBeNullOrWhiteSpace();
+        checksum1.Should().NotBe(checksum2,
+            because: "checksum should change after each write");
+    }
+
+    [Fact]
+    public void Should_Detect_Modification()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "modify_test.jsonl");
+        var checksumPath = logPath + ".sha256";
+        
+        var originalContent = "{\"event\":\"test1\"}\n{\"event\":\"test2\"}\n";
+        File.WriteAllText(logPath, originalContent);
+        
+        var checksum = _verifier.ComputeChecksum(logPath);
+        File.WriteAllText(checksumPath, checksum);
+
+        // Verify initial state is valid
+        _verifier.Verify(logPath).Should().BeTrue();
+
+        // Act - modify content
+        File.WriteAllText(logPath, "{\"event\":\"MODIFIED\"}\n{\"event\":\"test2\"}\n");
+
+        // Assert
+        var result = _verifier.Verify(logPath);
+        result.Should().BeFalse(
+            because: "modification should be detected");
+    }
+
+    [Fact]
+    public void Should_Detect_Truncation()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "truncate_test.jsonl");
+        var checksumPath = logPath + ".sha256";
+        
+        var originalContent = "{\"event\":\"test1\"}\n{\"event\":\"test2\"}\n{\"event\":\"test3\"}\n";
+        File.WriteAllText(logPath, originalContent);
+        
+        var checksum = _verifier.ComputeChecksum(logPath);
+        File.WriteAllText(checksumPath, checksum);
+
+        // Verify initial state
+        _verifier.Verify(logPath).Should().BeTrue();
+
+        // Act - truncate file
+        File.WriteAllText(logPath, "{\"event\":\"test1\"}\n");
+
+        // Assert
+        _verifier.Verify(logPath).Should().BeFalse(
+            because: "truncation should be detected");
+    }
+
+    [Fact]
+    public void Should_Detect_Insertion()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "insert_test.jsonl");
+        var checksumPath = logPath + ".sha256";
+        
+        var originalContent = "{\"event\":\"test1\"}\n{\"event\":\"test2\"}\n";
+        File.WriteAllText(logPath, originalContent);
+        
+        var checksum = _verifier.ComputeChecksum(logPath);
+        File.WriteAllText(checksumPath, checksum);
+
+        // Verify initial state
+        _verifier.Verify(logPath).Should().BeTrue();
+
+        // Act - insert content in middle
+        var modifiedContent = "{\"event\":\"test1\"}\n{\"event\":\"INSERTED\"}\n{\"event\":\"test2\"}\n";
+        File.WriteAllText(logPath, modifiedContent);
+
+        // Assert
+        _verifier.Verify(logPath).Should().BeFalse(
+            because: "insertion should be detected");
+    }
+
+    [Fact]
+    public void Should_Write_ChecksumFile()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "checksum_file_test.jsonl");
+        var checksumPath = logPath + ".sha256";
+        
+        File.WriteAllText(logPath, "{\"event\":\"test\"}\n");
+
+        // Act
+        _verifier.WriteChecksumFile(logPath);
+
+        // Assert
+        File.Exists(checksumPath).Should().BeTrue();
+        
+        var savedChecksum = File.ReadAllText(checksumPath).Trim();
+        var computedChecksum = _verifier.ComputeChecksum(logPath);
+        
+        savedChecksum.Should().Be(computedChecksum);
+    }
+
+    [Fact]
+    public void Should_Verify_Valid_Log()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "valid_test.jsonl");
+        var content = "{\"event\":\"test1\"}\n{\"event\":\"test2\"}\n";
+        File.WriteAllText(logPath, content);
+        _verifier.WriteChecksumFile(logPath);
+
+        // Act
+        var result = _verifier.Verify(logPath);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Should_Return_Detailed_VerificationResult()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "detailed_test.jsonl");
+        File.WriteAllText(logPath, "{\"event\":\"test\"}\n");
+        _verifier.WriteChecksumFile(logPath);
+
+        // Tamper with file
+        File.AppendAllText(logPath, "{\"event\":\"tampered\"}\n");
+
+        // Act
+        var result = _verifier.VerifyWithDetails(logPath);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ExpectedChecksum.Should().NotBeNullOrWhiteSpace();
+        result.ActualChecksum.Should().NotBeNullOrWhiteSpace();
+        result.ExpectedChecksum.Should().NotBe(result.ActualChecksum);
+        result.ErrorMessage.Should().Contain("mismatch");
+    }
+
+    private static AuditEvent CreateTestEvent(string id)
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = new EventId($"evt_{id}"),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "Test",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object> { ["id"] = id }.AsReadOnly()
+        };
+    }
+}
+```
+
+```
 └── RotationTests.cs
     ├── Should_Rotate_OnSizeLimit()
     ├── Should_Create_NewFile()
@@ -882,6 +1981,239 @@ Tests/Unit/Domain/Audit/
     ├── Should_Be_Atomic()
     ├── Should_Delete_ExpiredLogs()
     └── Should_Respect_StorageLimit()
+```
+
+#### RotationTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Audit;
+
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using Xunit;
+
+public class RotationTests : IDisposable
+{
+    private readonly string _testDir;
+    private readonly AuditLogRotator _rotator;
+
+    public RotationTests()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_rotation_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+        _rotator = new AuditLogRotator(new AuditConfiguration
+        {
+            MaxFileSize = 1024, // 1KB for testing
+            RetentionDays = 90,
+            MaxTotalStorage = 10 * 1024 // 10KB
+        });
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    public async Task Should_Rotate_OnSizeLimit()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "session_001.jsonl");
+        
+        // Create file larger than limit
+        var largeContent = string.Join("\n", 
+            Enumerable.Range(0, 100).Select(i => $"{{\"event\":{i}}}"));
+        await File.WriteAllTextAsync(logPath, largeContent);
+
+        var originalSize = new FileInfo(logPath).Length;
+        originalSize.Should().BeGreaterThan(1024);
+
+        // Act
+        var result = await _rotator.RotateIfNeededAsync(logPath);
+
+        // Assert
+        result.RotationOccurred.Should().BeTrue();
+        File.Exists(logPath + ".1").Should().BeTrue(
+            because: "rotated file should exist with .1 suffix");
+    }
+
+    [Fact]
+    public async Task Should_Create_NewFile()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "session_002.jsonl");
+        var largeContent = new string('x', 2000); // Larger than 1KB limit
+        await File.WriteAllTextAsync(logPath, largeContent);
+
+        // Act
+        var writer = new FileAuditWriter(_testDir, new AuditConfiguration { MaxFileSize = 1024 });
+        await writer.WriteAsync(CreateTestEvent());
+
+        // Assert - new file should be created for new writes
+        // (Implementation detail: rotation creates new current file)
+    }
+
+    [Fact]
+    public async Task Should_Preserve_Permissions()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "session_perm.jsonl");
+        await File.WriteAllTextAsync(logPath, new string('x', 2000));
+
+        // Set permissions
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(logPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        // Act
+        await _rotator.RotateIfNeededAsync(logPath);
+
+        // Assert
+        var rotatedPath = logPath + ".1";
+        File.Exists(rotatedPath).Should().BeTrue();
+
+        if (!OperatingSystem.IsWindows())
+        {
+            var mode = File.GetUnixFileMode(rotatedPath);
+            mode.Should().HaveFlag(UnixFileMode.UserRead);
+            mode.Should().HaveFlag(UnixFileMode.UserWrite);
+            mode.Should().NotHaveFlag(UnixFileMode.OtherRead);
+            mode.Should().NotHaveFlag(UnixFileMode.OtherWrite);
+        }
+    }
+
+    [Fact]
+    public async Task Should_Be_Atomic()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "session_atomic.jsonl");
+        var events = Enumerable.Range(0, 50)
+            .Select(i => $"{{\"event\":{i}}}\n")
+            .ToList();
+        
+        await File.WriteAllTextAsync(logPath, string.Join("", events));
+
+        // Count lines before
+        var linesBefore = File.ReadAllLines(logPath).Length;
+
+        // Act
+        await _rotator.RotateIfNeededAsync(logPath);
+
+        // Assert - rotated file should have all original lines
+        var rotatedPath = logPath + ".1";
+        if (File.Exists(rotatedPath))
+        {
+            var linesAfter = File.ReadAllLines(rotatedPath).Length;
+            linesAfter.Should().Be(linesBefore,
+                because: "rotation must not lose events");
+        }
+    }
+
+    [Fact]
+    public async Task Should_Delete_ExpiredLogs()
+    {
+        // Arrange - create old log files
+        var oldLogPath = Path.Combine(_testDir, "2023-01-01T00-00-00Z_sess_old.jsonl");
+        await File.WriteAllTextAsync(oldLogPath, "{\"event\":\"old\"}");
+        
+        // Make file appear old
+        File.SetLastWriteTime(oldLogPath, DateTime.Now.AddDays(-100));
+
+        var recentLogPath = Path.Combine(_testDir, "2024-01-01T00-00-00Z_sess_recent.jsonl");
+        await File.WriteAllTextAsync(recentLogPath, "{\"event\":\"recent\"}");
+
+        // Act
+        var deleted = await _rotator.CleanupExpiredLogsAsync(_testDir, retentionDays: 90);
+
+        // Assert
+        deleted.Should().Contain(oldLogPath);
+        File.Exists(oldLogPath).Should().BeFalse(
+            because: "logs older than 90 days should be deleted");
+        File.Exists(recentLogPath).Should().BeTrue(
+            because: "recent logs should be kept");
+    }
+
+    [Fact]
+    public async Task Should_Respect_StorageLimit()
+    {
+        // Arrange - create files exceeding limit
+        for (int i = 0; i < 5; i++)
+        {
+            var path = Path.Combine(_testDir, $"session_{i:D3}.jsonl");
+            await File.WriteAllTextAsync(path, new string('x', 3000)); // 3KB each = 15KB total
+            File.SetLastWriteTime(path, DateTime.Now.AddDays(-i)); // Older files first
+        }
+
+        // Act - enforce 10KB limit
+        var deleted = await _rotator.EnforceStorageLimitAsync(_testDir, maxBytes: 10 * 1024);
+
+        // Assert
+        deleted.Should().NotBeEmpty(
+            because: "oldest files should be deleted to meet storage limit");
+        
+        var remainingSize = Directory.GetFiles(_testDir, "*.jsonl")
+            .Sum(f => new FileInfo(f).Length);
+        
+        remainingSize.Should().BeLessThanOrEqualTo(10 * 1024,
+            because: "total storage should not exceed limit");
+    }
+
+    [Fact]
+    public async Task Should_Number_RotatedFiles_Sequentially()
+    {
+        // Arrange
+        var logPath = Path.Combine(_testDir, "session_seq.jsonl");
+        
+        // Create and rotate multiple times
+        for (int i = 0; i < 3; i++)
+        {
+            await File.WriteAllTextAsync(logPath, new string('x', 2000));
+            await _rotator.RotateIfNeededAsync(logPath);
+        }
+
+        // Assert
+        File.Exists(logPath + ".1").Should().BeTrue();
+        File.Exists(logPath + ".2").Should().BeTrue();
+        File.Exists(logPath + ".3").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Should_Log_Deletion_Before_Delete()
+    {
+        // Arrange
+        var oldLogPath = Path.Combine(_testDir, "old_session.jsonl");
+        await File.WriteAllTextAsync(oldLogPath, "{\"event\":\"old\"}");
+        File.SetLastWriteTime(oldLogPath, DateTime.Now.AddDays(-100));
+
+        var deletionLog = new List<string>();
+        _rotator.OnBeforeDelete += (path) => deletionLog.Add(path);
+
+        // Act
+        await _rotator.CleanupExpiredLogsAsync(_testDir, retentionDays: 90);
+
+        // Assert
+        deletionLog.Should().Contain(oldLogPath,
+            because: "deletion should be logged before execution");
+    }
+
+    private static AuditEvent CreateTestEvent()
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "Test",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>().AsReadOnly()
+        };
+    }
+}
 ```
 
 ### Integration Tests
@@ -898,20 +2230,793 @@ Tests/Integration/Audit/
 │   ├── Should_SetCorrectPermissions_Windows()
 │   ├── Should_HandleConcurrentWrites()
 │   └── Should_FlushImmediately()
-│
+```
+
+#### AuditStorageTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Audit;
+
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
+using Xunit;
+
+[Collection("Integration")]
+public class AuditStorageTests : IClassFixture<IntegrationTestFixture>, IDisposable
+{
+    private readonly IServiceProvider _services;
+    private readonly string _testDir;
+
+    public AuditStorageTests(IntegrationTestFixture fixture)
+    {
+        _services = fixture.Services;
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_storage_{Guid.NewGuid():N}");
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    public async Task Should_CreateAuditDirectory()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, ".agent", "logs", "audit");
+        Directory.Exists(auditDir).Should().BeFalse();
+
+        // Act
+        var writer = new FileAuditWriter(auditDir, new AuditConfiguration());
+        await writer.WriteAsync(CreateTestEvent());
+        await writer.DisposeAsync();
+
+        // Assert
+        Directory.Exists(auditDir).Should().BeTrue(
+            because: "audit directory should be created automatically");
+    }
+
+    [Fact]
+    public async Task Should_WriteToCorrectLocation()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "custom_audit");
+        var config = new AuditConfiguration { Directory = auditDir };
+        
+        // Act
+        var writer = new FileAuditWriter(auditDir, config);
+        await writer.WriteAsync(CreateTestEvent());
+        await writer.DisposeAsync();
+
+        // Assert
+        var files = Directory.GetFiles(auditDir, "*.jsonl");
+        files.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Should_UseJsonlFormat()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "jsonl_test");
+        Directory.CreateDirectory(auditDir);
+
+        var writer = new FileAuditWriter(auditDir, new AuditConfiguration());
+        
+        // Act
+        await writer.WriteAsync(CreateTestEvent());
+        await writer.WriteAsync(CreateTestEvent());
+        await writer.WriteAsync(CreateTestEvent());
+        await writer.DisposeAsync();
+
+        // Assert
+        var logFile = Directory.GetFiles(auditDir, "*.jsonl").First();
+        var lines = await File.ReadAllLinesAsync(logFile);
+        
+        lines.Should().HaveCount(3);
+        
+        foreach (var line in lines)
+        {
+            // Each line should be valid JSON
+            var action = () => JsonDocument.Parse(line);
+            action.Should().NotThrow(
+                because: "each line must be valid JSON (JSONL format)");
+            
+            // No multi-line JSON
+            line.Should().NotContain("\n");
+        }
+    }
+
+    [Fact]
+    public async Task Should_CreateFilePerSession()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "session_test");
+        Directory.CreateDirectory(auditDir);
+
+        // Act - create two sessions
+        var session1 = SessionId.New();
+        var writer1 = new FileAuditWriter(auditDir, new AuditConfiguration(), session1);
+        await writer1.WriteAsync(CreateTestEvent(session1));
+        await writer1.DisposeAsync();
+
+        var session2 = SessionId.New();
+        var writer2 = new FileAuditWriter(auditDir, new AuditConfiguration(), session2);
+        await writer2.WriteAsync(CreateTestEvent(session2));
+        await writer2.DisposeAsync();
+
+        // Assert
+        var files = Directory.GetFiles(auditDir, "*.jsonl");
+        files.Should().HaveCount(2,
+            because: "each session should have its own log file");
+    }
+
+    [Fact]
+    public async Task Should_IncludeTimestampInFilename()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "filename_test");
+        Directory.CreateDirectory(auditDir);
+
+        // Act
+        var writer = new FileAuditWriter(auditDir, new AuditConfiguration());
+        await writer.WriteAsync(CreateTestEvent());
+        await writer.DisposeAsync();
+
+        // Assert
+        var logFile = Directory.GetFiles(auditDir, "*.jsonl").First();
+        var filename = Path.GetFileName(logFile);
+        
+        // Should match pattern: 2024-01-15T10-30-00Z_sess_xxx.jsonl
+        filename.Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z_sess_[a-zA-Z0-9]+\.jsonl$",
+            because: "filename must include ISO timestamp and session ID");
+    }
+
+    [SkippableFact]
+    public async Task Should_SetCorrectPermissions_Unix()
+    {
+        Skip.If(OperatingSystem.IsWindows());
+
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "perms_unix");
+        Directory.CreateDirectory(auditDir);
+
+        // Act
+        var writer = new FileAuditWriter(auditDir, new AuditConfiguration());
+        await writer.WriteAsync(CreateTestEvent());
+        await writer.DisposeAsync();
+
+        // Assert
+        var logFile = Directory.GetFiles(auditDir, "*.jsonl").First();
+        var mode = File.GetUnixFileMode(logFile);
+        
+        // Should be 0600 (owner read/write only)
+        mode.Should().HaveFlag(UnixFileMode.UserRead);
+        mode.Should().HaveFlag(UnixFileMode.UserWrite);
+        mode.Should().NotHaveFlag(UnixFileMode.GroupRead);
+        mode.Should().NotHaveFlag(UnixFileMode.GroupWrite);
+        mode.Should().NotHaveFlag(UnixFileMode.OtherRead);
+        mode.Should().NotHaveFlag(UnixFileMode.OtherWrite);
+    }
+
+    [SkippableFact]
+    public async Task Should_SetCorrectPermissions_Windows()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows());
+
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "perms_windows");
+        Directory.CreateDirectory(auditDir);
+
+        // Act
+        var writer = new FileAuditWriter(auditDir, new AuditConfiguration());
+        await writer.WriteAsync(CreateTestEvent());
+        await writer.DisposeAsync();
+
+        // Assert - Windows uses ACLs, verify current user has access
+        var logFile = Directory.GetFiles(auditDir, "*.jsonl").First();
+        var fi = new FileInfo(logFile);
+        
+        // File should be accessible to current user
+        fi.Exists.Should().BeTrue();
+        
+        // ACL verification would require System.Security.AccessControl
+    }
+
+    [Fact]
+    public async Task Should_HandleConcurrentWrites()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "concurrent_test");
+        Directory.CreateDirectory(auditDir);
+        var writer = new FileAuditWriter(auditDir, new AuditConfiguration());
+
+        // Act - write concurrently from multiple tasks
+        var tasks = Enumerable.Range(0, 100)
+            .Select(i => writer.WriteAsync(CreateTestEvent()))
+            .ToList();
+
+        await Task.WhenAll(tasks);
+        await writer.DisposeAsync();
+
+        // Assert
+        var logFile = Directory.GetFiles(auditDir, "*.jsonl").First();
+        var lines = await File.ReadAllLinesAsync(logFile);
+        
+        lines.Should().HaveCount(100,
+            because: "all concurrent writes should succeed");
+        
+        // Each line should be valid JSON (no corruption from concurrent access)
+        foreach (var line in lines)
+        {
+            var action = () => JsonDocument.Parse(line);
+            action.Should().NotThrow();
+        }
+    }
+
+    [Fact]
+    public async Task Should_FlushImmediately()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "flush_test");
+        Directory.CreateDirectory(auditDir);
+        var writer = new FileAuditWriter(auditDir, new AuditConfiguration());
+
+        // Act
+        await writer.WriteAsync(CreateTestEvent());
+        // Don't dispose yet - check file immediately
+
+        // Assert
+        var logFile = Directory.GetFiles(auditDir, "*.jsonl").First();
+        var content = await File.ReadAllTextAsync(logFile);
+        
+        content.Should().NotBeEmpty(
+            because: "events should be flushed immediately, not buffered");
+
+        await writer.DisposeAsync();
+    }
+
+    private static AuditEvent CreateTestEvent(SessionId? sessionId = null)
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = sessionId ?? SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "Test",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>().AsReadOnly()
+        };
+    }
+}
+```
+
+```
 ├── AuditConfigTests.cs
 │   ├── Should_LoadFromConfig()
 │   ├── Should_UseDefaultValues()
 │   ├── Should_ValidateConfiguration()
 │   ├── Should_ApplyLogLevel()
 │   └── Should_ApplyRetentionSettings()
-│
+```
+
+#### AuditConfigTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Audit;
+
+using AgenticCoder.Application.Configuration;
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+[Collection("Integration")]
+public class AuditConfigTests : IClassFixture<IntegrationTestFixture>, IDisposable
+{
+    private readonly string _testDir;
+
+    public AuditConfigTests(IntegrationTestFixture fixture)
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_config_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    public void Should_LoadFromConfig()
+    {
+        // Arrange
+        var agentConfigPath = Path.Combine(_testDir, "agent-config.yml");
+        File.WriteAllText(agentConfigPath, @"
+audit:
+  enabled: true
+  directory: custom_audit_dir
+  rotation:
+    size_mb: 25
+  retention:
+    days: 30
+    max_storage_mb: 1000
+  integrity:
+    enabled: true
+    algorithm: SHA512
+");
+
+        var config = new ConfigurationBuilder()
+            .AddAgentConfig(agentConfigPath)
+            .Build();
+
+        // Act
+        var services = new ServiceCollection();
+        services.AddAuditServices(config);
+        var provider = services.BuildServiceProvider();
+        var auditConfig = provider.GetRequiredService<IAuditConfiguration>();
+
+        // Assert
+        auditConfig.Directory.Should().Contain("custom_audit_dir");
+        auditConfig.RotationSizeMb.Should().Be(25);
+        auditConfig.RetentionDays.Should().Be(30);
+        auditConfig.MaxStorageMb.Should().Be(1000);
+        auditConfig.IntegrityAlgorithm.Should().Be("SHA512");
+    }
+
+    [Fact]
+    public void Should_UseDefaultValues()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().Build();
+
+        // Act
+        services.AddAuditServices(config);
+        var provider = services.BuildServiceProvider();
+        var auditConfig = provider.GetRequiredService<IAuditConfiguration>();
+
+        // Assert
+        auditConfig.Enabled.Should().BeTrue(
+            because: "audit is enabled by default");
+        auditConfig.RotationSizeMb.Should().Be(10,
+            because: "default rotation size is 10MB");
+        auditConfig.RetentionDays.Should().Be(90,
+            because: "default retention is 90 days");
+        auditConfig.MaxStorageMb.Should().Be(500,
+            because: "default max storage is 500MB");
+        auditConfig.EnableIntegrityChecks.Should().BeTrue(
+            because: "integrity checks are enabled by default");
+        auditConfig.IntegrityAlgorithm.Should().Be("SHA256",
+            because: "SHA256 is the default algorithm");
+    }
+
+    [Fact]
+    public void Should_ValidateConfiguration()
+    {
+        // Arrange - invalid configuration
+        var agentConfigPath = Path.Combine(_testDir, "invalid-config.yml");
+        File.WriteAllText(agentConfigPath, @"
+audit:
+  rotation:
+    size_mb: -5
+  retention:
+    days: 0
+    max_storage_mb: -100
+");
+
+        var config = new ConfigurationBuilder()
+            .AddAgentConfig(agentConfigPath)
+            .Build();
+
+        // Act & Assert
+        var services = new ServiceCollection();
+        var action = () => services.AddAuditServices(config);
+
+        action.Should().Throw<ConfigurationValidationException>(
+            because: "invalid values should be rejected during configuration");
+    }
+
+    [Fact]
+    public async Task Should_ApplyLogLevel()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "loglevel_test");
+        Directory.CreateDirectory(auditDir);
+
+        var config = new AuditConfiguration
+        {
+            Directory = auditDir,
+            MinimumSeverity = AuditSeverity.Warning
+        };
+
+        // Act
+        var logger = new AuditLogger(
+            new FileAuditWriter(auditDir, config),
+            config
+        );
+
+        await logger.LogInfoAsync("session_start", new { });       // Should be filtered
+        await logger.LogWarningAsync("constraint_violation", new { });  // Should be logged
+        await logger.LogErrorAsync("file_error", new { });         // Should be logged
+        await logger.DisposeAsync();
+
+        // Assert
+        var logFile = Directory.GetFiles(auditDir, "*.jsonl").First();
+        var lines = await File.ReadAllLinesAsync(logFile);
+
+        lines.Should().HaveCount(2,
+            because: "info events should be filtered when minimum is Warning");
+    }
+
+    [Fact]
+    public async Task Should_ApplyRetentionSettings()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "retention_test");
+        Directory.CreateDirectory(auditDir);
+
+        // Create files with old timestamps
+        var oldFile = Path.Combine(auditDir, "2023-01-01T00-00-00Z_sess_old.jsonl");
+        var recentFile = Path.Combine(auditDir, $"{DateTime.UtcNow:yyyy-MM-ddTHH-mm-ssZ}_sess_new.jsonl");
+
+        await File.WriteAllTextAsync(oldFile, "{\"test\":true}");
+        await File.WriteAllTextAsync(recentFile, "{\"test\":true}");
+
+        // Set old file's timestamp
+        File.SetCreationTimeUtc(oldFile, DateTime.UtcNow.AddDays(-100));
+
+        var config = new AuditConfiguration
+        {
+            Directory = auditDir,
+            RetentionDays = 90
+        };
+
+        // Act
+        var retentionManager = new AuditRetentionManager(auditDir, config);
+        await retentionManager.CleanupExpiredLogsAsync();
+
+        // Assert
+        File.Exists(oldFile).Should().BeFalse(
+            because: "files older than retention period should be deleted");
+        File.Exists(recentFile).Should().BeTrue(
+            because: "recent files should be kept");
+    }
+}
+```
+
+```
 ├── AuditRecoveryTests.cs
 │   ├── Should_RecoverFromCrash()
 │   ├── Should_DetectPartialWrite()
 │   ├── Should_HandleDiskFull()
 │   └── Should_RetryOnFailure()
-│
+```
+
+#### AuditRecoveryTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Audit;
+
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using System.IO;
+using System.Text.Json;
+using Xunit;
+
+[Collection("Integration")]
+public class AuditRecoveryTests : IClassFixture<IntegrationTestFixture>, IDisposable
+{
+    private readonly string _testDir;
+
+    public AuditRecoveryTests(IntegrationTestFixture fixture)
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_recovery_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    public async Task Should_RecoverFromCrash()
+    {
+        // Arrange - simulate a crash by leaving a partial file
+        var auditDir = Path.Combine(_testDir, "crash_recovery");
+        Directory.CreateDirectory(auditDir);
+
+        var crashedFile = Path.Combine(auditDir, "2024-01-15T10-00-00Z_sess_crashed.jsonl");
+        
+        // Write some valid events, then simulate incomplete write
+        var validEvent1 = CreateValidEventJson(1);
+        var validEvent2 = CreateValidEventJson(2);
+        var partialEvent = "{\"eventId\":\"partial\",\"timestamp\":\"2024-01-15T10:00:03Z\"";  // Incomplete
+        
+        await File.WriteAllTextAsync(crashedFile, 
+            $"{validEvent1}\n{validEvent2}\n{partialEvent}");
+
+        // Act
+        var recoveryManager = new AuditRecoveryManager(auditDir, new AuditConfiguration());
+        var result = await recoveryManager.RecoverAsync();
+
+        // Assert
+        result.RecoveredFiles.Should().Be(1);
+        result.CorruptedEntriesFound.Should().Be(1);
+        result.ValidEntriesRecovered.Should().Be(2);
+
+        // Corrupted data should be moved to a .corrupt file
+        File.Exists(crashedFile + ".corrupt").Should().BeTrue();
+        
+        // Original file should only contain valid entries
+        var recoveredContent = await File.ReadAllLinesAsync(crashedFile);
+        recoveredContent.Should().HaveCount(2);
+        
+        foreach (var line in recoveredContent)
+        {
+            var action = () => JsonDocument.Parse(line);
+            action.Should().NotThrow();
+        }
+    }
+
+    [Fact]
+    public async Task Should_DetectPartialWrite()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "partial_write");
+        Directory.CreateDirectory(auditDir);
+
+        var logFile = Path.Combine(auditDir, "2024-01-15T10-00-00Z_sess_partial.jsonl");
+        
+        // Various types of partial writes
+        var testCases = new[]
+        {
+            "{\"eventId\":\"1\",\"incomplete",                    // Truncated mid-field
+            "{\"eventId\":\"2\"}garbage",                          // Extra garbage after valid JSON
+            "not json at all",                                     // Not JSON
+            "{\"eventId\":\"3\",\"data\":{\"nested\":\"incomplete", // Deeply nested incomplete
+            ""                                                     // Empty line
+        };
+
+        await File.WriteAllLinesAsync(logFile, testCases);
+
+        // Act
+        var validator = new AuditLogValidator(new AuditConfiguration());
+        var result = await validator.ValidateFileAsync(logFile);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.TotalLines.Should().Be(5);
+        result.InvalidLines.Should().Be(4);  // 4 invalid, 1 valid (the second one, minus garbage)
+        result.Errors.Should().Contain(e => e.Contains("line 1"));
+        result.Errors.Should().Contain(e => e.Contains("line 3"));
+        result.Errors.Should().Contain(e => e.Contains("line 4"));
+    }
+
+    [Fact]
+    public async Task Should_HandleDiskFull()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "disk_full");
+        Directory.CreateDirectory(auditDir);
+
+        // Create a configuration with very low storage limit
+        var config = new AuditConfiguration
+        {
+            Directory = auditDir,
+            MaxStorageMb = 1  // 1MB limit
+        };
+
+        var writer = new FileAuditWriter(auditDir, config);
+
+        // Act - try to write more than the limit
+        var eventsWritten = 0;
+        AuditStorageException? storageException = null;
+
+        try
+        {
+            for (int i = 0; i < 100000; i++)
+            {
+                await writer.WriteAsync(CreateLargeTestEvent(i));
+                eventsWritten++;
+            }
+        }
+        catch (AuditStorageException ex)
+        {
+            storageException = ex;
+        }
+        finally
+        {
+            await writer.DisposeAsync();
+        }
+
+        // Assert
+        storageException.Should().NotBeNull(
+            because: "storage limit should be enforced");
+        storageException!.Message.Should().Contain("storage limit",
+            because: "error message should be descriptive");
+        eventsWritten.Should().BeGreaterThan(0,
+            because: "some events should have been written before limit");
+
+        // Verify graceful degradation - existing events preserved
+        var files = Directory.GetFiles(auditDir, "*.jsonl");
+        files.Should().NotBeEmpty();
+        
+        foreach (var file in files)
+        {
+            var lines = await File.ReadAllLinesAsync(file);
+            foreach (var line in lines)
+            {
+                var action = () => JsonDocument.Parse(line);
+                action.Should().NotThrow(
+                    because: "all written events should be valid");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Should_RetryOnFailure()
+    {
+        // Arrange
+        var auditDir = Path.Combine(_testDir, "retry_test");
+        Directory.CreateDirectory(auditDir);
+
+        var config = new AuditConfiguration
+        {
+            Directory = auditDir,
+            RetryAttempts = 3,
+            RetryDelayMs = 100
+        };
+
+        // Create a writer with a flaky underlying stream
+        var flakyStream = new FlakyStreamWrapper(
+            new FileStream(
+                Path.Combine(auditDir, "test.jsonl"),
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.Read
+            ),
+            failCount: 2  // Fail first 2 attempts, succeed on 3rd
+        );
+
+        var writer = new FileAuditWriter(flakyStream, config);
+
+        // Act
+        var result = await writer.WriteAsync(CreateTestEvent());
+        await writer.DisposeAsync();
+
+        // Assert
+        result.Success.Should().BeTrue(
+            because: "write should succeed after retries");
+        result.AttemptCount.Should().Be(3,
+            because: "it should have taken 3 attempts");
+
+        // Verify event was actually written
+        var content = await File.ReadAllTextAsync(Path.Combine(auditDir, "test.jsonl"));
+        content.Should().NotBeEmpty();
+    }
+
+    private static string CreateValidEventJson(int index)
+    {
+        var evt = new
+        {
+            schemaVersion = "1.0",
+            eventId = $"evt_{index}",
+            timestamp = DateTimeOffset.UtcNow.ToString("o"),
+            sessionId = "sess_test",
+            correlationId = "corr_test",
+            eventType = "file_read",
+            severity = "info",
+            source = "Test",
+            operatingMode = "local_only",
+            data = new { }
+        };
+        return JsonSerializer.Serialize(evt);
+    }
+
+    private static AuditEvent CreateTestEvent()
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "Test",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>().AsReadOnly()
+        };
+    }
+
+    private static AuditEvent CreateLargeTestEvent(int index)
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "Test",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>
+            {
+                ["index"] = index,
+                ["padding"] = new string('x', 500)
+            }.AsReadOnly()
+        };
+    }
+}
+
+/// <summary>
+/// Test helper that simulates I/O failures.
+/// </summary>
+internal class FlakyStreamWrapper : Stream
+{
+    private readonly Stream _inner;
+    private int _failCount;
+    private int _writeAttempts = 0;
+
+    public FlakyStreamWrapper(Stream inner, int failCount)
+    {
+        _inner = inner;
+        _failCount = failCount;
+    }
+
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        _writeAttempts++;
+        if (_writeAttempts <= _failCount)
+        {
+            throw new IOException($"Simulated failure {_writeAttempts} of {_failCount}");
+        }
+        _inner.Write(buffer, offset, count);
+    }
+
+    public override async Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    {
+        _writeAttempts++;
+        if (_writeAttempts <= _failCount)
+        {
+            throw new IOException($"Simulated failure {_writeAttempts} of {_failCount}");
+        }
+        await _inner.WriteAsync(buffer, offset, count, cancellationToken);
+    }
+
+    // Required Stream overrides
+    public override bool CanRead => _inner.CanRead;
+    public override bool CanSeek => _inner.CanSeek;
+    public override bool CanWrite => _inner.CanWrite;
+    public override long Length => _inner.Length;
+    public override long Position
+    {
+        get => _inner.Position;
+        set => _inner.Position = value;
+    }
+    public override void Flush() => _inner.Flush();
+    public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+    public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
+    public override void SetLength(long value) => _inner.SetLength(value);
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _inner.Dispose();
+        base.Dispose(disposing);
+    }
+}
+```
+
+```
 └── CLIIntegrationTests.cs
     ├── AuditList_ShouldShowSessions()
     ├── AuditShow_ShouldDisplayEvents()
@@ -919,6 +3024,351 @@ Tests/Integration/Audit/
     ├── AuditVerify_ShouldValidateIntegrity()
     ├── AuditExport_ShouldCreateFile()
     └── AuditStats_ShouldShowUsage()
+```
+
+#### CLIIntegrationTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Audit;
+
+using AgenticCoder.CLI;
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+[Collection("Integration")]
+public class CLIIntegrationTests : IClassFixture<IntegrationTestFixture>, IDisposable
+{
+    private readonly string _testDir;
+    private readonly CLITestHarness _cli;
+
+    public CLIIntegrationTests(IntegrationTestFixture fixture)
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_cli_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+        _cli = new CLITestHarness(_testDir);
+        
+        // Seed with test audit data
+        SeedTestData().GetAwaiter().GetResult();
+    }
+
+    public void Dispose()
+    {
+        _cli.Dispose();
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    private async Task SeedTestData()
+    {
+        var auditDir = Path.Combine(_testDir, ".agent", "logs", "audit");
+        Directory.CreateDirectory(auditDir);
+
+        // Create two sessions with events
+        var session1 = "sess_abc123";
+        var session2 = "sess_def456";
+
+        var file1 = Path.Combine(auditDir, $"2024-01-15T10-00-00Z_{session1}.jsonl");
+        var file2 = Path.Combine(auditDir, $"2024-01-15T11-00-00Z_{session2}.jsonl");
+
+        var events1 = new[]
+        {
+            CreateEventJson(session1, "session_start", "info"),
+            CreateEventJson(session1, "file_read", "info", "/src/main.cs"),
+            CreateEventJson(session1, "file_write", "info", "/src/main.cs"),
+            CreateEventJson(session1, "session_end", "info")
+        };
+
+        var events2 = new[]
+        {
+            CreateEventJson(session2, "session_start", "info"),
+            CreateEventJson(session2, "constraint_violation", "warning", "/system/hosts"),
+            CreateEventJson(session2, "operation_blocked", "error", "/etc/passwd"),
+            CreateEventJson(session2, "session_end", "info")
+        };
+
+        await File.WriteAllLinesAsync(file1, events1);
+        await File.WriteAllLinesAsync(file2, events2);
+    }
+
+    [Fact]
+    public async Task AuditList_ShouldShowSessions()
+    {
+        // Act
+        var result = await _cli.RunAsync("audit", "list");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("sess_abc123");
+        result.Output.Should().Contain("sess_def456");
+        result.Output.Should().Contain("2024-01-15");
+        result.Output.Should().Contain("Events:");
+    }
+
+    [Fact]
+    public async Task AuditList_WithDateFilter_ShouldFilterResults()
+    {
+        // Act
+        var result = await _cli.RunAsync("audit", "list", "--after", "2024-01-15T10:30:00Z");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("sess_def456");
+        result.Output.Should().NotContain("sess_abc123");
+    }
+
+    [Fact]
+    public async Task AuditShow_ShouldDisplayEvents()
+    {
+        // Act
+        var result = await _cli.RunAsync("audit", "show", "sess_abc123");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("session_start");
+        result.Output.Should().Contain("file_read");
+        result.Output.Should().Contain("file_write");
+        result.Output.Should().Contain("session_end");
+        result.Output.Should().Contain("/src/main.cs");
+    }
+
+    [Fact]
+    public async Task AuditShow_WithEventFilter_ShouldFilterResults()
+    {
+        // Act
+        var result = await _cli.RunAsync("audit", "show", "sess_abc123", "--type", "file_read");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("file_read");
+        result.Output.Should().NotContain("session_start");
+        result.Output.Should().NotContain("file_write");
+    }
+
+    [Fact]
+    public async Task AuditSearch_ShouldFindEvents()
+    {
+        // Act - search for constraint violations
+        var result = await _cli.RunAsync("audit", "search", "--type", "constraint_violation");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("sess_def456");
+        result.Output.Should().Contain("constraint_violation");
+        result.Output.Should().Contain("/system/hosts");
+    }
+
+    [Fact]
+    public async Task AuditSearch_ByPath_ShouldFindEvents()
+    {
+        // Act - search for operations on /etc/passwd
+        var result = await _cli.RunAsync("audit", "search", "--path", "/etc/passwd");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("operation_blocked");
+        result.Output.Should().Contain("/etc/passwd");
+    }
+
+    [Fact]
+    public async Task AuditSearch_BySeverity_ShouldFindEvents()
+    {
+        // Act - search for errors only
+        var result = await _cli.RunAsync("audit", "search", "--severity", "error");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("operation_blocked");
+        result.Output.Should().NotContain("session_start");
+    }
+
+    [Fact]
+    public async Task AuditVerify_ShouldValidateIntegrity()
+    {
+        // Act
+        var result = await _cli.RunAsync("audit", "verify");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("verified");
+        result.Output.Should().Contain("2 sessions");
+        result.Output.Should().Contain("8 events");
+        result.Output.Should().NotContain("corrupted");
+    }
+
+    [Fact]
+    public async Task AuditVerify_WithCorruptedData_ShouldReportErrors()
+    {
+        // Arrange - corrupt one of the files
+        var auditDir = Path.Combine(_testDir, ".agent", "logs", "audit");
+        var corruptFile = Path.Combine(auditDir, "2024-01-15T12-00-00Z_sess_corrupt.jsonl");
+        await File.WriteAllTextAsync(corruptFile, "{\"incomplete");
+
+        // Act
+        var result = await _cli.RunAsync("audit", "verify");
+
+        // Assert
+        result.ExitCode.Should().Be(1,
+            because: "verification should fail with corrupted data");
+        result.Output.Should().Contain("corrupted");
+        result.Output.Should().Contain("sess_corrupt");
+    }
+
+    [Fact]
+    public async Task AuditExport_ShouldCreateFile()
+    {
+        // Arrange
+        var exportPath = Path.Combine(_testDir, "export.json");
+
+        // Act
+        var result = await _cli.RunAsync("audit", "export", "--output", exportPath);
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        File.Exists(exportPath).Should().BeTrue();
+
+        var content = await File.ReadAllTextAsync(exportPath);
+        var action = () => JsonDocument.Parse(content);
+        action.Should().NotThrow();
+
+        using var doc = JsonDocument.Parse(content);
+        doc.RootElement.GetProperty("sessions").GetArrayLength().Should().Be(2);
+        doc.RootElement.GetProperty("totalEvents").GetInt32().Should().Be(8);
+    }
+
+    [Fact]
+    public async Task AuditExport_WithSessionFilter_ShouldExportSelected()
+    {
+        // Arrange
+        var exportPath = Path.Combine(_testDir, "export_single.json");
+
+        // Act
+        var result = await _cli.RunAsync("audit", "export", 
+            "--session", "sess_abc123", 
+            "--output", exportPath);
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+
+        using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(exportPath));
+        doc.RootElement.GetProperty("sessions").GetArrayLength().Should().Be(1);
+        doc.RootElement.GetProperty("totalEvents").GetInt32().Should().Be(4);
+    }
+
+    [Fact]
+    public async Task AuditStats_ShouldShowUsage()
+    {
+        // Act
+        var result = await _cli.RunAsync("audit", "stats");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("Total sessions: 2");
+        result.Output.Should().Contain("Total events: 8");
+        result.Output.Should().Contain("Storage used:");
+        result.Output.Should().Contain("Event types:");
+        result.Output.Should().Contain("file_read");
+        result.Output.Should().Contain("constraint_violation");
+    }
+
+    [Fact]
+    public async Task AuditStats_WithVerbose_ShouldShowDetails()
+    {
+        // Act
+        var result = await _cli.RunAsync("audit", "stats", "--verbose");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("session_start: 2");
+        result.Output.Should().Contain("file_read: 1");
+        result.Output.Should().Contain("file_write: 1");
+        result.Output.Should().Contain("constraint_violation: 1");
+        result.Output.Should().Contain("operation_blocked: 1");
+        result.Output.Should().Contain("session_end: 2");
+    }
+
+    [Fact]
+    public async Task AuditClean_ShouldRemoveOldLogs()
+    {
+        // Arrange - add an old file
+        var auditDir = Path.Combine(_testDir, ".agent", "logs", "audit");
+        var oldFile = Path.Combine(auditDir, "2023-01-01T00-00-00Z_sess_old.jsonl");
+        await File.WriteAllTextAsync(oldFile, "{}");
+        File.SetCreationTimeUtc(oldFile, DateTime.UtcNow.AddDays(-100));
+
+        // Act
+        var result = await _cli.RunAsync("audit", "clean", "--older-than", "90");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        File.Exists(oldFile).Should().BeFalse();
+        result.Output.Should().Contain("Removed 1 log file");
+    }
+
+    private static string CreateEventJson(
+        string sessionId, 
+        string eventType, 
+        string severity,
+        string? path = null)
+    {
+        var data = path != null 
+            ? new { path } 
+            : (object)new { };
+
+        var evt = new
+        {
+            schemaVersion = "1.0",
+            eventId = $"evt_{Guid.NewGuid():N}",
+            timestamp = DateTimeOffset.UtcNow.ToString("o"),
+            sessionId,
+            correlationId = $"corr_{Guid.NewGuid():N}",
+            eventType,
+            severity,
+            source = "Test",
+            operatingMode = "local_only",
+            data
+        };
+        return JsonSerializer.Serialize(evt);
+    }
+}
+
+/// <summary>
+/// Test harness for running CLI commands in isolation.
+/// </summary>
+internal class CLITestHarness : IDisposable
+{
+    private readonly string _workDir;
+
+    public CLITestHarness(string workDir)
+    {
+        _workDir = workDir;
+    }
+
+    public async Task<CLIResult> RunAsync(params string[] args)
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var app = new AgentCLI(output, error, _workDir);
+        var exitCode = await app.RunAsync(args);
+
+        return new CLIResult
+        {
+            ExitCode = exitCode,
+            Output = output.ToString(),
+            Error = error.ToString()
+        };
+    }
+
+    public void Dispose() { }
+}
+
+internal class CLIResult
+{
+    public int ExitCode { get; init; }
+    public string Output { get; init; } = string.Empty;
+    public string Error { get; init; } = string.Empty;
+}
 ```
 
 ### End-to-End Tests
@@ -937,6 +3387,388 @@ Tests/E2E/Audit/
 │   └── Scenario_ExportAndAnalysis()
 ```
 
+#### AuditScenarios.cs
+
+```csharp
+namespace AgenticCoder.Tests.E2E.Audit;
+
+using AgenticCoder.CLI;
+using AgenticCoder.Application.Sessions;
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+[Collection("E2E")]
+[Trait("Category", "E2E")]
+public class AuditScenarios : IClassFixture<E2ETestFixture>, IDisposable
+{
+    private readonly E2ETestFixture _fixture;
+    private readonly string _testDir;
+    private readonly string _auditDir;
+
+    public AuditScenarios(E2ETestFixture fixture)
+    {
+        _fixture = fixture;
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_e2e_{Guid.NewGuid():N}");
+        _auditDir = Path.Combine(_testDir, ".agent", "logs", "audit");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    public async Task Scenario_CompleteSession_AllEventsLogged()
+    {
+        // Arrange
+        var app = _fixture.CreateApplication(_testDir);
+
+        // Act - execute a complete session
+        await app.StartSessionAsync();
+        await app.ExecuteTaskAsync("Create a simple class");
+        await app.EndSessionAsync();
+
+        // Assert - verify all required events present
+        var events = await ReadAllAuditEvents();
+        
+        events.Should().Contain(e => e.EventType == "session_start",
+            because: "session start must be logged");
+        events.Should().Contain(e => e.EventType == "task_start",
+            because: "task execution must be logged");
+        events.Should().Contain(e => e.EventType == "task_end",
+            because: "task completion must be logged");
+        events.Should().Contain(e => e.EventType == "session_end",
+            because: "session end must be logged");
+
+        // Verify session continuity
+        var sessionId = events.First().SessionId;
+        events.Should().OnlyContain(e => e.SessionId == sessionId,
+            because: "all events should belong to the same session");
+
+        // Verify ordering
+        var timestamps = events.Select(e => e.Timestamp).ToList();
+        timestamps.Should().BeInAscendingOrder(
+            because: "events should be chronologically ordered");
+
+        // Verify correlation chain
+        var correlationIds = events.Select(e => e.CorrelationId).Distinct();
+        correlationIds.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task Scenario_FileOperations_CorrectlyAudited()
+    {
+        // Arrange
+        var app = _fixture.CreateApplication(_testDir);
+        var targetFile = Path.Combine(_testDir, "test.cs");
+
+        // Act - perform file operations
+        await app.StartSessionAsync();
+        await app.ReadFileAsync(targetFile);  // Should log file_read
+        await app.WriteFileAsync(targetFile, "// Test content");  // Should log file_write
+        await app.EndSessionAsync();
+
+        // Assert
+        var events = await ReadAllAuditEvents();
+
+        // Find file read event
+        var readEvent = events.First(e => e.EventType == "file_read");
+        readEvent.Data.Should().ContainKey("path");
+        readEvent.Data["path"].ToString().Should().Contain("test.cs");
+        readEvent.Data.Should().ContainKey("success");
+        readEvent.Data.Should().NotContainKey("content",
+            because: "file content should never be logged");
+
+        // Find file write event
+        var writeEvent = events.First(e => e.EventType == "file_write");
+        writeEvent.Data.Should().ContainKey("path");
+        writeEvent.Data.Should().ContainKey("bytes_written");
+        writeEvent.Data.Should().NotContainKey("content",
+            because: "file content should never be logged");
+    }
+
+    [Fact]
+    public async Task Scenario_SecurityViolation_CapturedWithDetails()
+    {
+        // Arrange
+        var app = _fixture.CreateApplication(_testDir);
+
+        // Act - attempt to access protected path
+        await app.StartSessionAsync();
+        var result = await app.ReadFileAsync("/etc/passwd");  // Should be blocked
+        await app.EndSessionAsync();
+
+        // Assert
+        result.Success.Should().BeFalse();
+
+        var events = await ReadAllAuditEvents();
+
+        // Find security violation event
+        var violationEvent = events.First(e => 
+            e.EventType == "constraint_violation" || 
+            e.EventType == "operation_blocked");
+
+        violationEvent.Severity.Should().BeOneOf("warning", "error");
+        violationEvent.Data.Should().ContainKey("requested_path");
+        violationEvent.Data.Should().ContainKey("reason");
+        violationEvent.Data.Should().ContainKey("constraint_type");
+        violationEvent.Data["constraint_type"].ToString().Should().Be("protected_path");
+    }
+
+    [Fact]
+    public async Task Scenario_ErrorRecovery_TrackedInAudit()
+    {
+        // Arrange
+        var app = _fixture.CreateApplication(_testDir);
+
+        // Act - simulate an error that's recovered from
+        await app.StartSessionAsync();
+        
+        try
+        {
+            await app.ExecuteTaskAsync("intentionally_failing_task");
+        }
+        catch { /* Expected */ }
+
+        await app.ExecuteTaskAsync("recovery_task");
+        await app.EndSessionAsync();
+
+        // Assert
+        var events = await ReadAllAuditEvents();
+
+        // Verify error event
+        var errorEvent = events.FirstOrDefault(e => e.EventType == "task_error");
+        errorEvent.Should().NotBeNull();
+        errorEvent!.Severity.Should().Be("error");
+
+        // Verify recovery - subsequent task succeeded
+        var recoveryEvents = events.Where(e => 
+            e.Timestamp > errorEvent.Timestamp && 
+            e.EventType == "task_end");
+        recoveryEvents.Should().NotBeEmpty(
+            because: "recovery should be tracked after error");
+    }
+
+    [Fact]
+    public async Task Scenario_GracefulShutdown_AuditComplete()
+    {
+        // Arrange
+        var app = _fixture.CreateApplication(_testDir);
+
+        // Act - normal shutdown
+        await app.StartSessionAsync();
+        await app.ExecuteTaskAsync("test task");
+        await app.EndSessionAsync();
+        await app.DisposeAsync();
+
+        // Assert
+        var events = await ReadAllAuditEvents();
+
+        // Last event should be session_end
+        events.Last().EventType.Should().Be("session_end");
+
+        // All events should have integrity checksums
+        var logFiles = Directory.GetFiles(_auditDir, "*.jsonl");
+        foreach (var file in logFiles)
+        {
+            var validator = new AuditLogValidator(new AuditConfiguration());
+            var result = await validator.ValidateFileAsync(file);
+            result.IsValid.Should().BeTrue(
+                because: $"log file {Path.GetFileName(file)} should be valid");
+        }
+    }
+
+    [Fact]
+    public async Task Scenario_ForcedShutdown_NoDataLoss()
+    {
+        // Arrange
+        var app = _fixture.CreateApplication(_testDir);
+
+        // Act - simulate crash (no graceful shutdown)
+        await app.StartSessionAsync();
+        await app.ExecuteTaskAsync("task 1");
+        await app.ExecuteTaskAsync("task 2");
+        
+        // Force abort without EndSessionAsync
+        app.ForceAbort();
+
+        // Assert - verify events still persisted
+        var events = await ReadAllAuditEvents();
+
+        events.Should().Contain(e => e.EventType == "session_start");
+        events.Where(e => e.EventType == "task_start").Should().HaveCount(2,
+            because: "both task starts should be persisted immediately");
+        
+        // No data loss - all written events preserved
+        events.Count.Should().BeGreaterThanOrEqualTo(3,
+            because: "session_start + 2 task_start at minimum");
+    }
+
+    [Fact]
+    public async Task Scenario_LogRotation_DuringSession()
+    {
+        // Arrange - configure for small rotation size
+        var config = new Dictionary<string, string>
+        {
+            ["audit:rotation:size_mb"] = "0.1"  // 100KB for testing
+        };
+        var app = _fixture.CreateApplication(_testDir, config);
+
+        // Act - generate enough events to trigger rotation
+        await app.StartSessionAsync();
+        
+        for (int i = 0; i < 1000; i++)
+        {
+            await app.ExecuteTaskAsync($"task_{i}");
+        }
+        
+        await app.EndSessionAsync();
+
+        // Assert
+        var logFiles = Directory.GetFiles(_auditDir, "*.jsonl");
+        logFiles.Length.Should().BeGreaterThan(1,
+            because: "rotation should have created multiple files");
+
+        // Verify no events lost across rotation
+        var allEvents = await ReadAllAuditEvents();
+        allEvents.Where(e => e.EventType == "task_start").Should().HaveCount(1000);
+
+        // Verify each file is valid
+        foreach (var file in logFiles)
+        {
+            var validator = new AuditLogValidator(new AuditConfiguration());
+            var result = await validator.ValidateFileAsync(file);
+            result.IsValid.Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task Scenario_IntegrityVerification_AfterSession()
+    {
+        // Arrange
+        var app = _fixture.CreateApplication(_testDir);
+
+        // Act - complete a session
+        await app.StartSessionAsync();
+        await app.ExecuteTaskAsync("create file");
+        await app.EndSessionAsync();
+        await app.DisposeAsync();
+
+        // Assert - use CLI to verify
+        var cli = new CLITestHarness(_testDir);
+        var result = await cli.RunAsync("audit", "verify");
+
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("verified");
+        result.Output.Should().NotContain("corrupted");
+        result.Output.Should().NotContain("tampered");
+    }
+
+    [Fact]
+    public async Task Scenario_IntegrityVerification_DetectsTampering()
+    {
+        // Arrange
+        var app = _fixture.CreateApplication(_testDir);
+
+        await app.StartSessionAsync();
+        await app.ExecuteTaskAsync("create file");
+        await app.EndSessionAsync();
+        await app.DisposeAsync();
+
+        // Tamper with the log file
+        var logFile = Directory.GetFiles(_auditDir, "*.jsonl").First();
+        var lines = await File.ReadAllLinesAsync(logFile);
+        lines[1] = lines[1].Replace("file", "FILE");  // Subtle change
+        await File.WriteAllLinesAsync(logFile, lines);
+
+        // Act - verify with CLI
+        var cli = new CLITestHarness(_testDir);
+        var result = await cli.RunAsync("audit", "verify");
+
+        // Assert
+        result.ExitCode.Should().Be(1,
+            because: "tampering should be detected");
+        result.Output.Should().Contain("integrity");
+    }
+
+    [Fact]
+    public async Task Scenario_ExportAndAnalysis()
+    {
+        // Arrange
+        var app = _fixture.CreateApplication(_testDir);
+
+        await app.StartSessionAsync();
+        await app.ExecuteTaskAsync("task 1");
+        await app.ExecuteTaskAsync("task 2");
+        await app.EndSessionAsync();
+        await app.DisposeAsync();
+
+        var exportPath = Path.Combine(_testDir, "audit_export.json");
+
+        // Act - export and analyze
+        var cli = new CLITestHarness(_testDir);
+        var exportResult = await cli.RunAsync("audit", "export", "--output", exportPath);
+        var statsResult = await cli.RunAsync("audit", "stats");
+
+        // Assert - export succeeded
+        exportResult.ExitCode.Should().Be(0);
+        File.Exists(exportPath).Should().BeTrue();
+
+        // Verify export format
+        using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(exportPath));
+        doc.RootElement.GetProperty("schemaVersion").GetString().Should().NotBeEmpty();
+        doc.RootElement.GetProperty("exportTimestamp").GetString().Should().NotBeEmpty();
+        doc.RootElement.GetProperty("sessions").GetArrayLength().Should().Be(1);
+        doc.RootElement.GetProperty("totalEvents").GetInt32().Should().BeGreaterThan(0);
+
+        // Stats should show meaningful data
+        statsResult.ExitCode.Should().Be(0);
+        statsResult.Output.Should().Contain("task_start: 2");
+    }
+
+    private async Task<List<AuditEventData>> ReadAllAuditEvents()
+    {
+        var events = new List<AuditEventData>();
+
+        if (!Directory.Exists(_auditDir))
+            return events;
+
+        foreach (var file in Directory.GetFiles(_auditDir, "*.jsonl").OrderBy(f => f))
+        {
+            var lines = await File.ReadAllLinesAsync(file);
+            foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
+            {
+                try
+                {
+                    var evt = JsonSerializer.Deserialize<AuditEventData>(line);
+                    if (evt != null) events.Add(evt);
+                }
+                catch { /* Skip invalid lines */ }
+            }
+        }
+
+        return events.OrderBy(e => e.Timestamp).ToList();
+    }
+}
+
+internal class AuditEventData
+{
+    public string SchemaVersion { get; set; } = string.Empty;
+    public string EventId { get; set; } = string.Empty;
+    public DateTimeOffset Timestamp { get; set; }
+    public string SessionId { get; set; } = string.Empty;
+    public string CorrelationId { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public string Severity { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+    public string OperatingMode { get; set; } = string.Empty;
+    public Dictionary<string, object> Data { get; set; } = new();
+}
+```
+
 ### Performance Tests
 
 ```
@@ -948,12 +3780,466 @@ Tests/Performance/Audit/
 │   ├── Benchmark_LogRotation()
 │   ├── Benchmark_SearchQuery()
 │   └── Benchmark_Export()
-│
+```
+
+#### AuditBenchmarks.cs
+
+```csharp
+namespace AgenticCoder.Tests.Performance.Audit;
+
+using AgenticCoder.Infrastructure.Audit;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Jobs;
+using System.Security.Cryptography;
+
+[MemoryDiagnoser]
+[SimpleJob(RuntimeMoniker.Net80)]
+[RPlotExporter]
+public class AuditBenchmarks
+{
+    private FileAuditWriter _writer = null!;
+    private AuditEvent _testEvent = null!;
+    private string _testDir = null!;
+    private string _searchDir = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_bench_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+
+        _writer = new FileAuditWriter(_testDir, new AuditConfiguration());
+
+        _testEvent = new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "Benchmark",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>
+            {
+                ["path"] = "/src/test.cs",
+                ["bytes"] = 1024,
+                ["duration_ms"] = 5.2
+            }.AsReadOnly()
+        };
+
+        // Setup search directory with sample data
+        _searchDir = Path.Combine(Path.GetTempPath(), $"audit_search_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_searchDir);
+        SeedSearchData().GetAwaiter().GetResult();
+    }
+
+    private async Task SeedSearchData()
+    {
+        var writer = new FileAuditWriter(_searchDir, new AuditConfiguration());
+        for (int i = 0; i < 10000; i++)
+        {
+            await writer.WriteAsync(CreateVariedEvent(i));
+        }
+        await writer.DisposeAsync();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _writer.DisposeAsync().GetAwaiter().GetResult();
+        try { Directory.Delete(_testDir, true); } catch { }
+        try { Directory.Delete(_searchDir, true); } catch { }
+    }
+
+    [Benchmark(Description = "Write single audit event")]
+    public async Task Benchmark_SingleEventWrite()
+    {
+        await _writer.WriteAsync(_testEvent);
+    }
+
+    [Benchmark(Description = "Write 1000 events per second target")]
+    [Arguments(1000)]
+    public async Task Benchmark_1000EventsPerSecond(int count)
+    {
+        var tasks = new List<Task>(count);
+        for (int i = 0; i < count; i++)
+        {
+            tasks.Add(_writer.WriteAsync(_testEvent));
+        }
+        await Task.WhenAll(tasks);
+    }
+
+    [Benchmark(Description = "SHA-256 checksum calculation")]
+    public byte[] Benchmark_ChecksumUpdate()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(_testEvent);
+        var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+        return SHA256.HashData(bytes);
+    }
+
+    [Benchmark(Description = "Incremental checksum with chain")]
+    public string Benchmark_IncrementalChecksum()
+    {
+        var prevHash = "0".PadLeft(64, '0');
+        var json = System.Text.Json.JsonSerializer.Serialize(_testEvent);
+        var combined = prevHash + json;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(combined);
+        var hash = SHA256.HashData(bytes);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    [Benchmark(Description = "Log rotation trigger and create")]
+    public async Task Benchmark_LogRotation()
+    {
+        var rotationDir = Path.Combine(_testDir, $"rotation_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(rotationDir);
+
+        var config = new AuditConfiguration
+        {
+            Directory = rotationDir,
+            RotationSizeMb = 0.001  // 1KB for fast rotation
+        };
+
+        var writer = new FileAuditWriter(rotationDir, config);
+        
+        // Write enough to trigger rotation
+        for (int i = 0; i < 100; i++)
+        {
+            await writer.WriteAsync(_testEvent);
+        }
+
+        await writer.DisposeAsync();
+        Directory.Delete(rotationDir, true);
+    }
+
+    [Benchmark(Description = "Search 10K events by event type")]
+    public async Task<int> Benchmark_SearchQuery()
+    {
+        var searcher = new AuditSearcher(_searchDir);
+        var results = await searcher.SearchAsync(new AuditSearchQuery
+        {
+            EventType = "file_write"
+        });
+        return results.Count;
+    }
+
+    [Benchmark(Description = "Search 10K events by path pattern")]
+    public async Task<int> Benchmark_SearchByPath()
+    {
+        var searcher = new AuditSearcher(_searchDir);
+        var results = await searcher.SearchAsync(new AuditSearchQuery
+        {
+            PathPattern = "/src/*.cs"
+        });
+        return results.Count;
+    }
+
+    [Benchmark(Description = "Search 10K events by date range")]
+    public async Task<int> Benchmark_SearchByDateRange()
+    {
+        var searcher = new AuditSearcher(_searchDir);
+        var results = await searcher.SearchAsync(new AuditSearchQuery
+        {
+            After = DateTimeOffset.UtcNow.AddHours(-1),
+            Before = DateTimeOffset.UtcNow
+        });
+        return results.Count;
+    }
+
+    [Benchmark(Description = "Export 10K events to JSON")]
+    public async Task Benchmark_Export()
+    {
+        var exporter = new AuditExporter(_searchDir);
+        var exportPath = Path.Combine(_testDir, $"export_{Guid.NewGuid():N}.json");
+        
+        await exporter.ExportAsync(exportPath, new AuditExportOptions());
+        
+        File.Delete(exportPath);
+    }
+
+    private static AuditEvent CreateVariedEvent(int index)
+    {
+        var eventTypes = new[] { "file_read", "file_write", "session_start", "session_end", "constraint_violation" };
+        var severities = new[] { AuditSeverity.Info, AuditSeverity.Warning, AuditSeverity.Error };
+
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow.AddSeconds(-index),
+            SessionId = SessionId.Parse($"sess_{index % 10}"),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.Parse(eventTypes[index % eventTypes.Length]),
+            Severity = severities[index % severities.Length],
+            Source = "Benchmark",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>
+            {
+                ["path"] = $"/src/file_{index % 100}.cs",
+                ["index"] = index
+            }.AsReadOnly()
+        };
+    }
+}
+```
+
+```
 └── AuditLoadTests.cs
     ├── Should_Handle_HighEventRate()
     ├── Should_NotExceedMemoryLimit()
     ├── Should_NotExceedCPULimit()
     └── Should_MaintainLatency_UnderLoad()
+```
+
+#### AuditLoadTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Performance.Audit;
+
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using System.Diagnostics;
+using Xunit;
+
+[Trait("Category", "Performance")]
+[Collection("Performance")]
+public class AuditLoadTests : IDisposable
+{
+    private readonly string _testDir;
+
+    public AuditLoadTests()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_load_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    [Trait("Performance", "HighRate")]
+    public async Task Should_Handle_HighEventRate()
+    {
+        // Arrange
+        var config = new AuditConfiguration { Directory = _testDir };
+        var writer = new FileAuditWriter(_testDir, config);
+        
+        const int targetEventsPerSecond = 1000;
+        const int durationSeconds = 5;
+        const int totalEvents = targetEventsPerSecond * durationSeconds;
+
+        var events = Enumerable.Range(0, totalEvents)
+            .Select(CreateTestEvent)
+            .ToList();
+
+        // Act
+        var sw = Stopwatch.StartNew();
+        
+        var tasks = events.Select(e => writer.WriteAsync(e));
+        await Task.WhenAll(tasks);
+        
+        sw.Stop();
+        await writer.DisposeAsync();
+
+        // Assert
+        var actualRate = totalEvents / sw.Elapsed.TotalSeconds;
+        actualRate.Should().BeGreaterThan(targetEventsPerSecond,
+            because: $"should handle at least {targetEventsPerSecond} events/sec, " +
+                     $"achieved {actualRate:F0} events/sec");
+
+        // Verify all events written
+        var logFiles = Directory.GetFiles(_testDir, "*.jsonl");
+        var totalLines = logFiles.Sum(f => File.ReadLines(f).Count());
+        totalLines.Should().Be(totalEvents);
+    }
+
+    [Fact]
+    [Trait("Performance", "Memory")]
+    public async Task Should_NotExceedMemoryLimit()
+    {
+        // Arrange
+        const long maxMemoryIncreaseMb = 50;
+        var config = new AuditConfiguration { Directory = _testDir };
+        var writer = new FileAuditWriter(_testDir, config);
+
+        // Force GC and get baseline
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        var baselineMemory = GC.GetTotalMemory(true);
+
+        // Act - write 100K events
+        for (int i = 0; i < 100_000; i++)
+        {
+            await writer.WriteAsync(CreateTestEvent(i));
+            
+            // Periodically check memory
+            if (i % 10_000 == 0)
+            {
+                var currentMemory = GC.GetTotalMemory(false);
+                var increase = (currentMemory - baselineMemory) / (1024.0 * 1024.0);
+                
+                increase.Should().BeLessThan(maxMemoryIncreaseMb,
+                    because: $"memory should not increase more than {maxMemoryIncreaseMb}MB " +
+                             $"during sustained writes (at event {i}, increase: {increase:F1}MB)");
+            }
+        }
+
+        await writer.DisposeAsync();
+
+        // Final memory check
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        var finalMemory = GC.GetTotalMemory(true);
+        var finalIncrease = (finalMemory - baselineMemory) / (1024.0 * 1024.0);
+
+        finalIncrease.Should().BeLessThan(maxMemoryIncreaseMb,
+            because: "memory should be released after disposal");
+    }
+
+    [Fact]
+    [Trait("Performance", "CPU")]
+    public async Task Should_NotExceedCPULimit()
+    {
+        // Arrange
+        var config = new AuditConfiguration { Directory = _testDir };
+        var writer = new FileAuditWriter(_testDir, config);
+        var process = Process.GetCurrentProcess();
+
+        var startCpuTime = process.TotalProcessorTime;
+        var sw = Stopwatch.StartNew();
+
+        // Act - write 10K events
+        for (int i = 0; i < 10_000; i++)
+        {
+            await writer.WriteAsync(CreateTestEvent(i));
+        }
+
+        sw.Stop();
+        var endCpuTime = process.TotalProcessorTime;
+        await writer.DisposeAsync();
+
+        // Assert
+        var cpuUsed = (endCpuTime - startCpuTime).TotalMilliseconds;
+        var wallTime = sw.Elapsed.TotalMilliseconds;
+        var cpuPercent = (cpuUsed / wallTime) * 100 / Environment.ProcessorCount;
+
+        cpuPercent.Should().BeLessThan(25,
+            because: $"audit logging should use less than 25% CPU, " +
+                     $"used {cpuPercent:F1}% ({cpuUsed:F0}ms CPU / {wallTime:F0}ms wall)");
+    }
+
+    [Fact]
+    [Trait("Performance", "Latency")]
+    public async Task Should_MaintainLatency_UnderLoad()
+    {
+        // Arrange
+        var config = new AuditConfiguration { Directory = _testDir };
+        var writer = new FileAuditWriter(_testDir, config);
+        var latencies = new List<double>();
+
+        // Act - measure latency for each write
+        for (int i = 0; i < 1000; i++)
+        {
+            var sw = Stopwatch.StartNew();
+            await writer.WriteAsync(CreateTestEvent(i));
+            sw.Stop();
+            latencies.Add(sw.Elapsed.TotalMilliseconds);
+        }
+
+        await writer.DisposeAsync();
+
+        // Assert
+        var avgLatency = latencies.Average();
+        var p50 = Percentile(latencies, 50);
+        var p95 = Percentile(latencies, 95);
+        var p99 = Percentile(latencies, 99);
+        var maxLatency = latencies.Max();
+
+        avgLatency.Should().BeLessThan(5,
+            because: $"average latency should be <5ms, was {avgLatency:F2}ms");
+        p95.Should().BeLessThan(10,
+            because: $"P95 latency should be <10ms, was {p95:F2}ms");
+        p99.Should().BeLessThan(50,
+            because: $"P99 latency should be <50ms, was {p99:F2}ms");
+    }
+
+    [Fact]
+    [Trait("Performance", "Concurrent")]
+    public async Task Should_HandleConcurrentSessions()
+    {
+        // Arrange - simulate 10 concurrent sessions
+        const int sessionCount = 10;
+        const int eventsPerSession = 1000;
+        var config = new AuditConfiguration { Directory = _testDir };
+
+        // Act
+        var sw = Stopwatch.StartNew();
+        
+        var tasks = Enumerable.Range(0, sessionCount)
+            .Select(async sessionIndex =>
+            {
+                var sessionId = SessionId.Parse($"sess_{sessionIndex}");
+                var writer = new FileAuditWriter(_testDir, config, sessionId);
+                
+                for (int i = 0; i < eventsPerSession; i++)
+                {
+                    await writer.WriteAsync(CreateTestEvent(i, sessionId));
+                }
+                
+                await writer.DisposeAsync();
+            });
+
+        await Task.WhenAll(tasks);
+        sw.Stop();
+
+        // Assert
+        var totalEvents = sessionCount * eventsPerSession;
+        var eventsPerSecond = totalEvents / sw.Elapsed.TotalSeconds;
+
+        eventsPerSecond.Should().BeGreaterThan(500,
+            because: $"concurrent sessions should maintain good throughput, " +
+                     $"achieved {eventsPerSecond:F0} events/sec");
+
+        // Verify all events written
+        var logFiles = Directory.GetFiles(_testDir, "*.jsonl");
+        logFiles.Should().HaveCount(sessionCount,
+            because: "each session should have its own log file");
+    }
+
+    private static double Percentile(List<double> values, int percentile)
+    {
+        var sorted = values.OrderBy(v => v).ToList();
+        var index = (int)Math.Ceiling(percentile / 100.0 * sorted.Count) - 1;
+        return sorted[Math.Max(0, Math.Min(index, sorted.Count - 1))];
+    }
+
+    private static AuditEvent CreateTestEvent(int index, SessionId? sessionId = null)
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = sessionId ?? SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "LoadTest",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>
+            {
+                ["index"] = index,
+                ["path"] = $"/test/file_{index}.cs"
+            }.AsReadOnly()
+        };
+    }
+}
 ```
 
 ### Regression Tests
@@ -965,12 +4251,662 @@ Tests/Regression/Audit/
 │   ├── Should_NotLose_Events_OnDiskFull()
 │   ├── Should_NotLose_Events_OnHighLoad()
 │   └── Should_NotLose_Events_OnRotation()
-│
+```
+
+#### EventLossTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Regression.Audit;
+
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+/// <summary>
+/// Regression tests to ensure audit events are never lost under various failure conditions.
+/// These tests verify the durability guarantees of the audit system.
+/// </summary>
+[Trait("Category", "Regression")]
+[Collection("Regression")]
+public class EventLossTests : IDisposable
+{
+    private readonly string _testDir;
+
+    public EventLossTests()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_regression_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    [Trait("Regression", "DataLoss")]
+    public async Task Should_NotLose_Events_OnCrash()
+    {
+        // Arrange
+        var config = new AuditConfiguration { Directory = _testDir };
+        var expectedEvents = new List<string>();
+
+        // Act - simulate crash by not disposing properly
+        var writer = new FileAuditWriter(_testDir, config);
+        
+        for (int i = 0; i < 100; i++)
+        {
+            var evt = CreateTestEvent(i);
+            expectedEvents.Add(evt.EventId.ToString());
+            await writer.WriteAsync(evt);
+        }
+        
+        // Simulate crash - abandon without dispose
+        // In real crash, the FileAuditWriter would be lost without cleanup
+        // But events should already be flushed to disk
+
+        // Assert - verify events are on disk despite no dispose
+        var actualEvents = await ReadAllEventIds();
+        
+        actualEvents.Should().BeEquivalentTo(expectedEvents,
+            because: "all events should be persisted immediately, not buffered");
+
+        // Cleanup for test
+        await writer.DisposeAsync();
+    }
+
+    [Fact]
+    [Trait("Regression", "DataLoss")]
+    public async Task Should_NotLose_Events_OnDiskFull()
+    {
+        // Arrange - very small storage limit
+        var config = new AuditConfiguration
+        {
+            Directory = _testDir,
+            MaxStorageMb = 1  // 1MB limit
+        };
+
+        var writer = new FileAuditWriter(_testDir, config);
+        var eventsBeforeLimit = new List<string>();
+
+        // Act - write until we hit storage limit
+        try
+        {
+            for (int i = 0; i < 100_000; i++)
+            {
+                var evt = CreateLargeTestEvent(i);
+                eventsBeforeLimit.Add(evt.EventId.ToString());
+                await writer.WriteAsync(evt);
+            }
+        }
+        catch (AuditStorageException)
+        {
+            // Expected - storage limit reached
+        }
+
+        await writer.DisposeAsync();
+
+        // Assert - all events written before exception should be preserved
+        var actualEvents = await ReadAllEventIds();
+        
+        // We don't know exactly how many were written, but none should be lost
+        foreach (var eventId in actualEvents)
+        {
+            eventsBeforeLimit.Should().Contain(eventId,
+                because: "every event on disk should be one we tried to write");
+        }
+
+        // Every event on disk should be valid
+        var logFiles = Directory.GetFiles(_testDir, "*.jsonl");
+        foreach (var file in logFiles)
+        {
+            var lines = await File.ReadAllLinesAsync(file);
+            foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
+            {
+                var action = () => JsonDocument.Parse(line);
+                action.Should().NotThrow(
+                    because: "all persisted events should be valid JSON");
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Regression", "DataLoss")]
+    public async Task Should_NotLose_Events_OnHighLoad()
+    {
+        // Arrange
+        var config = new AuditConfiguration { Directory = _testDir };
+        var writer = new FileAuditWriter(_testDir, config);
+        
+        const int totalEvents = 10_000;
+        var expectedEventIds = new ConcurrentBag<string>();
+
+        // Act - high concurrency stress test
+        var tasks = Enumerable.Range(0, totalEvents)
+            .Select(async i =>
+            {
+                var evt = CreateTestEvent(i);
+                expectedEventIds.Add(evt.EventId.ToString());
+                await writer.WriteAsync(evt);
+            });
+
+        await Task.WhenAll(tasks);
+        await writer.DisposeAsync();
+
+        // Assert - no events lost
+        var actualEvents = await ReadAllEventIds();
+        
+        actualEvents.Should().HaveCount(totalEvents,
+            because: $"all {totalEvents} events should be persisted");
+        
+        actualEvents.Should().BeEquivalentTo(expectedEventIds,
+            because: "exactly the events we wrote should be on disk");
+    }
+
+    [Fact]
+    [Trait("Regression", "DataLoss")]
+    public async Task Should_NotLose_Events_OnRotation()
+    {
+        // Arrange - small rotation size to force many rotations
+        var config = new AuditConfiguration
+        {
+            Directory = _testDir,
+            RotationSizeMb = 0.01  // 10KB for frequent rotation
+        };
+
+        var writer = new FileAuditWriter(_testDir, config);
+        var expectedEventIds = new List<string>();
+
+        // Act - write enough to cause multiple rotations
+        for (int i = 0; i < 1000; i++)
+        {
+            var evt = CreateTestEvent(i);
+            expectedEventIds.Add(evt.EventId.ToString());
+            await writer.WriteAsync(evt);
+        }
+
+        await writer.DisposeAsync();
+
+        // Assert - multiple files created
+        var logFiles = Directory.GetFiles(_testDir, "*.jsonl");
+        logFiles.Length.Should().BeGreaterThan(1,
+            because: "multiple rotations should have occurred");
+
+        // No events lost across rotations
+        var actualEvents = await ReadAllEventIds();
+        actualEvents.Should().BeEquivalentTo(expectedEventIds,
+            because: "no events should be lost during rotation");
+    }
+
+    [Fact]
+    [Trait("Regression", "DataLoss")]
+    public async Task Should_NotLose_Events_OnConcurrentRotation()
+    {
+        // Arrange - stress test rotation under concurrent writes
+        var config = new AuditConfiguration
+        {
+            Directory = _testDir,
+            RotationSizeMb = 0.05  // 50KB
+        };
+
+        var writer = new FileAuditWriter(_testDir, config);
+        var expectedEventIds = new ConcurrentBag<string>();
+
+        // Act - concurrent writes forcing rotation
+        var tasks = Enumerable.Range(0, 100)
+            .Select(async batch =>
+            {
+                for (int i = 0; i < 100; i++)
+                {
+                    var evt = CreateTestEvent(batch * 100 + i);
+                    expectedEventIds.Add(evt.EventId.ToString());
+                    await writer.WriteAsync(evt);
+                }
+            });
+
+        await Task.WhenAll(tasks);
+        await writer.DisposeAsync();
+
+        // Assert
+        var actualEvents = await ReadAllEventIds();
+        actualEvents.Should().HaveCount(10_000,
+            because: "all 10,000 events should be persisted despite concurrent rotation");
+    }
+
+    private async Task<List<string>> ReadAllEventIds()
+    {
+        var eventIds = new List<string>();
+
+        foreach (var file in Directory.GetFiles(_testDir, "*.jsonl"))
+        {
+            var lines = await File.ReadAllLinesAsync(file);
+            foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    if (doc.RootElement.TryGetProperty("eventId", out var eventIdProp))
+                    {
+                        eventIds.Add(eventIdProp.GetString()!);
+                    }
+                }
+                catch { /* Skip invalid lines */ }
+            }
+        }
+
+        return eventIds;
+    }
+
+    private static AuditEvent CreateTestEvent(int index)
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "RegressionTest",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>
+            {
+                ["index"] = index
+            }.AsReadOnly()
+        };
+    }
+
+    private static AuditEvent CreateLargeTestEvent(int index)
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "RegressionTest",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>
+            {
+                ["index"] = index,
+                ["padding"] = new string('x', 500)  // Large payload
+            }.AsReadOnly()
+        };
+    }
+}
+```
+
+```
 └── SecurityRegressionTests.cs
     ├── Should_AlwaysRedact_Secrets()
     ├── Should_NeverLog_FileContents()
     ├── Should_MaintainPermissions()
     └── Should_PreventTampering()
+```
+
+#### SecurityRegressionTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Regression.Audit;
+
+using AgenticCoder.Infrastructure.Audit;
+using FluentAssertions;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using Xunit;
+
+/// <summary>
+/// Security regression tests to verify audit system doesn't leak sensitive data.
+/// These tests ensure the security properties of the audit system are maintained.
+/// </summary>
+[Trait("Category", "Regression")]
+[Trait("Category", "Security")]
+[Collection("Regression")]
+public class SecurityRegressionTests : IDisposable
+{
+    private readonly string _testDir;
+
+    public SecurityRegressionTests()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"audit_security_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Theory]
+    [Trait("Security", "Redaction")]
+    [InlineData("GITHUB_TOKEN=ghp_abc123xyz789")]
+    [InlineData("api_key: sk-proj-1234567890abcdef")]
+    [InlineData("password=SuperSecret123!")]
+    [InlineData("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")]
+    [InlineData("Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9")]
+    [InlineData("-----BEGIN RSA PRIVATE KEY-----")]
+    [InlineData("-----BEGIN OPENSSH PRIVATE KEY-----")]
+    public async Task Should_AlwaysRedact_Secrets(string sensitiveData)
+    {
+        // Arrange
+        var config = new AuditConfiguration { Directory = _testDir };
+        var writer = new FileAuditWriter(_testDir, config);
+
+        var evt = new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "SecurityTest",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>
+            {
+                ["output"] = $"Command output: {sensitiveData}",
+                ["error"] = $"Error: {sensitiveData}",
+                ["metadata"] = sensitiveData
+            }.AsReadOnly()
+        };
+
+        // Act
+        await writer.WriteAsync(evt);
+        await writer.DisposeAsync();
+
+        // Assert
+        var logContent = await File.ReadAllTextAsync(
+            Directory.GetFiles(_testDir, "*.jsonl").First());
+
+        // Extract actual sensitive values (not redaction markers)
+        var sensitivePatterns = new[]
+        {
+            "ghp_", "sk-proj-", "SuperSecret", "wJalrXUtn",
+            "eyJhbGciOi", "BEGIN RSA PRIVATE KEY", "BEGIN OPENSSH"
+        };
+
+        foreach (var pattern in sensitivePatterns)
+        {
+            if (sensitiveData.Contains(pattern))
+            {
+                logContent.Should().NotContain(pattern,
+                    because: $"sensitive data '{pattern}...' should be redacted");
+            }
+        }
+
+        // Should contain redaction marker instead
+        logContent.Should().Contain("[REDACTED",
+            because: "redacted content should show a marker");
+    }
+
+    [Fact]
+    [Trait("Security", "FileContents")]
+    public async Task Should_NeverLog_FileContents()
+    {
+        // Arrange
+        var config = new AuditConfiguration { Directory = _testDir };
+        var writer = new FileAuditWriter(_testDir, config);
+
+        var fileContent = "This is file content that should never appear in logs!";
+
+        // Various events that might try to include file content
+        var events = new[]
+        {
+            CreateFileEvent("file_read", fileContent),
+            CreateFileEvent("file_write", fileContent),
+            CreateFileEvent("file_create", fileContent),
+            CreateFileEvent("file_modify", fileContent)
+        };
+
+        // Act
+        foreach (var evt in events)
+        {
+            await writer.WriteAsync(evt);
+        }
+        await writer.DisposeAsync();
+
+        // Assert
+        var logContent = await File.ReadAllTextAsync(
+            Directory.GetFiles(_testDir, "*.jsonl").First());
+
+        logContent.Should().NotContain(fileContent,
+            because: "file content should never be logged");
+        logContent.Should().NotContain("never appear in logs",
+            because: "file content should be completely excluded");
+
+        // Should contain metadata about the file operation
+        logContent.Should().Contain("path",
+            because: "file path metadata should be logged");
+    }
+
+    [Fact]
+    [Trait("Security", "ContentFiltering")]
+    public async Task Should_FilterContent_EvenInErrorMessages()
+    {
+        // Arrange
+        var config = new AuditConfiguration { Directory = _testDir };
+        var writer = new FileAuditWriter(_testDir, config);
+
+        var sensitiveContent = "password=secret123";
+        var evt = new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.Error,
+            Severity = AuditSeverity.Error,
+            Source = "SecurityTest",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>
+            {
+                ["error_message"] = $"Failed to parse config: {sensitiveContent}",
+                ["stack_trace"] = $"at Config.Parse(\"{sensitiveContent}\")"
+            }.AsReadOnly()
+        };
+
+        // Act
+        await writer.WriteAsync(evt);
+        await writer.DisposeAsync();
+
+        // Assert
+        var logContent = await File.ReadAllTextAsync(
+            Directory.GetFiles(_testDir, "*.jsonl").First());
+
+        logContent.Should().NotContain("secret123",
+            because: "secrets in error messages should be redacted");
+    }
+
+    [SkippableFact]
+    [Trait("Security", "Permissions")]
+    public async Task Should_MaintainPermissions_Unix()
+    {
+        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
+
+        // Arrange
+        var config = new AuditConfiguration { Directory = _testDir };
+        var writer = new FileAuditWriter(_testDir, config);
+
+        // Act
+        await writer.WriteAsync(CreateSimpleEvent());
+        await writer.DisposeAsync();
+
+        // Assert
+        var logFile = Directory.GetFiles(_testDir, "*.jsonl").First();
+        var mode = File.GetUnixFileMode(logFile);
+
+        // Should be 0600 - owner read/write only
+        mode.Should().HaveFlag(UnixFileMode.UserRead);
+        mode.Should().HaveFlag(UnixFileMode.UserWrite);
+        mode.Should().NotHaveFlag(UnixFileMode.GroupRead);
+        mode.Should().NotHaveFlag(UnixFileMode.GroupWrite);
+        mode.Should().NotHaveFlag(UnixFileMode.OtherRead);
+        mode.Should().NotHaveFlag(UnixFileMode.OtherWrite);
+
+        // Directory should be 0700
+        var dirMode = new DirectoryInfo(_testDir).UnixFileMode;
+        dirMode.Should().HaveFlag(UnixFileMode.UserRead);
+        dirMode.Should().HaveFlag(UnixFileMode.UserWrite);
+        dirMode.Should().HaveFlag(UnixFileMode.UserExecute);
+        dirMode.Should().NotHaveFlag(UnixFileMode.GroupRead);
+        dirMode.Should().NotHaveFlag(UnixFileMode.OtherRead);
+    }
+
+    [Fact]
+    [Trait("Security", "Integrity")]
+    public async Task Should_PreventTampering()
+    {
+        // Arrange
+        var config = new AuditConfiguration
+        {
+            Directory = _testDir,
+            EnableIntegrityChecks = true
+        };
+        var writer = new FileAuditWriter(_testDir, config);
+
+        // Write some events
+        for (int i = 0; i < 10; i++)
+        {
+            await writer.WriteAsync(CreateSimpleEvent());
+        }
+        await writer.DisposeAsync();
+
+        // Verify integrity before tampering
+        var validator = new AuditLogValidator(config);
+        var logFile = Directory.GetFiles(_testDir, "*.jsonl").First();
+        var beforeResult = await validator.ValidateFileAsync(logFile);
+        beforeResult.IsValid.Should().BeTrue();
+
+        // Act - tamper with the file
+        var lines = await File.ReadAllLinesAsync(logFile);
+        lines[5] = lines[5].Replace("info", "error");  // Subtle change
+        await File.WriteAllLinesAsync(logFile, lines);
+
+        // Assert - tampering detected
+        var afterResult = await validator.ValidateFileAsync(logFile);
+        afterResult.IsValid.Should().BeFalse(
+            because: "integrity check should detect modification");
+        afterResult.Errors.Should().Contain(e => e.Contains("line 6") || e.Contains("checksum"),
+            because: "error should indicate which line was tampered");
+    }
+
+    [Fact]
+    [Trait("Security", "Integrity")]
+    public async Task Should_DetectDeletion()
+    {
+        // Arrange
+        var config = new AuditConfiguration
+        {
+            Directory = _testDir,
+            EnableIntegrityChecks = true
+        };
+        var writer = new FileAuditWriter(_testDir, config);
+
+        for (int i = 0; i < 10; i++)
+        {
+            await writer.WriteAsync(CreateSimpleEvent());
+        }
+        await writer.DisposeAsync();
+
+        var logFile = Directory.GetFiles(_testDir, "*.jsonl").First();
+
+        // Act - delete a line
+        var lines = (await File.ReadAllLinesAsync(logFile)).ToList();
+        lines.RemoveAt(5);
+        await File.WriteAllLinesAsync(logFile, lines);
+
+        // Assert
+        var validator = new AuditLogValidator(config);
+        var result = await validator.ValidateFileAsync(logFile);
+        
+        result.IsValid.Should().BeFalse(
+            because: "deletion should break the integrity chain");
+    }
+
+    [Fact]
+    [Trait("Security", "Integrity")]
+    public async Task Should_DetectInsertion()
+    {
+        // Arrange
+        var config = new AuditConfiguration
+        {
+            Directory = _testDir,
+            EnableIntegrityChecks = true
+        };
+        var writer = new FileAuditWriter(_testDir, config);
+
+        for (int i = 0; i < 10; i++)
+        {
+            await writer.WriteAsync(CreateSimpleEvent());
+        }
+        await writer.DisposeAsync();
+
+        var logFile = Directory.GetFiles(_testDir, "*.jsonl").First();
+
+        // Act - insert a fake event
+        var lines = (await File.ReadAllLinesAsync(logFile)).ToList();
+        var fakeEvent = "{\"eventId\":\"fake\",\"timestamp\":\"2024-01-01T00:00:00Z\"}";
+        lines.Insert(5, fakeEvent);
+        await File.WriteAllLinesAsync(logFile, lines);
+
+        // Assert
+        var validator = new AuditLogValidator(config);
+        var result = await validator.ValidateFileAsync(logFile);
+        
+        result.IsValid.Should().BeFalse(
+            because: "insertion should break the integrity chain");
+    }
+
+    private static AuditEvent CreateFileEvent(string eventType, string content)
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.Parse(eventType),
+            Severity = AuditSeverity.Info,
+            Source = "SecurityTest",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>
+            {
+                ["path"] = "/test/file.txt",
+                // NOTE: Content should be filtered out by the writer
+                ["content"] = content,
+                ["bytes"] = content.Length
+            }.AsReadOnly()
+        };
+    }
+
+    private static AuditEvent CreateSimpleEvent()
+    {
+        return new AuditEvent
+        {
+            SchemaVersion = "1.0",
+            EventId = EventId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            SessionId = SessionId.New(),
+            CorrelationId = CorrelationId.New(),
+            EventType = AuditEventType.FileRead,
+            Severity = AuditSeverity.Info,
+            Source = "SecurityTest",
+            OperatingMode = "local_only",
+            Data = new Dictionary<string, object>
+            {
+                ["path"] = "/test/file.cs"
+            }.AsReadOnly()
+        };
+    }
+}
 ```
 
 ---

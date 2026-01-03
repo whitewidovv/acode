@@ -28,17 +28,17 @@ public sealed class ConfigCommand
     /// <summary>
     /// Validates the configuration file.
     /// </summary>
-    /// <param name="filePath">Path to config file.</param>
+    /// <param name="repositoryRoot">Repository root directory.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Exit code (0 for success, 1 for errors).</returns>
-    public async Task<int> ValidateAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task<int> ValidateAsync(string repositoryRoot, CancellationToken cancellationToken = default)
     {
         try
         {
             Console.WriteLine("Validating configuration...");
             Console.WriteLine();
 
-            var config = await _loader.LoadAsync(filePath, cancellationToken).ConfigureAwait(false);
+            var config = await _loader.LoadAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
             var result = _validator.Validate(config);
 
             // Display validation results
@@ -81,9 +81,16 @@ public sealed class ConfigCommand
                 return 1;
             }
         }
-        catch (FileNotFoundException ex)
+        catch (FileNotFoundException)
         {
-            Console.WriteLine($"Error: Configuration file not found: {ex.Message}");
+            Console.WriteLine("Error: Configuration validation failed:");
+            Console.WriteLine("CFG001: Configuration file not found: .agent/config.yml");
+            return 1;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.WriteLine("Error: Configuration invalid:");
+            Console.WriteLine(ex.Message);
             return 1;
         }
         catch (Exception ex)
@@ -96,17 +103,17 @@ public sealed class ConfigCommand
     /// <summary>
     /// Shows the configuration file.
     /// </summary>
-    /// <param name="filePath">Path to config file.</param>
+    /// <param name="repositoryRoot">Repository root directory.</param>
     /// <param name="format">Output format (yaml or json).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Exit code (0 for success, 1 for errors).</returns>
-    public async Task<int> ShowAsync(string filePath, string format = "yaml", CancellationToken cancellationToken = default)
+    public async Task<int> ShowAsync(string repositoryRoot, string format = "yaml", CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(format);
 
         try
         {
-            var config = await _loader.LoadAsync(filePath, cancellationToken).ConfigureAwait(false);
+            var config = await _loader.LoadAsync(repositoryRoot, cancellationToken).ConfigureAwait(false);
 
             if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
             {
@@ -133,9 +140,15 @@ public sealed class ConfigCommand
 
             return 0;
         }
-        catch (FileNotFoundException ex)
+        catch (FileNotFoundException)
         {
-            Console.WriteLine($"Error: Configuration file not found: {ex.Message}");
+            Console.WriteLine("Error: Configuration file not found: .agent/config.yml");
+            return 1;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.WriteLine("Error: Configuration validation failed:");
+            Console.WriteLine(ex.Message);
             return 1;
         }
         catch (Exception ex)

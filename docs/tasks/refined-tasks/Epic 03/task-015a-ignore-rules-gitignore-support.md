@@ -28,6 +28,63 @@ The ignore service is used by multiple systems. Indexing uses it. File enumerati
 
 Performance is critical. Ignore checks happen for every file. Compiled patterns enable fast matching. Caching reduces repeated work.
 
+### Business Value
+
+Effective ignore rule support is fundamental to the quality and usability of the indexing system. Without proper ignore rules, the index would be polluted with build artifacts, dependency folders like node_modules, binary files, and other non-essential content that dramatically degrades search relevance and inflates index size. By implementing comprehensive gitignore support, the agent leverages the project's existing configuration, requiring zero additional setup for most repositories.
+
+The business value extends beyond mere file filtering. Proper ignore handling ensures that context provided to the LLM is focused on actual source code and meaningful project files rather than generated or vendored content. This directly impacts response quality, token efficiency, and the agent's ability to understand project structure. Teams already invested in maintaining .gitignore files see immediate benefit without configuration overhead.
+
+Furthermore, the ignore service serves as a foundational component for multiple downstream systems. Search results, context packing, file enumeration, and agent tool responses all depend on consistent ignore behavior. A single, well-tested ignore implementation prevents fragmented logic and ensures uniform behavior across all agent operations.
+
+### Scope
+
+1. **Gitignore Parser** - Full-fidelity parser for .gitignore files supporting all standard syntax including comments, blank lines, wildcards, double wildcards, character classes, negation, and directory-specific patterns
+2. **Pattern Matcher** - High-performance glob pattern matching engine with compiled pattern support for fast evaluation against file paths
+3. **Binary Detection** - Automatic binary file detection via file extension lookup and magic number inspection for common binary formats
+4. **Ignore Service** - Unified API that aggregates rules from multiple sources (.gitignore files, config, global settings) with proper precedence ordering
+5. **CLI Commands** - `acode ignore check` and `acode ignore list` commands for debugging and visibility into ignore behavior
+
+### Integration Points
+
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Index Service | Consumer | Calls IsIgnored() during file enumeration to filter indexed content |
+| File Enumerator | Consumer | Uses ignore service to exclude files from directory traversal |
+| Context Packer | Consumer | Filters context candidates through ignore rules before inclusion |
+| Configuration Service | Provider | Supplies additional ignore patterns from .agent/config.yml |
+| Search Tools | Consumer | Ensures search results respect ignore rules for consistency |
+| CLI Commands | Consumer | Exposes ignore checking and listing for debugging |
+
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Malformed gitignore pattern | Invalid pattern skipped, file may be incorrectly included | Log warning with line number, continue processing remaining patterns |
+| Missing .gitignore file | No project-specific ignores applied | Graceful handling with empty rule set, log at debug level only |
+| Encoding errors in gitignore | Parser fails to read patterns | Attempt UTF-8 fallback, then Latin-1, log warning and skip problematic lines |
+| Recursive pattern explosion | Pattern matching becomes slow | Set maximum recursion depth, timeout on pattern compilation |
+| Binary detection false positive | Text file incorrectly excluded | Provide override mechanism via explicit negation patterns |
+| Binary detection false negative | Binary file incorrectly indexed | Accept as low-impact; index size increases but functionality preserved |
+
+### Assumptions
+
+1. The .gitignore format follows the specification documented in the Git manual and behavior matches git version 2.x
+2. Most repositories will have existing .gitignore files that cover the majority of files that should be excluded
+3. Binary file detection by extension covers 95%+ of binary files encountered in typical repositories
+4. Magic number detection is only needed for files without extensions or with misleading extensions
+5. Pattern matching performance is critical since every file enumeration triggers ignore checks
+6. Users expect gitignore behavior to match git exactly - any deviation will cause confusion
+7. The .agent/config.yml ignore patterns supplement rather than replace gitignore rules
+8. Case sensitivity of pattern matching follows the operating system conventions
+
+### Security Considerations
+
+1. **Path Traversal Prevention** - Pattern matching must not allow patterns that could match outside the repository root directory
+2. **Symbolic Link Handling** - Ignore checking must handle symlinks carefully to prevent escaping repository boundaries
+3. **Denial of Service** - Maliciously crafted patterns with excessive backtracking must be rejected or timeout protected
+4. **Sensitive File Exposure** - Binary detection must not read excessive file content; limit magic number inspection to first 512 bytes
+5. **Configuration Injection** - Patterns from configuration must be validated to prevent regex injection if patterns are compiled to regex
+
 ---
 
 ## Glossary / Terms
@@ -69,64 +126,80 @@ The following items are explicitly excluded from Task 015.a:
 
 ### Gitignore Parsing
 
-- FR-001: Parse .gitignore files
-- FR-002: Handle comments (#)
-- FR-003: Handle blank lines
-- FR-004: Handle trailing spaces
-- FR-005: Handle escape characters
+| ID | Requirement |
+|----|-------------|
+| FR-015a-01 | The system MUST parse .gitignore files from the repository root and any subdirectories |
+| FR-015a-02 | The parser MUST correctly handle comment lines beginning with # character |
+| FR-015a-03 | The parser MUST skip blank lines without error |
+| FR-015a-04 | The parser MUST handle trailing spaces in patterns correctly per git specification |
+| FR-015a-05 | The parser MUST support escape characters for special characters in patterns |
 
 ### Pattern Syntax
 
-- FR-006: Simple patterns MUST work
-- FR-007: Wildcard (*) MUST work
-- FR-008: Double wildcard (**) MUST work
-- FR-009: Question mark (?) MUST work
-- FR-010: Character class ([]) MUST work
-- FR-011: Negation (!) MUST work
-- FR-012: Directory slash (/) MUST work
+| ID | Requirement |
+|----|-------------|
+| FR-015a-06 | Simple literal patterns MUST match files with exact names |
+| FR-015a-07 | Single wildcard (*) MUST match any sequence of characters within a path component |
+| FR-015a-08 | Double wildcard (**) MUST match zero or more directories in the path |
+| FR-015a-09 | Question mark (?) MUST match exactly one character |
+| FR-015a-10 | Character class ([abc], [a-z]) MUST match any single character in the class |
+| FR-015a-11 | Negation patterns (!) MUST re-include previously excluded files |
+| FR-015a-12 | Trailing slash (/) MUST indicate the pattern matches directories only |
 
 ### Pattern Matching
 
-- FR-013: Match file names
-- FR-014: Match full paths
-- FR-015: Match directories
-- FR-016: Case handling per OS
-- FR-017: Slash normalization
+| ID | Requirement |
+|----|-------------|
+| FR-015a-13 | The matcher MUST support matching against file names only |
+| FR-015a-14 | The matcher MUST support matching against full relative paths |
+| FR-015a-15 | The matcher MUST correctly identify directory matches when pattern ends with slash |
+| FR-015a-16 | Case sensitivity MUST follow the operating system conventions (case-insensitive on Windows) |
+| FR-015a-17 | Path separators MUST be normalized to forward slashes internally |
 
 ### Multiple Gitignores
 
-- FR-018: Root .gitignore MUST work
-- FR-019: Nested .gitignore MUST work
-- FR-020: Precedence correct
-- FR-021: Inherit parent rules
+| ID | Requirement |
+|----|-------------|
+| FR-015a-18 | The root .gitignore MUST apply to all files in the repository |
+| FR-015a-19 | Nested .gitignore files MUST apply only to their directory subtree |
+| FR-015a-20 | Pattern precedence MUST follow git rules: later patterns override earlier ones |
+| FR-015a-21 | Child directory patterns MUST inherit parent directory patterns |
 
 ### Additional Sources
 
-- FR-022: Config ignores MUST work
-- FR-023: Global ignores MUST work
-- FR-024: Command-line ignores MUST work
-- FR-025: Source precedence correct
+| ID | Requirement |
+|----|-------------|
+| FR-015a-22 | The system MUST support additional ignore patterns from .agent/config.yml |
+| FR-015a-23 | The system MUST support a global ignore file configured by the user |
+| FR-015a-24 | The system MUST support command-line specified ignore patterns |
+| FR-015a-25 | Source precedence MUST be: gitignore < global < config < command-line |
 
 ### Binary Detection
 
-- FR-026: Detect by extension
-- FR-027: Detect by magic number
-- FR-028: Auto-ignore binaries
-- FR-029: Override detection
+| ID | Requirement |
+|----|-------------|
+| FR-015a-26 | The system MUST detect binary files by file extension |
+| FR-015a-27 | The system MUST detect binary files by magic number signature in file header |
+| FR-015a-28 | Detected binary files MUST be automatically added to the ignore list |
+| FR-015a-29 | Binary detection MUST be overridable via explicit negation patterns |
 
 ### API
 
-- FR-030: IsIgnored(path) MUST work
-- FR-031: GetIgnores() MUST work
-- FR-032: AddIgnore() MUST work
-- FR-033: Refresh() MUST work
+| ID | Requirement |
+|----|-------------|
+| FR-015a-30 | IsIgnored(path) MUST return true if the path matches any ignore pattern |
+| FR-015a-31 | GetIgnores() MUST return all currently active ignore patterns with their sources |
+| FR-015a-32 | AddIgnore(pattern, source) MUST add a new pattern to the ignore list at runtime |
+| FR-015a-33 | Refresh() MUST reload all ignore patterns from disk sources |
 
 ### Performance
 
-- FR-034: Compile patterns
-- FR-035: Cache results
-- FR-036: Lazy loading
-- FR-037: Batch checking
+| ID | Requirement |
+|----|-------------|
+| FR-015a-34 | Patterns MUST be compiled to optimized form on first load |
+| FR-015a-35 | IsIgnored results MUST be cached for repeated calls with the same path |
+| FR-015a-36 | Ignore sources MUST be loaded lazily when first accessed |
+| FR-015a-37 | The API MUST support batch checking of multiple paths in a single call |
 
 ---
 
@@ -134,21 +207,43 @@ The following items are explicitly excluded from Task 015.a:
 
 ### Performance
 
-- NFR-001: Single check < 1ms
-- NFR-002: Batch 1K < 50ms
-- NFR-003: Load ignores < 50ms
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-015a-01 | Performance | Single IsIgnored() check MUST complete in less than 1ms average |
+| NFR-015a-02 | Performance | Batch checking of 1,000 paths MUST complete in less than 50ms |
+| NFR-015a-03 | Performance | Loading and compiling all ignore patterns MUST complete in less than 50ms |
 
 ### Reliability
 
-- NFR-004: Invalid patterns handled
-- NFR-005: Missing files handled
-- NFR-006: Encoding handled
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-015a-04 | Reliability | Invalid patterns MUST be skipped with warning rather than failing the entire parse |
+| NFR-015a-05 | Reliability | Missing .gitignore files MUST be handled gracefully without errors |
+| NFR-015a-06 | Reliability | Non-UTF-8 encoded gitignore files MUST be handled with fallback encoding |
 
 ### Compatibility
 
-- NFR-007: Match git behavior
-- NFR-008: Cross-platform paths
-- NFR-009: Case sensitivity
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-015a-07 | Compatibility | Pattern matching behavior MUST match git's behavior for all documented patterns |
+| NFR-015a-08 | Compatibility | Path handling MUST work correctly on Windows, macOS, and Linux |
+| NFR-015a-09 | Compatibility | Case sensitivity MUST respect operating system file system conventions |
+
+### Maintainability
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-015a-10 | Maintainability | The ignore service MUST have a clear interface for extension with new pattern sources |
+| NFR-015a-11 | Maintainability | Pattern matching logic MUST be unit testable in isolation from file system |
+| NFR-015a-12 | Maintainability | All gitignore parsing edge cases MUST be covered by unit tests |
+
+### Observability
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-015a-13 | Observability | Pattern compilation failures MUST be logged with file and line number |
+| NFR-015a-14 | Observability | Cache hit/miss ratios MUST be available for performance monitoring |
+| NFR-015a-15 | Observability | The ignore check command MUST show which pattern caused a file to be ignored |
 
 ---
 
@@ -315,22 +410,71 @@ Source: auto-binary
 ```
 Tests/Unit/Ignore/
 ├── GitignoreParserTests.cs
-│   ├── Should_Parse_Comments()
-│   ├── Should_Parse_Patterns()
-│   └── Should_Handle_Negation()
+│   ├── Should_Parse_Empty_File()
+│   ├── Should_Parse_Comment_Lines()
+│   ├── Should_Parse_Blank_Lines()
+│   ├── Should_Parse_Simple_Pattern()
+│   ├── Should_Parse_Directory_Pattern()
+│   ├── Should_Parse_Negation_Pattern()
+│   ├── Should_Parse_Escaped_Characters()
+│   ├── Should_Parse_Trailing_Spaces()
+│   ├── Should_Handle_BOM()
+│   ├── Should_Handle_Different_Line_Endings()
+│   └── Should_Return_Line_Numbers()
 │
 ├── PatternMatcherTests.cs
-│   ├── Should_Match_Wildcard()
-│   ├── Should_Match_DoubleWildcard()
-│   └── Should_Match_Directory()
+│   ├── Should_Match_Exact_Filename()
+│   ├── Should_Match_Single_Wildcard()
+│   ├── Should_Match_Double_Wildcard()
+│   ├── Should_Match_Question_Mark()
+│   ├── Should_Match_Character_Class()
+│   ├── Should_Match_Negated_Class()
+│   ├── Should_Match_Directory_Only()
+│   ├── Should_Match_Rooted_Pattern()
+│   ├── Should_Match_Deeply_Nested()
+│   ├── Should_Handle_Case_Sensitivity()
+│   ├── Should_Handle_Leading_Slash()
+│   ├── Should_Handle_Trailing_Slash()
+│   └── Should_Not_Match_Non_Matching()
+│
+├── NegationTests.cs
+│   ├── Should_Negate_Previous_Pattern()
+│   ├── Should_Handle_Multiple_Negations()
+│   ├── Should_Apply_Order_Correctly()
+│   ├── Should_Handle_Directory_Negation()
+│   └── Should_Handle_Nested_Negation()
 │
 ├── BinaryDetectorTests.cs
-│   ├── Should_Detect_By_Extension()
-│   └── Should_Detect_By_MagicNumber()
+│   ├── Should_Detect_Image_Extensions()
+│   ├── Should_Detect_Archive_Extensions()
+│   ├── Should_Detect_Executable_Extensions()
+│   ├── Should_Detect_Media_Extensions()
+│   ├── Should_Detect_Office_Extensions()
+│   ├── Should_Detect_By_Magic_Number()
+│   ├── Should_Detect_ELF_Binary()
+│   ├── Should_Detect_PE_Binary()
+│   ├── Should_Detect_Mach_O_Binary()
+│   ├── Should_Handle_Text_File()
+│   ├── Should_Handle_Unknown_Extension()
+│   └── Should_Handle_No_Extension()
 │
-└── IgnoreServiceTests.cs
-    ├── Should_Combine_Sources()
-    └── Should_Handle_Precedence()
+├── IgnoreServiceTests.cs
+│   ├── Should_Load_Gitignore()
+│   ├── Should_Load_Nested_Gitignores()
+│   ├── Should_Load_Config_Ignores()
+│   ├── Should_Load_Global_Ignores()
+│   ├── Should_Combine_All_Sources()
+│   ├── Should_Apply_Precedence_Order()
+│   ├── Should_Cache_Results()
+│   ├── Should_Refresh_On_Demand()
+│   ├── Should_Handle_Missing_Gitignore()
+│   └── Should_Handle_Invalid_Pattern()
+│
+└── IgnoreCacheTests.cs
+    ├── Should_Cache_Check_Results()
+    ├── Should_Invalidate_On_Pattern_Change()
+    ├── Should_Invalidate_On_Refresh()
+    └── Should_Handle_Large_Path_Count()
 ```
 
 ### Integration Tests
@@ -338,7 +482,15 @@ Tests/Unit/Ignore/
 ```
 Tests/Integration/Ignore/
 ├── IgnoreIntegrationTests.cs
-│   └── Should_Work_With_Real_Repo()
+│   ├── Should_Work_With_Real_Gitignore()
+│   ├── Should_Work_With_Nested_Directories()
+│   ├── Should_Handle_Large_Gitignore()
+│   ├── Should_Handle_Many_Ignore_Files()
+│   └── Should_Work_With_Index_Build()
+│
+└── BinaryIntegrationTests.cs
+    ├── Should_Detect_Real_Binaries()
+    └── Should_Not_False_Positive()
 ```
 
 ### E2E Tests
@@ -346,7 +498,10 @@ Tests/Integration/Ignore/
 ```
 Tests/E2E/Ignore/
 ├── IgnoreE2ETests.cs
-│   └── Should_Filter_Index()
+│   ├── Should_Filter_Index_Build()
+│   ├── Should_Filter_Search_Results()
+│   ├── Should_Show_Check_Command()
+│   └── Should_Show_List_Command()
 ```
 
 ### Performance Benchmarks

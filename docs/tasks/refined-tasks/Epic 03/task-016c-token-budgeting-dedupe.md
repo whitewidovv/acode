@@ -10,23 +10,74 @@
 
 ## Description
 
-Task 016.c implements token budgeting and deduplication. Token budgeting ensures context fits the LLM window. Deduplication removes redundant content.
+### Business Value
 
-Token budgeting is essential. LLMs have fixed context windows. Exceeding the window causes errors. Budget management prevents this.
+Token budgeting is the gatekeeper that ensures the agent's context never exceeds LLM limits while maximizing the value of every token spent. Without proper budgeting, requests fail with context overflow errors—a catastrophic user experience. Task 016.c delivers the precise token management and deduplication logic that makes context assembly reliable and efficient.
 
-Accurate token counting is critical. Different tokenizers count differently. Use the appropriate tokenizer for the target model. Approximate counting is insufficient.
+Every token matters in a fixed context window. Wasting tokens on duplicate content—the same function included from multiple search results—directly reduces the unique information available to the LLM. Deduplication reclaims these wasted tokens, often recovering 10-30% of context capacity in typical codebases where related searches frequently overlap.
 
-Budget allocation is strategic. Reserve space for system prompts. Reserve space for responses. Allocate remaining to context.
+Accurate token counting is non-negotiable. Approximate counting leads to either wasted capacity (conservative estimates) or runtime failures (optimistic estimates). By using the actual tokenizer for the target model, this system provides exact counts that enable precise budget management. Combined with category-based allocation, teams can tune how context space is divided between tool results, open files, and search results.
 
-Category budgets distribute tokens. Tool results get a share. Open files get a share. Search results get a share. Configurable ratios.
+### Scope
 
-Deduplication saves tokens. The same code might appear from multiple sources. Include it once. Use saved tokens for other content.
+This task defines the complete token budgeting and deduplication subsystem:
 
-Exact deduplication catches identical chunks. Same file, same lines, same content. Easy to detect. Always remove duplicates.
+1. **Token Counter:** Accurate token counting using model-specific tokenizers (tiktoken for GPT models, claude tokenizer for Anthropic).
 
-Overlap deduplication handles partial matches. Two chunks might share lines. Merge them or keep the better one.
+2. **Budget Manager:** Tracks total budget, reserves space for system prompts and responses, and enforces limits.
 
-Token counting is expensive. Cache counts when possible. Reuse cached counts. Invalidate on content change.
+3. **Category Allocator:** Divides available budget across content categories (tool results, open files, search results, references) based on configurable ratios.
+
+4. **Exact Deduplication:** Detects and removes identical chunks that appear from multiple sources.
+
+5. **Overlap Deduplication:** Detects and merges chunks with significant line overlap to eliminate redundancy.
+
+### Integration Points
+
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Task 016 (Context Packer) | Parent System | Budget manager is invoked by Context Packer for selection |
+| Task 016.a (Chunking) | Upstream | Receives chunks with token estimates |
+| Task 016.b (Ranking) | Upstream | Receives ranked chunks for budget-constrained selection |
+| Task 002 (Config) | Configuration | Budget settings from `.agent/config.yml` |
+| Task 004 (Model Provider) | Model Info | Target model context window size |
+| Task 011 (Session) | System Prompt | System prompt token count for reservation |
+
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Tokenizer initialization fails | Cannot count tokens | Fallback to approximate counting (4 chars = 1 token) |
+| Token count exceeds budget | Selection fails | Truncate lowest-ranked chunks until budget met |
+| Category allocation exceeds 100% | Invalid configuration | Normalize allocations, log warning |
+| Deduplication false positive | Unique content removed | Conservative overlap threshold (default 80%) |
+| Merge creates oversized chunk | Merged chunk exceeds limit | Re-split after merge if necessary |
+| Cache invalidation missed | Stale token counts | Timestamp-based cache invalidation |
+| Unicode counting error | Incorrect token estimate | Proper UTF-8 handling in tokenizer |
+| Empty result after budgeting | No context for LLM | Minimum content guarantee, warning to user |
+
+### Assumptions
+
+1. The target model's tokenizer is available (tiktoken for OpenAI, etc.)
+2. Token counting is deterministic for the same content
+3. System prompt and expected response size are known at selection time
+4. Category allocations are configured and sum to 100%
+5. Chunks have accurate line number metadata for overlap detection
+6. Token count caching is beneficial due to repeated content
+7. Deduplication is preferred over including duplicates
+8. Budget enforcement is strict—no context overflow allowed
+
+### Security Considerations
+
+1. **No Arbitrary Code in Tokenizer:** Tokenizer must be a trusted library, not executing arbitrary content.
+
+2. **Memory Limits on Counting:** Token counting must handle large content without memory exhaustion.
+
+3. **Cache Integrity:** Token count cache must not be manipulable to cause budget overflow.
+
+4. **Audit Trail:** Budget decisions (what was included/excluded) must be logged for debugging.
+
+5. **Deterministic Selection:** Budget selection must be deterministic for reproducibility and auditing.
 
 ---
 
@@ -66,87 +117,109 @@ The following items are explicitly excluded from Task 016.c:
 
 ## Functional Requirements
 
-### Token Counting
+### Token Counting (FR-016c-01 to FR-016c-05)
 
-- FR-001: Count tokens accurately
-- FR-002: Support tiktoken
-- FR-003: Support model-specific tokenizers
-- FR-004: Cache token counts
-- FR-005: Handle unicode correctly
+| ID | Requirement |
+|----|-------------|
+| FR-016c-01 | System MUST count tokens accurately using model-specific tokenizer |
+| FR-016c-02 | System MUST support tiktoken for OpenAI models |
+| FR-016c-03 | System MUST support model-specific tokenizers for other providers |
+| FR-016c-04 | System MUST cache token counts for repeated content |
+| FR-016c-05 | System MUST handle unicode content correctly |
 
-### Budget Management
+### Budget Management (FR-016c-06 to FR-016c-10)
 
-- FR-006: Track total budget
-- FR-007: Reserve for system prompt
-- FR-008: Reserve for response
-- FR-009: Calculate available budget
-- FR-010: Configurable reserves
+| ID | Requirement |
+|----|-------------|
+| FR-016c-06 | System MUST track total context window budget |
+| FR-016c-07 | System MUST reserve tokens for system prompt |
+| FR-016c-08 | System MUST reserve tokens for expected response |
+| FR-016c-09 | System MUST calculate available budget after reserves |
+| FR-016c-10 | Reserve amounts MUST be configurable |
 
-### Category Allocation
+### Category Allocation (FR-016c-11 to FR-016c-15)
 
-- FR-011: Allocate by category
-- FR-012: Configurable ratios
-- FR-013: Track category usage
-- FR-014: Rebalance if under-used
-- FR-015: Report allocation
+| ID | Requirement |
+|----|-------------|
+| FR-016c-11 | System MUST allocate available budget by content category |
+| FR-016c-12 | Category allocation ratios MUST be configurable |
+| FR-016c-13 | System MUST track token usage per category |
+| FR-016c-14 | System MUST redistribute unused category allocation |
+| FR-016c-15 | System MUST report allocation breakdown |
 
-### Budget Enforcement
+### Budget Enforcement (FR-016c-16 to FR-016c-20)
 
-- FR-016: Enforce total limit
-- FR-017: Enforce category limits
-- FR-018: Handle overflow
-- FR-019: Truncate if needed
-- FR-020: Report overflow
+| ID | Requirement |
+|----|-------------|
+| FR-016c-16 | System MUST enforce total context budget limit |
+| FR-016c-17 | System MUST enforce per-category budget limits |
+| FR-016c-18 | System MUST handle budget overflow gracefully |
+| FR-016c-19 | System MUST truncate content to fit budget when necessary |
+| FR-016c-20 | System MUST report when content is truncated due to budget |
 
-### Exact Deduplication
+### Exact Deduplication (FR-016c-21 to FR-016c-24)
 
-- FR-021: Detect identical chunks
-- FR-022: Keep highest-ranked
-- FR-023: Remove duplicates
-- FR-024: Track dedup savings
+| ID | Requirement |
+|----|-------------|
+| FR-016c-21 | System MUST detect identical chunks by content hash |
+| FR-016c-22 | System MUST keep highest-ranked instance of duplicate chunks |
+| FR-016c-23 | System MUST remove lower-ranked duplicate chunks |
+| FR-016c-24 | System MUST track and report deduplication savings |
 
-### Overlap Deduplication
+### Overlap Deduplication (FR-016c-25 to FR-016c-28)
 
-- FR-025: Detect overlapping chunks
-- FR-026: Calculate overlap amount
-- FR-027: Merge or keep best
-- FR-028: Configurable threshold
+| ID | Requirement |
+|----|-------------|
+| FR-016c-25 | System MUST detect chunks with overlapping line ranges |
+| FR-016c-26 | System MUST calculate overlap percentage between chunks |
+| FR-016c-27 | System MUST merge or deduplicate chunks exceeding overlap threshold |
+| FR-016c-28 | Overlap threshold MUST be configurable (default: 80%) |
 
-### Selection
+### Selection (FR-016c-29 to FR-016c-32)
 
-- FR-029: Select to fill budget
-- FR-030: Prioritize by rank
-- FR-031: Respect category limits
-- FR-032: Optimize filling
+| ID | Requirement |
+|----|-------------|
+| FR-016c-29 | System MUST select chunks to fill available budget |
+| FR-016c-30 | System MUST prioritize selection by ranking score |
+| FR-016c-31 | System MUST respect category limits during selection |
+| FR-016c-32 | System MUST optimize budget utilization |
 
-### Reporting
+### Reporting (FR-016c-33 to FR-016c-36)
 
-- FR-033: Report token usage
-- FR-034: Report dedup savings
-- FR-035: Report category breakdown
-- FR-036: Report overflow warnings
+| ID | Requirement |
+|----|-------------|
+| FR-016c-33 | System MUST report total token usage |
+| FR-016c-34 | System MUST report deduplication savings in tokens |
+| FR-016c-35 | System MUST report category-wise token breakdown |
+| FR-016c-36 | System MUST report overflow warnings when budget exceeded |
 
 ---
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-016c-01 to NFR-016c-03)
 
-- NFR-001: Token count < 10ms/1000 tokens
-- NFR-002: Dedup check < 20ms
-- NFR-003: Selection < 50ms
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-016c-01 | Performance | Token counting MUST complete in less than 10ms per 1000 tokens |
+| NFR-016c-02 | Performance | Deduplication check MUST complete in less than 20ms for 100 chunks |
+| NFR-016c-03 | Performance | Budget selection MUST complete in less than 50ms |
 
-### Accuracy
+### Accuracy (NFR-016c-04 to NFR-016c-06)
 
-- NFR-004: Count within 0.5%
-- NFR-005: No budget overflow
-- NFR-006: Correct dedup
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-016c-04 | Accuracy | Token counts MUST be within 0.5% of actual model tokenization |
+| NFR-016c-05 | Accuracy | Selected content MUST NOT exceed total budget |
+| NFR-016c-06 | Accuracy | Deduplication MUST correctly identify duplicate content |
 
-### Reliability
+### Reliability (NFR-016c-07 to NFR-016c-09)
 
-- NFR-007: Handle edge cases
-- NFR-008: Graceful fallback
-- NFR-009: No data loss
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-016c-07 | Reliability | System MUST handle edge cases (empty input, single chunk) |
+| NFR-016c-08 | Reliability | System MUST fall back gracefully when tokenizer unavailable |
+| NFR-016c-09 | Reliability | No content data MUST be lost during budgeting operations |
 
 ---
 
@@ -319,27 +392,77 @@ Deduplication:
 ```
 Tests/Unit/Context/Budget/
 ├── TokenCounterTests.cs
-│   ├── Should_Count_Accurately()
+│   ├── Should_Count_Empty_String()
+│   ├── Should_Count_Single_Word()
+│   ├── Should_Count_Sentence()
+│   ├── Should_Count_Paragraph()
+│   ├── Should_Count_Code()
+│   ├── Should_Handle_Whitespace()
 │   ├── Should_Handle_Unicode()
-│   └── Should_Cache_Counts()
+│   ├── Should_Handle_Emojis()
+│   ├── Should_Handle_Long_Identifiers()
+│   ├── Should_Cache_Repeated_Counts()
+│   ├── Should_Count_Batch()
+│   └── Should_Match_Model_Tokenizer()
 │
 ├── BudgetManagerTests.cs
-│   ├── Should_Calculate_Available()
+│   ├── Should_Calculate_Total_Available()
+│   ├── Should_Apply_System_Reserve()
+│   ├── Should_Apply_Response_Reserve()
 │   ├── Should_Allocate_Categories()
-│   └── Should_Enforce_Limits()
+│   ├── Should_Track_Consumption()
+│   ├── Should_Enforce_Total_Limit()
+│   ├── Should_Enforce_Category_Limit()
+│   ├── Should_Report_Remaining()
+│   ├── Should_Handle_Zero_Budget()
+│   └── Should_Load_Config()
+│
+├── CategoryAllocatorTests.cs
+│   ├── Should_Allocate_By_Percentage()
+│   ├── Should_Handle_Fixed_Allocation()
+│   ├── Should_Sum_To_Available()
+│   ├── Should_Handle_Single_Category()
+│   ├── Should_Handle_Empty_Category()
+│   └── Should_Redistribute_Unused()
 │
 ├── ExactDedupTests.cs
-│   ├── Should_Detect_Duplicates()
-│   └── Should_Keep_Best()
+│   ├── Should_Detect_Exact_Duplicate()
+│   ├── Should_Keep_First_Occurrence()
+│   ├── Should_Keep_Highest_Ranked()
+│   ├── Should_Handle_Different_Sources()
+│   ├── Should_Handle_No_Duplicates()
+│   ├── Should_Handle_All_Duplicates()
+│   └── Should_Report_Removed_Count()
 │
 ├── OverlapDedupTests.cs
-│   ├── Should_Detect_Overlap()
-│   ├── Should_Calculate_Amount()
-│   └── Should_Merge()
+│   ├── Should_Detect_Overlap_By_Lines()
+│   ├── Should_Calculate_Overlap_Percentage()
+│   ├── Should_Merge_Overlapping_Chunks()
+│   ├── Should_Handle_Adjacent_Chunks()
+│   ├── Should_Handle_Contained_Chunk()
+│   ├── Should_Respect_Threshold()
+│   ├── Should_Handle_Different_Files()
+│   ├── Should_Handle_No_Overlap()
+│   └── Should_Report_Merged_Count()
 │
-└── SelectorTests.cs
-    ├── Should_Fill_Budget()
-    └── Should_Respect_Categories()
+├── SelectorTests.cs
+│   ├── Should_Select_By_Rank_Order()
+│   ├── Should_Fill_To_Budget()
+│   ├── Should_Not_Exceed_Budget()
+│   ├── Should_Respect_Category_Limits()
+│   ├── Should_Skip_Chunk_If_Too_Large()
+│   ├── Should_Balance_Across_Categories()
+│   ├── Should_Handle_Empty_Candidates()
+│   ├── Should_Handle_Single_Candidate()
+│   └── Should_Return_Selected_With_Reasons()
+│
+└── BudgetReportTests.cs
+    ├── Should_Report_Total_Used()
+    ├── Should_Report_Category_Breakdown()
+    ├── Should_Report_Duplicates_Removed()
+    ├── Should_Report_Overlaps_Merged()
+    ├── Should_Report_Tokens_Saved()
+    └── Should_Format_Percentages()
 ```
 
 ### Integration Tests
@@ -347,7 +470,14 @@ Tests/Unit/Context/Budget/
 ```
 Tests/Integration/Context/Budget/
 ├── BudgetIntegrationTests.cs
-│   └── Should_Manage_Real_Context()
+│   ├── Should_Manage_Real_Context()
+│   ├── Should_Handle_Large_Chunk_Set()
+│   ├── Should_Work_With_Real_Tokenizer()
+│   └── Should_Apply_Config_Settings()
+│
+└── DedupIntegrationTests.cs
+    ├── Should_Dedup_Real_Search_Results()
+    └── Should_Merge_Real_Overlapping_Chunks()
 ```
 
 ### E2E Tests
@@ -355,7 +485,9 @@ Tests/Integration/Context/Budget/
 ```
 Tests/E2E/Context/Budget/
 ├── BudgetE2ETests.cs
-│   └── Should_Budget_For_Agent()
+│   ├── Should_Budget_For_Agent_Context()
+│   ├── Should_Show_Budget_Report_Via_CLI()
+│   └── Should_Respect_Config_Changes()
 ```
 
 ### Performance Benchmarks

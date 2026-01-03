@@ -792,43 +792,12 @@ Response JSON format:
 
 ## Testing Requirements
 
+> **Note:** ChatResponse, FinishReason, and UsageInfo core tests are implemented in Task 004 (ResponseTypeTests.cs, UsageInfoTests.cs). This section covers types and scenarios unique to Task 004.b.
+
 ### Unit Tests
 
 ```
 Tests/Unit/Domain/Models/Responses/
-├── ChatResponseTests.cs
-│   ├── Should_Be_Immutable()
-│   ├── Should_Require_Id()
-│   ├── Should_Require_Message()
-│   ├── Should_Validate_FinishReason()
-│   ├── Should_Compute_IsComplete()
-│   ├── Should_Compute_IsTruncated()
-│   ├── Should_Compute_HasToolCalls()
-│   ├── Should_Implement_Value_Equality()
-│   ├── Should_Serialize_To_Json()
-│   ├── Should_Deserialize_From_Json()
-│   ├── Should_Omit_Null_Properties()
-│   ├── Success_Factory_Should_Work()
-│   ├── Truncated_Factory_Should_Work()
-│   ├── ToolCallsRequired_Factory_Should_Work()
-│   ├── Refused_Factory_Should_Work()
-│   └── Error_Factory_Should_Work()
-│
-├── FinishReasonTests.cs
-│   ├── Should_Have_All_Values()
-│   ├── Should_Serialize_To_SnakeCase()
-│   ├── Should_Deserialize_CaseInsensitive()
-│   ├── Should_Map_From_Ollama()
-│   └── Should_Map_From_Vllm()
-│
-├── UsageInfoTests.cs
-│   ├── Should_Compute_TotalTokens()
-│   ├── Should_Validate_NonNegative()
-│   ├── Should_Add_Usage()
-│   ├── Empty_Should_Return_Zeros()
-│   ├── Should_Serialize_To_Json()
-│   └── Should_Have_Correct_ToString()
-│
 ├── ResponseMetadataTests.cs
 │   ├── Should_Require_ProviderId()
 │   ├── Should_Require_ModelId()
@@ -836,13 +805,521 @@ Tests/Unit/Domain/Models/Responses/
 │   ├── Should_Allow_Null_TTFT()
 │   ├── Should_Preserve_Extensions()
 │   └── Should_Be_Immutable()
-│
+```
+
+#### ResponseMetadataTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models.Responses;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+public class ResponseMetadataTests
+{
+    #region Validation Tests
+
+    [Fact]
+    public void Should_Require_ProviderId()
+    {
+        // Act
+        var action = () => new ResponseMetadata
+        {
+            ProviderId = "",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(2)
+        };
+
+        // Assert
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*provider*empty*");
+    }
+
+    [Fact]
+    public void Should_Require_ModelId()
+    {
+        // Act
+        var action = () => new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "",
+            RequestDuration = TimeSpan.FromSeconds(2)
+        };
+
+        // Assert
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*model*empty*");
+    }
+
+    [Fact]
+    public void Should_Validate_NonNegative_Duration()
+    {
+        // Act
+        var action = () => new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(-1)
+        };
+
+        // Assert
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*duration*negative*");
+    }
+
+    #endregion
+
+    #region Computation Tests
+
+    [Fact]
+    public void Should_Compute_TokensPerSecond()
+    {
+        // Arrange
+        var metadata = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(2),
+            CompletionTokenCount = 100
+        };
+
+        // Act
+        var tokensPerSecond = metadata.TokensPerSecond;
+
+        // Assert
+        tokensPerSecond.Should().BeApproximately(50.0, 0.1);
+    }
+
+    [Fact]
+    public void Should_Handle_Zero_Duration()
+    {
+        // Arrange
+        var metadata = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.Zero,
+            CompletionTokenCount = 100
+        };
+
+        // Act
+        var tokensPerSecond = metadata.TokensPerSecond;
+
+        // Assert
+        tokensPerSecond.Should().Be(0, because: "zero duration should return 0, not infinity");
+    }
+
+    [Fact]
+    public void Should_Handle_Zero_Tokens()
+    {
+        // Arrange
+        var metadata = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(1),
+            CompletionTokenCount = 0
+        };
+
+        // Act
+        var tokensPerSecond = metadata.TokensPerSecond;
+
+        // Assert
+        tokensPerSecond.Should().Be(0);
+    }
+
+    #endregion
+
+    #region TTFT Tests
+
+    [Fact]
+    public void Should_Allow_Null_TTFT()
+    {
+        // Arrange - non-streaming response
+        var metadata = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(2),
+            TimeToFirstToken = null
+        };
+
+        // Assert
+        metadata.TimeToFirstToken.Should().BeNull();
+    }
+
+    [Fact]
+    public void Should_Accept_Valid_TTFT()
+    {
+        // Arrange - streaming response
+        var metadata = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(2),
+            TimeToFirstToken = TimeSpan.FromMilliseconds(89)
+        };
+
+        // Assert
+        metadata.TimeToFirstToken.Should().Be(TimeSpan.FromMilliseconds(89));
+    }
+
+    #endregion
+
+    #region Extensions Tests
+
+    [Fact]
+    public void Should_Preserve_Extensions()
+    {
+        // Arrange
+        var extensions = new Dictionary<string, JsonElement>
+        {
+            ["gpu_memory_used"] = JsonSerializer.SerializeToElement(4096),
+            ["batch_size"] = JsonSerializer.SerializeToElement(1),
+            ["quantization"] = JsonSerializer.SerializeToElement("Q4_K_M")
+        };
+
+        var metadata = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(2),
+            Extensions = extensions
+        };
+
+        // Assert
+        metadata.Extensions.Should().HaveCount(3);
+        metadata.Extensions["quantization"].GetString().Should().Be("Q4_K_M");
+    }
+
+    [Fact]
+    public void Should_Default_Empty_Extensions()
+    {
+        // Arrange
+        var metadata = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(1)
+        };
+
+        // Assert
+        metadata.Extensions.Should().NotBeNull();
+        metadata.Extensions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Extensions_Should_Be_ReadOnly()
+    {
+        // Arrange
+        var metadata = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(1)
+        };
+
+        // Assert
+        metadata.Extensions.Should().BeAssignableTo<IReadOnlyDictionary<string, JsonElement>>();
+    }
+
+    #endregion
+
+    #region Immutability Tests
+
+    [Fact]
+    public void Should_Be_Immutable()
+    {
+        // Arrange
+        var original = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(2)
+        };
+
+        // Act
+        var modified = original with { ProviderId = "vllm" };
+
+        // Assert
+        original.ProviderId.Should().Be("ollama");
+        modified.ProviderId.Should().Be("vllm");
+    }
+
+    #endregion
+
+    #region Serialization Tests
+
+    [Fact]
+    public void Should_Serialize_To_Json()
+    {
+        // Arrange
+        var metadata = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(2.5),
+            TimeToFirstToken = TimeSpan.FromMilliseconds(89)
+        };
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(metadata, options);
+
+        // Assert
+        json.Should().Contain("\"provider_id\":\"ollama\"");
+        json.Should().Contain("\"model_id\":\"llama3.2:8b\"");
+    }
+
+    #endregion
+}
+```
+
+```
 ├── ResponseDeltaTests.cs
 │   ├── Should_Require_Content_Or_Complete()
 │   ├── Should_Compute_IsComplete()
 │   ├── Should_Allow_ToolCallDelta()
 │   └── Should_Have_Index()
-│
+```
+
+#### ResponseDeltaTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models.Responses;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using Xunit;
+
+public class ResponseDeltaTests
+{
+    #region Validation Tests
+
+    [Fact]
+    public void Should_Require_Content_Or_Complete()
+    {
+        // Arrange - delta with nothing
+        var action = () => ResponseDelta.Create(
+            index: 0,
+            contentDelta: null,
+            toolCallDelta: null,
+            finishReason: null
+        );
+
+        // Assert
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*content*complete*");
+    }
+
+    [Fact]
+    public void Should_Allow_ContentDelta_Only()
+    {
+        // Act
+        var delta = ResponseDelta.Create(
+            index: 0,
+            contentDelta: "Hello",
+            toolCallDelta: null,
+            finishReason: null
+        );
+
+        // Assert
+        delta.ContentDelta.Should().Be("Hello");
+        delta.IsComplete.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Should_Allow_FinishReason_Only()
+    {
+        // Act - final delta with just finish reason
+        var delta = ResponseDelta.Create(
+            index: 5,
+            contentDelta: null,
+            toolCallDelta: null,
+            finishReason: FinishReason.Stop
+        );
+
+        // Assert
+        delta.IsComplete.Should().BeTrue();
+        delta.FinishReason.Should().Be(FinishReason.Stop);
+    }
+
+    #endregion
+
+    #region IsComplete Tests
+
+    [Fact]
+    public void Should_Compute_IsComplete_True()
+    {
+        // Arrange
+        var delta = new ResponseDelta
+        {
+            Index = 10,
+            FinishReason = FinishReason.Stop
+        };
+
+        // Assert
+        delta.IsComplete.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Should_Compute_IsComplete_False()
+    {
+        // Arrange
+        var delta = new ResponseDelta
+        {
+            Index = 5,
+            ContentDelta = "partial"
+        };
+
+        // Assert
+        delta.IsComplete.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(FinishReason.Stop)]
+    [InlineData(FinishReason.Length)]
+    [InlineData(FinishReason.ToolCalls)]
+    [InlineData(FinishReason.Error)]
+    public void Should_Be_Complete_For_Any_FinishReason(FinishReason reason)
+    {
+        // Arrange
+        var delta = new ResponseDelta
+        {
+            Index = 0,
+            FinishReason = reason
+        };
+
+        // Assert
+        delta.IsComplete.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region ToolCallDelta Tests
+
+    [Fact]
+    public void Should_Allow_ToolCallDelta()
+    {
+        // Arrange
+        var toolDelta = new ToolCallDelta
+        {
+            Index = 0,
+            Id = "call_123",
+            Name = "write_file"
+        };
+
+        // Act
+        var delta = new ResponseDelta
+        {
+            Index = 0,
+            ToolCallDelta = toolDelta
+        };
+
+        // Assert
+        delta.ToolCallDelta.Should().NotBeNull();
+        delta.ToolCallDelta!.Name.Should().Be("write_file");
+    }
+
+    [Fact]
+    public void Should_Allow_Both_Content_And_ToolCall()
+    {
+        // Some models stream content while building tool calls
+        // Arrange
+        var delta = new ResponseDelta
+        {
+            Index = 0,
+            ContentDelta = "I'll write a file for you.",
+            ToolCallDelta = new ToolCallDelta { Index = 0, Name = "write_file" }
+        };
+
+        // Assert
+        delta.ContentDelta.Should().NotBeNull();
+        delta.ToolCallDelta.Should().NotBeNull();
+    }
+
+    #endregion
+
+    #region Index Tests
+
+    [Fact]
+    public void Should_Have_Index()
+    {
+        // Arrange
+        var delta = new ResponseDelta
+        {
+            Index = 42,
+            ContentDelta = "test"
+        };
+
+        // Assert
+        delta.Index.Should().Be(42);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(100)]
+    [InlineData(1000)]
+    public void Should_Accept_Valid_Index_Values(int index)
+    {
+        // Act
+        var delta = new ResponseDelta
+        {
+            Index = index,
+            ContentDelta = "test"
+        };
+
+        // Assert
+        delta.Index.Should().Be(index);
+    }
+
+    #endregion
+
+    #region Usage Tests
+
+    [Fact]
+    public void Should_Include_Usage_On_Final_Delta()
+    {
+        // Arrange
+        var usage = new UsageInfo(100, 50);
+        var delta = new ResponseDelta
+        {
+            Index = 10,
+            FinishReason = FinishReason.Stop,
+            Usage = usage
+        };
+
+        // Assert
+        delta.Usage.Should().NotBeNull();
+        delta.Usage!.TotalTokens.Should().Be(150);
+    }
+
+    [Fact]
+    public void Usage_Should_Be_Null_For_Intermediate_Deltas()
+    {
+        // Arrange
+        var delta = new ResponseDelta
+        {
+            Index = 5,
+            ContentDelta = "intermediate"
+        };
+
+        // Assert
+        delta.Usage.Should().BeNull();
+    }
+
+    #endregion
+}
+```
+
+```
 ├── DeltaAccumulatorTests.cs
 │   ├── Should_Concatenate_Content()
 │   ├── Should_Merge_ToolCalls_By_Index()
@@ -852,13 +1329,756 @@ Tests/Unit/Domain/Models/Responses/
 │   ├── Build_Should_Throw_If_Incomplete()
 │   ├── Should_Be_ThreadSafe()
 │   └── Current_Should_Return_Partial()
-│
+```
+
+#### DeltaAccumulatorTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models.Responses;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+public class DeltaAccumulatorTests
+{
+    #region Content Concatenation Tests
+
+    [Fact]
+    public void Should_Concatenate_Content()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+
+        // Act
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "Hello" });
+        accumulator.Append(new ResponseDelta { Index = 1, ContentDelta = ", " });
+        accumulator.Append(new ResponseDelta { Index = 2, ContentDelta = "world!" });
+        accumulator.Append(new ResponseDelta { Index = 3, FinishReason = FinishReason.Stop });
+
+        var response = accumulator.Build();
+
+        // Assert
+        response.Message.Content.Should().Be("Hello, world!");
+    }
+
+    [Fact]
+    public void Should_Handle_Empty_ContentDeltas()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+
+        // Act
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "Hello" });
+        accumulator.Append(new ResponseDelta { Index = 1, ContentDelta = "" });
+        accumulator.Append(new ResponseDelta { Index = 2, ContentDelta = "World" });
+        accumulator.Append(new ResponseDelta { Index = 3, FinishReason = FinishReason.Stop });
+
+        var response = accumulator.Build();
+
+        // Assert
+        response.Message.Content.Should().Be("HelloWorld");
+    }
+
+    [Fact]
+    public void Should_Handle_Unicode_Content()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+
+        // Act
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "Hello 👋 " });
+        accumulator.Append(new ResponseDelta { Index = 1, ContentDelta = "世界 🌍" });
+        accumulator.Append(new ResponseDelta { Index = 2, FinishReason = FinishReason.Stop });
+
+        var response = accumulator.Build();
+
+        // Assert
+        response.Message.Content.Should().Be("Hello 👋 世界 🌍");
+    }
+
+    #endregion
+
+    #region ToolCall Merging Tests
+
+    [Fact]
+    public void Should_Merge_ToolCalls_By_Index()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+
+        // Act - simulate streaming tool call
+        accumulator.Append(new ResponseDelta
+        {
+            Index = 0,
+            ToolCallDelta = new ToolCallDelta { Index = 0, Id = "call_1", Name = "write_file" }
+        });
+        accumulator.Append(new ResponseDelta
+        {
+            Index = 1,
+            ToolCallDelta = new ToolCallDelta { Index = 0, ArgumentsDelta = "{\"path\":" }
+        });
+        accumulator.Append(new ResponseDelta
+        {
+            Index = 2,
+            ToolCallDelta = new ToolCallDelta { Index = 0, ArgumentsDelta = "\"test.cs\"}" }
+        });
+        accumulator.Append(new ResponseDelta { Index = 3, FinishReason = FinishReason.ToolCalls });
+
+        var response = accumulator.Build();
+
+        // Assert
+        response.Message.ToolCalls.Should().HaveCount(1);
+        response.Message.ToolCalls![0].Name.Should().Be("write_file");
+        response.Message.ToolCalls[0].Id.Should().Be("call_1");
+    }
+
+    [Fact]
+    public void Should_Handle_Multiple_ToolCalls()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+
+        // Act - two parallel tool calls
+        accumulator.Append(new ResponseDelta
+        {
+            Index = 0,
+            ToolCallDelta = new ToolCallDelta { Index = 0, Id = "call_1", Name = "read_file" }
+        });
+        accumulator.Append(new ResponseDelta
+        {
+            Index = 1,
+            ToolCallDelta = new ToolCallDelta { Index = 1, Id = "call_2", Name = "write_file" }
+        });
+        accumulator.Append(new ResponseDelta
+        {
+            Index = 2,
+            ToolCallDelta = new ToolCallDelta { Index = 0, ArgumentsDelta = "{\"path\":\"a.cs\"}" }
+        });
+        accumulator.Append(new ResponseDelta
+        {
+            Index = 3,
+            ToolCallDelta = new ToolCallDelta { Index = 1, ArgumentsDelta = "{\"path\":\"b.cs\"}" }
+        });
+        accumulator.Append(new ResponseDelta { Index = 4, FinishReason = FinishReason.ToolCalls });
+
+        var response = accumulator.Build();
+
+        // Assert
+        response.Message.ToolCalls.Should().HaveCount(2);
+        response.Message.ToolCalls![0].Name.Should().Be("read_file");
+        response.Message.ToolCalls[1].Name.Should().Be("write_file");
+    }
+
+    #endregion
+
+    #region FinishReason Tests
+
+    [Fact]
+    public void Should_Capture_FinishReason()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+
+        // Act
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "Content" });
+        accumulator.Append(new ResponseDelta { Index = 1, FinishReason = FinishReason.Length });
+
+        var response = accumulator.Build();
+
+        // Assert
+        response.FinishReason.Should().Be(FinishReason.Length);
+    }
+
+    [Theory]
+    [InlineData(FinishReason.Stop)]
+    [InlineData(FinishReason.Length)]
+    [InlineData(FinishReason.ToolCalls)]
+    [InlineData(FinishReason.Error)]
+    public void Should_Capture_All_FinishReason_Types(FinishReason reason)
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+
+        // Act
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "test" });
+        accumulator.Append(new ResponseDelta { Index = 1, FinishReason = reason });
+
+        var response = accumulator.Build();
+
+        // Assert
+        response.FinishReason.Should().Be(reason);
+    }
+
+    #endregion
+
+    #region Usage Tests
+
+    [Fact]
+    public void Should_Capture_Usage()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+        var usage = new UsageInfo(100, 50);
+
+        // Act
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "test" });
+        accumulator.Append(new ResponseDelta { Index = 1, FinishReason = FinishReason.Stop, Usage = usage });
+
+        var response = accumulator.Build();
+
+        // Assert
+        response.Usage.PromptTokens.Should().Be(100);
+        response.Usage.CompletionTokens.Should().Be(50);
+        response.Usage.TotalTokens.Should().Be(150);
+    }
+
+    #endregion
+
+    #region Build Tests
+
+    [Fact]
+    public void Build_Should_Return_Response()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "Hello" });
+        accumulator.Append(new ResponseDelta { Index = 1, FinishReason = FinishReason.Stop });
+
+        // Act
+        var response = accumulator.Build();
+
+        // Assert
+        response.Should().NotBeNull();
+        response.Message.Should().NotBeNull();
+        response.Message.Role.Should().Be(MessageRole.Assistant);
+    }
+
+    [Fact]
+    public void Build_Should_Throw_If_Incomplete()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "Partial" });
+
+        // Act
+        var action = () => accumulator.Build();
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*incomplete*finish*");
+    }
+
+    [Fact]
+    public void Build_Should_Generate_Response_Id()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "test" });
+        accumulator.Append(new ResponseDelta { Index = 1, FinishReason = FinishReason.Stop });
+
+        // Act
+        var response = accumulator.Build();
+
+        // Assert
+        response.Id.Should().NotBeNullOrEmpty();
+        Guid.TryParse(response.Id, out _).Should().BeTrue();
+    }
+
+    #endregion
+
+    #region Current Property Tests
+
+    [Fact]
+    public void Current_Should_Return_Partial()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "Hello" });
+        accumulator.Append(new ResponseDelta { Index = 1, ContentDelta = " World" });
+
+        // Act
+        var current = accumulator.Current;
+
+        // Assert
+        current.Content.Should().Be("Hello World");
+        current.IsComplete.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Current_Should_Track_Delta_Count()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+
+        // Act
+        accumulator.Append(new ResponseDelta { Index = 0, ContentDelta = "a" });
+        accumulator.Append(new ResponseDelta { Index = 1, ContentDelta = "b" });
+        accumulator.Append(new ResponseDelta { Index = 2, ContentDelta = "c" });
+
+        // Assert
+        accumulator.DeltaCount.Should().Be(3);
+    }
+
+    #endregion
+
+    #region Thread Safety Tests
+
+    [Fact]
+    public async Task Should_Be_ThreadSafe()
+    {
+        // Arrange
+        var accumulator = new DeltaAccumulator();
+        var tasks = new List<Task>();
+
+        // Act - append from multiple threads
+        for (int i = 0; i < 100; i++)
+        {
+            int index = i;
+            tasks.Add(Task.Run(() =>
+            {
+                accumulator.Append(new ResponseDelta
+                {
+                    Index = index,
+                    ContentDelta = $"chunk{index}"
+                });
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+
+        // Add finish reason
+        accumulator.Append(new ResponseDelta { Index = 100, FinishReason = FinishReason.Stop });
+
+        // Assert
+        var response = accumulator.Build();
+        accumulator.DeltaCount.Should().Be(101);
+        // Content may be out of order due to threading, but should have all chunks
+    }
+
+    #endregion
+}
+```
+
+```
 └── ResponseBuilderTests.cs
     ├── Should_Build_Valid_Response()
     ├── Should_AutoGenerate_Id()
     ├── Should_AutoSet_Created()
     ├── Should_Validate_Required_Fields()
     └── Should_Support_Fluent_API()
+```
+
+#### ResponseBuilderTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models.Responses;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using Xunit;
+
+public class ResponseBuilderTests
+{
+    #region Build Tests
+
+    [Fact]
+    public void Should_Build_Valid_Response()
+    {
+        // Arrange
+        var builder = new ResponseBuilder()
+            .WithMessage(ChatMessage.CreateAssistant("Hello"))
+            .WithFinishReason(FinishReason.Stop)
+            .WithUsage(new UsageInfo(10, 5))
+            .WithMetadata(CreateMetadata());
+
+        // Act
+        var response = builder.Build();
+
+        // Assert
+        response.Should().NotBeNull();
+        response.Message.Content.Should().Be("Hello");
+        response.FinishReason.Should().Be(FinishReason.Stop);
+    }
+
+    [Fact]
+    public void Should_AutoGenerate_Id()
+    {
+        // Arrange
+        var builder = new ResponseBuilder()
+            .WithMessage(ChatMessage.CreateAssistant("test"))
+            .WithFinishReason(FinishReason.Stop)
+            .WithUsage(UsageInfo.Empty)
+            .WithMetadata(CreateMetadata());
+
+        // Act
+        var response = builder.Build();
+
+        // Assert
+        response.Id.Should().NotBeNullOrEmpty();
+        Guid.TryParse(response.Id, out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Should_Use_Provided_Id()
+    {
+        // Arrange
+        var customId = "custom-id-12345";
+        var builder = new ResponseBuilder()
+            .WithId(customId)
+            .WithMessage(ChatMessage.CreateAssistant("test"))
+            .WithFinishReason(FinishReason.Stop)
+            .WithUsage(UsageInfo.Empty)
+            .WithMetadata(CreateMetadata());
+
+        // Act
+        var response = builder.Build();
+
+        // Assert
+        response.Id.Should().Be(customId);
+    }
+
+    [Fact]
+    public void Should_AutoSet_Created()
+    {
+        // Arrange
+        var before = DateTimeOffset.UtcNow;
+
+        var builder = new ResponseBuilder()
+            .WithMessage(ChatMessage.CreateAssistant("test"))
+            .WithFinishReason(FinishReason.Stop)
+            .WithUsage(UsageInfo.Empty)
+            .WithMetadata(CreateMetadata());
+
+        // Act
+        var response = builder.Build();
+        var after = DateTimeOffset.UtcNow;
+
+        // Assert
+        response.Created.Should().BeOnOrAfter(before);
+        response.Created.Should().BeOnOrBefore(after);
+    }
+
+    #endregion
+
+    #region Validation Tests
+
+    [Fact]
+    public void Should_Validate_Required_Message()
+    {
+        // Arrange
+        var builder = new ResponseBuilder()
+            .WithFinishReason(FinishReason.Stop)
+            .WithUsage(UsageInfo.Empty)
+            .WithMetadata(CreateMetadata());
+
+        // Act
+        var action = () => builder.Build();
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*message*required*");
+    }
+
+    [Fact]
+    public void Should_Validate_Required_Usage()
+    {
+        // Arrange
+        var builder = new ResponseBuilder()
+            .WithMessage(ChatMessage.CreateAssistant("test"))
+            .WithFinishReason(FinishReason.Stop)
+            .WithMetadata(CreateMetadata());
+
+        // Act
+        var action = () => builder.Build();
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*usage*required*");
+    }
+
+    [Fact]
+    public void Should_Validate_Required_Metadata()
+    {
+        // Arrange
+        var builder = new ResponseBuilder()
+            .WithMessage(ChatMessage.CreateAssistant("test"))
+            .WithFinishReason(FinishReason.Stop)
+            .WithUsage(UsageInfo.Empty);
+
+        // Act
+        var action = () => builder.Build();
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*metadata*required*");
+    }
+
+    #endregion
+
+    #region Fluent API Tests
+
+    [Fact]
+    public void Should_Support_Fluent_API()
+    {
+        // Arrange & Act
+        var response = new ResponseBuilder()
+            .WithId("test-id")
+            .WithMessage(ChatMessage.CreateAssistant("Hello"))
+            .WithFinishReason(FinishReason.Stop)
+            .WithUsage(new UsageInfo(100, 50))
+            .WithMetadata(CreateMetadata())
+            .WithModel("llama3.2:8b")
+            .WithRefusal(null)
+            .Build();
+
+        // Assert
+        response.Id.Should().Be("test-id");
+        response.Model.Should().Be("llama3.2:8b");
+    }
+
+    [Fact]
+    public void Should_Support_Refusal()
+    {
+        // Arrange & Act
+        var response = new ResponseBuilder()
+            .WithMessage(ChatMessage.CreateAssistant("I cannot help with that."))
+            .WithFinishReason(FinishReason.Stop)
+            .WithUsage(UsageInfo.Empty)
+            .WithMetadata(CreateMetadata())
+            .WithRefusal("Request violates usage policy")
+            .Build();
+
+        // Assert
+        response.Refusal.Should().Be("Request violates usage policy");
+    }
+
+    [Fact]
+    public void Should_Support_ContentFilterResults()
+    {
+        // Arrange
+        var filterResults = new List<ContentFilterResult>
+        {
+            new ContentFilterResult
+            {
+                Category = FilterCategory.Violence,
+                Severity = FilterSeverity.Low,
+                Filtered = false
+            }
+        };
+
+        // Act
+        var response = new ResponseBuilder()
+            .WithMessage(ChatMessage.CreateAssistant("test"))
+            .WithFinishReason(FinishReason.Stop)
+            .WithUsage(UsageInfo.Empty)
+            .WithMetadata(CreateMetadata())
+            .WithContentFilterResults(filterResults)
+            .Build();
+
+        // Assert
+        response.ContentFilterResults.Should().HaveCount(1);
+    }
+
+    #endregion
+
+    #region Edge Cases
+
+    [Fact]
+    public void Should_Allow_Reuse_After_Build()
+    {
+        // Arrange
+        var builder = new ResponseBuilder()
+            .WithMessage(ChatMessage.CreateAssistant("Response 1"))
+            .WithFinishReason(FinishReason.Stop)
+            .WithUsage(UsageInfo.Empty)
+            .WithMetadata(CreateMetadata());
+
+        // Act
+        var response1 = builder.Build();
+        
+        builder.WithMessage(ChatMessage.CreateAssistant("Response 2"));
+        var response2 = builder.Build();
+
+        // Assert
+        response1.Message.Content.Should().Be("Response 1");
+        response2.Message.Content.Should().Be("Response 2");
+        response1.Id.Should().NotBe(response2.Id);
+    }
+
+    #endregion
+
+    private static ResponseMetadata CreateMetadata()
+    {
+        return new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(2)
+        };
+    }
+}
+```
+
+```
+├── ContentFilterResultTests.cs
+│   ├── Should_Have_Category()
+│   ├── Should_Have_Severity()
+│   ├── Should_Have_Filtered_Flag()
+│   └── Should_Serialize()
+```
+
+#### ContentFilterResultTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models.Responses;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+public class ContentFilterResultTests
+{
+    [Theory]
+    [InlineData(FilterCategory.Sexual)]
+    [InlineData(FilterCategory.Violence)]
+    [InlineData(FilterCategory.Hate)]
+    [InlineData(FilterCategory.SelfHarm)]
+    public void Should_Have_Category(FilterCategory category)
+    {
+        // Act
+        var result = new ContentFilterResult
+        {
+            Category = category,
+            Severity = FilterSeverity.Safe,
+            Filtered = false
+        };
+
+        // Assert
+        result.Category.Should().Be(category);
+    }
+
+    [Theory]
+    [InlineData(FilterSeverity.Safe)]
+    [InlineData(FilterSeverity.Low)]
+    [InlineData(FilterSeverity.Medium)]
+    [InlineData(FilterSeverity.High)]
+    public void Should_Have_Severity(FilterSeverity severity)
+    {
+        // Act
+        var result = new ContentFilterResult
+        {
+            Category = FilterCategory.Violence,
+            Severity = severity,
+            Filtered = severity == FilterSeverity.High
+        };
+
+        // Assert
+        result.Severity.Should().Be(severity);
+    }
+
+    [Fact]
+    public void Should_Have_Filtered_Flag()
+    {
+        // Arrange
+        var filtered = new ContentFilterResult
+        {
+            Category = FilterCategory.Violence,
+            Severity = FilterSeverity.High,
+            Filtered = true
+        };
+
+        var notFiltered = new ContentFilterResult
+        {
+            Category = FilterCategory.Violence,
+            Severity = FilterSeverity.Low,
+            Filtered = false
+        };
+
+        // Assert
+        filtered.Filtered.Should().BeTrue();
+        notFiltered.Filtered.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Should_Support_Optional_Reason()
+    {
+        // Arrange
+        var withReason = new ContentFilterResult
+        {
+            Category = FilterCategory.Violence,
+            Severity = FilterSeverity.High,
+            Filtered = true,
+            Reason = "Graphic violence detected"
+        };
+
+        var withoutReason = new ContentFilterResult
+        {
+            Category = FilterCategory.Violence,
+            Severity = FilterSeverity.Safe,
+            Filtered = false
+        };
+
+        // Assert
+        withReason.Reason.Should().Be("Graphic violence detected");
+        withoutReason.Reason.Should().BeNull();
+    }
+
+    [Fact]
+    public void Should_Serialize_To_Json()
+    {
+        // Arrange
+        var result = new ContentFilterResult
+        {
+            Category = FilterCategory.Hate,
+            Severity = FilterSeverity.Medium,
+            Filtered = false,
+            Reason = "Borderline content"
+        };
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(result, options);
+
+        // Assert
+        json.Should().Contain("\"category\"");
+        json.Should().Contain("\"severity\"");
+        json.Should().Contain("\"filtered\":false");
+    }
+
+    [Fact]
+    public void Should_Deserialize_From_Json()
+    {
+        // Arrange
+        var json = """
+        {
+            "category": "violence",
+            "severity": "low",
+            "filtered": false
+        }
+        """;
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNameCaseInsensitive = true
+        };
+
+        // Act
+        var result = JsonSerializer.Deserialize<ContentFilterResult>(json, options);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Category.Should().Be(FilterCategory.Violence);
+        result.Severity.Should().Be(FilterSeverity.Low);
+    }
+}
 ```
 
 ### Integration Tests
@@ -870,35 +2090,178 @@ Tests/Integration/Models/Responses/
 │   ├── Should_Match_Vllm_Format()
 │   ├── Should_Handle_Extensions()
 │   └── Should_Roundtrip_All_Types()
-│
-└── StreamingResponseTests.cs
-    ├── Should_Accumulate_Deltas()
-    ├── Should_Handle_Cancellation()
-    └── Should_Propagate_Errors()
 ```
 
-### End-to-End Tests
+#### ResponseSerializationTests.cs
 
-```
-Tests/E2E/Responses/
-├── ResponseProcessingTests.cs
-│   ├── Should_Process_Complete_Response()
-│   ├── Should_Handle_Truncated_Response()
-│   ├── Should_Handle_ToolCall_Response()
-│   └── Should_Handle_Error_Response()
-```
+```csharp
+namespace AgenticCoder.Tests.Integration.Models.Responses;
 
-### Performance Tests
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
 
-```
-Tests/Performance/Models/Responses/
-├── ResponseBenchmarks.cs
-│   ├── Benchmark_ChatResponse_Construction()
-│   ├── Benchmark_UsageInfo_Operations()
-│   ├── Benchmark_Serialization()
-│   ├── Benchmark_Deserialization()
-│   ├── Benchmark_DeltaAccumulator_Append()
-│   └── Benchmark_DeltaAccumulator_Build()
+[Collection("Integration")]
+public class ResponseSerializationTests
+{
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
+    [Fact]
+    public void Should_Match_Ollama_Format()
+    {
+        // Arrange - Ollama response format
+        var ollamaJson = """
+        {
+            "message": {
+                "role": "assistant",
+                "content": "Hello from Ollama!"
+            },
+            "done": true,
+            "done_reason": "stop",
+            "eval_count": 10,
+            "prompt_eval_count": 25
+        }
+        """;
+
+        // Act - parse and convert to our format
+        using var doc = JsonDocument.Parse(ollamaJson);
+        var response = ParseOllamaResponse(doc.RootElement);
+
+        // Assert
+        response.Message.Content.Should().Be("Hello from Ollama!");
+        response.FinishReason.Should().Be(FinishReason.Stop);
+        response.Usage.CompletionTokens.Should().Be(10);
+        response.Usage.PromptTokens.Should().Be(25);
+    }
+
+    [Fact]
+    public void Should_Match_Vllm_Format()
+    {
+        // Arrange - vLLM/OpenAI format
+        var vllmJson = """
+        {
+            "id": "cmpl-abc123",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello from vLLM!"
+                },
+                "finish_reason": "stop",
+                "index": 0
+            }],
+            "usage": {
+                "prompt_tokens": 25,
+                "completion_tokens": 10,
+                "total_tokens": 35
+            }
+        }
+        """;
+
+        // Act
+        using var doc = JsonDocument.Parse(vllmJson);
+        var response = ParseVllmResponse(doc.RootElement);
+
+        // Assert
+        response.Message.Content.Should().Be("Hello from vLLM!");
+        response.FinishReason.Should().Be(FinishReason.Stop);
+        response.Usage.TotalTokens.Should().Be(35);
+    }
+
+    [Fact]
+    public void Should_Handle_Extensions()
+    {
+        // Arrange
+        var metadata = new ResponseMetadata
+        {
+            ProviderId = "ollama",
+            ModelId = "llama3.2:8b",
+            RequestDuration = TimeSpan.FromSeconds(2),
+            Extensions = new Dictionary<string, JsonElement>
+            {
+                ["eval_duration"] = JsonSerializer.SerializeToElement(1500000000L),
+                ["load_duration"] = JsonSerializer.SerializeToElement(500000000L)
+            }
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(metadata, Options);
+        var restored = JsonSerializer.Deserialize<ResponseMetadata>(json, Options);
+
+        // Assert
+        restored!.Extensions.Should().ContainKey("eval_duration");
+        restored.Extensions["eval_duration"].GetInt64().Should().Be(1500000000L);
+    }
+
+    [Fact]
+    public void Should_Roundtrip_All_Types()
+    {
+        // Arrange
+        var original = ChatResponse.Success(
+            ChatMessage.CreateAssistant("Test response"),
+            new UsageInfo(100, 50),
+            "llama3.2:8b"
+        );
+
+        // Act
+        var json = JsonSerializer.Serialize(original, Options);
+        var restored = JsonSerializer.Deserialize<ChatResponse>(json, Options);
+
+        // Assert
+        restored!.Message.Content.Should().Be(original.Message.Content);
+        restored.FinishReason.Should().Be(original.FinishReason);
+        restored.Usage.TotalTokens.Should().Be(original.Usage.TotalTokens);
+    }
+
+    private static ChatResponse ParseOllamaResponse(JsonElement element)
+    {
+        var message = JsonSerializer.Deserialize<ChatMessage>(
+            element.GetProperty("message").GetRawText(), Options)!;
+
+        var doneReason = element.GetProperty("done_reason").GetString() ?? "stop";
+        var finishReason = doneReason switch
+        {
+            "stop" => FinishReason.Stop,
+            "length" => FinishReason.Length,
+            _ => FinishReason.Stop
+        };
+
+        var usage = new UsageInfo(
+            element.GetProperty("prompt_eval_count").GetInt32(),
+            element.GetProperty("eval_count").GetInt32()
+        );
+
+        return ChatResponse.Success(message, usage, "ollama-model");
+    }
+
+    private static ChatResponse ParseVllmResponse(JsonElement element)
+    {
+        var choice = element.GetProperty("choices")[0];
+        var message = JsonSerializer.Deserialize<ChatMessage>(
+            choice.GetProperty("message").GetRawText(), Options)!;
+
+        var finishReasonStr = choice.GetProperty("finish_reason").GetString() ?? "stop";
+        var finishReason = finishReasonStr switch
+        {
+            "stop" => FinishReason.Stop,
+            "length" => FinishReason.Length,
+            "tool_calls" => FinishReason.ToolCalls,
+            _ => FinishReason.Stop
+        };
+
+        var usageEl = element.GetProperty("usage");
+        var usage = new UsageInfo(
+            usageEl.GetProperty("prompt_tokens").GetInt32(),
+            usageEl.GetProperty("completion_tokens").GetInt32()
+        );
+
+        return ChatResponse.Success(message, usage, "vllm-model");
+    }
+}
 ```
 
 ---

@@ -4,29 +4,96 @@
 **Tier:** S – Core Infrastructure  
 **Complexity:** 13 (Fibonacci points)  
 **Phase:** Phase 3 – Intelligence Layer  
-**Dependencies:** Task 014 (RepoFS), Task 015 (Text Index), Task 016 (Context Packer)  
+**Dependencies:** Task 014 (RepoFS), Task 015 (Text Index), Task 016 (Context Packer), Task 050 (Workspace DB)  
 
 ---
 
 ## Description
 
-Task 017 implements Symbol Index v2. The symbol index extracts and stores semantic information about code: classes, methods, properties, functions, types. This enables semantic code navigation and retrieval.
+### Business Value
 
-Text search finds strings. Symbol search finds meaning. When the agent needs `GetUserById`, symbol search returns the method definition, not every file containing "GetUserById".
+Symbol Index v2 elevates the agent from text-level to semantic-level code understanding. While Task 015's text index finds strings, Symbol Index finds meaning—classes, methods, properties, and their relationships.
 
-Symbol Index v2 builds on Task 015's text index. Text index handles full-text search. Symbol index handles semantic search. Both serve the context packer.
+This semantic understanding provides:
 
-The symbol index extracts symbols from source code. Roslyn parses C# code. TypeScript compiler API parses TypeScript/JavaScript. Language-specific extractors handle each language.
+1. **Precise Code Navigation:** When the agent needs `GetUserById`, symbol search returns the method definition, not every file containing those characters. This precision dramatically improves context quality.
 
-Symbols have relationships. Methods belong to classes. Classes implement interfaces. Functions call other functions. The symbol index stores these relationships.
+2. **Relationship Awareness:** Symbols have relationships—methods belong to classes, classes implement interfaces, functions call other functions. This enables the agent to understand code structure, not just content.
 
-Symbol extraction is language-specific. C# symbols differ from TypeScript symbols. Each language has its own extractor. Extractors implement a common interface.
+3. **Language-Aware Indexing:** Each programming language has unique symbol types and conventions. Language-specific extractors (Roslyn for C#, TypeScript Compiler API for TS) provide accurate semantic analysis.
 
-The symbol index persists to the workspace database. Task 050 provides the schema. Symbol data survives restarts. Incremental updates keep it current.
+4. **Incremental Efficiency:** Only changed files are re-analyzed. The symbol index stays current with minimal overhead, enabling real-time updates as developers work.
 
-Symbol retrieval serves the context packer. When the agent needs code, symbol lookup finds relevant symbols. Symbol context is more precise than full-file context.
+5. **Context Enhancement:** Symbol-based retrieval provides more precise context to the LLM. Instead of "file containing UserService," the agent gets "the CreateUser method in UserService."
 
-Task 017 defines the core infrastructure. Task 017.a implements C# extraction. Task 017.b implements TypeScript extraction. Task 017.c adds dependency mapping and retrieval APIs.
+### Scope
+
+Task 017 defines the core symbol indexing infrastructure:
+
+1. **Symbol Model:** Defines ISymbol interface and related types (SymbolKind, SymbolLocation, visibility, signatures). Common representation across all languages.
+
+2. **Symbol Store:** Persistent storage for symbols with CRUD operations. Supports queries by name, kind, file, namespace, and containment. Uses workspace database from Task 050.
+
+3. **Extractor Interface:** Defines ISymbolExtractor contract. Language-specific implementations in subtasks (017.a for C#, 017.b for TypeScript).
+
+4. **Extractor Registry:** Maps file extensions to extractors. Fallback for unsupported languages. Enables future language additions.
+
+5. **Index Service:** Orchestrates full and incremental indexing. Tracks file hashes for change detection. Supports parallel processing.
+
+6. **Query Interface:** Rich querying capabilities—exact match, prefix, fuzzy, filtered by kind/visibility/file.
+
+### Integration Points
+
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Task 014 (RepoFS) | File Access | Reads files for extraction |
+| Task 015 (Text Index) | Complementary | Text index for full-text, symbol index for semantic |
+| Task 016 (Context) | Data Source | Symbol definitions feed context packer |
+| Task 050 (Workspace DB) | Persistence | Stores symbols in SQLite database |
+| Task 017.a (C# Extractor) | Implementation | Roslyn-based C# extraction |
+| Task 017.b (TS Extractor) | Implementation | TypeScript extraction |
+| Task 017.c (Dependencies) | Enhancement | Cross-reference and dependency mapping |
+| Task 003.c (Audit) | Audit Logging | Index operations are audited |
+
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Parse error in file | File not indexed | Log warning, skip file, continue |
+| Extractor crash | Indexing fails | Isolate extraction, timeout, skip file |
+| Database corruption | Index unavailable | Corruption detection, rebuild |
+| Memory exhaustion | Indexing crashes | Stream processing, file size limits |
+| Concurrent updates | Inconsistent state | Locking, transaction isolation |
+| Unknown language | No symbols extracted | Warn, fallback to text-only |
+| Large file timeout | Slow indexing | Size limits, timeout per file |
+| Duplicate symbols | Query ambiguity | Unique ID, include location in disambiguation |
+
+### Assumptions
+
+1. Target languages have parseable syntax (valid source files)
+2. Language extractors are available (Roslyn, TS Compiler API)
+3. Symbols have unique IDs within the index
+4. Symbol locations are stable within a file version
+5. Incremental updates are more common than full rebuilds
+6. Most queries are by name or kind
+7. Containment relationships are tree-structured
+8. File hashes reliably detect changes
+9. Parallel extraction is safe
+10. Database can handle 1M+ symbols
+
+### Security Considerations
+
+Symbol indexing involves parsing and analyzing code:
+
+1. **Parse Safety:** Extractors MUST handle malicious input. Parser crashes MUST NOT affect the host process.
+
+2. **Resource Limits:** Extraction MUST have memory and time limits. Adversarial files MUST NOT cause DoS.
+
+3. **Path Validation:** All file paths MUST go through RepoFS. No direct file system access.
+
+4. **Content Protection:** Indexed content MUST have same access controls as source. Index permissions MUST match repository.
+
+5. **Audit Trail:** Index operations SHOULD be logged for troubleshooting.
 
 ---
 
@@ -69,126 +136,259 @@ The following items are explicitly excluded from Task 017:
 
 ## Functional Requirements
 
-### Symbol Model
+### Symbol Model (FR-017-01 to FR-017-25)
 
-- FR-001: Define ISymbol interface
-- FR-002: Define SymbolKind enum
-- FR-003: Support class symbols
-- FR-004: Support interface symbols
-- FR-005: Support method symbols
-- FR-006: Support property symbols
-- FR-007: Support field symbols
-- FR-008: Support function symbols
-- FR-009: Support type alias symbols
-- FR-010: Support enum symbols
-- FR-011: Support namespace/module symbols
-- FR-012: Store fully qualified name
-- FR-013: Store short name
-- FR-014: Store file location
-- FR-015: Store line/column range
-- FR-016: Store visibility
-- FR-017: Store signature for methods
-- FR-018: Store containing symbol
+| ID | Requirement |
+|----|-------------|
+| FR-017-01 | System MUST define ISymbol interface |
+| FR-017-02 | ISymbol MUST have Id property (Guid) |
+| FR-017-03 | ISymbol MUST have Name property (short name) |
+| FR-017-04 | ISymbol MUST have FullyQualifiedName property |
+| FR-017-05 | ISymbol MUST have Kind property (SymbolKind enum) |
+| FR-017-06 | ISymbol MUST have Location property (SymbolLocation) |
+| FR-017-07 | ISymbol MUST have Signature property (nullable) |
+| FR-017-08 | ISymbol MUST have Visibility property |
+| FR-017-09 | ISymbol MUST have ContainingSymbolId property (nullable) |
+| FR-017-10 | System MUST define SymbolKind enum |
+| FR-017-11 | SymbolKind MUST include Namespace |
+| FR-017-12 | SymbolKind MUST include Class |
+| FR-017-13 | SymbolKind MUST include Interface |
+| FR-017-14 | SymbolKind MUST include Struct |
+| FR-017-15 | SymbolKind MUST include Enum |
+| FR-017-16 | SymbolKind MUST include Method |
+| FR-017-17 | SymbolKind MUST include Property |
+| FR-017-18 | SymbolKind MUST include Field |
+| FR-017-19 | SymbolKind MUST include Constructor |
+| FR-017-20 | SymbolKind MUST include Function |
+| FR-017-21 | SymbolKind MUST include Variable |
+| FR-017-22 | SymbolKind MUST include TypeAlias |
+| FR-017-23 | SymbolLocation MUST include FilePath |
+| FR-017-24 | SymbolLocation MUST include StartLine/EndLine |
+| FR-017-25 | SymbolLocation MUST include StartColumn/EndColumn |
 
-### Symbol Store
+### Symbol Store (FR-017-26 to FR-017-50)
 
-- FR-019: Define ISymbolStore interface
-- FR-020: Add symbols to store
-- FR-021: Remove symbols from store
-- FR-022: Update symbols in store
-- FR-023: Query by name
-- FR-024: Query by kind
-- FR-025: Query by file
-- FR-026: Query by namespace
-- FR-027: Query by containing symbol
-- FR-028: Batch operations
-- FR-029: Persist to database
-- FR-030: Load from database
+| ID | Requirement |
+|----|-------------|
+| FR-017-26 | System MUST define ISymbolStore interface |
+| FR-017-27 | AddAsync MUST insert single symbol |
+| FR-017-28 | AddRangeAsync MUST batch insert symbols |
+| FR-017-29 | Batch insert MUST be transactional |
+| FR-017-30 | RemoveAsync MUST delete symbol by ID |
+| FR-017-31 | RemoveByFileAsync MUST delete all symbols in file |
+| FR-017-32 | UpdateAsync MUST modify existing symbol |
+| FR-017-33 | GetByIdAsync MUST retrieve symbol by ID |
+| FR-017-34 | Store MUST persist to SQLite database |
+| FR-017-35 | Store MUST load from database on startup |
+| FR-017-36 | Store MUST support concurrent reads |
+| FR-017-37 | Store MUST serialize writes |
+| FR-017-38 | Store MUST use connection pooling |
+| FR-017-39 | Store MUST create indexes for common queries |
+| FR-017-40 | Store MUST index Name column |
+| FR-017-41 | Store MUST index Kind column |
+| FR-017-42 | Store MUST index FilePath column |
+| FR-017-43 | Store MUST index ContainingSymbolId column |
+| FR-017-44 | Store MUST handle 1M+ symbols |
+| FR-017-45 | Store MUST support pagination |
+| FR-017-46 | Store MUST report symbol count |
+| FR-017-47 | Store MUST report file count |
+| FR-017-48 | ClearAsync MUST delete all symbols |
+| FR-017-49 | Store MUST be disposable |
+| FR-017-50 | Disposal MUST release connections |
 
-### Symbol Extractor
+### Symbol Extractor (FR-017-51 to FR-017-70)
 
-- FR-031: Define ISymbolExtractor interface
-- FR-032: Extractor returns symbols for file
-- FR-033: Extractor reports parse errors
-- FR-034: Registry of extractors by language
-- FR-035: Fallback for unknown languages
-- FR-036: Configurable extraction depth
-- FR-037: Skip test files option
-- FR-038: Skip generated files option
+| ID | Requirement |
+|----|-------------|
+| FR-017-51 | System MUST define ISymbolExtractor interface |
+| FR-017-52 | ExtractAsync MUST accept file path |
+| FR-017-53 | ExtractAsync MUST accept file content |
+| FR-017-54 | ExtractAsync MUST return list of symbols |
+| FR-017-55 | ExtractAsync MUST accept CancellationToken |
+| FR-017-56 | Extractor MUST report supported extensions |
+| FR-017-57 | Extractor MUST report supported languages |
+| FR-017-58 | Extractor MUST handle parse errors gracefully |
+| FR-017-59 | Parse errors MUST be logged |
+| FR-017-60 | Parse errors MUST return partial results |
+| FR-017-61 | Extractor MUST respect extraction depth config |
+| FR-017-62 | Depth 0 MUST extract types only |
+| FR-017-63 | Depth 1 MUST extract types and members |
+| FR-017-64 | Depth 2 MUST extract nested and local |
+| FR-017-65 | Extractor MUST respect file size limit |
+| FR-017-66 | Oversized files MUST be skipped |
+| FR-017-67 | Extractor MUST respect timeout |
+| FR-017-68 | Timeout MUST return partial results |
+| FR-017-69 | System MUST define IExtractorRegistry |
+| FR-017-70 | Registry MUST map extensions to extractors |
 
-### Index Management
+### Index Management (FR-017-71 to FR-017-95)
 
-- FR-039: Define ISymbolIndex interface
-- FR-040: Full index rebuild
-- FR-041: Incremental index update
-- FR-042: Index specific files
-- FR-043: Remove files from index
-- FR-044: Clear entire index
-- FR-045: Index status reporting
-- FR-046: Index progress callback
-- FR-047: Cancellation support
-- FR-048: Parallel indexing
+| ID | Requirement |
+|----|-------------|
+| FR-017-71 | System MUST define ISymbolIndex interface |
+| FR-017-72 | BuildAsync MUST perform full index rebuild |
+| FR-017-73 | Build MUST clear existing symbols first |
+| FR-017-74 | Build MUST enumerate all source files |
+| FR-017-75 | Build MUST respect ignore patterns |
+| FR-017-76 | Build MUST extract symbols per file |
+| FR-017-77 | Build MUST store extracted symbols |
+| FR-017-78 | Build MUST track file hashes |
+| FR-017-79 | Build MUST report progress |
+| FR-017-80 | UpdateAsync MUST perform incremental update |
+| FR-017-81 | Update MUST detect modified files |
+| FR-017-82 | Update MUST detect new files |
+| FR-017-83 | Update MUST detect deleted files |
+| FR-017-84 | Modified files MUST be re-extracted |
+| FR-017-85 | New files MUST be extracted and added |
+| FR-017-86 | Deleted files MUST have symbols removed |
+| FR-017-87 | IndexFilesAsync MUST index specific files |
+| FR-017-88 | RemoveFilesAsync MUST remove specific files |
+| FR-017-89 | ClearAsync MUST clear entire index |
+| FR-017-90 | GetStatusAsync MUST return index status |
+| FR-017-91 | Status MUST include file count |
+| FR-017-92 | Status MUST include symbol count |
+| FR-017-93 | Status MUST include last build time |
+| FR-017-94 | Status MUST include last update time |
+| FR-017-95 | All operations MUST support cancellation |
 
-### File Tracking
+### Query Interface (FR-017-96 to FR-017-120)
 
-- FR-049: Track indexed file hashes
-- FR-050: Detect file changes
-- FR-051: Detect file deletions
-- FR-052: Detect new files
-- FR-053: Handle file renames
-
-### Query Interface
-
-- FR-054: Search symbols by name
-- FR-055: Fuzzy name matching
-- FR-056: Prefix matching
-- FR-057: Filter by kind
-- FR-058: Filter by visibility
-- FR-059: Filter by file pattern
-- FR-060: Pagination support
-- FR-061: Order by relevance
-- FR-062: Order by name
-- FR-063: Order by file
-
-### Symbol Resolution
-
-- FR-064: Resolve symbol by ID
-- FR-065: Get symbol source code
-- FR-066: Get symbol documentation
-- FR-067: Get containing context
-- FR-068: Navigate to definition
+| ID | Requirement |
+|----|-------------|
+| FR-017-96 | System MUST define ISymbolQuery interface |
+| FR-017-97 | SearchAsync MUST accept query string |
+| FR-017-98 | Search MUST support exact name match |
+| FR-017-99 | Search MUST support prefix match |
+| FR-017-100 | Search MUST support fuzzy match |
+| FR-017-101 | Fuzzy MUST tolerate typos |
+| FR-017-102 | Search MUST support wildcard (*) |
+| FR-017-103 | Search MUST filter by SymbolKind |
+| FR-017-104 | Search MUST filter by visibility |
+| FR-017-105 | Search MUST filter by file pattern |
+| FR-017-106 | Search MUST filter by namespace |
+| FR-017-107 | Search MUST support multiple filters |
+| FR-017-108 | Search MUST return ordered results |
+| FR-017-109 | Order MUST support by relevance |
+| FR-017-110 | Order MUST support by name |
+| FR-017-111 | Order MUST support by file |
+| FR-017-112 | Search MUST support pagination |
+| FR-017-113 | Pagination MUST accept skip and take |
+| FR-017-114 | Search MUST return total count |
+| FR-017-115 | ResolveAsync MUST get symbol by ID |
+| FR-017-116 | GetSourceAsync MUST return symbol source code |
+| FR-017-117 | GetDocumentationAsync MUST return doc comments |
+| FR-017-118 | GetContainingAsync MUST return containing context |
+| FR-017-119 | GetChildrenAsync MUST return contained symbols |
+| FR-017-120 | Query operations MUST be read-only |
 
 ---
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-017-01 to NFR-017-20)
 
-- NFR-001: Index 1000 files < 30s
-- NFR-002: Incremental update < 100ms/file
-- NFR-003: Query < 50ms
-- NFR-004: Batch insert < 1ms/symbol
-- NFR-005: Parallel indexing with workers
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-01 | Performance | Full index of 1000 files MUST complete in < 30s |
+| NFR-017-02 | Performance | Full index of 10,000 files MUST complete in < 5 min |
+| NFR-017-03 | Performance | Incremental update per file MUST complete in < 100ms |
+| NFR-017-04 | Performance | Incremental update for 100 files MUST complete in < 5s |
+| NFR-017-05 | Performance | Name search MUST complete in < 50ms |
+| NFR-017-06 | Performance | Fuzzy search MUST complete in < 100ms |
+| NFR-017-07 | Performance | Filtered search MUST complete in < 75ms |
+| NFR-017-08 | Performance | Symbol resolution by ID MUST complete in < 10ms |
+| NFR-017-09 | Performance | Batch insert MUST achieve > 1000 symbols/s |
+| NFR-017-10 | Performance | Index load MUST complete in < 2s |
+| NFR-017-11 | Performance | Memory usage during indexing MUST be < 1GB |
+| NFR-017-12 | Performance | Memory usage for loaded index MUST be < 200MB |
+| NFR-017-13 | Performance | Parallel indexing MUST use configurable workers |
+| NFR-017-14 | Performance | Default worker count MUST be CPU cores - 1 |
+| NFR-017-15 | Performance | Database queries MUST use prepared statements |
+| NFR-017-16 | Performance | Database MUST use WAL mode |
+| NFR-017-17 | Performance | Database indexes MUST cover common queries |
+| NFR-017-18 | Performance | Connection pooling MUST be used |
+| NFR-017-19 | Performance | Extraction MUST stream large files |
+| NFR-017-20 | Performance | Progress reporting MUST NOT slow indexing |
 
-### Scalability
+### Scalability (NFR-017-21 to NFR-017-30)
 
-- NFR-006: Handle 100K files
-- NFR-007: Handle 1M symbols
-- NFR-008: Memory-efficient streaming
-- NFR-009: Pagination for large results
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-21 | Scalability | Index MUST handle 100,000 files |
+| NFR-017-22 | Scalability | Index MUST handle 1,000,000 symbols |
+| NFR-017-23 | Scalability | Queries MUST remain < 100ms at 1M symbols |
+| NFR-017-24 | Scalability | Pagination MUST work at any offset |
+| NFR-017-25 | Scalability | Large result sets MUST be streamed |
+| NFR-017-26 | Scalability | Index file size MUST scale linearly |
+| NFR-017-27 | Scalability | Memory MUST NOT scale with symbol count |
+| NFR-017-28 | Scalability | Concurrent queries MUST be supported |
+| NFR-017-29 | Scalability | Concurrent updates MUST be serialized |
+| NFR-017-30 | Scalability | Large files (>1MB) MUST NOT block |
 
-### Reliability
+### Reliability (NFR-017-31 to NFR-017-45)
 
-- NFR-010: Survive parse errors
-- NFR-011: Partial results on failure
-- NFR-012: Consistent index state
-- NFR-013: Crash recovery
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-31 | Reliability | Parse errors MUST NOT stop indexing |
+| NFR-017-32 | Reliability | Extractor crash MUST NOT crash host |
+| NFR-017-33 | Reliability | Partial results MUST be returned on failure |
+| NFR-017-34 | Reliability | Index state MUST remain consistent |
+| NFR-017-35 | Reliability | Interrupted build MUST be resumable |
+| NFR-017-36 | Reliability | Corruption MUST be detected on load |
+| NFR-017-37 | Reliability | Corruption MUST trigger rebuild prompt |
+| NFR-017-38 | Reliability | Crash during update MUST NOT corrupt index |
+| NFR-017-39 | Reliability | Database transactions MUST be atomic |
+| NFR-017-40 | Reliability | Rollback MUST restore previous state |
+| NFR-017-41 | Reliability | File locks MUST be handled |
+| NFR-017-42 | Reliability | Network errors (if any) MUST retry |
+| NFR-017-43 | Reliability | Out of disk space MUST be handled |
+| NFR-017-44 | Reliability | Symbols MUST have unique IDs |
+| NFR-017-45 | Reliability | Duplicate detection MUST prevent conflicts |
 
-### Accuracy
+### Accuracy (NFR-017-46 to NFR-017-55)
 
-- NFR-014: No duplicate symbols
-- NFR-015: Correct locations
-- NFR-016: Valid relationships
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-46 | Accuracy | Symbol names MUST match source exactly |
+| NFR-017-47 | Accuracy | Symbol locations MUST be precise |
+| NFR-017-48 | Accuracy | Line numbers MUST be 1-based |
+| NFR-017-49 | Accuracy | Column numbers MUST be 1-based |
+| NFR-017-50 | Accuracy | Containment MUST reflect actual structure |
+| NFR-017-51 | Accuracy | Visibility MUST match source |
+| NFR-017-52 | Accuracy | Signatures MUST be parseable |
+| NFR-017-53 | Accuracy | Deleted file symbols MUST be removed |
+| NFR-017-54 | Accuracy | Renamed files MUST update correctly |
+| NFR-017-55 | Accuracy | No orphaned symbols after update |
+
+### Maintainability (NFR-017-56 to NFR-017-65)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-56 | Maintainability | Schema MUST be versioned |
+| NFR-017-57 | Maintainability | Schema migrations MUST be automatic |
+| NFR-017-58 | Maintainability | All interfaces MUST have XML docs |
+| NFR-017-59 | Maintainability | Code coverage MUST be > 80% |
+| NFR-017-60 | Maintainability | Cyclomatic complexity MUST be < 10 |
+| NFR-017-61 | Maintainability | Dependencies MUST be injected |
+| NFR-017-62 | Maintainability | Extractors MUST be pluggable |
+| NFR-017-63 | Maintainability | Adding language MUST NOT modify core |
+| NFR-017-64 | Maintainability | Configuration MUST be documented |
+| NFR-017-65 | Maintainability | Error codes MUST be documented |
+
+### Observability (NFR-017-66 to NFR-017-75)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017-66 | Observability | Build progress MUST be logged |
+| NFR-017-67 | Observability | Extraction errors MUST be logged |
+| NFR-017-68 | Observability | Query operations MUST log at Debug |
+| NFR-017-69 | Observability | Metrics MUST track indexed file count |
+| NFR-017-70 | Observability | Metrics MUST track symbol count |
+| NFR-017-71 | Observability | Metrics MUST track build duration |
+| NFR-017-72 | Observability | Metrics MUST track query latency |
+| NFR-017-73 | Observability | Metrics MUST track extraction errors |
+| NFR-017-74 | Observability | Structured logging MUST be used |
+| NFR-017-75 | Observability | Correlation IDs MUST be propagated |
 
 ---
 
@@ -384,22 +584,92 @@ By Kind:
 ```
 Tests/Unit/Symbols/
 ├── SymbolTests.cs
-│   ├── Should_Store_All_Metadata()
-│   └── Should_Support_All_Kinds()
+│   ├── Should_Store_Name()
+│   ├── Should_Store_FullyQualifiedName()
+│   ├── Should_Store_Kind()
+│   ├── Should_Store_Location()
+│   ├── Should_Store_Signature()
+│   ├── Should_Store_Visibility()
+│   ├── Should_Store_ContainingSymbol()
+│   ├── Should_Support_Class_Kind()
+│   ├── Should_Support_Interface_Kind()
+│   ├── Should_Support_Struct_Kind()
+│   ├── Should_Support_Enum_Kind()
+│   ├── Should_Support_Method_Kind()
+│   ├── Should_Support_Property_Kind()
+│   ├── Should_Support_Field_Kind()
+│   ├── Should_Support_Function_Kind()
+│   ├── Should_Support_TypeAlias_Kind()
+│   └── Should_Support_Namespace_Kind()
+│
+├── SymbolLocationTests.cs
+│   ├── Should_Store_FilePath()
+│   ├── Should_Store_StartLine()
+│   ├── Should_Store_EndLine()
+│   ├── Should_Store_StartColumn()
+│   ├── Should_Store_EndColumn()
+│   └── Should_Calculate_Range()
 │
 ├── SymbolStoreTests.cs
 │   ├── Should_Add_Symbol()
-│   ├── Should_Remove_Symbol()
-│   ├── Should_Query_By_Name()
-│   └── Should_Query_By_Kind()
+│   ├── Should_Add_Multiple_Symbols()
+│   ├── Should_Add_Batch_Symbols()
+│   ├── Should_Remove_Symbol_By_Id()
+│   ├── Should_Remove_Symbols_By_File()
+│   ├── Should_Update_Symbol()
+│   ├── Should_Query_By_Exact_Name()
+│   ├── Should_Query_By_Prefix()
+│   ├── Should_Query_By_Fuzzy_Match()
+│   ├── Should_Query_By_Kind()
+│   ├── Should_Query_By_Visibility()
+│   ├── Should_Query_By_File_Pattern()
+│   ├── Should_Query_By_Namespace()
+│   ├── Should_Query_By_ContainingSymbol()
+│   ├── Should_Return_Paginated_Results()
+│   ├── Should_Order_By_Name()
+│   ├── Should_Order_By_Relevance()
+│   ├── Should_Order_By_File()
+│   ├── Should_Handle_Empty_Store()
+│   └── Should_Handle_No_Matches()
 │
 ├── SymbolIndexTests.cs
-│   ├── Should_Build_Index()
-│   └── Should_Update_Incrementally()
+│   ├── Should_Build_Full_Index()
+│   ├── Should_Track_Indexed_Files()
+│   ├── Should_Detect_Changed_Files()
+│   ├── Should_Detect_New_Files()
+│   ├── Should_Detect_Deleted_Files()
+│   ├── Should_Update_Incrementally()
+│   ├── Should_Index_Specific_Files()
+│   ├── Should_Remove_File_From_Index()
+│   ├── Should_Clear_Index()
+│   ├── Should_Report_Status()
+│   ├── Should_Report_Progress()
+│   ├── Should_Support_Cancellation()
+│   ├── Should_Index_In_Parallel()
+│   ├── Should_Handle_Parse_Errors()
+│   └── Should_Provide_Partial_Results()
 │
-└── ExtractorRegistryTests.cs
-    ├── Should_Register_Extractor()
-    └── Should_Get_By_Language()
+├── ExtractorRegistryTests.cs
+│   ├── Should_Register_Extractor()
+│   ├── Should_Get_Extractor_By_Extension()
+│   ├── Should_Get_Extractor_By_Language()
+│   ├── Should_Return_Null_For_Unknown()
+│   ├── Should_Support_Multiple_Extensions()
+│   ├── Should_Handle_Fallback_Extractor()
+│   └── Should_List_Supported_Languages()
+│
+├── ExtractorConfigTests.cs
+│   ├── Should_Respect_Max_File_Size()
+│   ├── Should_Skip_Test_Files()
+│   ├── Should_Skip_Generated_Files()
+│   └── Should_Apply_Extraction_Depth()
+│
+└── SymbolResolutionTests.cs
+    ├── Should_Resolve_Symbol_By_Id()
+    ├── Should_Get_Symbol_Source_Code()
+    ├── Should_Get_Symbol_Documentation()
+    ├── Should_Get_Containing_Context()
+    └── Should_Navigate_To_Definition()
 ```
 
 ### Integration Tests
@@ -407,10 +677,25 @@ Tests/Unit/Symbols/
 ```
 Tests/Integration/Symbols/
 ├── SymbolStoreIntegrationTests.cs
-│   └── Should_Persist_And_Load()
+│   ├── Should_Persist_To_Database()
+│   ├── Should_Load_From_Database()
+│   ├── Should_Handle_Concurrent_Writes()
+│   ├── Should_Handle_Large_Symbol_Count()
+│   └── Should_Survive_Restart()
 │
-└── SymbolIndexIntegrationTests.cs
-    └── Should_Index_Real_Files()
+├── SymbolIndexIntegrationTests.cs
+│   ├── Should_Index_CSharp_Files()
+│   ├── Should_Index_TypeScript_Files()
+│   ├── Should_Index_JavaScript_Files()
+│   ├── Should_Index_Mixed_Languages()
+│   ├── Should_Handle_Large_Codebase()
+│   ├── Should_Handle_Incremental_With_Many_Changes()
+│   └── Should_Recover_From_Crash()
+│
+└── QueryIntegrationTests.cs
+    ├── Should_Search_Across_Languages()
+    ├── Should_Combine_Filters()
+    └── Should_Handle_Complex_Queries()
 ```
 
 ### E2E Tests
@@ -418,8 +703,14 @@ Tests/Integration/Symbols/
 ```
 Tests/E2E/Symbols/
 ├── SymbolE2ETests.cs
-│   ├── Should_Build_Via_CLI()
-│   └── Should_Search_Via_CLI()
+│   ├── Should_Build_Index_Via_CLI()
+│   ├── Should_Build_With_Progress_Via_CLI()
+│   ├── Should_Update_Index_Via_CLI()
+│   ├── Should_Search_Symbols_Via_CLI()
+│   ├── Should_Search_By_Kind_Via_CLI()
+│   ├── Should_Show_Status_Via_CLI()
+│   ├── Should_Clear_Index_Via_CLI()
+│   └── Should_Integrate_With_Context_Packer()
 ```
 
 ### Performance Benchmarks

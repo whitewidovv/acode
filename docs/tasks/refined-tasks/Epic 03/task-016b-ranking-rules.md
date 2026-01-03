@@ -10,21 +10,74 @@
 
 ## Description
 
-Task 016.b defines the ranking rules for the Context Packer. Ranking determines which chunks are most important. Higher-ranked chunks are included first in context.
+### Business Value
 
-Ranking is multi-factor. No single factor determines rank. Relevance, recency, source priority, and other factors combine.
+Ranking is the intelligence that determines which code chunks matter most for the agent's current task. With potentially thousands of chunks across a codebase, the agent cannot include everything in its context window. Task 016.b delivers the prioritization logic that ensures the most relevant, useful chunks appear first—maximizing the value of every token spent on context.
 
-Relevance is the primary factor. How well does the chunk match the current task? Search score indicates relevance. Keyword overlap matters.
+Effective ranking directly impacts agent response quality. When the agent is asked to modify a function, the ranking system must surface that function's code, its callers, its tests, and related interfaces—in priority order. Poor ranking buries critical context below less relevant code, forcing the LLM to work with incomplete information and producing lower-quality responses.
 
-Source priority favors certain origins. Tool results often most relevant. Open files are directly referenced. Search results vary in quality.
+The multi-factor ranking approach recognizes that "relevance" is complex. A chunk might be relevant because it matched a search query, because the user has the file open, because it was recently modified, or because it's in a critical path of the codebase. By combining these factors with configurable weights, the ranking system adapts to different workflows and use cases.
 
-Recency considers time factors. Recently modified files may be more relevant. Recently viewed files are likely important.
+### Scope
 
-Weights are configurable. Different use cases need different balances. Search-heavy tasks weight relevance higher. Exploration tasks weight diversity higher.
+This task defines the complete ranking subsystem for the Context Packer:
 
-Combined scoring produces final rank. Normalize each factor. Apply weights. Sum to final score. Sort descending.
+1. **Relevance Scoring:** Calculate how well each chunk matches the current query or task based on search scores and keyword overlap.
 
-Tie-breaking ensures determinism. When scores are equal, use consistent ordering. File path is the final tiebreaker.
+2. **Source Priority Scoring:** Prioritize chunks based on their origin—tool results rank higher than search results, which rank higher than indirect references.
+
+3. **Recency Scoring:** Factor in how recently files were modified or accessed, with configurable time decay.
+
+4. **Position Scoring:** Boost chunks based on their position in files (headers, class declarations) and relationship to other selected chunks.
+
+5. **Combined Ranking Engine:** Weighted combination of all factors producing a final score for deterministic ordering.
+
+### Integration Points
+
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Task 016 (Context Packer) | Parent System | Ranker is invoked by Context Packer to prioritize chunks |
+| Task 016.a (Chunking) | Upstream | Receives chunks with metadata for ranking |
+| Task 016.c (Budgeting) | Downstream | Ranked chunks passed to budget selector |
+| Task 002 (Config) | Configuration | Ranking weights and settings from `.agent/config.yml` |
+| Task 015 (Indexing) | Metadata Source | File modification times and access patterns from index |
+| Task 011 (Session) | Context Source | Current task context for relevance scoring |
+
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Missing relevance signal | Cannot score by relevance | Default to neutral score (0.5), rely on other factors |
+| Invalid weight configuration | Weights don't sum to 1.0 | Normalize weights automatically, log warning |
+| Missing file metadata | Cannot score recency | Default to neutral score, warn in debug output |
+| Pattern matching error | Boost/penalty not applied | Validate patterns at config load, skip invalid patterns |
+| Tie-breaking inconsistency | Non-deterministic order | Strict tie-breaking rules: score → source → path → line |
+| Score overflow | Numeric instability | Clamp scores to 0-1 range after all adjustments |
+| Empty chunk set | No results to rank | Return empty result immediately, no error |
+| Circular boost/penalty | Unexpected score behavior | Apply boosts and penalties in single pass only |
+
+### Assumptions
+
+1. All chunks have associated metadata (source, path, line numbers)
+2. Search scores, when present, are normalized to 0-1 range
+3. File modification times are available from the file system or index
+4. Boost and penalty patterns use standard glob syntax
+5. Weight configuration is validated at startup
+6. The ranking algorithm is deterministic for identical inputs
+7. Performance is acceptable for up to 10,000 chunks
+8. Debug output is available for ranking troubleshooting
+
+### Security Considerations
+
+1. **Path Pattern Safety:** Boost and penalty patterns must be validated to prevent regex denial-of-service attacks.
+
+2. **Information Leakage:** Ranking debug output must not expose sensitive file paths outside the repository.
+
+3. **Configuration Tampering:** Ranking weights should be validated to prevent malicious configurations that could prioritize dangerous code.
+
+4. **Deterministic Output:** Ranking must be deterministic to enable auditing and reproducibility.
+
+5. **No External Calls:** Ranking must be purely computational with no external service dependencies.
 
 ---
 
@@ -64,88 +117,112 @@ The following items are explicitly excluded from Task 016.b:
 
 ## Functional Requirements
 
-### Relevance Scoring
+### Relevance Scoring (FR-016b-01 to FR-016b-04)
 
-- FR-001: Score by search relevance
-- FR-002: Score by keyword match
-- FR-003: Score by query overlap
-- FR-004: Normalize 0-1
+| ID | Requirement |
+|----|-------------|
+| FR-016b-01 | System MUST score chunks by search relevance when available |
+| FR-016b-02 | System MUST score chunks by keyword match against current query |
+| FR-016b-03 | System MUST score chunks by query term overlap |
+| FR-016b-04 | Relevance scores MUST be normalized to 0-1 range |
 
-### Source Scoring
+### Source Scoring (FR-016b-05 to FR-016b-10)
 
-- FR-005: Assign source priority
-- FR-006: Tool results: high
-- FR-007: Open files: medium-high
-- FR-008: Search results: medium
-- FR-009: References: low
-- FR-010: Configurable priorities
+| ID | Requirement |
+|----|-------------|
+| FR-016b-05 | System MUST assign priority score based on chunk source |
+| FR-016b-06 | Tool results MUST receive high source priority (default: 100) |
+| FR-016b-07 | Open files MUST receive medium-high source priority (default: 80) |
+| FR-016b-08 | Search results MUST receive medium source priority (default: 60) |
+| FR-016b-09 | References MUST receive low source priority (default: 40) |
+| FR-016b-10 | Source priorities MUST be configurable |
 
-### Recency Scoring
+### Recency Scoring (FR-016b-11 to FR-016b-14)
 
-- FR-011: Score by modification time
-- FR-012: Score by access time
-- FR-013: Apply time decay
-- FR-014: Configurable decay
+| ID | Requirement |
+|----|-------------|
+| FR-016b-11 | System MUST score chunks by file modification time |
+| FR-016b-12 | System MUST score chunks by file access time when available |
+| FR-016b-13 | System MUST apply time decay function to recency scores |
+| FR-016b-14 | Decay rate MUST be configurable (hours until score halves) |
 
-### Position Scoring
+### Position Scoring (FR-016b-15 to FR-016b-17)
 
-- FR-015: Score by file position
-- FR-016: Top of file: boost
-- FR-017: Related code: boost
+| ID | Requirement |
+|----|-------------|
+| FR-016b-15 | System MUST score chunks by position within file |
+| FR-016b-16 | Top-of-file content (imports, class headers) MUST receive position boost |
+| FR-016b-17 | Code related to other selected chunks MUST receive boost |
 
-### Combined Scoring
+### Combined Scoring (FR-016b-18 to FR-016b-21)
 
-- FR-018: Apply weights to factors
-- FR-019: Sum weighted scores
-- FR-020: Normalize final score
-- FR-021: Configurable weights
+| ID | Requirement |
+|----|-------------|
+| FR-016b-18 | System MUST apply configurable weights to each scoring factor |
+| FR-016b-19 | System MUST sum weighted scores to produce final score |
+| FR-016b-20 | Final scores MUST be normalized to 0-1 range |
+| FR-016b-21 | All weights MUST be configurable in configuration file |
 
-### Tie-Breaking
+### Tie-Breaking (FR-016b-22 to FR-016b-25)
 
-- FR-022: Primary: score
-- FR-023: Secondary: source priority
-- FR-024: Tertiary: file path
-- FR-025: Deterministic order
+| ID | Requirement |
+|----|-------------|
+| FR-016b-22 | Primary sort MUST be by final combined score (descending) |
+| FR-016b-23 | Secondary sort MUST be by source priority (descending) |
+| FR-016b-24 | Tertiary sort MUST be by file path (alphabetical) |
+| FR-016b-25 | Ranking MUST be deterministic for identical inputs |
 
-### Filtering
+### Filtering (FR-016b-26 to FR-016b-28)
 
-- FR-026: Minimum score threshold
-- FR-027: Exclude below threshold
-- FR-028: Configurable threshold
+| ID | Requirement |
+|----|-------------|
+| FR-016b-26 | System MUST support minimum score threshold |
+| FR-016b-27 | Chunks below threshold MUST be excluded from results |
+| FR-016b-28 | Minimum score threshold MUST be configurable |
 
-### Boosting
+### Boosting (FR-016b-29 to FR-016b-31)
 
-- FR-029: Boost specific paths
-- FR-030: Boost specific types
-- FR-031: Temporary boosts
+| ID | Requirement |
+|----|-------------|
+| FR-016b-29 | System MUST support score boost for specific path patterns |
+| FR-016b-30 | System MUST support score boost for specific file types |
+| FR-016b-31 | System MUST support temporary session-level boosts |
 
-### Penalties
+### Penalties (FR-016b-32 to FR-016b-34)
 
-- FR-032: Penalize test files
-- FR-033: Penalize generated files
-- FR-034: Configurable penalties
+| ID | Requirement |
+|----|-------------|
+| FR-016b-32 | System MUST apply score penalty for test file paths |
+| FR-016b-33 | System MUST apply score penalty for generated file paths |
+| FR-016b-34 | Penalty patterns and factors MUST be configurable |
 
 ---
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-016b-01 to NFR-016b-03)
 
-- NFR-001: Rank 1000 chunks < 50ms
-- NFR-002: Score computation < 1ms each
-- NFR-003: Sort < 10ms
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-016b-01 | Performance | System MUST rank 1000 chunks in less than 50ms |
+| NFR-016b-02 | Performance | Individual score computation MUST complete in less than 1ms |
+| NFR-016b-03 | Performance | Sorting MUST complete in less than 10ms for 1000 chunks |
 
-### Quality
+### Quality (NFR-016b-04 to NFR-016b-06)
 
-- NFR-004: Consistent ranking
-- NFR-005: Intuitive results
-- NFR-006: Configurable behavior
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-016b-04 | Quality | Ranking MUST be consistent across identical inputs |
+| NFR-016b-05 | Quality | Ranking results MUST be intuitive for developers |
+| NFR-016b-06 | Quality | Ranking behavior MUST be configurable for different use cases |
 
-### Reliability
+### Reliability (NFR-016b-07 to NFR-016b-09)
 
-- NFR-007: Handle missing factors
-- NFR-008: Default values
-- NFR-009: No crashes
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-016b-07 | Reliability | System MUST handle missing scoring factors gracefully |
+| NFR-016b-08 | Reliability | System MUST use sensible default values for missing data |
+| NFR-016b-09 | Reliability | System MUST NOT crash on invalid input data |
 
 ---
 
@@ -325,26 +402,71 @@ Top 10 chunks:
 ```
 Tests/Unit/Context/Ranking/
 ├── RelevanceScorerTests.cs
-│   ├── Should_Score_Search_Results()
-│   ├── Should_Score_Keywords()
-│   └── Should_Normalize()
+│   ├── Should_Score_Search_Result()
+│   ├── Should_Score_High_Relevance()
+│   ├── Should_Score_Low_Relevance()
+│   ├── Should_Score_Keyword_Match()
+│   ├── Should_Score_Multiple_Keywords()
+│   ├── Should_Normalize_To_Zero_One()
+│   ├── Should_Handle_No_Relevance_Signal()
+│   └── Should_Handle_Empty_Query()
 │
 ├── SourceScorerTests.cs
-│   ├── Should_Assign_Priorities()
-│   └── Should_Be_Configurable()
+│   ├── Should_Score_Tool_Result()
+│   ├── Should_Score_Open_File()
+│   ├── Should_Score_Search_Result()
+│   ├── Should_Score_Reference()
+│   ├── Should_Load_Config_Priorities()
+│   ├── Should_Handle_Unknown_Source()
+│   └── Should_Normalize_To_Zero_One()
 │
 ├── RecencyScorerTests.cs
-│   ├── Should_Score_By_Time()
-│   └── Should_Apply_Decay()
+│   ├── Should_Score_Today()
+│   ├── Should_Score_Yesterday()
+│   ├── Should_Score_Last_Week()
+│   ├── Should_Score_Last_Month()
+│   ├── Should_Score_Older()
+│   ├── Should_Apply_Decay_Function()
+│   ├── Should_Load_Config_Decay()
+│   ├── Should_Handle_Missing_Date()
+│   └── Should_Normalize_To_Zero_One()
+│
+├── PositionScorerTests.cs
+│   ├── Should_Boost_Top_Of_File()
+│   ├── Should_Boost_Class_Header()
+│   ├── Should_Boost_Related_To_Other_Chunks()
+│   ├── Should_Handle_Middle_Of_File()
+│   └── Should_Normalize_To_Zero_One()
 │
 ├── CombinedRankerTests.cs
-│   ├── Should_Apply_Weights()
-│   ├── Should_Sum_Correctly()
-│   └── Should_Handle_Ties()
+│   ├── Should_Apply_Default_Weights()
+│   ├── Should_Apply_Custom_Weights()
+│   ├── Should_Sum_Weighted_Scores()
+│   ├── Should_Normalize_Final_Score()
+│   ├── Should_Handle_Zero_Weight()
+│   ├── Should_Handle_Single_Factor()
+│   ├── Should_Sort_By_Score_Descending()
+│   ├── Should_Handle_Tie_Deterministically()
+│   ├── Should_Apply_Min_Score_Threshold()
+│   └── Should_Return_Ranking_Factors()
 │
-└── BoostPenaltyTests.cs
-    ├── Should_Apply_Boosts()
-    └── Should_Apply_Penalties()
+├── BoostPenaltyTests.cs
+│   ├── Should_Apply_Path_Boost()
+│   ├── Should_Apply_Pattern_Boost()
+│   ├── Should_Apply_Multiple_Boosts()
+│   ├── Should_Apply_Path_Penalty()
+│   ├── Should_Apply_Pattern_Penalty()
+│   ├── Should_Apply_Multiple_Penalties()
+│   ├── Should_Stack_Boosts_And_Penalties()
+│   ├── Should_Match_Glob_Patterns()
+│   ├── Should_Handle_No_Match()
+│   └── Should_Cap_Final_Score()
+│
+└── TieBreakingTests.cs
+    ├── Should_Break_By_Source_Priority()
+    ├── Should_Break_By_Path_Alpha()
+    ├── Should_Break_By_Line_Number()
+    └── Should_Be_Deterministic()
 ```
 
 ### Integration Tests
@@ -352,7 +474,14 @@ Tests/Unit/Context/Ranking/
 ```
 Tests/Integration/Context/Ranking/
 ├── RankingIntegrationTests.cs
-│   └── Should_Rank_Real_Chunks()
+│   ├── Should_Rank_Real_Chunks()
+│   ├── Should_Rank_Large_Chunk_Set()
+│   ├── Should_Apply_Config_Settings()
+│   └── Should_Produce_Stable_Ranking()
+│
+└── RankingDebugIntegrationTests.cs
+    ├── Should_Output_Debug_Info()
+    └── Should_Show_Factor_Breakdown()
 ```
 
 ### E2E Tests
@@ -360,7 +489,9 @@ Tests/Integration/Context/Ranking/
 ```
 Tests/E2E/Context/Ranking/
 ├── RankingE2ETests.cs
-│   └── Should_Rank_For_Agent()
+│   ├── Should_Rank_For_Agent_Context()
+│   ├── Should_Debug_Via_CLI()
+│   └── Should_Respect_Config_Changes()
 ```
 
 ### Performance Benchmarks

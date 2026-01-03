@@ -10,25 +10,65 @@
 
 ## Description
 
-Task 017.b implements TypeScript and JavaScript symbol extraction. TypeScript is a common language in modern projects. Many frontend and Node.js projects use it. JavaScript remains ubiquitous.
+### Business Value
 
-TypeScript Compiler API provides parsing capabilities. Similar to Roslyn for C#, it offers complete AST access. The extractor uses this API for accurate symbol extraction.
+TypeScript and JavaScript symbol extraction enables the agent to understand web and Node.js codebases, which represent a significant portion of modern software development. Without TS/JS parsing capabilities, the agent cannot navigate React components, understand Express routes, or comprehend the structure of frontend applications. This task implements production-grade TypeScript/JavaScript parsing using the TypeScript Compiler API.
 
-TypeScript and JavaScript share syntax. The same extractor handles both. TypeScript adds type annotations. JavaScript symbols lack type information but structure remains similar.
+The TypeScript Compiler API provides complete AST access comparable to Roslyn for C#. It handles both TypeScript's rich type system and JavaScript's dynamic nature. Since TypeScript is a superset of JavaScript, a single extractor implementation can process both languages, with TypeScript files providing richer type information. This unified approach reduces complexity while maximizing language coverage.
 
-The extractor runs in Node.js. A lightweight Node.js process handles parsing. The .NET agent communicates via stdout/stdin. JSON messages exchange symbol data.
+The extracted symbols integrate with the Symbol Index (Task 017) to power cross-language code intelligence. When a user asks the agent to modify a React component or an API endpoint, the symbol extractor identifies functions, classes, exports, and their associated JSDoc documentation. The extractor runs in a Node.js subprocess, communicating with the .NET agent via a JSON message protocol, ensuring isolation and proper language runtime support.
 
-Symbol extraction handles all TypeScript constructs. Classes, interfaces, type aliases. Functions, arrow functions, methods. Variables, constants, parameters. Modules, namespaces, exports.
+### Scope
 
-JSDoc comments are extracted. Many JavaScript projects use JSDoc. TypeScript supports JSDoc for typing. Documentation aids context understanding.
+This task delivers the following components:
 
-ES modules and CommonJS are supported. Import/export statements are analyzed. Module structure is captured. Dependency information extracted.
+1. **NodeBridge** - .NET component that spawns and manages the Node.js extraction process with JSON stdin/stdout protocol
+2. **TypeScript Extractor (Node.js)** - Node.js application using TypeScript Compiler API to parse and extract symbols
+3. **JSDocExtractor** - Parser for JSDoc comments (@param, @returns, @description, @example, @deprecated)
+4. **MessageProtocol** - Defines request/response message formats for cross-process communication
+5. **TypeScriptSymbolExtractor** - ISymbolExtractor implementation that orchestrates the Node.js bridge for .ts/.js/.tsx/.jsx files
 
-The extractor handles JSX/TSX. React components are common. JSX elements have symbol information. Component props are extracted.
+### Integration Points
 
-Decorators are extracted. Angular and NestJS use decorators. Decorator metadata is captured. Decorator arguments noted.
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Symbol Index (Task 017) | Consumer | Receives extracted symbols for indexing and querying |
+| Dependency Mapper (Task 017.c) | Consumer | Uses extracted symbols to build import/export relationships |
+| Context Packer | Consumer | Retrieves symbol metadata when packing code context for prompts |
+| Configuration System | Configuration | Reads extraction settings (include JS, include JSX, extract JSDoc) |
+| File System Abstraction | Dependency | Reads TypeScript/JavaScript source files |
+| Node.js Runtime | External Dependency | Required runtime for TypeScript Compiler API execution |
+| Logging Infrastructure | Dependency | Reports extraction progress, errors, and bridge status |
 
-Error handling is critical. JavaScript projects often have syntax errors. Partial results are returned. The agent continues with what's available.
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Node.js not installed | Extractor unavailable | Clear error message with installation instructions, graceful feature degradation |
+| Node.js process crash | Extraction interruption | Auto-restart bridge with exponential backoff, report partial results |
+| Invalid TypeScript syntax | Partial AST available | Extract from valid portions, log diagnostics |
+| Large file timeout | Extraction hangs | Configurable timeout (default 30s), return partial results |
+| Missing tsconfig.json | Reduced type resolution | Fall back to default compiler options |
+| Memory exhaustion in Node | Process crash | Memory limits on Node process, file size restrictions |
+
+### Assumptions
+
+1. Node.js 18.x or higher is installed and available in PATH
+2. TypeScript Compiler API is bundled with the extraction tool (no external npm install required)
+3. Source files use UTF-8 encoding
+4. JSDoc follows standard format (@param, @returns, etc.)
+5. ES modules (import/export) and CommonJS (require/module.exports) are both supported
+6. React JSX/TSX syntax is handled via appropriate compiler options
+7. The Node.js bridge process has a maximum lifespan and is recycled periodically
+8. tsconfig.json is used when present but not required for basic extraction
+
+### Security Considerations
+
+1. **Process Isolation** - Node.js runs in a separate process with no .NET memory access
+2. **No Code Execution** - TypeScript parsing MUST NOT execute source code or eval() statements
+3. **Path Validation** - All file paths MUST be validated before passing to Node.js subprocess
+4. **Input Sanitization** - JSON messages MUST be validated to prevent injection attacks
+5. **Resource Limits** - Node.js process MUST have memory and CPU limits to prevent DoS
 
 ---
 
@@ -70,121 +110,167 @@ The following items are explicitly excluded from Task 017.b:
 
 ## Functional Requirements
 
-### TypeScript Integration
+### TypeScript Integration (FR-017b-01 to FR-017b-06)
 
-- FR-001: Initialize TypeScript compiler
-- FR-002: Parse TypeScript files
-- FR-003: Parse JavaScript files
-- FR-004: Handle JSX/TSX
-- FR-005: Get source file AST
-- FR-006: Handle parse errors
+| ID | Requirement |
+|----|-------------|
+| FR-017b-01 | System MUST initialize TypeScript compiler program |
+| FR-017b-02 | System MUST parse TypeScript (.ts) files |
+| FR-017b-03 | System MUST parse JavaScript (.js) files |
+| FR-017b-04 | System MUST parse JSX (.jsx) and TSX (.tsx) files |
+| FR-017b-05 | System MUST expose source file AST for each parsed file |
+| FR-017b-06 | System MUST handle parse errors gracefully and report diagnostics |
 
-### Symbol Discovery
+### Symbol Discovery (FR-017b-07 to FR-017b-19)
 
-- FR-007: Extract class declarations
-- FR-008: Extract interface declarations
-- FR-009: Extract type alias declarations
-- FR-010: Extract enum declarations
-- FR-011: Extract function declarations
-- FR-012: Extract arrow functions
-- FR-013: Extract method declarations
-- FR-014: Extract property declarations
-- FR-015: Extract variable declarations
-- FR-016: Extract const declarations
-- FR-017: Extract module declarations
-- FR-018: Extract namespace declarations
-- FR-019: Extract export declarations
+| ID | Requirement |
+|----|-------------|
+| FR-017b-07 | System MUST extract class declarations |
+| FR-017b-08 | System MUST extract interface declarations (TypeScript only) |
+| FR-017b-09 | System MUST extract type alias declarations (TypeScript only) |
+| FR-017b-10 | System MUST extract enum declarations (TypeScript only) |
+| FR-017b-11 | System MUST extract function declarations |
+| FR-017b-12 | System MUST extract named arrow functions |
+| FR-017b-13 | System MUST extract method declarations |
+| FR-017b-14 | System MUST extract property declarations |
+| FR-017b-15 | System MUST extract variable/const declarations |
+| FR-017b-16 | System MUST extract let declarations |
+| FR-017b-17 | System MUST extract module declarations |
+| FR-017b-18 | System MUST extract namespace declarations |
+| FR-017b-19 | System MUST extract export declarations |
 
-### Symbol Metadata
+### Symbol Metadata (FR-017b-20 to FR-017b-29)
 
-- FR-020: Extract symbol name
-- FR-021: Extract fully qualified name
-- FR-022: Extract symbol kind
-- FR-023: Extract export status
-- FR-024: Extract default export status
-- FR-025: Extract const modifier
-- FR-026: Extract readonly modifier
-- FR-027: Extract abstract modifier
-- FR-028: Extract async modifier
-- FR-029: Extract generic parameters
+| ID | Requirement |
+|----|-------------|
+| FR-017b-20 | Extractor MUST capture symbol name |
+| FR-017b-21 | Extractor MUST capture fully qualified name (module path + name) |
+| FR-017b-22 | Extractor MUST capture symbol kind (class, function, variable, etc.) |
+| FR-017b-23 | Extractor MUST capture export status (exported, default, none) |
+| FR-017b-24 | Extractor MUST capture default export status |
+| FR-017b-25 | Extractor MUST capture const modifier |
+| FR-017b-26 | Extractor MUST capture readonly modifier |
+| FR-017b-27 | Extractor MUST capture abstract modifier |
+| FR-017b-28 | Extractor MUST capture async modifier |
+| FR-017b-29 | Extractor MUST capture generic type parameters |
 
-### Location Extraction
+### Location Extraction (FR-017b-30 to FR-017b-35)
 
-- FR-030: Extract file path
-- FR-031: Extract start line
-- FR-032: Extract start column
-- FR-033: Extract end line
-- FR-034: Extract end column
-- FR-035: Handle multi-line spans
+| ID | Requirement |
+|----|-------------|
+| FR-017b-30 | System MUST extract file path relative to project root |
+| FR-017b-31 | System MUST extract 1-based start line number |
+| FR-017b-32 | System MUST extract 1-based start column number |
+| FR-017b-33 | System MUST extract 1-based end line number |
+| FR-017b-34 | System MUST extract 1-based end column number |
+| FR-017b-35 | System MUST handle multi-line spans correctly |
 
-### Signature Extraction
+### Signature Extraction (FR-017b-36 to FR-017b-41)
 
-- FR-036: Extract function parameters
-- FR-037: Extract parameter types
-- FR-038: Extract parameter defaults
-- FR-039: Extract return type
-- FR-040: Extract property type
-- FR-041: Format signature string
+| ID | Requirement |
+|----|-------------|
+| FR-017b-36 | Extractor MUST capture function parameters |
+| FR-017b-37 | Extractor MUST capture parameter types (when available) |
+| FR-017b-38 | Extractor MUST capture parameter default values |
+| FR-017b-39 | Extractor MUST capture function return type |
+| FR-017b-40 | Extractor MUST capture property type annotations |
+| FR-017b-41 | Extractor MUST format human-readable signature strings |
 
-### Documentation Extraction
+### Documentation Extraction (FR-017b-42 to FR-017b-47)
 
-- FR-042: Extract JSDoc comments
-- FR-043: Extract @param tags
-- FR-044: Extract @returns tag
-- FR-045: Extract @description
-- FR-046: Extract @example
-- FR-047: Extract @deprecated
+| ID | Requirement |
+|----|-------------|
+| FR-017b-42 | Extractor MUST extract JSDoc comments attached to declarations |
+| FR-017b-43 | Extractor MUST extract @param tags with name and description |
+| FR-017b-44 | Extractor MUST extract @returns/@return tag |
+| FR-017b-45 | Extractor MUST extract @description tag content |
+| FR-017b-46 | Extractor MUST extract @example tag content |
+| FR-017b-47 | Extractor MUST extract @deprecated tag presence and reason |
 
-### Module Analysis
+### Module Analysis (FR-017b-48 to FR-017b-52)
 
-- FR-048: Track imports
-- FR-049: Track exports
-- FR-050: Identify default exports
-- FR-051: Identify named exports
-- FR-052: Resolve module paths
+| ID | Requirement |
+|----|-------------|
+| FR-017b-48 | System MUST track import statements and their sources |
+| FR-017b-49 | System MUST track export statements and exported symbols |
+| FR-017b-50 | System MUST identify default exports |
+| FR-017b-51 | System MUST identify named exports |
+| FR-017b-52 | System MUST resolve relative module paths |
 
-### Node.js Bridge
+### Node.js Bridge (FR-017b-53 to FR-017b-57)
 
-- FR-053: Spawn Node.js process
-- FR-054: JSON message protocol
-- FR-055: Stream large results
-- FR-056: Handle process errors
-- FR-057: Graceful shutdown
+| ID | Requirement |
+|----|-------------|
+| FR-017b-53 | System MUST spawn Node.js process with bundled extractor script |
+| FR-017b-54 | System MUST use JSON message protocol over stdin/stdout |
+| FR-017b-55 | System MUST stream large results to avoid memory issues |
+| FR-017b-56 | System MUST handle process errors and restart automatically |
+| FR-017b-57 | System MUST support graceful shutdown with pending request drain |
 
-### Extractor Interface
+### Extractor Interface (FR-017b-58 to FR-017b-64)
 
-- FR-058: Implement ISymbolExtractor
-- FR-059: Register for .ts extension
-- FR-060: Register for .js extension
-- FR-061: Register for .tsx extension
-- FR-062: Register for .jsx extension
-- FR-063: Return extracted symbols
-- FR-064: Report extraction errors
+| ID | Requirement |
+|----|-------------|
+| FR-017b-58 | TypeScriptSymbolExtractor MUST implement ISymbolExtractor interface |
+| FR-017b-59 | Extractor MUST register for .ts file extension |
+| FR-017b-60 | Extractor MUST register for .js file extension |
+| FR-017b-61 | Extractor MUST register for .tsx file extension |
+| FR-017b-62 | Extractor MUST register for .jsx file extension |
+| FR-017b-63 | ExtractAsync MUST return ExtractionResult with all discovered symbols |
+| FR-017b-64 | Extractor MUST report extraction errors in result object |
 
 ---
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-017b-01 to NFR-017b-06)
 
-- NFR-001: Parse < 100ms per file
-- NFR-002: Extract < 150ms per file
-- NFR-003: Bridge startup < 500ms
-- NFR-004: Handle files up to 500KB
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017b-01 | Performance | File parsing MUST complete in < 100ms per file (median) |
+| NFR-017b-02 | Performance | Symbol extraction MUST complete in < 150ms per file (median) |
+| NFR-017b-03 | Performance | Node.js bridge startup MUST complete in < 500ms |
+| NFR-017b-04 | Performance | System MUST handle files up to 500KB without degradation |
+| NFR-017b-05 | Performance | JSON message serialization MUST not exceed 10% of extraction time |
+| NFR-017b-06 | Performance | Batch extraction of 100 files MUST complete within 15 seconds |
 
-### Reliability
+### Reliability (NFR-017b-07 to NFR-017b-12)
 
-- NFR-005: Handle malformed code
-- NFR-006: Partial results on error
-- NFR-007: Process isolation
-- NFR-008: Bridge recovery
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017b-07 | Reliability | System MUST handle malformed TypeScript/JavaScript without crashing |
+| NFR-017b-08 | Reliability | Partial results MUST be returned when parse errors occur |
+| NFR-017b-09 | Reliability | Node.js process isolation MUST prevent .NET host crashes |
+| NFR-017b-10 | Reliability | Bridge MUST automatically recover from Node.js process failures |
+| NFR-017b-11 | Reliability | Pending requests MUST be retried on bridge restart |
+| NFR-017b-12 | Reliability | File encoding errors MUST be logged and skipped gracefully |
 
-### Accuracy
+### Security (NFR-017b-13 to NFR-017b-16)
 
-- NFR-009: All declarations found
-- NFR-010: Correct locations
-- NFR-011: Correct signatures
-- NFR-012: Correct exports
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017b-13 | Security | Source file content MUST NOT be logged at INFO level |
+| NFR-017b-14 | Security | File paths MUST be validated before Node.js process access |
+| NFR-017b-15 | Security | No code execution (eval, require of unknown modules) MUST occur |
+| NFR-017b-16 | Security | Node.js process MUST run with restricted permissions |
+
+### Maintainability (NFR-017b-17 to NFR-017b-20)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017b-17 | Maintainability | TypeScript extractor MUST be bundled (no npm install at runtime) |
+| NFR-017b-18 | Maintainability | Node.js version requirements MUST be documented |
+| NFR-017b-19 | Maintainability | All public APIs MUST have XML documentation |
+| NFR-017b-20 | Maintainability | Message protocol MUST be versioned for compatibility |
+
+### Observability (NFR-017b-21 to NFR-017b-24)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017b-21 | Observability | Bridge startup/shutdown events MUST be logged |
+| NFR-017b-22 | Observability | Extraction duration MUST be logged per file |
+| NFR-017b-23 | Observability | Parse errors MUST be logged with file path and position |
+| NFR-017b-24 | Observability | Node.js process restarts MUST be logged with reason |
 
 ---
 
@@ -373,21 +459,80 @@ acode symbols extract src/ --stats
 Tests/Unit/Symbols/TypeScript/
 ├── TypeScriptExtractorTests.cs
 │   ├── Should_Extract_Class()
+│   ├── Should_Extract_Abstract_Class()
+│   ├── Should_Extract_Class_With_Generics()
 │   ├── Should_Extract_Interface()
+│   ├── Should_Extract_Type_Alias()
+│   ├── Should_Extract_Enum()
 │   ├── Should_Extract_Function()
-│   ├── Should_Extract_Variable()
-│   ├── Should_Extract_Export()
-│   └── Should_Handle_Malformed()
+│   ├── Should_Extract_Arrow_Function()
+│   ├── Should_Extract_Async_Function()
+│   ├── Should_Extract_Generator_Function()
+│   ├── Should_Extract_Class_Method()
+│   ├── Should_Extract_Static_Method()
+│   ├── Should_Extract_Property()
+│   ├── Should_Extract_Readonly_Property()
+│   ├── Should_Extract_Constructor()
+│   ├── Should_Extract_Getter_Setter()
+│   ├── Should_Extract_Named_Export()
+│   ├── Should_Extract_Default_Export()
+│   ├── Should_Extract_Re_Export()
+│   ├── Should_Extract_Variable_Const()
+│   ├── Should_Extract_Variable_Let()
+│   ├── Should_Extract_Decorator()
+│   ├── Should_Extract_Visibility()
+│   ├── Should_Extract_Return_Type()
+│   ├── Should_Extract_Parameter_Types()
+│   ├── Should_Extract_Location()
+│   ├── Should_Handle_Malformed_File()
+│   └── Should_Handle_Partial_Results()
+│
+├── JavaScriptExtractorTests.cs
+│   ├── Should_Extract_Function()
+│   ├── Should_Extract_Arrow_Function()
+│   ├── Should_Extract_Class()
+│   ├── Should_Extract_Object_Method()
+│   ├── Should_Extract_CommonJS_Export()
+│   ├── Should_Extract_ES_Module_Export()
+│   ├── Should_Handle_No_Types()
+│   └── Should_Infer_From_JSDoc()
 │
 ├── JSDocExtractorTests.cs
 │   ├── Should_Extract_Description()
 │   ├── Should_Extract_Params()
-│   └── Should_Extract_Returns()
+│   ├── Should_Extract_Returns()
+│   ├── Should_Extract_Typedef()
+│   ├── Should_Extract_Type()
+│   ├── Should_Extract_Throws()
+│   ├── Should_Extract_Example()
+│   ├── Should_Handle_Missing_Docs()
+│   ├── Should_Handle_Malformed_JSDoc()
+│   └── Should_Handle_Multi_Line()
 │
-└── NodeBridgeTests.cs
-    ├── Should_Start_Process()
-    ├── Should_Exchange_Messages()
-    └── Should_Handle_Errors()
+├── NodeBridgeTests.cs
+│   ├── Should_Start_Process()
+│   ├── Should_Find_Node_Executable()
+│   ├── Should_Exchange_JSON_Messages()
+│   ├── Should_Handle_Large_Messages()
+│   ├── Should_Handle_Process_Crash()
+│   ├── Should_Handle_Timeout()
+│   ├── Should_Restart_On_Failure()
+│   ├── Should_Shutdown_Gracefully()
+│   └── Should_Handle_Concurrent_Requests()
+│
+├── TSConfigParserTests.cs
+│   ├── Should_Parse_TsConfig()
+│   ├── Should_Resolve_Extends()
+│   ├── Should_Handle_Missing_TsConfig()
+│   └── Should_Apply_Compiler_Options()
+│
+└── TypeScriptParserTests.cs
+    ├── Should_Parse_TS_File()
+    ├── Should_Parse_JS_File()
+    ├── Should_Parse_TSX_File()
+    ├── Should_Parse_JSX_File()
+    ├── Should_Handle_Syntax_Errors()
+    └── Should_Handle_Different_Targets()
 ```
 
 ### Integration Tests
@@ -396,7 +541,18 @@ Tests/Unit/Symbols/TypeScript/
 Tests/Integration/Symbols/TypeScript/
 ├── TypeScriptExtractorIntegrationTests.cs
 │   ├── Should_Extract_Real_TS_File()
-│   └── Should_Extract_Real_JS_File()
+│   ├── Should_Extract_Real_JS_File()
+│   ├── Should_Extract_Real_TSX_File()
+│   ├── Should_Extract_React_Components()
+│   ├── Should_Handle_Large_File()
+│   ├── Should_Handle_Many_Files()
+│   ├── Should_Handle_Node_Modules()
+│   └── Should_Handle_Monorepo()
+│
+└── NodeBridgeIntegrationTests.cs
+    ├── Should_Start_Bridge_Process()
+    ├── Should_Handle_Long_Running()
+    └── Should_Survive_Process_Restart()
 ```
 
 ### E2E Tests
@@ -404,7 +560,10 @@ Tests/Integration/Symbols/TypeScript/
 ```
 Tests/E2E/Symbols/TypeScript/
 ├── TypeScriptSymbolE2ETests.cs
-│   └── Should_Index_TypeScript_Project()
+│   ├── Should_Index_TypeScript_Project()
+│   ├── Should_Index_JavaScript_Project()
+│   ├── Should_Search_TS_Symbols()
+│   └── Should_Extract_Via_CLI()
 ```
 
 ### Performance Benchmarks

@@ -14,6 +14,11 @@ This document defines **mandatory** audit procedures to verify task completion. 
 
 - [ ] **Read the refined task specification completely** before starting audit
 - [ ] **Read the parent epic specification** to understand context
+- [ ] **Check for subtasks (task-XXXa, task-XXXb, etc.)**
+  - Run: `find docs/tasks/refined-tasks -name "task-XXX*.md"` (replace XXX with task number)
+  - If subtasks exist, parent task is NOT complete until ALL subtasks are complete
+  - Example: Task 003 has subtasks 003a, 003b, 003c → Task 003 incomplete until all 3 done
+  - Audit EACH subtask separately, then audit parent only when all subtasks pass
 - [ ] **Verify all Functional Requirements (FR-XXX-YYY) are implemented**
   - Go line-by-line through the FR list
   - For each FR, identify the corresponding code artifact

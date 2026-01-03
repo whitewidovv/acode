@@ -4,31 +4,102 @@
 **Tier:** S – Core Infrastructure  
 **Complexity:** 13 (Fibonacci points)  
 **Phase:** Phase 3 – Intelligence Layer  
-**Dependencies:** Task 002 (Config Contract)  
+**Dependencies:** Task 002 (Config Contract), Task 003 (DI Container), Task 011 (Run Session)  
 
 ---
 
 ## Description
 
-Task 014 implements the RepoFS abstraction. This is the file system layer that all agent operations use. It provides uniform access to files regardless of where they are stored.
+### Business Value
 
-RepoFS abstracts file system differences. Local files work one way. Docker-mounted files work another. The abstraction hides these differences. Consumers get a consistent API.
+RepoFS is the foundational file system abstraction that enables Agentic Coding Bot to interact with repository files safely and consistently. This abstraction is critical because:
 
-The agent needs to read files for context. It needs to write files for changes. It needs to enumerate directories for discovery. RepoFS provides all these operations.
+1. **Platform Independence:** Developers work on Windows, macOS, and Linux. Docker containers add another dimension. Without RepoFS, every file operation would need platform-specific handling scattered throughout the codebase.
 
-Atomic operations are critical. When the agent makes changes, they must be all-or-nothing. Partial writes corrupt files. RepoFS ensures atomicity through transactions.
+2. **Security Boundary:** The agent must NEVER access files outside the repository. A single path traversal vulnerability could expose sensitive system files or credentials. RepoFS provides the security boundary that protects user systems.
 
-Patching is the primary write mechanism. The agent doesn't rewrite whole files. It applies patches—small targeted changes. RepoFS applies patches atomically and can roll back.
+3. **Transactional Integrity:** When the agent modifies files, partial failures can corrupt code. RepoFS transactions ensure changes are atomic—either all succeed or all are rolled back.
 
-Path normalization is essential. Windows uses backslashes. Unix uses forward slashes. Docker mounts add complexity. RepoFS normalizes all paths internally.
+4. **Testability:** By abstracting file system operations behind an interface, unit tests can use in-memory implementations. This enables fast, reliable testing without touching the actual file system.
 
-File system events enable incremental indexing. When files change, indexes need updates. RepoFS can optionally report changes. This is used by the indexing layer.
+5. **Future Extensibility:** The abstraction allows adding new file system types (cloud storage, network shares) without modifying consuming code.
 
-Security boundaries are enforced. The agent only accesses files within the repository. RepoFS prevents path traversal attacks. It validates all paths.
+### Scope
 
-Error handling is comprehensive. File not found. Permission denied. Disk full. Network error. Each has clear error codes and messages.
+This task defines the complete file system abstraction layer:
 
-Performance is optimized for common patterns. Reading small files is fast. Enumerating large directories is efficient. Caching is used appropriately.
+1. **IRepoFS Interface:** The primary contract for file system operations. Defines reading, writing, deletion, enumeration, metadata, transactions, and patching. All file system implementations MUST implement this interface.
+
+2. **Path Handling:** Normalization and validation of file paths. Handles platform differences (slashes, case sensitivity). Prevents path traversal attacks.
+
+3. **Local File System Implementation:** The primary implementation for native file system access. Optimized for common development scenarios.
+
+4. **Docker File System Implementation:** Enables file operations within Docker containers via mounted volumes or Docker API.
+
+5. **Transaction Support:** Groups multiple file operations into atomic units. Supports commit and rollback.
+
+6. **Patch Application:** Applies unified diff patches to files. Critical for the agent's primary modification mechanism.
+
+7. **Factory Pattern:** Creates appropriate file system instances based on configuration.
+
+### Integration Points
+
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Task 002 (Config) | Configuration | RepoFS settings in `.agent/config.yml` under `repo` section |
+| Task 003 (DI) | Dependency Injection | IRepoFS registered as scoped service |
+| Task 011 (Session) | Transaction Context | Sessions wrap file operations in transactions |
+| Task 015 (Indexing) | Content Access | Indexer reads files via RepoFS for indexing |
+| Task 016 (Context) | Context Building | Context packer reads files via RepoFS |
+| Task 025 (File Tool) | Tool Operations | File read/write tools use RepoFS |
+| Task 050 (Git Sync) | Change Detection | Git operations observe RepoFS changes |
+| Task 003.c (Audit) | Audit Logging | All file operations are audited |
+
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| File not found | Read operation fails | Clear error message, file existence check in tooling |
+| Permission denied | Cannot read/write | Detect at startup, report permissions issue |
+| Disk full | Write fails mid-operation | Transaction rollback, disk space check |
+| Path traversal attempt | Security violation | Strict validation, request rejection, audit log |
+| Encoding detection fails | Garbled content | Default to UTF-8, warn user |
+| Docker container unavailable | Cannot access files | Health check, clear error, retry guidance |
+| Transaction timeout | Operation blocked | Configurable timeout, deadlock detection |
+| Concurrent modification | Race condition | File locking for writes, optimistic concurrency for reads |
+| Long path (Windows) | Operation fails | Detect and warn, suggest path shortening |
+| Symbolic link escape | Security violation | Resolve symlinks, validate final path |
+
+### Assumptions
+
+1. The repository is stored on a local or Docker-mounted file system
+2. Files are predominantly text (UTF-8) with occasional binary files
+3. The agent has read access to all files in the repository
+4. Write access may be restricted to certain directories
+5. File operations complete in reasonable time (no network latency)
+6. The file system supports atomic rename operations (for transactions)
+7. File paths are valid for the target platform
+8. File sizes are reasonable for in-memory processing (< 10MB typical)
+9. Concurrent agents are not modifying the same repository
+10. Git ignore patterns are respected for enumeration
+
+### Security Considerations
+
+RepoFS is a critical security boundary. All file operations MUST:
+
+1. **Validate Paths:** Every path MUST be validated before use. Path traversal attempts (../) MUST be rejected.
+
+2. **Enforce Boundaries:** Access MUST be limited to the repository root. No operation may access parent directories.
+
+3. **Handle Symlinks Safely:** Symbolic links MUST be resolved and the final path validated. Links pointing outside the repository MUST be rejected.
+
+4. **Audit Operations:** All file modifications MUST be logged to the audit system with user context, paths, and operation type.
+
+5. **Sanitize Errors:** Error messages MUST NOT expose sensitive path information beyond the repository root.
+
+6. **Limit Permissions:** RepoFS SHOULD operate with minimum necessary permissions. Write access SHOULD be explicit.
+
+7. **Protect Sensitive Files:** Certain files (.agent/secrets.yml, .env) SHOULD have additional access controls.
 
 ---
 
@@ -72,122 +143,309 @@ The following items are explicitly excluded from Task 014:
 
 ## Functional Requirements
 
-### IRepoFS Interface
+### IRepoFS Interface (FR-014-01 to FR-014-20)
 
-- FR-001: IRepoFS interface MUST exist
-- FR-002: Interface MUST support read
-- FR-003: Interface MUST support write
-- FR-004: Interface MUST support delete
-- FR-005: Interface MUST support enumerate
-- FR-006: Interface MUST support exists
-- FR-007: Interface MUST support metadata
+| ID | Requirement |
+|----|-------------|
+| FR-014-01 | System MUST define IRepoFS interface |
+| FR-014-02 | IRepoFS MUST have RootPath property returning repository root |
+| FR-014-03 | IRepoFS MUST be disposable for resource cleanup |
+| FR-014-04 | All operations MUST accept CancellationToken |
+| FR-014-05 | All operations MUST validate paths before execution |
+| FR-014-06 | All write operations MUST be auditable |
+| FR-014-07 | Interface MUST support reading files |
+| FR-014-08 | Interface MUST support writing files |
+| FR-014-09 | Interface MUST support deleting files |
+| FR-014-10 | Interface MUST support directory enumeration |
+| FR-014-11 | Interface MUST support file existence checking |
+| FR-014-12 | Interface MUST support metadata retrieval |
+| FR-014-13 | Interface MUST support transactions |
+| FR-014-14 | Interface MUST support patch application |
+| FR-014-15 | IRepoFS MUST have GetCapabilities method |
+| FR-014-16 | Capabilities MUST report read-only mode |
+| FR-014-17 | Capabilities MUST report transaction support |
+| FR-014-18 | Capabilities MUST report watch support |
+| FR-014-19 | IRepoFS MAY support file watching |
+| FR-014-20 | Watch events MUST include path and change type |
 
-### Path Handling
+### Path Handling (FR-014-21 to FR-014-40)
 
-- FR-008: Paths MUST be normalized
-- FR-009: Forward slashes MUST work
-- FR-010: Backslashes MUST work
-- FR-011: Relative paths MUST work
-- FR-012: Absolute paths MUST be converted
+| ID | Requirement |
+|----|-------------|
+| FR-014-21 | System MUST define IPathNormalizer interface |
+| FR-014-22 | Normalize MUST convert backslashes to forward slashes |
+| FR-014-23 | Normalize MUST collapse multiple slashes |
+| FR-014-24 | Normalize MUST handle ./ (current directory) |
+| FR-014-25 | Normalize MUST resolve ../ (parent directory) safely |
+| FR-014-26 | Normalize MUST remove trailing slashes |
+| FR-014-27 | Normalize MUST handle empty path as root |
+| FR-014-28 | System MUST define IPathValidator interface |
+| FR-014-29 | Validate MUST reject null paths |
+| FR-014-30 | Validate MUST reject empty paths |
+| FR-014-31 | Validate MUST reject absolute paths |
+| FR-014-32 | Validate MUST reject UNC paths (\\\\server\\share) |
+| FR-014-33 | Validate MUST reject paths escaping root via ../ |
+| FR-014-34 | Validate MUST reject encoded traversal (%2e%2e) |
+| FR-014-35 | Validate MUST reject null bytes in paths |
+| FR-014-36 | Validate MUST reject invalid characters |
+| FR-014-37 | Validate MUST return normalized path on success |
+| FR-014-38 | Validation failure MUST throw PathValidationException |
+| FR-014-39 | Exception MUST include sanitized path info |
+| FR-014-40 | Exception MUST NOT expose system paths |
 
-### Security
+### Reading Operations (FR-014-41 to FR-014-55)
 
-- FR-013: Root boundary MUST be enforced
-- FR-014: Path traversal MUST be prevented
-- FR-015: ../ MUST not escape root
-- FR-016: Symlinks MUST not escape root
+| ID | Requirement |
+|----|-------------|
+| FR-014-41 | ReadFileAsync MUST return file content as string |
+| FR-014-42 | ReadFileAsync MUST auto-detect encoding |
+| FR-014-43 | ReadFileAsync MUST handle UTF-8 with and without BOM |
+| FR-014-44 | ReadFileAsync MUST handle UTF-16 LE and BE |
+| FR-014-45 | ReadFileAsync MUST default to UTF-8 if detection fails |
+| FR-014-46 | ReadFileAsync MUST throw FileNotFoundException if missing |
+| FR-014-47 | ReadFileAsync MUST support cancellation |
+| FR-014-48 | ReadLinesAsync MUST return IReadOnlyList<string> |
+| FR-014-49 | ReadLinesAsync MUST handle LF, CR, and CRLF |
+| FR-014-50 | ReadLinesAsync MUST handle empty files |
+| FR-014-51 | ReadLinesAsync MUST handle files without trailing newline |
+| FR-014-52 | ReadBytesAsync MUST return raw byte array |
+| FR-014-53 | ReadBytesAsync MUST support large files (> 10MB) |
+| FR-014-54 | All read operations MUST NOT modify files |
+| FR-014-55 | All read operations MUST be thread-safe |
 
-### Reading
+### Writing Operations (FR-014-56 to FR-014-70)
 
-- FR-017: ReadFileAsync MUST work
-- FR-018: ReadLinesAsync MUST work
-- FR-019: ReadBytesAsync MUST work
-- FR-020: Encoding MUST be detected
-- FR-021: UTF-8 MUST be default
+| ID | Requirement |
+|----|-------------|
+| FR-014-56 | WriteFileAsync MUST write string content |
+| FR-014-57 | WriteFileAsync MUST use UTF-8 without BOM |
+| FR-014-58 | WriteFileAsync MUST create file if not exists |
+| FR-014-59 | WriteFileAsync MUST overwrite existing content |
+| FR-014-60 | WriteFileAsync MUST create parent directories |
+| FR-014-61 | WriteFileAsync MUST support cancellation |
+| FR-014-62 | WriteLinesAsync MUST write lines with configurable newlines |
+| FR-014-63 | WriteLinesAsync MUST default to platform line endings |
+| FR-014-64 | WriteBytesAsync MUST write raw bytes |
+| FR-014-65 | All writes MUST be atomic (temp file + rename) |
+| FR-014-66 | Atomic write failure MUST NOT corrupt original |
+| FR-014-67 | Write operations MUST acquire file lock |
+| FR-014-68 | Lock acquisition MUST timeout (configurable) |
+| FR-014-69 | Write operations MUST fire change events |
+| FR-014-70 | Write operations MUST be audited |
 
-### Writing
+### Deletion Operations (FR-014-71 to FR-014-80)
 
-- FR-022: WriteFileAsync MUST work
-- FR-023: WriteLinesAsync MUST work
-- FR-024: WriteBytesAsync MUST work
-- FR-025: Overwrite MUST work
-- FR-026: Create new MUST work
+| ID | Requirement |
+|----|-------------|
+| FR-014-71 | DeleteFileAsync MUST remove specified file |
+| FR-014-72 | DeleteFileAsync MUST NOT error if file missing |
+| FR-014-73 | DeleteFileAsync MUST return bool indicating deletion |
+| FR-014-74 | DeleteDirectoryAsync MUST remove directory |
+| FR-014-75 | DeleteDirectoryAsync MUST support recursive flag |
+| FR-014-76 | Non-recursive MUST fail on non-empty directory |
+| FR-014-77 | Recursive MUST remove all contents |
+| FR-014-78 | Deletion MUST NOT follow symlinks |
+| FR-014-79 | Deletion MUST fire change events |
+| FR-014-80 | Deletion MUST be audited |
 
-### Deletion
+### Enumeration Operations (FR-014-81 to FR-014-95)
 
-- FR-027: DeleteFileAsync MUST work
-- FR-028: DeleteDirectoryAsync MUST work
-- FR-029: Recursive delete MUST work
-- FR-030: Non-existent MUST not error
+| ID | Requirement |
+|----|-------------|
+| FR-014-81 | EnumerateFilesAsync MUST return IAsyncEnumerable |
+| FR-014-82 | EnumerateFilesAsync MUST yield FileEntry records |
+| FR-014-83 | FileEntry MUST include relative path |
+| FR-014-84 | FileEntry MUST include file name |
+| FR-014-85 | FileEntry MAY include size and modified time |
+| FR-014-86 | EnumerateFilesAsync MUST support recursive flag |
+| FR-014-87 | EnumerateFilesAsync MUST support glob pattern filter |
+| FR-014-88 | EnumerateFilesAsync MUST respect .gitignore patterns |
+| FR-014-89 | EnumerateFilesAsync MUST respect .agentignore patterns |
+| FR-014-90 | EnumerateDirectoriesAsync MUST return directory entries |
+| FR-014-91 | Enumeration MUST skip hidden files by default |
+| FR-014-92 | Enumeration MUST have option to include hidden |
+| FR-014-93 | Enumeration MUST support cancellation |
+| FR-014-94 | Enumeration MUST handle inaccessible directories |
+| FR-014-95 | Inaccessible directories MUST be skipped with warning |
 
-### Enumeration
+### Metadata Operations (FR-014-96 to FR-014-105)
 
-- FR-031: EnumerateFilesAsync MUST work
-- FR-032: EnumerateDirectoriesAsync MUST work
-- FR-033: Recursive enumeration MUST work
-- FR-034: Filtering MUST work
-- FR-035: Ignores MUST be respected
+| ID | Requirement |
+|----|-------------|
+| FR-014-96 | ExistsAsync MUST return bool |
+| FR-014-97 | ExistsAsync MUST check both files and directories |
+| FR-014-98 | ExistsAsync MUST distinguish file from directory |
+| FR-014-99 | GetMetadataAsync MUST return FileMetadata |
+| FR-014-100 | FileMetadata MUST include Size in bytes |
+| FR-014-101 | FileMetadata MUST include LastModified timestamp |
+| FR-014-102 | FileMetadata MUST include CreatedAt timestamp |
+| FR-014-103 | FileMetadata MUST include IsReadOnly flag |
+| FR-014-104 | FileMetadata MUST include IsDirectory flag |
+| FR-014-105 | GetMetadataAsync MUST throw if path not found |
 
-### Metadata
+### Transaction Support (FR-014-106 to FR-014-120)
 
-- FR-036: ExistsAsync MUST work
-- FR-037: GetMetadataAsync MUST work
-- FR-038: Size MUST be returned
-- FR-039: Last modified MUST be returned
-- FR-040: Created MUST be returned
+| ID | Requirement |
+|----|-------------|
+| FR-014-106 | BeginTransactionAsync MUST return IRepoFSTransaction |
+| FR-014-107 | IRepoFSTransaction MUST implement IAsyncDisposable |
+| FR-014-108 | Transaction MUST buffer all write operations |
+| FR-014-109 | CommitAsync MUST apply all buffered writes atomically |
+| FR-014-110 | CommitAsync MUST use two-phase commit |
+| FR-014-111 | RollbackAsync MUST discard all buffered writes |
+| FR-014-112 | Dispose without commit MUST auto-rollback |
+| FR-014-113 | Transaction MUST track affected files |
+| FR-014-114 | Transaction MUST prevent concurrent transactions |
+| FR-014-115 | Transaction MUST support timeout |
+| FR-014-116 | Timeout MUST trigger auto-rollback |
+| FR-014-117 | Nested transactions MUST throw NotSupportedException |
+| FR-014-118 | Transaction MUST create backup of modified files |
+| FR-014-119 | Rollback MUST restore backups |
+| FR-014-120 | Backups MUST be cleaned after commit |
 
-### Transactions
+### Patch Application (FR-014-121 to FR-014-140)
 
-- FR-041: BeginTransaction MUST work
-- FR-042: Commit MUST finalize
-- FR-043: Rollback MUST undo
-- FR-044: Auto-rollback on error
-- FR-045: Nested transactions NOT supported
+| ID | Requirement |
+|----|-------------|
+| FR-014-121 | ApplyPatchAsync MUST accept unified diff format |
+| FR-014-122 | ApplyPatchAsync MUST return PatchResult |
+| FR-014-123 | PatchResult MUST include Success flag |
+| FR-014-124 | PatchResult MUST include AffectedFiles list |
+| FR-014-125 | PatchResult MUST include Error on failure |
+| FR-014-126 | Patch MUST support adding lines |
+| FR-014-127 | Patch MUST support removing lines |
+| FR-014-128 | Patch MUST support modifying lines |
+| FR-014-129 | Patch MUST support context matching |
+| FR-014-130 | Patch MUST support multiple hunks |
+| FR-014-131 | Patch MUST support multiple files |
+| FR-014-132 | Patch MUST support new file creation |
+| FR-014-133 | Patch MUST support file deletion |
+| FR-014-134 | PreviewPatchAsync MUST show changes without applying |
+| FR-014-135 | Preview MUST return line-by-line diff |
+| FR-014-136 | ValidatePatchAsync MUST check patch applicability |
+| FR-014-137 | Validation MUST check context match |
+| FR-014-138 | Validation MUST check file existence |
+| FR-014-139 | Patch application MUST be transactional |
+| FR-014-140 | Partial patch failure MUST rollback entire patch |
 
-### Patching
+### Factory and Configuration (FR-014-141 to FR-014-155)
 
-- FR-046: ApplyPatchAsync MUST work
-- FR-047: Unified diff MUST work
-- FR-048: Line-based patches MUST work
-- FR-049: Patch preview MUST work
-- FR-050: Patch validation MUST work
-
-### Factory
-
-- FR-051: IRepoFSFactory MUST exist
-- FR-052: Create from config MUST work
-- FR-053: Type detection MUST work
-- FR-054: Local type MUST work
-- FR-055: Docker type MUST work
+| ID | Requirement |
+|----|-------------|
+| FR-014-141 | System MUST define IRepoFSFactory interface |
+| FR-014-142 | CreateAsync MUST return configured IRepoFS |
+| FR-014-143 | Factory MUST read config from RepoConfig section |
+| FR-014-144 | Factory MUST support "local" fs_type |
+| FR-014-145 | Factory MUST support "docker" fs_type |
+| FR-014-146 | Factory MUST auto-detect type if not specified |
+| FR-014-147 | Auto-detect MUST check for Docker environment |
+| FR-014-148 | Local type MUST create LocalFileSystem |
+| FR-014-149 | Docker type MUST create DockerFileSystem |
+| FR-014-150 | Factory MUST validate root path exists |
+| FR-014-151 | Factory MUST validate root is directory |
+| FR-014-152 | Factory MUST set read-only mode if configured |
+| FR-014-153 | Factory MUST configure ignore patterns |
+| FR-014-154 | Factory MUST register for DI as scoped |
+| FR-014-155 | Factory MUST log configuration on creation |
 
 ---
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-014-01 to NFR-014-20)
 
-- NFR-001: Small file read < 10ms
-- NFR-002: Large file read < 100ms/MB
-- NFR-003: Directory enumeration < 50ms/1000 files
-- NFR-004: Write < 20ms/MB
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014-01 | Performance | Path normalization MUST complete in < 1ms |
+| NFR-014-02 | Performance | Path validation MUST complete in < 1ms |
+| NFR-014-03 | Performance | Small file read (< 1KB) MUST complete in < 10ms |
+| NFR-014-04 | Performance | Medium file read (1KB-100KB) MUST complete in < 50ms |
+| NFR-014-05 | Performance | Large file read (100KB-1MB) MUST complete in < 100ms |
+| NFR-014-06 | Performance | Very large file read (> 1MB) MUST complete in < 100ms/MB |
+| NFR-014-07 | Performance | File write throughput MUST be > 10MB/s |
+| NFR-014-08 | Performance | Directory enumeration MUST handle 1000 files in < 50ms |
+| NFR-014-09 | Performance | Directory enumeration MUST handle 10,000 files in < 500ms |
+| NFR-014-10 | Performance | Metadata query MUST complete in < 5ms |
+| NFR-014-11 | Performance | Existence check MUST complete in < 2ms |
+| NFR-014-12 | Performance | Transaction begin MUST complete in < 10ms |
+| NFR-014-13 | Performance | Transaction commit MUST complete in < 100ms + write time |
+| NFR-014-14 | Performance | Transaction rollback MUST complete in < 50ms |
+| NFR-014-15 | Performance | Patch validation MUST complete in < 50ms |
+| NFR-014-16 | Performance | Patch application MUST complete in < 100ms typical |
+| NFR-014-17 | Performance | Memory allocation per read MUST be < 2x file size |
+| NFR-014-18 | Performance | Enumeration MUST use streaming (no full materialization) |
+| NFR-014-19 | Performance | Connection pooling MUST be used for Docker FS |
+| NFR-014-20 | Performance | File handle caching SHOULD be used for hot paths |
 
-### Reliability
+### Security (NFR-014-21 to NFR-014-35)
 
-- NFR-005: No partial writes
-- NFR-006: Rollback always works
-- NFR-007: Corruption detection
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014-21 | Security | All paths MUST be validated before use |
+| NFR-014-22 | Security | Path traversal attempts MUST be rejected |
+| NFR-014-23 | Security | Symbolic links MUST be resolved and validated |
+| NFR-014-24 | Security | Symlinks escaping root MUST be rejected |
+| NFR-014-25 | Security | Encoded path attacks MUST be detected |
+| NFR-014-26 | Security | Null bytes in paths MUST be rejected |
+| NFR-014-27 | Security | Write operations MUST be audited |
+| NFR-014-28 | Security | Delete operations MUST be audited |
+| NFR-014-29 | Security | Audit logs MUST NOT contain file content |
+| NFR-014-30 | Security | Error messages MUST NOT expose system paths |
+| NFR-014-31 | Security | Temporary files MUST be in repo temp directory |
+| NFR-014-32 | Security | Temp files MUST have restricted permissions |
+| NFR-014-33 | Security | Backup files MUST be cleaned after transaction |
+| NFR-014-34 | Security | Docker credentials MUST NOT be logged |
+| NFR-014-35 | Security | Read-only mode MUST prevent all writes |
 
-### Security
+### Reliability (NFR-014-36 to NFR-014-50)
 
-- NFR-008: Path validation
-- NFR-009: Boundary enforcement
-- NFR-010: No privilege escalation
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014-36 | Reliability | Atomic writes MUST NOT corrupt on crash |
+| NFR-014-37 | Reliability | Transaction commit MUST be crash-safe |
+| NFR-014-38 | Reliability | Transaction rollback MUST always succeed |
+| NFR-014-39 | Reliability | Partial patch MUST NOT leave files corrupted |
+| NFR-014-40 | Reliability | File locks MUST be released on disposal |
+| NFR-014-41 | Reliability | File locks MUST timeout after configured period |
+| NFR-014-42 | Reliability | Stale locks MUST be detected and cleaned |
+| NFR-014-43 | Reliability | Encoding detection MUST handle edge cases |
+| NFR-014-44 | Reliability | Binary file detection MUST be accurate |
+| NFR-014-45 | Reliability | Large file operations MUST not exhaust memory |
+| NFR-014-46 | Reliability | Disk full MUST be detected and handled |
+| NFR-014-47 | Reliability | Permission denied MUST be reported clearly |
+| NFR-014-48 | Reliability | Network errors (Docker) MUST retry with backoff |
+| NFR-014-49 | Reliability | Docker container restart MUST be handled |
+| NFR-014-50 | Reliability | Concurrent access MUST be handled safely |
 
-### Usability
+### Maintainability (NFR-014-51 to NFR-014-60)
 
-- NFR-011: Clear error messages
-- NFR-012: Helpful exceptions
-- NFR-013: Good logging
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014-51 | Maintainability | Interface MUST be well-documented |
+| NFR-014-52 | Maintainability | All public methods MUST have XML docs |
+| NFR-014-53 | Maintainability | Error codes MUST be documented |
+| NFR-014-54 | Maintainability | Configuration options MUST be documented |
+| NFR-014-55 | Maintainability | Code coverage MUST be > 80% |
+| NFR-014-56 | Maintainability | Cyclomatic complexity MUST be < 10 per method |
+| NFR-014-57 | Maintainability | Each class MUST have single responsibility |
+| NFR-014-58 | Maintainability | Dependencies MUST be injected |
+| NFR-014-59 | Maintainability | No static state (testability) |
+| NFR-014-60 | Maintainability | Platform-specific code MUST be isolated |
+
+### Observability (NFR-014-61 to NFR-014-70)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014-61 | Observability | All operations MUST log at Debug level |
+| NFR-014-62 | Observability | Errors MUST log at Error level with context |
+| NFR-014-63 | Observability | Performance metrics MUST be collected |
+| NFR-014-64 | Observability | Metrics MUST include operation latency |
+| NFR-014-65 | Observability | Metrics MUST include bytes read/written |
+| NFR-014-66 | Observability | Metrics MUST include operation count |
+| NFR-014-67 | Observability | Metrics MUST include error count |
+| NFR-014-68 | Observability | Transaction metrics MUST include commit/rollback ratio |
+| NFR-014-69 | Observability | Structured logging MUST be used |
+| NFR-014-70 | Observability | Log correlation IDs MUST be propagated |
 
 ---
 
@@ -195,145 +453,416 @@ The following items are explicitly excluded from Task 014:
 
 ### Overview
 
-RepoFS provides file system access for the agent. It abstracts local and Docker file systems behind a common interface.
+RepoFS (Repository File System) is the abstraction layer that provides safe, consistent file system access for the Agentic Coding Bot. It ensures the agent can read and modify files within a repository while preventing access to files outside the repository boundary.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Agent Operations                        │
+│         (read_file, write_file, list_directory)             │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      IRepoFS Interface                       │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐  │
+│  │ Read Operations │  │Write Operations │  │ Transactions│  │
+│  └─────────────────┘  └─────────────────┘  └─────────────┘  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐  │
+│  │   Enumeration   │  │    Metadata     │  │   Patching  │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────┘  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+          ┌───────────────┼───────────────┐
+          ▼               ▼               ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│  Path Validator │ │ Path Normalizer │ │  Audit Logger   │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
+          │               │               │
+          └───────────────┼───────────────┘
+                          │
+          ┌───────────────┴───────────────┐
+          ▼                               ▼
+┌─────────────────────────┐   ┌─────────────────────────┐
+│   LocalFileSystem       │   │   DockerFileSystem      │
+│   - Native file I/O     │   │   - Docker API calls    │
+│   - Direct disk access  │   │   - Volume mounts       │
+│   - File locking        │   │   - Container exec      │
+└─────────────────────────┘   └─────────────────────────┘
+```
 
 ### Configuration
+
+RepoFS is configured in the `.agent/config.yml` file under the `repo` section:
 
 ```yaml
 # .agent/config.yml
 repo:
-  # File system type: local, docker
+  # File system type: local, docker, auto (default: auto)
   fs_type: local
   
-  # Root path (default: current directory)
+  # Repository root path (default: current directory)
   root: .
   
-  # Docker-specific settings
+  # Read-only mode (default: false)
+  read_only: false
+  
+  # Transaction timeout in seconds (default: 300)
+  transaction_timeout_seconds: 300
+  
+  # File lock timeout in seconds (default: 30)
+  lock_timeout_seconds: 30
+  
+  # Enable file watching (default: false)
+  watch_enabled: false
+  
+  # Ignore patterns (in addition to .gitignore)
+  ignore_patterns:
+    - "*.log"
+    - "node_modules/"
+    - ".git/"
+  
+  # Docker-specific settings (when fs_type: docker)
   docker:
+    # Container name or ID
     container: my-container
+    
+    # Path inside container
     mount_path: /workspace
+    
+    # Connection timeout in seconds
+    timeout_seconds: 10
 ```
 
-### API Overview
+### API Reference
+
+#### Reading Files
 
 ```csharp
-// Reading files
-var content = await repoFS.ReadFileAsync("src/Program.cs");
-var lines = await repoFS.ReadLinesAsync("README.md");
-var bytes = await repoFS.ReadBytesAsync("image.png");
+// Read entire file as string
+string content = await repoFS.ReadFileAsync("src/Program.cs", cancellationToken);
 
-// Writing files
-await repoFS.WriteFileAsync("output.txt", content);
-await repoFS.WriteLinesAsync("data.txt", lines);
+// Read file as lines
+IReadOnlyList<string> lines = await repoFS.ReadLinesAsync("README.md", cancellationToken);
 
-// Checking existence
-if (await repoFS.ExistsAsync("config.json"))
+// Read file as bytes (for binary files)
+byte[] bytes = await repoFS.ReadBytesAsync("assets/logo.png", cancellationToken);
+```
+
+#### Writing Files
+
+```csharp
+// Write string content (creates parent directories if needed)
+await repoFS.WriteFileAsync("output/report.txt", content, cancellationToken);
+
+// Write lines with platform-appropriate line endings
+await repoFS.WriteLinesAsync("data/items.csv", lines, cancellationToken);
+
+// Write binary content
+await repoFS.WriteBytesAsync("output/image.png", bytes, cancellationToken);
+```
+
+#### Checking Existence and Metadata
+
+```csharp
+// Check if file or directory exists
+bool exists = await repoFS.ExistsAsync("src/config.json", cancellationToken);
+
+// Get detailed metadata
+FileMetadata meta = await repoFS.GetMetadataAsync("src/Program.cs", cancellationToken);
+Console.WriteLine($"Size: {meta.Size} bytes");
+Console.WriteLine($"Modified: {meta.LastModified}");
+Console.WriteLine($"Read-only: {meta.IsReadOnly}");
+```
+
+#### Enumerating Files and Directories
+
+```csharp
+// List all files in a directory
+await foreach (FileEntry file in repoFS.EnumerateFilesAsync("src", recursive: true))
 {
-    var meta = await repoFS.GetMetadataAsync("config.json");
+    Console.WriteLine($"{file.Path} ({file.Size} bytes)");
 }
 
-// Enumerating
-await foreach (var file in repoFS.EnumerateFilesAsync("src"))
+// List directories
+await foreach (DirectoryEntry dir in repoFS.EnumerateDirectoriesAsync(".", recursive: false))
 {
-    Console.WriteLine(file.Path);
+    Console.WriteLine($"Directory: {dir.Path}");
 }
+
+// With filtering
+await foreach (FileEntry file in repoFS.EnumerateFilesAsync("src", pattern: "*.cs"))
+{
+    Console.WriteLine($"C# file: {file.Path}");
+}
+```
+
+#### Deleting Files and Directories
+
+```csharp
+// Delete a file (no error if missing)
+bool deleted = await repoFS.DeleteFileAsync("temp/cache.json", cancellationToken);
+
+// Delete empty directory
+await repoFS.DeleteDirectoryAsync("temp/empty", recursive: false, cancellationToken);
+
+// Delete directory and all contents
+await repoFS.DeleteDirectoryAsync("temp/build", recursive: true, cancellationToken);
 ```
 
 ### Transactions
 
+Transactions group multiple file operations into an atomic unit. Either all operations succeed, or all are rolled back.
+
 ```csharp
-await using var transaction = await repoFS.BeginTransactionAsync();
+// Using block ensures automatic rollback on exception
+await using var transaction = await repoFS.BeginTransactionAsync(cancellationToken);
 
 try
 {
-    await repoFS.WriteFileAsync("file1.txt", content1);
-    await repoFS.WriteFileAsync("file2.txt", content2);
-    await transaction.CommitAsync();
+    // All writes are buffered
+    await repoFS.WriteFileAsync("src/file1.cs", content1);
+    await repoFS.WriteFileAsync("src/file2.cs", content2);
+    await repoFS.DeleteFileAsync("src/obsolete.cs");
+    
+    // Commit applies all changes atomically
+    await transaction.CommitAsync(cancellationToken);
+    Console.WriteLine("All changes applied successfully");
 }
-catch
+catch (Exception ex)
 {
-    // Auto-rollback on exception
+    // Rollback is automatic on exception, but can be explicit
+    await transaction.RollbackAsync(cancellationToken);
+    Console.WriteLine($"Changes rolled back: {ex.Message}");
     throw;
 }
 ```
 
-### Patching
+### Patch Application
+
+The agent primarily modifies files through patches (unified diff format), which enables precise, minimal changes.
 
 ```csharp
+// Define a patch in unified diff format
 var patch = @"
---- a/src/Program.cs
-+++ b/src/Program.cs
-@@ -10,3 +10,4 @@
- using System;
-+using System.Linq;
+--- a/src/Calculator.cs
++++ b/src/Calculator.cs
+@@ -10,6 +10,7 @@ public class Calculator
+     public int Add(int a, int b)
+     {
++        ArgumentOutOfRangeException.ThrowIfNegative(a);
+         return a + b;
+     }
+ }
 ";
 
-var result = await repoFS.ApplyPatchAsync(patch);
-if (!result.Success)
+// Preview patch without applying
+PatchPreview preview = await repoFS.PreviewPatchAsync(patch, cancellationToken);
+foreach (var change in preview.Changes)
+{
+    Console.WriteLine($"{change.ChangeType}: {change.Path}");
+    Console.WriteLine($"  Lines affected: {change.LinesAdded} added, {change.LinesRemoved} removed");
+}
+
+// Validate patch can be applied
+ValidationResult validation = await repoFS.ValidatePatchAsync(patch, cancellationToken);
+if (!validation.IsValid)
+{
+    Console.WriteLine($"Patch cannot be applied: {validation.Error}");
+    return;
+}
+
+// Apply patch (automatically transactional)
+PatchResult result = await repoFS.ApplyPatchAsync(patch, cancellationToken);
+if (result.Success)
+{
+    Console.WriteLine($"Applied patch to {result.AffectedFiles.Count} files");
+}
+else
 {
     Console.WriteLine($"Patch failed: {result.Error}");
 }
 ```
 
+### Path Handling
+
+RepoFS normalizes all paths to a consistent format and validates them for security.
+
+```csharp
+// All these paths are normalized to "src/utils/helpers.cs"
+await repoFS.ReadFileAsync("src/utils/helpers.cs");       // Already normalized
+await repoFS.ReadFileAsync("src\\utils\\helpers.cs");     // Windows backslashes
+await repoFS.ReadFileAsync("./src/utils/helpers.cs");     // Current directory prefix
+await repoFS.ReadFileAsync("src//utils//helpers.cs");     // Double slashes
+
+// These paths are REJECTED (security violations)
+await repoFS.ReadFileAsync("../secret.txt");              // Throws PathTraversalException
+await repoFS.ReadFileAsync("/etc/passwd");                // Throws PathValidationException
+await repoFS.ReadFileAsync("C:\\Windows\\system32");      // Throws PathValidationException
+```
+
 ### Error Handling
+
+RepoFS uses specific exception types for different error conditions:
 
 ```csharp
 try
 {
-    var content = await repoFS.ReadFileAsync("missing.txt");
+    var content = await repoFS.ReadFileAsync(path);
 }
 catch (FileNotFoundException ex)
 {
-    // File doesn't exist
+    // File does not exist
+    Console.WriteLine($"File not found: {ex.Path}");
 }
 catch (PathTraversalException ex)
 {
-    // Attempted to escape root
+    // Attempted to access file outside repository
+    Console.WriteLine($"Security violation: Path traversal attempt");
+}
+catch (PathValidationException ex)
+{
+    // Invalid path format
+    Console.WriteLine($"Invalid path: {ex.Message}");
 }
 catch (AccessDeniedException ex)
 {
     // Permission denied
+    Console.WriteLine($"Access denied: {ex.Path}");
+}
+catch (TransactionException ex)
+{
+    // Transaction-related error
+    Console.WriteLine($"Transaction error: {ex.Message}");
+}
+catch (PatchException ex)
+{
+    // Patch application failed
+    Console.WriteLine($"Patch failed: {ex.Message}");
+    Console.WriteLine($"Conflict at: {ex.ConflictPath}");
 }
 ```
 
 ### CLI Integration
 
-The file tools use RepoFS internally:
+RepoFS is used internally by the agent's file tools. When the agent reads or writes files, it uses RepoFS:
 
 ```bash
-$ acode run "Read the Program.cs file"
+# Reading a file via agent
+$ acode run "Show me the contents of src/Program.cs"
 
 [Tool: read_file]
   Path: src/Program.cs
-  Result: (file content)
+  Result: (file content displayed)
+
+# Writing a file via agent
+$ acode run "Add a comment to the top of Program.cs"
+
+[Tool: apply_patch]
+  Path: src/Program.cs
+  Result: Patch applied successfully
+
+# Listing directory contents
+$ acode run "What files are in the src directory?"
+
+[Tool: list_directory]
+  Path: src
+  Recursive: false
+  Result: 
+    - Program.cs (1.2KB)
+    - Config.cs (0.8KB)
+    - Utils/ (directory)
 ```
 
 ### Troubleshooting
 
-#### Path Not Found
+#### File Not Found
 
-**Problem:** File exists but not found
+**Problem:** `FileNotFoundException` when file should exist
+
+**Diagnosis:**
+```bash
+$ acode debug fs check-path src/Program.cs
+Path: src/Program.cs
+Normalized: src/Program.cs
+Absolute: /home/user/project/src/Program.cs
+Exists: false
+Suggestion: Check case sensitivity on Linux systems
+```
 
 **Solutions:**
-1. Check path is relative to root
-2. Check case sensitivity
-3. Verify .gitignore isn't excluding
-
-#### Permission Denied
-
-**Problem:** Cannot read/write file
-
-**Solutions:**
-1. Check file permissions
-2. Check if file is locked
-3. For Docker: check mount permissions
+1. Check path is relative to repository root
+2. Check case sensitivity (Linux is case-sensitive)
+3. Verify file isn't in `.gitignore` or `.agentignore`
+4. Check file permissions
 
 #### Path Traversal Blocked
 
-**Problem:** Cannot access parent directory
+**Problem:** `PathTraversalException` when accessing file
+
+**Cause:** Attempted to access file outside repository root
 
 **Solutions:**
-This is intentional. RepoFS prevents accessing files outside the repository root for security.
+This is intentional security behavior. Files outside the repository cannot be accessed. If you need files from a parent directory:
+1. Expand the repository root in configuration
+2. Use symbolic links (with caution)
+3. Copy required files into the repository
+
+#### Permission Denied
+
+**Problem:** `AccessDeniedException` on read or write
+
+**Diagnosis:**
+```bash
+$ acode debug fs check-permissions src/readonly.cs
+Path: src/readonly.cs
+Readable: true
+Writable: false
+Owner: root
+Suggestion: File is owned by different user
+```
+
+**Solutions:**
+1. Check file ownership and permissions
+2. For Docker: check mount options
+3. Run agent with appropriate permissions
+
+#### Transaction Timeout
+
+**Problem:** Transaction times out during commit
+
+**Diagnosis:**
+```bash
+$ acode debug fs list-locks
+Active locks:
+  - src/large-file.cs (held for 45s)
+  - src/another.cs (held for 32s)
+```
+
+**Solutions:**
+1. Increase `transaction_timeout_seconds` in config
+2. Break large transactions into smaller ones
+3. Check for external processes locking files
+
+#### Docker Connection Failed
+
+**Problem:** Cannot connect to Docker container
+
+**Diagnosis:**
+```bash
+$ acode debug fs docker-status
+Container: my-container
+Status: running
+Mount: /workspace accessible
+Docker socket: /var/run/docker.sock connected
+```
+
+**Solutions:**
+1. Verify container is running: `docker ps`
+2. Check container name in configuration
+3. Verify mount path exists in container
+4. Check Docker socket permissions
 
 ---
 
@@ -399,22 +928,94 @@ This is intentional. RepoFS prevents accessing files outside the repository root
 ```
 Tests/Unit/RepoFS/
 ├── PathNormalizerTests.cs
-│   ├── Should_Normalize_Slashes()
-│   ├── Should_Handle_Relative()
-│   └── Should_Reject_Traversal()
+│   ├── Should_Normalize_Forward_Slashes()
+│   ├── Should_Normalize_Back_Slashes()
+│   ├── Should_Normalize_Mixed_Slashes()
+│   ├── Should_Handle_Relative_Paths()
+│   ├── Should_Handle_Current_Directory_Dot()
+│   ├── Should_Collapse_Double_Slashes()
+│   ├── Should_Preserve_Leading_Slash()
+│   └── Should_Trim_Trailing_Slashes()
+│
+├── PathValidatorTests.cs
+│   ├── Should_Accept_Valid_Relative_Path()
+│   ├── Should_Accept_Subdirectory_Path()
+│   ├── Should_Accept_Deep_Nested_Path()
+│   ├── Should_Reject_Parent_Traversal()
+│   ├── Should_Reject_Hidden_Parent_Traversal()
+│   ├── Should_Reject_Encoded_Traversal()
+│   ├── Should_Reject_Absolute_Path()
+│   ├── Should_Reject_UNC_Path()
+│   ├── Should_Reject_Null_Path()
+│   └── Should_Reject_Empty_Path()
 │
 ├── LocalFileSystemTests.cs
-│   ├── Should_Read_File()
-│   ├── Should_Write_File()
-│   └── Should_Enumerate()
+│   ├── ReadFileAsync_Should_Return_Content()
+│   ├── ReadFileAsync_Should_Handle_UTF8_BOM()
+│   ├── ReadFileAsync_Should_Handle_UTF16()
+│   ├── ReadFileAsync_Should_Throw_FileNotFound()
+│   ├── ReadFileAsync_Should_Support_Cancellation()
+│   ├── ReadLinesAsync_Should_Return_Lines()
+│   ├── ReadLinesAsync_Should_Handle_Empty_File()
+│   ├── ReadLinesAsync_Should_Handle_No_Trailing_Newline()
+│   ├── ReadBytesAsync_Should_Return_Binary()
+│   ├── WriteFileAsync_Should_Create_New_File()
+│   ├── WriteFileAsync_Should_Overwrite_Existing()
+│   ├── WriteFileAsync_Should_Create_Parent_Directories()
+│   ├── WriteFileAsync_Should_Use_UTF8_No_BOM()
+│   ├── WriteLinesAsync_Should_Write_With_Newlines()
+│   ├── WriteBytesAsync_Should_Write_Binary()
+│   ├── DeleteFileAsync_Should_Remove_File()
+│   ├── DeleteFileAsync_Should_Ignore_Missing()
+│   ├── DeleteDirectoryAsync_Should_Remove_Empty()
+│   ├── DeleteDirectoryAsync_Should_Remove_Recursive()
+│   ├── ExistsAsync_Should_Return_True_For_File()
+│   ├── ExistsAsync_Should_Return_True_For_Directory()
+│   ├── ExistsAsync_Should_Return_False_For_Missing()
+│   ├── GetMetadataAsync_Should_Return_Size()
+│   ├── GetMetadataAsync_Should_Return_LastModified()
+│   ├── GetMetadataAsync_Should_Return_CreatedDate()
+│   └── GetMetadataAsync_Should_Throw_FileNotFound()
+│
+├── EnumerationTests.cs
+│   ├── EnumerateFilesAsync_Should_List_Files()
+│   ├── EnumerateFilesAsync_Should_Skip_Directories()
+│   ├── EnumerateFilesAsync_Should_Support_Recursive()
+│   ├── EnumerateFilesAsync_Should_Apply_Filter()
+│   ├── EnumerateFilesAsync_Should_Respect_Ignores()
+│   ├── EnumerateFilesAsync_Should_Handle_Empty_Directory()
+│   ├── EnumerateDirectoriesAsync_Should_List_Directories()
+│   ├── EnumerateDirectoriesAsync_Should_Skip_Files()
+│   ├── EnumerateDirectoriesAsync_Should_Support_Recursive()
+│   └── EnumerateDirectoriesAsync_Should_Handle_Hidden()
 │
 ├── TransactionTests.cs
-│   ├── Should_Commit()
-│   └── Should_Rollback()
+│   ├── BeginTransaction_Should_Create_Transaction()
+│   ├── Commit_Should_Finalize_Writes()
+│   ├── Commit_Should_Be_Atomic()
+│   ├── Rollback_Should_Undo_Writes()
+│   ├── Rollback_Should_Restore_Original()
+│   ├── AutoRollback_On_Exception()
+│   ├── AutoRollback_On_Dispose_Without_Commit()
+│   ├── Transaction_Should_Handle_Multiple_Files()
+│   ├── Transaction_Should_Handle_Create_And_Delete()
+│   └── Nested_Transaction_Should_Throw()
 │
 └── PatchApplicatorTests.cs
-    ├── Should_Apply_Unified_Diff()
-    └── Should_Validate_Patch()
+    ├── ApplyPatch_Should_Add_Lines()
+    ├── ApplyPatch_Should_Remove_Lines()
+    ├── ApplyPatch_Should_Modify_Lines()
+    ├── ApplyPatch_Should_Handle_Context()
+    ├── ApplyPatch_Should_Handle_Multiple_Hunks()
+    ├── ApplyPatch_Should_Handle_Multiple_Files()
+    ├── ApplyPatch_Should_Create_New_File()
+    ├── ApplyPatch_Should_Delete_File()
+    ├── ApplyPatch_Should_Fail_On_Mismatch()
+    ├── ApplyPatch_Should_Fail_On_Missing_File()
+    ├── PreviewPatch_Should_Show_Changes()
+    ├── PreviewPatch_Should_Not_Modify()
+    ├── ValidatePatch_Should_Accept_Valid()
+    └── ValidatePatch_Should_Reject_Malformed()
 ```
 
 ### Integration Tests
@@ -422,8 +1023,26 @@ Tests/Unit/RepoFS/
 ```
 Tests/Integration/RepoFS/
 ├── LocalFSIntegrationTests.cs
-│   ├── Should_Handle_Large_Files()
-│   └── Should_Handle_Deep_Directories()
+│   ├── Should_Read_Large_File()
+│   ├── Should_Write_Large_File()
+│   ├── Should_Handle_Deep_Directory_Tree()
+│   ├── Should_Handle_Many_Files()
+│   ├── Should_Handle_Unicode_Filenames()
+│   ├── Should_Handle_Long_Paths()
+│   ├── Should_Handle_Special_Characters()
+│   ├── Should_Handle_Concurrent_Reads()
+│   ├── Should_Handle_Read_While_Write()
+│   └── Should_Survive_Disk_Full()
+│
+├── TransactionIntegrationTests.cs
+│   ├── Should_Rollback_On_Crash()
+│   ├── Should_Handle_Concurrent_Transactions()
+│   └── Should_Recover_From_Partial_Commit()
+│
+└── PatchIntegrationTests.cs
+    ├── Should_Apply_Real_Git_Diff()
+    ├── Should_Handle_Binary_Detection()
+    └── Should_Apply_Patch_Atomically()
 ```
 
 ### E2E Tests
@@ -431,7 +1050,11 @@ Tests/Integration/RepoFS/
 ```
 Tests/E2E/RepoFS/
 ├── FileToolE2ETests.cs
-│   └── Should_Read_Write_Via_Agent()
+│   ├── Should_Read_File_Via_Agent_Tool()
+│   ├── Should_Write_File_Via_Agent_Tool()
+│   ├── Should_List_Directory_Via_Agent_Tool()
+│   ├── Should_Apply_Patch_Via_Agent_Tool()
+│   └── Should_Handle_Agent_Error_Recovery()
 ```
 
 ### Performance Benchmarks

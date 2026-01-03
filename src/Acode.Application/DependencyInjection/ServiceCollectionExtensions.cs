@@ -19,7 +19,11 @@ public static class ServiceCollectionExtensions
 
         // Register configuration services
         services.AddSingleton<IConfigLoader, ConfigLoader>();
-        services.AddSingleton<IConfigValidator, ConfigValidator>();
+        services.AddSingleton<IConfigValidator>(sp =>
+        {
+            var schemaValidator = sp.GetService<ISchemaValidator>();
+            return new ConfigValidator(schemaValidator);
+        });
         services.AddSingleton<IConfigCache, ConfigCache>();
 
         return services;

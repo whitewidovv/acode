@@ -46,11 +46,11 @@ public static class Program
             var validator = serviceProvider.GetRequiredService<IConfigValidator>();
             var configCommand = new ConfigCommand(loader, validator);
 
-            var configPath = ".agent/config.yml";
+            var repositoryRoot = Directory.GetCurrentDirectory();
 
             if (args[1] == "validate")
             {
-                return configCommand.ValidateAsync(configPath).GetAwaiter().GetResult();
+                return configCommand.ValidateAsync(repositoryRoot).GetAwaiter().GetResult();
             }
 
             if (args[1] == "show")
@@ -61,7 +61,7 @@ public static class Program
                     format = args[3];
                 }
 
-                return configCommand.ShowAsync(configPath, format).GetAwaiter().GetResult();
+                return configCommand.ShowAsync(repositoryRoot, format).GetAwaiter().GetResult();
             }
         }
 

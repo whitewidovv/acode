@@ -10,7 +10,7 @@ namespace Acode.Infrastructure.Configuration;
 /// <summary>
 /// Validates YAML configuration against JSON Schema.
 /// </summary>
-public sealed class JsonSchemaValidator
+public sealed class JsonSchemaValidator : ISchemaValidator
 {
     private const string EmbeddedResourceName = "Acode.Infrastructure.Resources.config-schema.json";
     private readonly JsonSchema _schema;
