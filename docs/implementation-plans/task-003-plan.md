@@ -173,15 +173,34 @@ Each subtask will be completed with:
 
 ## Completed
 
-(Will be updated as work progresses)
+✅ Strategic implementation plan created
+✅ Feature branch created: `feature/task-003-threat-model`
+✅ Domain Layer - Security Types (Partial):
+  - ✅ SecuritySeverity enum (5 levels: Debug → Critical)
+  - ✅ ThreatActor enum (10 actors: User, Agent, ExternalLlm, etc.)
+  - ✅ DataClassification enum (4 levels: Public → Secret)
+  - ✅ TrustBoundary enum (8 boundaries)
+  - ✅ AttackVector record (VectorId, Description, ThreatActor, Boundary)
+
+**Commits so far:** 6 (all with TDD - RED→GREEN cycle)
+**Tests passing:** 39 tests across 5 test files
+**Test coverage:** 100% of implemented domain types
 
 ## In Progress
 
-🔄 Reading specifications complete - ready to begin implementation
+🔄 Domain Layer: SecurityEvent record
 
 ## Remaining
 
-All subtasks listed above
+- Domain Layer: SecurityInvariant, FailSafeBehavior records
+- Risk Types: RiskId, RiskCategory (STRIDE), DreadScore, Risk, Mitigation
+- Protected Paths: PathCategory, DenylistEntry, DefaultDenylist data
+- Audit Types: AuditEventType, AuditEvent, SessionId, CorrelationId
+- Application Layer: Interfaces (ISecretRedactor, IPathValidator, etc.)
+- Infrastructure Layer: Implementations
+- CLI Layer: Security commands
+- Documentation: SECURITY.md, threat-model.md
+- Audit per AUDIT-GUIDELINES.md
 
 ## Key Decisions
 
