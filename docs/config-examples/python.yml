@@ -1,0 +1,44 @@
+# .agent/config.yml for Python project
+# Example for Python applications
+
+schema_version: "1.0.0"
+
+project:
+  name: my-python-app
+  type: python
+  languages: [python]
+  description: A Python web service with FastAPI
+
+mode:
+  default: local-only
+
+model:
+  provider: ollama
+  name: codellama:7b
+
+commands:
+  setup:
+    - python -m venv .venv
+    - run: pip install -r requirements.txt
+      cwd: .
+      env:
+        PIP_NO_CACHE_DIR: "1"
+  build: python -m build
+  test: pytest
+  lint: ruff check .
+  format: ruff format .
+  start: python -m myapp
+
+paths:
+  source: [src/, myapp/]
+  tests: [tests/]
+  output: [dist/, build/, .eggs/]
+  docs: [docs/]
+
+ignore:
+  patterns:
+    - "**/__pycache__/**"
+    - "**/.venv/**"
+    - "**/.pytest_cache/**"
+    - "**/*.egg-info/**"
+    - "**/.ruff_cache/**"

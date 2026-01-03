@@ -102,3 +102,5 @@ indent_style = tab
 # MSBuild files
 [*.{csproj,vbproj,vcxproj,vcxproj.filters,proj,projitems,shproj}]
 indent_size = 2
+[*.Tests.cs]
+dotnet_diagnostic.CA2007.severity = none

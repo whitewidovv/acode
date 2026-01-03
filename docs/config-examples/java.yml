@@ -1,0 +1,38 @@
+# .agent/config.yml for Java project
+# Example for Java/Maven applications
+
+schema_version: "1.0.0"
+
+project:
+  name: my-java-app
+  type: java
+  languages: [java]
+  description: A Java Spring Boot application
+
+mode:
+  default: local-only
+
+model:
+  provider: ollama
+  name: codellama:7b
+
+commands:
+  setup: mvn dependency:resolve
+  build: mvn clean package
+  test: mvn test
+  lint: mvn checkstyle:check
+  format: mvn fmt:format
+  start: mvn spring-boot:run
+
+paths:
+  source: [src/main/java/]
+  tests: [src/test/java/]
+  output: [target/]
+  docs: [docs/]
+
+ignore:
+  patterns:
+    - "**/target/**"
+    - "**/.m2/**"
+    - "**/.idea/**"
+    - "**/*.class"

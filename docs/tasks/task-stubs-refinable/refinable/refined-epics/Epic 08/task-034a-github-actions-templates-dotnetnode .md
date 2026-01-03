@@ -69,11 +69,23 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 021.c, Task 039, Task 050
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update:** Templates MUST include optional steps to publish provenance metadata (build ID, git SHA) into the Workspace DB for later inspection/export.
+
+**Update (security posture):**
+- Generated CI templates MUST avoid leaking secrets and MUST prefer OIDC/short-lived credentials when targeting cloud providers.
+- The generator MUST support referencing secrets via environment variables or GitHub Secrets, never embedding raw secret values.
+- Templates MUST include minimal permissions and pinned action versions (Task 034.b).
+
+**Update (Workspace DB Foundation / provenance):** This task MUST integrate with the Workspace DB (Task 050) to:
+- persist and surface provenance metadata (repo SHA, worktree id, run_id/session_id, timestamps),
+- record CI/deploy template generation events as audit events (Task 039), and
+- expose “sync status” for any generated artifacts/config bundles that will be exported (Task 021.c / Task 039.b).
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

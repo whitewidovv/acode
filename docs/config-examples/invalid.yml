@@ -1,0 +1,80 @@
+# INVALID .agent/config.yml
+# This example demonstrates common configuration errors
+
+# ERROR: schema_version must be a string, not a number
+schema_version: 1.0.0  # Should be "1.0.0"
+
+project:
+  # ERROR: Project name has spaces (not allowed per pattern)
+  name: my project  # Should be "my-project" or "my_project"
+
+  # ERROR: 'cpp' is not a valid project type
+  type: cpp  # Must be one of: dotnet|node|python|go|rust|java|other
+
+  languages: [c++, c]
+
+mode:
+  # ERROR: 'burst' cannot be the default mode per HC-03
+  default: burst  # Must be: local-only|airgapped
+
+  # ERROR: allow_burst must be boolean, not string
+  allow_burst: "yes"  # Should be: true or false
+
+  # ERROR: Unknown field not in schema
+  unknown_field: value  # This will produce a warning
+
+model:
+  parameters:
+    # ERROR: temperature out of range (0.0 to 2.0)
+    temperature: 5.0  # Should be between 0 and 2
+
+    # ERROR: max_tokens must be positive
+    max_tokens: -100  # Must be >= 1
+
+    # ERROR: top_p out of range (0.0 to 1.0)
+    top_p: 1.5  # Should be between 0 and 1
+
+commands:
+  # ERROR: Empty string not allowed
+  build: ""  # Should be a command or removed
+
+  # ERROR: Command object missing required 'run' property
+  test:
+    cwd: tests
+    timeout: 60
+    # Missing: run: "pytest"
+
+  # ERROR: Path traversal attempt
+  lint:
+    run: npm run lint
+    cwd: ../outside-repo  # Paths must be within repository
+
+paths:
+  # ERROR: Path includes '..' traversal (security violation)
+  source: [src/, ../../evil/]  # Paths cannot escape repository
+
+ignore:
+  # ERROR: Invalid glob pattern (unclosed bracket)
+  patterns:
+    - "**/*.{js"  # Should be "**/*.{js,ts}"
+
+network:
+  allowlist:
+    # ERROR: Host missing (required field)
+    - ports: [443]
+      reason: Missing host field
+
+    # ERROR: Port out of range
+    - host: example.com
+      ports: [70000]  # Ports must be 1-65535
+
+storage:
+  # ERROR: Invalid storage mode
+  mode: hybrid  # Must be: local_cache_only|offline_first_sync|remote_required
+
+  sync:
+    # ERROR: batch_size must be positive
+    batch_size: 0  # Must be >= 1
+
+    # ERROR: Invalid conflict policy
+    conflict_policy: merge  # Must be: lww|reject

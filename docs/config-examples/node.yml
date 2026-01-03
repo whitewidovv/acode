@@ -1,0 +1,43 @@
+# .agent/config.yml for Node.js project
+# Example for TypeScript/JavaScript applications
+
+schema_version: "1.0.0"
+
+project:
+  name: my-node-app
+  type: node
+  languages: [typescript, javascript]
+  description: A Node.js REST API with TypeScript
+
+mode:
+  default: local-only
+  allow_burst: true
+
+model:
+  provider: ollama
+  name: codellama:7b
+  parameters:
+    temperature: 0.7
+    max_tokens: 4096
+
+commands:
+  setup: npm install
+  build: npm run build
+  test: npm test
+  lint: npm run lint
+  format: npm run format
+  start: npm start
+
+paths:
+  source: [src/]
+  tests: [tests/, __tests__/]
+  output: [dist/, build/]
+  docs: [docs/]
+
+ignore:
+  patterns:
+    - "**/node_modules/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - "**/.next/**"
+    - "**/coverage/**"

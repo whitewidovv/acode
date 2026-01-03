@@ -1,0 +1,37 @@
+# .agent/config.yml for Rust project
+# Example for Rust applications
+
+schema_version: "1.0.0"
+
+project:
+  name: my-rust-app
+  type: rust
+  languages: [rust]
+  description: A Rust CLI application
+
+mode:
+  default: local-only
+
+model:
+  provider: ollama
+  name: codellama:7b
+
+commands:
+  setup: cargo fetch
+  build: cargo build --release
+  test: cargo test
+  lint: cargo clippy -- -D warnings
+  format: cargo fmt
+  start: cargo run
+
+paths:
+  source: [src/]
+  tests: [tests/]
+  output: [target/]
+  docs: [docs/]
+
+ignore:
+  patterns:
+    - "**/target/**"
+    - "**/.cargo/**"
+    - "**/Cargo.lock"  # Unless it's a binary
