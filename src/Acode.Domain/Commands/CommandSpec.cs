@@ -55,6 +55,7 @@ public sealed record CommandSpec
     /// Gets platform-specific command variants.
     /// Maps platform name to command string (e.g., "windows" -> "cmd /c build.bat").
     /// Null means no platform variants.
+    /// Maps to "platforms" in YAML configuration.
     /// </summary>
-    public IReadOnlyDictionary<string, string>? PlatformVariants { get; init; }
+    public IReadOnlyDictionary<string, string>? Platforms { get; init; }
 }

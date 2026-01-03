@@ -6,6 +6,61 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the **Agentic Coding Bot (Acode)** project - a locally-hosted, privacy-first AI-powered coding assistant. The repository contains both comprehensive task specifications and the implementation codebase for building a system that operates entirely within the user's infrastructure.
 
+## Core Working Principles
+
+**CRITICAL: Read these principles before starting ANY work.**
+
+### 1. Perfection and Completeness Over Speed
+
+- **DO NOT rush to complete tasks**
+- **DO NOT sacrifice quality to "get it done"**
+- **DO NOT skip steps to save context**
+- It is **acceptable and expected** to run out of context and continue in the next session
+- It is **unacceptable** to deliver incomplete, untested, or poorly integrated code
+
+**Example of What NOT to Do (Task 002 Failure):**
+- Implemented Infrastructure layer (YamlConfigReader, JsonSchemaValidator) without writing tests first
+- Rushed through implementation to "complete" the task
+- Audit failed to catch TDD violations and integration issues
+- Resulted in Copilot finding multiple critical issues post-PR
+
+**Example of What TO Do:**
+- Write tests FIRST (Red)
+- Implement code to make tests pass (Green)
+- Refactor (Clean)
+- Audit thoroughly using `docs/AUDIT-GUIDELINES.md`
+- Only mark task complete when audit passes
+
+### 2. Test-Driven Development (TDD) is MANDATORY
+
+- **Every source file must have corresponding tests**
+- **Write tests BEFORE implementation** (Red-Green-Refactor)
+- **No exceptions** - even simple getters/setters need tests for immutability verification
+- If you find yourself implementing without tests, STOP and write tests first
+
+**Test File Naming Convention:**
+- `src/Acode.Domain/Foo/Bar.cs` → `tests/Acode.Domain.Tests/Foo/BarTests.cs`
+- `src/Acode.Application/Foo/Bar.cs` → `tests/Acode.Application.Tests/Foo/BarTests.cs`
+- `src/Acode.Infrastructure/Foo/Bar.cs` → `tests/Acode.Infrastructure.Tests/Foo/BarTests.cs`
+
+### 3. Mandatory Audit Before PR
+
+- **DO NOT create PR without passing audit**
+- Follow `docs/AUDIT-GUIDELINES.md` checklist line-by-line
+- Audit failure = task is NOT complete
+- Fix all issues, then re-audit from step 1
+- Only create PR when audit passes
+
+**Audit Failure Criteria (automatic task incomplete):**
+- Any source file without tests
+- Build has errors or warnings
+- Any test fails
+- Interface exists but no implementation (e.g., NotImplementedException)
+- Layer boundaries violated
+- Documentation missing
+
+### 4. Git Workflow
+
 **Key Constraint:** All work MUST use feature branches with one commit per task objective, and create a PR when the task is complete. DO NOT commit directly to main.
 
 ## Repository Structure

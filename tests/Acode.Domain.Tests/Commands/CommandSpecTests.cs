@@ -115,7 +115,7 @@ public class CommandSpecTests
             Timeout = 600,
             Retry = 3,
             ContinueOnError = true,
-            PlatformVariants = new Dictionary<string, string> { ["windows"] = "pytest.exe tests/" }
+            Platforms = new Dictionary<string, string> { ["windows"] = "pytest.exe tests/" }
         };
 
         // Assert
@@ -125,7 +125,7 @@ public class CommandSpecTests
         spec.Timeout.Should().Be(600);
         spec.Retry.Should().Be(3);
         spec.ContinueOnError.Should().BeTrue();
-        spec.PlatformVariants.Should().ContainKey("windows");
+        spec.Platforms.Should().ContainKey("windows");
     }
 
     [Fact]
@@ -163,16 +163,16 @@ public class CommandSpecTests
     }
 
     [Fact]
-    public void CommandSpec_PlatformVariants_CanBeNull()
+    public void CommandSpec_Platforms_CanBeNull()
     {
         // Arrange & Act
         var spec = new CommandSpec
         {
             Run = "make all",
-            PlatformVariants = null
+            Platforms = null
         };
 
         // Assert
-        spec.PlatformVariants.Should().BeNull();
+        spec.Platforms.Should().BeNull();
     }
 }

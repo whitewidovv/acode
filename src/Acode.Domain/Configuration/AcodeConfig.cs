@@ -174,36 +174,86 @@ public sealed record ModelParametersConfig
 /// <summary>
 /// Command groups configuration.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Each command property can be one of three formats from the YAML configuration:
+/// </para>
+/// <list type="number">
+/// <item>
+/// <description>
+/// <strong>String format:</strong> A simple shell command string.
+/// Example: <c>"npm test"</c>
+/// Runtime type: <see cref="string"/>
+/// </description>
+/// </item>
+/// <item>
+/// <description>
+/// <strong>Array format:</strong> An array of strings representing command and arguments.
+/// Example: <c>["npm", "test", "--watch"]</c>
+/// Runtime type: <see cref="System.Collections.Generic.List{T}"/> where T is <see cref="string"/>
+/// </description>
+/// </item>
+/// <item>
+/// <description>
+/// <strong>Object format:</strong> A structured command specification with additional options.
+/// Example: <c>{ run: "npm test", cwd: "src", timeout: 600 }</c>
+/// Runtime type: <see cref="System.Collections.Generic.Dictionary{TKey, TValue}"/> where TKey is <see cref="string"/> and TValue is <see cref="object"/>
+/// </description>
+/// </item>
+/// </list>
+/// <para>
+/// Properties are typed as <see cref="object"/>? to support all three formats during YAML deserialization.
+/// Application layer code should inspect the runtime type and convert to CommandSpec as needed.
+/// </para>
+/// </remarks>
 public sealed record CommandsConfig
 {
     /// <summary>
-    /// Gets the setup command.
+    /// Gets the setup command (dependency installation, environment preparation).
     /// </summary>
+    /// <remarks>
+    /// Runtime type will be one of: <see cref="string"/>, <c>List&lt;string&gt;</c>, or <c>Dictionary&lt;string, object&gt;</c>.
+    /// </remarks>
     public object? Setup { get; init; }
 
     /// <summary>
-    /// Gets the build command.
+    /// Gets the build command (compilation, bundling, asset generation).
     /// </summary>
+    /// <remarks>
+    /// Runtime type will be one of: <see cref="string"/>, <c>List&lt;string&gt;</c>, or <c>Dictionary&lt;string, object&gt;</c>.
+    /// </remarks>
     public object? Build { get; init; }
 
     /// <summary>
-    /// Gets the test command.
+    /// Gets the test command (unit tests, integration tests).
     /// </summary>
+    /// <remarks>
+    /// Runtime type will be one of: <see cref="string"/>, <c>List&lt;string&gt;</c>, or <c>Dictionary&lt;string, object&gt;</c>.
+    /// </remarks>
     public object? Test { get; init; }
 
     /// <summary>
-    /// Gets the lint command.
+    /// Gets the lint command (static analysis, linting).
     /// </summary>
+    /// <remarks>
+    /// Runtime type will be one of: <see cref="string"/>, <c>List&lt;string&gt;</c>, or <c>Dictionary&lt;string, object&gt;</c>.
+    /// </remarks>
     public object? Lint { get; init; }
 
     /// <summary>
-    /// Gets the format command.
+    /// Gets the format command (code formatting, auto-fixing).
     /// </summary>
+    /// <remarks>
+    /// Runtime type will be one of: <see cref="string"/>, <c>List&lt;string&gt;</c>, or <c>Dictionary&lt;string, object&gt;</c>.
+    /// </remarks>
     public object? Format { get; init; }
 
     /// <summary>
-    /// Gets the start command.
+    /// Gets the start command (run development server, start application).
     /// </summary>
+    /// <remarks>
+    /// Runtime type will be one of: <see cref="string"/>, <c>List&lt;string&gt;</c>, or <c>Dictionary&lt;string, object&gt;</c>.
+    /// </remarks>
     public object? Start { get; init; }
 }
 
