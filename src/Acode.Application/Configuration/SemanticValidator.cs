@@ -127,6 +127,114 @@ public sealed class SemanticValidator
             }
         }
 
+        // FR-002b-66: timeout_seconds must be positive
+        if (config.Model?.TimeoutSeconds is not null && config.Model.TimeoutSeconds <= 0)
+        {
+            errors.Add(new ValidationError
+            {
+                Code = "INVALID_TIMEOUT",
+                Message = $"Model timeout_seconds must be positive (got {config.Model.TimeoutSeconds})",
+                Severity = ValidationSeverity.Error,
+                Path = "model.timeout_seconds"
+            });
+        }
+
+        // FR-002b-67: retry_count must be non-negative
+        if (config.Model?.RetryCount is not null && config.Model.RetryCount < 0)
+        {
+            errors.Add(new ValidationError
+            {
+                Code = "INVALID_RETRY_COUNT",
+                Message = $"Model retry_count must be non-negative (got {config.Model.RetryCount})",
+                Severity = ValidationSeverity.Error,
+                Path = "model.retry_count"
+            });
+        }
+
+        // FR-002b-59: project.type should match project.languages
+        if (config.Project?.Type is not null && config.Project.Languages?.Count > 0)
+        {
+            var knownMappings = new Dictionary<string, string[]>
+            {
+                ["dotnet"] = new[] { "csharp", "fsharp", "vb" },
+                ["node"] = new[] { "javascript", "typescript" },
+                ["python"] = new[] { "python" },
+                ["go"] = new[] { "go" },
+                ["rust"] = new[] { "rust" },
+                ["java"] = new[] { "java", "kotlin" }
+            };
+
+            if (knownMappings.TryGetValue(config.Project.Type.ToLowerInvariant(), out var expectedLanguages))
+            {
+                var hasMatch = config.Project.Languages.Any(lang =>
+                    expectedLanguages.Contains(lang.ToLowerInvariant()));
+
+                if (!hasMatch)
+                {
+                    errors.Add(new ValidationError
+                    {
+                        Code = "PROJECT_TYPE_LANGUAGE_MISMATCH",
+                        Message = $"Project type '{config.Project.Type}' does not match languages. Expected: {string.Join(", ", expectedLanguages)}",
+                        Severity = ValidationSeverity.Warning,
+                        Path = "project"
+                    });
+                }
+            }
+        }
+
+        // FR-002b-60: schema_version must be supported
+        if (!string.IsNullOrWhiteSpace(config.SchemaVersion))
+        {
+            var supportedVersions = new[] { "1.0.0" };
+            if (!supportedVersions.Contains(config.SchemaVersion))
+            {
+                errors.Add(new ValidationError
+                {
+                    Code = "UNSUPPORTED_SCHEMA_VERSION",
+                    Message = $"Schema version '{config.SchemaVersion}' is not supported. Supported: {string.Join(", ", supportedVersions)}",
+                    Severity = ValidationSeverity.Error,
+                    Path = "schema_version"
+                });
+            }
+        }
+
+        // FR-002b-61: no duplicate entries in arrays
+        if (config.Project?.Languages?.Count > 0)
+        {
+            var duplicates = config.Project.Languages
+                .GroupBy(x => x.ToLowerInvariant())
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToList();
+
+            if (duplicates.Count > 0)
+            {
+                errors.Add(new ValidationError
+                {
+                    Code = "DUPLICATE_LANGUAGES",
+                    Message = $"Duplicate languages: {string.Join(", ", duplicates)}",
+                    Severity = ValidationSeverity.Warning,
+                    Path = "project.languages"
+                });
+            }
+        }
+
+        // FR-002b-68: endpoint URL format
+        if (!string.IsNullOrWhiteSpace(config.Model?.Endpoint))
+        {
+            if (!Uri.TryCreate(config.Model.Endpoint, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != "http" && uri.Scheme != "https"))
+            {
+                errors.Add(new ValidationError
+                {
+                    Code = "INVALID_ENDPOINT_URL",
+                    Message = $"Endpoint must be valid HTTP/HTTPS URL: {config.Model.Endpoint}",
+                    Severity = ValidationSeverity.Error,
+                    Path = "model.endpoint"
+                });
+            }
+        }
+
         // FR-002b-70: Return all errors (aggregate)
         return errors.Count == 0
             ? ValidationResult.Success()

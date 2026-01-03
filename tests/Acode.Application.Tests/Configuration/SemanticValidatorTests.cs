@@ -310,4 +310,121 @@ public class SemanticValidatorTests
         // Assert
         result.IsValid.Should().BeTrue();
     }
+
+    [Fact]
+    public void Validate_WithNegativeTimeout_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Model = new ModelConfig { TimeoutSeconds = -1 }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e => e.Code == "INVALID_TIMEOUT");
+    }
+
+    [Fact]
+    public void Validate_WithNegativeRetryCount_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Model = new ModelConfig { RetryCount = -1 }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e => e.Code == "INVALID_RETRY_COUNT");
+    }
+
+    [Fact]
+    public void Validate_WithProjectTypeMismatch_ShouldReturnWarning()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Project = new ProjectConfig
+            {
+                Type = "dotnet",
+                Languages = new List<string> { "python" } // Mismatch
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.Errors.Should().ContainSingle(e => e.Code == "PROJECT_TYPE_LANGUAGE_MISMATCH");
+        result.Errors[0].Severity.Should().Be(ValidationSeverity.Warning);
+    }
+
+    [Fact]
+    public void Validate_WithUnsupportedSchemaVersion_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig { SchemaVersion = "2.0.0" };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e => e.Code == "UNSUPPORTED_SCHEMA_VERSION");
+    }
+
+    [Fact]
+    public void Validate_WithDuplicateLanguages_ShouldReturnWarning()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Project = new ProjectConfig
+            {
+                Languages = new List<string> { "python", "Python", "PYTHON" }
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.Errors.Should().ContainSingle(e => e.Code == "DUPLICATE_LANGUAGES");
+        result.Errors[0].Severity.Should().Be(ValidationSeverity.Warning);
+    }
+
+    [Fact]
+    public void Validate_WithInvalidEndpointUrl_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Model = new ModelConfig { Endpoint = "not-a-valid-url" }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e => e.Code == "INVALID_ENDPOINT_URL");
+    }
 }
