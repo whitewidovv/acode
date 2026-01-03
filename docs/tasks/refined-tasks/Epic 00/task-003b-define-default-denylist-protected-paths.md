@@ -986,3 +986,558 @@ Tests/Security/PathProtection/
 
 ---
 
+## User Verification Steps
+
+### Scenario 1: View Default Denylist
+
+**Objective:** Verify the denylist display command works correctly
+
+1. Open terminal in repository root
+2. Run: `agentic-coder security show-denylist`
+3. Verify output shows all SSH paths (~/.ssh/*, etc.)
+4. Verify output shows all cloud credential paths
+5. Verify output shows all package manager paths
+6. Verify output shows all system paths
+7. Verify output shows all environment file patterns
+8. Verify each entry has a reason description
+
+**Expected Result:**
+- Complete list of protected paths displayed
+- Paths grouped by category
+- Each path has explanation
+
+### Scenario 2: Platform-Specific Paths
+
+**Objective:** Verify platform filtering works
+
+1. Run: `agentic-coder security show-denylist --platform windows`
+2. Verify Windows paths are shown (C:\Windows\, etc.)
+3. Verify Unix-only paths are NOT shown
+4. Run: `agentic-coder security show-denylist --platform linux`
+5. Verify Unix paths are shown (/etc/, /root/, etc.)
+6. Verify Windows-only paths are NOT shown
+
+**Expected Result:**
+- Platform flag correctly filters paths
+- Only relevant paths for platform shown
+
+### Scenario 3: Check Blocked Path
+
+**Objective:** Verify path checking identifies protected paths
+
+1. Run: `agentic-coder security check-path ~/.ssh/id_rsa`
+2. Verify output shows "BLOCKED"
+3. Verify output shows reason (SSH private key)
+4. Verify output shows matched pattern (~/.ssh/id_*)
+5. Run: `agentic-coder security check-path ~/.aws/credentials`
+6. Verify output shows "BLOCKED"
+7. Verify output shows reason (AWS credentials)
+
+**Expected Result:**
+- Protected paths correctly identified
+- Clear reason provided
+- Pattern match shown
+
+### Scenario 4: Check Allowed Path
+
+**Objective:** Verify normal paths are allowed
+
+1. Run: `agentic-coder security check-path ./src/Program.cs`
+2. Verify output shows "ALLOWED"
+3. Run: `agentic-coder security check-path ./README.md`
+4. Verify output shows "ALLOWED"
+
+**Expected Result:**
+- Normal development files are allowed
+- No false positives
+
+### Scenario 5: Directory Traversal Block
+
+**Objective:** Verify directory traversal is blocked
+
+1. Run: `agentic-coder security check-path ./src/../../../etc/passwd`
+2. Verify output shows "BLOCKED"
+3. Verify path is normalized before check
+4. Verify attack is detected
+
+**Expected Result:**
+- Traversal attempts blocked
+- Path normalized correctly
+- Security violation logged
+
+### Scenario 6: Symlink Attack Block
+
+**Objective:** Verify symlinks to protected paths are blocked
+
+1. Create symlink: `ln -s ~/.ssh/id_rsa test_link`
+2. Run: `agentic-coder security check-path ./test_link`
+3. Verify output shows "BLOCKED"
+4. Verify symlink was resolved
+5. Clean up: `rm test_link`
+
+**Expected Result:**
+- Symlink attacks detected
+- Real target path checked
+- Protection enforced
+
+### Scenario 7: Environment File Protection
+
+**Objective:** Verify .env files are protected
+
+1. Run: `agentic-coder security check-path .env`
+2. Verify output shows "BLOCKED"
+3. Run: `agentic-coder security check-path .env.local`
+4. Verify output shows "BLOCKED"
+5. Run: `agentic-coder security check-path ./config/.env.production`
+6. Verify output shows "BLOCKED" (nested pattern)
+
+**Expected Result:**
+- All .env variants blocked
+- Nested .env files blocked
+- Pattern matching works correctly
+
+### Scenario 8: User Extension
+
+**Objective:** Verify users can extend the denylist
+
+1. Add to `.agent/config.yml`:
+   ```yaml
+   security:
+     additional_protected_paths:
+       - pattern: "company-secrets/"
+         reason: "Internal documentation"
+   ```
+2. Run: `agentic-coder security show-denylist`
+3. Verify "company-secrets/" appears in list
+4. Run: `agentic-coder security check-path ./company-secrets/internal.doc`
+5. Verify output shows "BLOCKED"
+6. Verify reason shows "Internal documentation"
+
+**Expected Result:**
+- User extensions loaded
+- Extensions applied to checks
+- Custom reason displayed
+
+### Scenario 9: Cannot Remove Default Paths
+
+**Objective:** Verify default paths cannot be removed
+
+1. Add to `.agent/config.yml`:
+   ```yaml
+   security:
+     remove_protected_paths:
+       - "~/.ssh/"
+   ```
+2. Run: `agentic-coder security show-denylist`
+3. Verify ~/.ssh/ is STILL in the list
+4. Verify warning or error about invalid config
+
+**Expected Result:**
+- Default paths cannot be removed
+- Clear error/warning message
+- Security not compromised
+
+### Scenario 10: Violation Logging
+
+**Objective:** Verify violations are logged
+
+1. Enable verbose logging
+2. Attempt operation that accesses ~/.ssh/id_rsa
+3. Check log output
+4. Verify log contains:
+   - Timestamp
+   - Event type (protected_path_access_blocked)
+   - Error code (ACODE-SEC-003)
+   - Pattern matched
+   - Risk ID reference
+5. Verify log does NOT contain:
+   - File contents
+   - Full path (redacted)
+
+**Expected Result:**
+- Violations properly logged
+- Logs contain required fields
+- No sensitive data in logs
+
+### Scenario 11: Performance Verification
+
+**Objective:** Verify path checking is fast
+
+1. Run benchmark: `agentic-coder benchmark path-check`
+2. Verify single path check < 1ms
+3. Verify 1000 path checks complete reasonably
+4. Verify no memory growth over repeated checks
+
+**Expected Result:**
+- Path checking is performant
+- No memory leaks
+- Acceptable for production use
+
+### Scenario 12: Error Message Quality
+
+**Objective:** Verify error messages are helpful
+
+1. Attempt to read ~/.ssh/id_rsa via the agent
+2. Verify error message includes:
+   - Error code ACODE-SEC-003
+   - Clear description of why blocked
+   - Suggestion for alternative
+3. Verify error message does NOT include:
+   - File contents
+   - Exact file path (redacted)
+   - Stack traces (unless debug mode)
+
+**Expected Result:**
+- Error messages are user-friendly
+- Security information not leaked
+- Actionable guidance provided
+
+---
+
+## Implementation Prompt
+
+### File Structure
+
+```
+src/
+├── AgenticCoder.Domain/
+│   ├── Security/
+│   │   ├── PathProtection/
+│   │   │   ├── DefaultDenylist.cs
+│   │   │   ├── DenylistEntry.cs
+│   │   │   ├── IPathMatcher.cs
+│   │   │   ├── GlobMatcher.cs
+│   │   │   ├── IPathNormalizer.cs
+│   │   │   ├── PathNormalizer.cs
+│   │   │   ├── ISymlinkResolver.cs
+│   │   │   ├── SymlinkResolver.cs
+│   │   │   ├── IProtectedPathValidator.cs
+│   │   │   ├── ProtectedPathValidator.cs
+│   │   │   └── ProtectedPathError.cs
+│   │   └── Risks/
+│   │       └── PathProtectionRisks.cs
+│   └── ValueObjects/
+│       └── NormalizedPath.cs
+│
+├── AgenticCoder.Application/
+│   ├── Security/
+│   │   ├── Commands/
+│   │   │   ├── CheckPathCommand.cs
+│   │   │   └── CheckPathHandler.cs
+│   │   └── Queries/
+│   │       ├── GetDenylistQuery.cs
+│   │       └── GetDenylistHandler.cs
+│
+├── AgenticCoder.Infrastructure/
+│   ├── Security/
+│   │   ├── PathProtection/
+│   │   │   ├── FileSystemPathNormalizer.cs
+│   │   │   ├── FileSystemSymlinkResolver.cs
+│   │   │   └── PlatformPathDetector.cs
+│   └── Configuration/
+│       └── UserDenylistExtensionLoader.cs
+│
+└── AgenticCoder.CLI/
+    └── Commands/
+        └── Security/
+            ├── ShowDenylistCommand.cs
+            └── CheckPathCommand.cs
+```
+
+### Core Interfaces
+
+```csharp
+namespace AgenticCoder.Domain.Security.PathProtection;
+
+/// <summary>
+/// Entry in the denylist defining a protected path pattern.
+/// </summary>
+public sealed record DenylistEntry
+{
+    public required string Pattern { get; init; }
+    public required string Reason { get; init; }
+    public required string RiskId { get; init; }
+    public required PathCategory Category { get; init; }
+    public required Platform[] Platforms { get; init; }
+    public bool IsDefault { get; init; } = true;
+}
+
+public enum PathCategory
+{
+    SshKeys,
+    GpgKeys,
+    CloudCredentials,
+    PackageManagerCredentials,
+    GitCredentials,
+    SystemFiles,
+    EnvironmentFiles,
+    SecretFiles,
+    UserDefined
+}
+
+public enum Platform
+{
+    Windows,
+    Linux,
+    MacOS,
+    All
+}
+
+/// <summary>
+/// Validates whether a path is protected and should be blocked.
+/// </summary>
+public interface IProtectedPathValidator
+{
+    /// <summary>
+    /// Checks if the given path is protected by the denylist.
+    /// </summary>
+    /// <param name="path">The path to check (may be relative or absolute).</param>
+    /// <returns>Result indicating if path is protected and why.</returns>
+    PathValidationResult Validate(string path);
+    
+    /// <summary>
+    /// Checks if the given path is protected, with operation context.
+    /// </summary>
+    PathValidationResult Validate(string path, FileOperation operation);
+}
+
+public enum FileOperation
+{
+    Read,
+    Write,
+    Delete,
+    List
+}
+
+public sealed record PathValidationResult
+{
+    public bool IsProtected { get; init; }
+    public string? MatchedPattern { get; init; }
+    public string? Reason { get; init; }
+    public string? RiskId { get; init; }
+    public PathCategory? Category { get; init; }
+    public ProtectedPathError? Error { get; init; }
+    
+    public static PathValidationResult Allowed() => 
+        new() { IsProtected = false };
+    
+    public static PathValidationResult Blocked(DenylistEntry entry) =>
+        new()
+        {
+            IsProtected = true,
+            MatchedPattern = entry.Pattern,
+            Reason = entry.Reason,
+            RiskId = entry.RiskId,
+            Category = entry.Category,
+            Error = new ProtectedPathError(entry)
+        };
+}
+```
+
+### Default Denylist Definition
+
+```csharp
+namespace AgenticCoder.Domain.Security.PathProtection;
+
+/// <summary>
+/// Immutable default denylist that cannot be modified.
+/// SECURITY CRITICAL: Changes to this class require security review.
+/// </summary>
+public static class DefaultDenylist
+{
+    /// <summary>
+    /// Gets all default protected path entries.
+    /// This collection is immutable and cannot be reduced.
+    /// </summary>
+    public static IReadOnlyList<DenylistEntry> Entries { get; } = CreateEntries();
+    
+    private static IReadOnlyList<DenylistEntry> CreateEntries()
+    {
+        return new[]
+        {
+            // SSH Keys
+            new DenylistEntry
+            {
+                Pattern = "~/.ssh/",
+                Reason = "SSH directory containing private keys",
+                RiskId = "RISK-E-003",
+                Category = PathCategory.SshKeys,
+                Platforms = [Platform.Linux, Platform.MacOS]
+            },
+            new DenylistEntry
+            {
+                Pattern = "~/.ssh/id_*",
+                Reason = "SSH private key files",
+                RiskId = "RISK-E-003",
+                Category = PathCategory.SshKeys,
+                Platforms = [Platform.Linux, Platform.MacOS]
+            },
+            // ... (all entries defined)
+            
+            // Cloud Credentials
+            new DenylistEntry
+            {
+                Pattern = "~/.aws/",
+                Reason = "AWS credentials and configuration",
+                RiskId = "RISK-I-003",
+                Category = PathCategory.CloudCredentials,
+                Platforms = [Platform.All]
+            },
+            
+            // Environment Files
+            new DenylistEntry
+            {
+                Pattern = ".env",
+                Reason = "Environment file may contain secrets",
+                RiskId = "RISK-I-002",
+                Category = PathCategory.EnvironmentFiles,
+                Platforms = [Platform.All]
+            },
+            new DenylistEntry
+            {
+                Pattern = ".env.*",
+                Reason = "Environment file variants",
+                RiskId = "RISK-I-002",
+                Category = PathCategory.EnvironmentFiles,
+                Platforms = [Platform.All]
+            },
+            new DenylistEntry
+            {
+                Pattern = "**/.env",
+                Reason = "Nested environment files",
+                RiskId = "RISK-I-002",
+                Category = PathCategory.EnvironmentFiles,
+                Platforms = [Platform.All]
+            },
+            
+            // System Paths (Windows)
+            new DenylistEntry
+            {
+                Pattern = @"C:\Windows\",
+                Reason = "Windows system directory",
+                RiskId = "RISK-E-004",
+                Category = PathCategory.SystemFiles,
+                Platforms = [Platform.Windows]
+            },
+            
+            // System Paths (Unix)
+            new DenylistEntry
+            {
+                Pattern = "/etc/",
+                Reason = "Unix system configuration directory",
+                RiskId = "RISK-E-004",
+                Category = PathCategory.SystemFiles,
+                Platforms = [Platform.Linux, Platform.MacOS]
+            },
+            
+        }.ToImmutableList();
+    }
+}
+```
+
+### Path Matcher Implementation
+
+```csharp
+namespace AgenticCoder.Domain.Security.PathProtection;
+
+/// <summary>
+/// Matches paths against glob patterns.
+/// SECURITY CRITICAL: Must not use backtracking regex.
+/// </summary>
+public sealed class GlobMatcher : IPathMatcher
+{
+    private readonly bool _caseSensitive;
+    
+    public GlobMatcher(bool caseSensitive)
+    {
+        _caseSensitive = caseSensitive;
+    }
+    
+    /// <summary>
+    /// Matches a normalized path against a glob pattern.
+    /// Uses linear-time algorithm to prevent ReDoS.
+    /// </summary>
+    public bool Matches(string pattern, string path)
+    {
+        // Implementation uses state machine, not regex
+        // to avoid catastrophic backtracking
+        return MatchGlob(pattern, path, 0, 0);
+    }
+    
+    private bool MatchGlob(string pattern, string path, int pi, int si)
+    {
+        // Linear-time glob matching algorithm
+        // Handles *, **, ?, [abc], [a-z]
+        // Returns match result without backtracking
+    }
+}
+```
+
+### Error Codes
+
+| Code | Description |
+|------|-------------|
+| ACODE-SEC-003 | Protected path access blocked |
+| ACODE-SEC-003-001 | SSH key path blocked |
+| ACODE-SEC-003-002 | Cloud credential path blocked |
+| ACODE-SEC-003-003 | System path blocked |
+| ACODE-SEC-003-004 | Environment file blocked |
+| ACODE-SEC-003-005 | Symlink to protected path blocked |
+| ACODE-SEC-003-006 | Directory traversal blocked |
+| ACODE-SEC-003-007 | User-defined protected path blocked |
+
+### CLI Exit Codes
+
+| Exit Code | Meaning |
+|-----------|---------|
+| 0 | Path is allowed |
+| 1 | Path is blocked (protected) |
+| 2 | Invalid arguments |
+| 3 | Configuration error |
+
+### Implementation Checklist
+
+1. [ ] Implement `DefaultDenylist` with all required entries
+2. [ ] Implement `DenylistEntry` record with all fields
+3. [ ] Implement `IPathMatcher` and `GlobMatcher`
+4. [ ] Implement `IPathNormalizer` and `PathNormalizer`
+5. [ ] Implement `ISymlinkResolver` and `SymlinkResolver`
+6. [ ] Implement `IProtectedPathValidator` and `ProtectedPathValidator`
+7. [ ] Implement `ProtectedPathError` with proper error codes
+8. [ ] Implement user extension loading from config
+9. [ ] Implement CLI `security show-denylist` command
+10. [ ] Implement CLI `security check-path` command
+11. [ ] Add integration with file operation interceptor
+12. [ ] Add logging for all violations
+13. [ ] Write unit tests for each denylist entry
+14. [ ] Write unit tests for path matching
+15. [ ] Write unit tests for symlink resolution
+16. [ ] Write integration tests for enforcement
+17. [ ] Write security tests for bypass attempts
+18. [ ] Document all entries in SECURITY.md
+19. [ ] Add performance benchmarks
+20. [ ] Conduct security review
+
+### Dependencies
+
+- Task 002.a (config schema for user extensions)
+- Task 002.b (config parser for loading extensions)
+- Task 003 (threat model for risk references)
+- Task 003.a (risk IDs for entry references)
+
+### Verification Command
+
+```bash
+# Run all denylist tests
+dotnet test --filter "FullyQualifiedName~PathProtection"
+
+# Run security tests
+dotnet test --filter "Category=Security&FullyQualifiedName~Denylist"
+
+# Run benchmarks
+dotnet run --project Tests/Performance -- --filter "*PathMatching*"
+```
+
+---
+
+**End of Task 003.b Specification**
