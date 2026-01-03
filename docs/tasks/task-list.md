@@ -100,6 +100,32 @@
 
 #### Non-interactive mode behaviors
 
+### Task 050: Workspace Database Foundation (SQLite + Migrations + Postgres Connector)
+
+#### Define workspace DB layout + migration strategy (SQLite local, Postgres remote)
+
+#### Implement DB access layer + connection management (SQLite + Postgres)
+
+#### Implement migration runner CLI + startup bootstrapping
+
+#### Implement health checks + diagnostics (db status, sync status, storage stats)
+
+#### Implement backup/export hooks for workspace DB (safe, redacted)
+
+### Task 049: Conversation History & Multi-Chat Management (CRU(sD)) — Offline-first (SQLite cache + Postgres)
+
+#### Define conversation data model + storage provider abstraction (SQLite cache + Postgres source-of-truth)
+
+#### Implement CRU(sD) APIs + CLI commands (chat create/list/open/rename/delete/restore/purge)
+
+#### Implement multi-chat concurrency model + run/worktree binding
+
+#### Implement indexing + fast search over chats/runs/messages
+
+#### Define retention, export, privacy + redaction controls (local cache + remote DB)
+
+#### Implement SQLite→Postgres sync engine (outbox, batching, retries, idempotency, conflict policy)
+
 ### Task 011: Run Session State Machine + Persistence
 
 #### Run entities (session/task/step/tool call/artifacts)
