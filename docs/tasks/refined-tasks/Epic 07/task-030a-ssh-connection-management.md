@@ -229,54 +229,119 @@ Console.WriteLine($"Health: {status.OverallHealth}");
 
 ## Implementation Prompt
 
-### Interface
+You are implementing SSH connection management for compute targets. This handles connection pooling, keep-alive, and health checks. Follow Clean Architecture and TDD.
+
+### Part 1: File Structure and Domain Models
+
+#### File Structure
+
+```
+src/Acode.Domain/
+├── Compute/
+│   └── Ssh/
+│       └── Connection/
+│           ├── PoolState.cs
+│           ├── HealthState.cs
+│           ├── ConnectionMetrics.cs
+│           └── Events/
+│               ├── ConnectionAcquiredEvent.cs
+│               ├── ConnectionReleasedEvent.cs
+│               ├── ConnectionFailedEvent.cs
+│               └── PoolExhaustedEvent.cs
+
+src/Acode.Application/
+├── Compute/
+│   └── Ssh/
+│       └── Connection/
+│           ├── ISshConnectionPool.cs
+│           ├── ISshConnection.cs
+│           ├── IHealthChecker.cs
+│           ├── IKeepAliveManager.cs
+│           └── PoolConfiguration.cs
+
+src/Acode.Infrastructure/
+├── Compute/
+│   └── Ssh/
+│       └── Connection/
+│           ├── SshConnectionPool.cs
+│           ├── SshConnectionWrapper.cs
+│           ├── HealthChecker.cs
+│           ├── KeepAliveManager.cs
+│           └── PoolMetricsCollector.cs
+
+tests/Acode.Infrastructure.Tests/
+├── Compute/
+│   └── Ssh/
+│       └── Connection/
+│           ├── SshConnectionPoolTests.cs
+│           ├── HealthCheckerTests.cs
+│           └── KeepAliveManagerTests.cs
+```
+
+#### Domain Models
 
 ```csharp
-public interface ISshConnectionPool : IAsyncDisposable
+// src/Acode.Domain/Compute/Ssh/Connection/PoolState.cs
+namespace Acode.Domain.Compute.Ssh.Connection;
+
+public enum PoolState
 {
-    Task<ISshConnection> AcquireAsync(CancellationToken ct);
-    void Release(ISshConnection connection);
-    PoolStatus GetStatus();
-    Task<HealthStatus> CheckHealthAsync();
+    Initializing = 0,
+    Ready = 1,
+    Exhausted = 2,
+    Degraded = 3,
+    Failed = 4,
+    Draining = 5,
+    Disposed = 6
 }
 
-public interface ISshConnection : IDisposable
-{
-    string ConnectionId { get; }
-    bool IsConnected { get; }
-    Task<SshCommandResult> ExecuteAsync(string command, CancellationToken ct);
-    ISftpChannel OpenSftp();
-}
+// src/Acode.Domain/Compute/Ssh/Connection/HealthState.cs
+namespace Acode.Domain.Compute.Ssh.Connection;
 
-public record PoolStatus(
-    int ActiveConnections,
-    int IdleConnections,
-    int TotalConnections,
-    int WaitingRequests,
-    HealthState OverallHealth);
+public enum HealthState { Healthy, Unhealthy, Unknown, Degraded, Checking }
 
-public record HealthStatus(
+public sealed record HealthStatus(
     HealthState State,
-    DateTime LastCheck,
+    DateTimeOffset LastCheck,
     int ConsecutiveFailures,
-    string LastError);
+    string? LastError,
+    TimeSpan LastCheckDuration);
 
-public enum HealthState { Healthy, Unhealthy, Unknown, Degraded }
-```
+// src/Acode.Domain/Compute/Ssh/Connection/ConnectionMetrics.cs
+namespace Acode.Domain.Compute.Ssh.Connection;
 
-### Pool Pattern
-
-```csharp
-public class SshConnectionPool : ISshConnectionPool
+public sealed record ConnectionMetrics
 {
-    private readonly SemaphoreSlim _semaphore;
-    private readonly ConcurrentBag<ISshConnection> _idle;
-    private readonly ConcurrentDictionary<string, ISshConnection> _active;
-    private readonly Timer _keepAliveTimer;
-    private readonly Timer _healthCheckTimer;
+    public int TotalCreated { get; init; }
+    public int TotalFailed { get; init; }
+    public int TotalReconnects { get; init; }
+    public int KeepAlivesSent { get; init; }
+    public int KeepAlivesFailed { get; init; }
+    public int HealthChecksPassed { get; init; }
+    public int HealthChecksFailed { get; init; }
+    public TimeSpan AverageAcquireTime { get; init; }
+    public TimeSpan AverageCommandTime { get; init; }
 }
+
+// src/Acode.Domain/Compute/Ssh/Connection/Events/ConnectionAcquiredEvent.cs
+namespace Acode.Domain.Compute.Ssh.Connection.Events;
+
+public sealed record ConnectionAcquiredEvent(
+    string ConnectionId,
+    string PoolId,
+    TimeSpan WaitTime,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+public sealed record ConnectionReleasedEvent(
+    string ConnectionId,
+    string PoolId,
+    TimeSpan HeldDuration,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+public sealed record PoolExhaustedEvent(
+    string PoolId,
+    int WaitersCount,
+    DateTimeOffset Timestamp) : IDomainEvent;
 ```
 
----
-
-**End of Task 030.a Specification**
+**End of Task 030.a Specification - Part 1/3**
