@@ -614,3 +614,514 @@ curl http://localhost:8000/v1/models   # vLLM
 4. Check network connectivity
 
 ---
+
+## Acceptance Criteria
+
+### IProviderRegistry Interface
+
+- [ ] AC-001: IProviderRegistry interface defined
+- [ ] AC-002: Register method exists
+- [ ] AC-003: Unregister method exists
+- [ ] AC-004: GetProvider method exists
+- [ ] AC-005: GetDefaultProvider method exists
+- [ ] AC-006: GetProviderFor method exists
+- [ ] AC-007: ListProviders method exists
+- [ ] AC-008: IsRegistered method exists
+- [ ] AC-009: GetProviderHealth method exists
+- [ ] AC-010: CheckAllHealthAsync method exists
+- [ ] AC-011: Implements IAsyncDisposable
+- [ ] AC-012: CancellationToken supported
+
+### ProviderDescriptor Record
+
+- [ ] AC-013: ProviderDescriptor defined
+- [ ] AC-014: Id property exists and required
+- [ ] AC-015: Id validation works
+- [ ] AC-016: Name property exists
+- [ ] AC-017: Type property exists
+- [ ] AC-018: Endpoint property exists
+- [ ] AC-019: Capabilities property exists
+- [ ] AC-020: Config property exists
+- [ ] AC-021: Priority property exists
+- [ ] AC-022: Enabled property exists
+- [ ] AC-023: Immutability verified
+
+### ProviderType Enum
+
+- [ ] AC-024: ProviderType enum defined
+- [ ] AC-025: Ollama value exists
+- [ ] AC-026: Vllm value exists
+- [ ] AC-027: Mock value exists
+- [ ] AC-028: Serialization to lowercase
+
+### ProviderCapabilities Record
+
+- [ ] AC-029: ProviderCapabilities defined
+- [ ] AC-030: SupportedModels property exists
+- [ ] AC-031: SupportsStreaming property exists
+- [ ] AC-032: SupportsToolCalls property exists
+- [ ] AC-033: MaxContextTokens property exists
+- [ ] AC-034: MaxOutputTokens property exists
+- [ ] AC-035: SupportsJsonMode property exists
+- [ ] AC-036: Supports method works
+- [ ] AC-037: Merge method works
+
+### ProviderEndpoint Record
+
+- [ ] AC-038: ProviderEndpoint defined
+- [ ] AC-039: BaseUrl property exists
+- [ ] AC-040: ConnectTimeout property exists
+- [ ] AC-041: RequestTimeout property exists
+- [ ] AC-042: URL validation works
+- [ ] AC-043: Timeout validation works
+- [ ] AC-044: Default values provided
+
+### ProviderConfig Record
+
+- [ ] AC-045: ProviderConfig defined
+- [ ] AC-046: ModelMappings property exists
+- [ ] AC-047: DefaultModel property exists
+- [ ] AC-048: RetryPolicy property exists
+- [ ] AC-049: FallbackProviderId property exists
+- [ ] AC-050: CustomSettings property exists
+
+### RetryPolicy Record
+
+- [ ] AC-051: RetryPolicy defined
+- [ ] AC-052: MaxRetries property exists
+- [ ] AC-053: InitialDelay property exists
+- [ ] AC-054: MaxDelay property exists
+- [ ] AC-055: BackoffMultiplier property exists
+- [ ] AC-056: RetryableErrors property exists
+- [ ] AC-057: None static property works
+- [ ] AC-058: Default static property works
+
+### ProviderHealth Record
+
+- [ ] AC-059: ProviderHealth defined
+- [ ] AC-060: Status property exists
+- [ ] AC-061: LastCheck property exists
+- [ ] AC-062: LastError property exists
+- [ ] AC-063: ResponseTimeMs property exists
+- [ ] AC-064: ConsecutiveFailures property exists
+
+### HealthStatus Enum
+
+- [ ] AC-065: HealthStatus enum defined
+- [ ] AC-066: Unknown value exists
+- [ ] AC-067: Healthy value exists
+- [ ] AC-068: Degraded value exists
+- [ ] AC-069: Unhealthy value exists
+- [ ] AC-070: Disabled value exists
+
+### Provider Registration
+
+- [ ] AC-071: Registration accepts valid descriptor
+- [ ] AC-072: Registration rejects duplicate IDs
+- [ ] AC-073: Registration validates descriptor
+- [ ] AC-074: Registration initializes provider
+- [ ] AC-075: Registration performs health check
+- [ ] AC-076: Registration logs events
+- [ ] AC-077: Capability index updated
+
+### Provider Selection
+
+- [ ] AC-078: GetDefaultProvider returns configured default
+- [ ] AC-079: GetDefaultProvider throws when no default
+- [ ] AC-080: GetProvider returns by ID
+- [ ] AC-081: GetProvider throws for missing ID
+- [ ] AC-082: GetProviderFor matches capabilities
+- [ ] AC-083: GetProviderFor considers model
+- [ ] AC-084: GetProviderFor considers health
+- [ ] AC-085: GetProviderFor logs decision
+- [ ] AC-086: GetProviderFor throws when no match
+
+### Health Checking
+
+- [ ] AC-087: CheckAllHealthAsync checks all
+- [ ] AC-088: Health check respects timeout
+- [ ] AC-089: LastCheck updated
+- [ ] AC-090: ResponseTimeMs recorded
+- [ ] AC-091: LastError recorded on failure
+- [ ] AC-092: ConsecutiveFailures incremented
+- [ ] AC-093: ConsecutiveFailures reset on success
+- [ ] AC-094: Background checks supported
+- [ ] AC-095: Health change events emitted
+
+### Configuration Integration
+
+- [ ] AC-096: Config loaded from yml
+- [ ] AC-097: Providers section parsed
+- [ ] AC-098: Defaults applied
+- [ ] AC-099: Config validated
+- [ ] AC-100: Loading logged
+- [ ] AC-101: Env vars override
+
+### Operating Mode Integration
+
+- [ ] AC-102: Mode validation performed
+- [ ] AC-103: External rejected in airgapped
+- [ ] AC-104: Inconsistency warnings emitted
+- [ ] AC-105: Validation logged
+
+### Fallback Behavior
+
+- [ ] AC-106: Fallback configured
+- [ ] AC-107: Fallback attempted on failure
+- [ ] AC-108: Ordering respected
+- [ ] AC-109: Attempts logged
+- [ ] AC-110: Chain length limited
+
+### Performance
+
+- [ ] AC-111: Registration < 100ms
+- [ ] AC-112: GetDefaultProvider < 1μs
+- [ ] AC-113: GetProvider O(1)
+- [ ] AC-114: GetProviderFor < 100μs
+- [ ] AC-115: Thread-safety verified
+
+### Security
+
+- [ ] AC-116: No credentials logged
+- [ ] AC-117: Endpoints validated
+- [ ] AC-118: Local-only in airgapped
+- [ ] AC-119: Responses sanitized
+
+### Documentation
+
+- [ ] AC-120: XML documentation complete
+- [ ] AC-121: Config examples provided
+- [ ] AC-122: CLI commands documented
+- [ ] AC-123: Error codes documented
+
+---
+
+## Testing Requirements
+
+### Unit Tests
+
+```
+Tests/Unit/Application/Providers/
+├── ProviderRegistryTests.cs
+│   ├── Should_Register_Valid_Provider()
+│   ├── Should_Reject_Duplicate_Id()
+│   ├── Should_Validate_Descriptor()
+│   ├── Should_Return_Default_Provider()
+│   ├── Should_Throw_When_No_Default()
+│   ├── Should_Get_Provider_By_Id()
+│   ├── Should_Throw_For_Missing_Provider()
+│   ├── Should_Match_Request_To_Provider()
+│   ├── Should_Consider_Model_In_Selection()
+│   ├── Should_Consider_Health_In_Selection()
+│   ├── Should_List_All_Providers()
+│   ├── Should_Check_If_Registered()
+│   ├── Should_Handle_Fallback()
+│   ├── Should_Limit_Fallback_Chain()
+│   └── Should_Be_Thread_Safe()
+│
+├── ProviderDescriptorTests.cs
+│   ├── Should_Require_Id()
+│   ├── Should_Validate_Id_Not_Empty()
+│   ├── Should_Be_Immutable()
+│   └── Should_Support_All_Properties()
+│
+├── ProviderCapabilitiesTests.cs
+│   ├── Should_Check_Supports()
+│   ├── Should_Merge_Capabilities()
+│   └── Should_Be_Immutable()
+│
+├── ProviderEndpointTests.cs
+│   ├── Should_Validate_Url()
+│   ├── Should_Validate_Timeouts()
+│   └── Should_Provide_Defaults()
+│
+├── RetryPolicyTests.cs
+│   ├── Should_Have_Defaults()
+│   ├── None_Should_Disable_Retries()
+│   └── Should_Be_Immutable()
+│
+└── ProviderHealthTests.cs
+    ├── Should_Track_Status()
+    ├── Should_Record_Failures()
+    └── Should_Reset_On_Success()
+```
+
+### Integration Tests
+
+```
+Tests/Integration/Providers/
+├── ProviderConfigLoadingTests.cs
+│   ├── Should_Load_From_Config_Yml()
+│   ├── Should_Apply_Defaults()
+│   ├── Should_Override_With_Env_Vars()
+│   └── Should_Validate_Config()
+│
+├── ProviderHealthCheckTests.cs
+│   ├── Should_Check_Provider_Health()
+│   ├── Should_Timeout_Appropriately()
+│   └── Should_Update_Health_Status()
+│
+└── OperatingModeValidationTests.cs
+    ├── Should_Validate_Airgapped_Mode()
+    └── Should_Warn_On_Inconsistency()
+```
+
+### End-to-End Tests
+
+```
+Tests/E2E/Providers/
+├── ProviderSelectionE2ETests.cs
+│   ├── Should_Select_Default_Provider()
+│   ├── Should_Select_By_Capability()
+│   ├── Should_Fallback_On_Failure()
+│   └── Should_Fail_When_No_Match()
+```
+
+### Performance Tests
+
+```
+Tests/Performance/Providers/
+├── ProviderRegistryBenchmarks.cs
+│   ├── Benchmark_Registration()
+│   ├── Benchmark_GetDefaultProvider()
+│   ├── Benchmark_GetProviderById()
+│   ├── Benchmark_GetProviderFor()
+│   └── Benchmark_ConcurrentAccess()
+```
+
+---
+
+## User Verification Steps
+
+### Scenario 1: Register Provider
+
+1. Create ProviderDescriptor with valid data
+2. Call registry.Register(descriptor)
+3. Verify IsRegistered returns true
+4. Verify ListProviders includes provider
+
+### Scenario 2: Get Default Provider
+
+1. Configure default_provider in config
+2. Start application
+3. Call GetDefaultProvider()
+4. Verify correct provider returned
+
+### Scenario 3: Get Provider by ID
+
+1. Register multiple providers
+2. Call GetProvider("ollama")
+3. Verify correct provider returned
+4. Call GetProvider("nonexistent")
+5. Verify ProviderNotFoundException thrown
+
+### Scenario 4: Capability-Based Selection
+
+1. Register provider with streaming support
+2. Create request requiring streaming
+3. Call GetProviderFor(request)
+4. Verify streaming-capable provider returned
+
+### Scenario 5: Health Check
+
+1. Register provider
+2. Call GetProviderHealth(id)
+3. Verify status is Healthy
+4. Stop provider service
+5. Call CheckAllHealthAsync()
+6. Verify status is Unhealthy
+
+### Scenario 6: Fallback on Failure
+
+1. Configure provider with fallback
+2. Make primary provider unhealthy
+3. Request provider for request
+4. Verify fallback provider returned
+
+### Scenario 7: Config Loading
+
+1. Create .agent/config.yml with providers
+2. Start application
+3. Verify all configured providers registered
+4. Verify settings applied correctly
+
+### Scenario 8: Environment Override
+
+1. Set ACODE_MODEL_PROVIDERS_OLLAMA_ENDPOINT
+2. Start application
+3. Verify endpoint overridden
+
+### Scenario 9: Airgapped Mode Validation
+
+1. Set operating mode to airgapped
+2. Configure provider with external endpoint
+3. Verify registration rejected or warned
+
+### Scenario 10: CLI Provider List
+
+1. Run `acode providers list`
+2. Verify all providers shown
+3. Verify status displayed correctly
+
+---
+
+## Implementation Prompt
+
+### File Structure
+
+```
+src/AgenticCoder.Application/Providers/
+├── IProviderRegistry.cs
+├── ProviderRegistry.cs
+├── ProviderDescriptor.cs
+├── ProviderType.cs
+├── ProviderCapabilities.cs
+├── ProviderEndpoint.cs
+├── ProviderConfig.cs
+├── RetryPolicy.cs
+├── ProviderHealth.cs
+├── HealthStatus.cs
+├── Selection/
+│   ├── IProviderSelector.cs
+│   ├── DefaultProviderSelector.cs
+│   └── CapabilityProviderSelector.cs
+└── Exceptions/
+    ├── ProviderNotFoundException.cs
+    ├── NoCapableProviderException.cs
+    └── ProviderRegistrationException.cs
+```
+
+### IProviderRegistry Implementation
+
+```csharp
+namespace AgenticCoder.Application.Providers;
+
+public interface IProviderRegistry : IAsyncDisposable
+{
+    void Register(ProviderDescriptor descriptor);
+    void Unregister(string providerId);
+    
+    IModelProvider GetProvider(string providerId);
+    IModelProvider GetDefaultProvider();
+    IModelProvider GetProviderFor(ChatRequest request);
+    
+    IReadOnlyList<ProviderDescriptor> ListProviders();
+    bool IsRegistered(string providerId);
+    
+    ProviderHealth GetProviderHealth(string providerId);
+    Task<IReadOnlyDictionary<string, ProviderHealth>> CheckAllHealthAsync(
+        CancellationToken cancellationToken = default);
+}
+```
+
+### ProviderRegistry Implementation
+
+```csharp
+namespace AgenticCoder.Application.Providers;
+
+public sealed class ProviderRegistry : IProviderRegistry
+{
+    private readonly ConcurrentDictionary<string, ProviderRegistration> _providers = new();
+    private readonly ILogger<ProviderRegistry> _logger;
+    private readonly ProviderConfig _config;
+    private readonly IProviderSelector _selector;
+    
+    public ProviderRegistry(
+        IOptions<ProviderConfig> config,
+        IProviderSelector selector,
+        ILogger<ProviderRegistry> logger)
+    {
+        _config = config.Value;
+        _selector = selector;
+        _logger = logger;
+    }
+    
+    public void Register(ProviderDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ValidateDescriptor(descriptor);
+        
+        if (!_providers.TryAdd(descriptor.Id, new ProviderRegistration(descriptor)))
+        {
+            throw new ProviderRegistrationException(
+                $"Provider '{descriptor.Id}' is already registered",
+                "ACODE-PRV-001");
+        }
+        
+        _logger.LogInformation(
+            "Provider registered: {ProviderId} ({ProviderType})",
+            descriptor.Id, descriptor.Type);
+    }
+    
+    public IModelProvider GetDefaultProvider()
+    {
+        if (string.IsNullOrEmpty(_config.DefaultProviderId))
+        {
+            throw new NoCapableProviderException(
+                "No default provider configured",
+                "ACODE-PRV-002");
+        }
+        
+        return GetProvider(_config.DefaultProviderId);
+    }
+    
+    // Additional implementation...
+}
+```
+
+### Error Codes
+
+| Code | Message |
+|------|---------|
+| ACODE-PRV-001 | Provider already registered |
+| ACODE-PRV-002 | No default provider configured |
+| ACODE-PRV-003 | Provider not found |
+| ACODE-PRV-004 | No provider supports request |
+| ACODE-PRV-005 | Invalid provider descriptor |
+| ACODE-PRV-006 | Provider initialization failed |
+| ACODE-PRV-007 | Health check timeout |
+| ACODE-PRV-008 | Fallback chain exhausted |
+| ACODE-PRV-009 | Invalid provider endpoint |
+| ACODE-PRV-010 | Operating mode violation |
+
+### Implementation Checklist
+
+1. [ ] Define IProviderRegistry interface
+2. [ ] Implement ProviderRegistry class
+3. [ ] Define ProviderDescriptor record
+4. [ ] Define ProviderType enum
+5. [ ] Define ProviderCapabilities record
+6. [ ] Define ProviderEndpoint record
+7. [ ] Define ProviderConfig record
+8. [ ] Define RetryPolicy record
+9. [ ] Define ProviderHealth record
+10. [ ] Define HealthStatus enum
+11. [ ] Implement IProviderSelector interface
+12. [ ] Implement DefaultProviderSelector
+13. [ ] Implement CapabilityProviderSelector
+14. [ ] Implement health checking
+15. [ ] Implement fallback logic
+16. [ ] Implement config loading
+17. [ ] Implement operating mode validation
+18. [ ] Add exception types
+19. [ ] Write unit tests
+20. [ ] Write integration tests
+21. [ ] Add XML documentation
+
+### Dependencies
+
+- Task 004 (IModelProvider interface)
+- Task 004.a (ChatRequest types)
+- Task 004.b (ChatResponse types)
+- Task 001 (Operating modes)
+- Task 002 (Config schema)
+
+### Verification Command
+
+```bash
+dotnet test --filter "FullyQualifiedName~Providers"
+```
+
+---
+
+**End of Task 004.c Specification**
