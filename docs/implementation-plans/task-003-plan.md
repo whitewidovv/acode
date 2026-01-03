@@ -175,48 +175,67 @@ Each subtask will be completed with:
 
 ✅ Strategic implementation plan created
 ✅ Feature branch created: `feature/task-003-threat-model`
-✅ Domain Layer - Security Types:
+
+### Domain Layer - Complete (22 types, 23 commits)
+
+✅ **Security Types (Core):**
   - ✅ SecuritySeverity enum (5 levels: Debug → Critical)
-  - ✅ ThreatActor enum (10 actors: User, Agent, ExternalLlm, etc.)
+  - ✅ ThreatActor enum (10 actors: User, Agent, ExternalLlm, LocalModel, etc.)
   - ✅ DataClassification enum (4 levels: Public → Secret)
   - ✅ TrustBoundary enum (8 boundaries)
   - ✅ AttackVector record (VectorId, Description, ThreatActor, Boundary)
-✅ Domain Layer - Risk Types (Task 003.a):
+
+✅ **Risk Types (Task 003.a - Complete):**
   - ✅ RiskCategory enum (6 STRIDE categories)
-✅ Domain Layer - PathProtection Types (Task 003.b):
-  - ✅ PathCategory enum (9 categories)
+  - ✅ RiskId value object (format: RISK-[STRIDE]-NNN, with validation)
+  - ✅ Severity enum (4 levels: Low, Medium, High, Critical)
+  - ✅ DreadScore value object (5 components, auto-calculated average & severity)
+  - ✅ MitigationStatus enum (4 statuses)
+  - ✅ Mitigation record (full mitigation metadata)
+  - ✅ Risk record (complete risk with DREAD, mitigations, attack vectors)
+
+✅ **PathProtection Types (Task 003.b - Complete):**
+  - ✅ PathCategory enum (9 categories: SshKeys, GpgKeys, CloudCredentials, etc.)
   - ✅ Platform enum (4 platforms: Windows, Linux, MacOS, All)
-✅ Domain Layer - Audit Types (Task 003.c):
+  - ✅ DenylistEntry record (Pattern, Reason, RiskId, Category, Platforms)
+  - ✅ DefaultDenylist static class (45+ protected paths immutable)
+
+✅ **Audit Types (Task 003.c - Complete):**
   - ✅ AuditEventType enum (25 mandatory event types)
+  - ✅ AuditSeverity enum (5 levels)
+  - ✅ EventId value object (GUID wrapper with validation)
+  - ✅ SessionId value object (GUID wrapper with validation)
+  - ✅ CorrelationId value object (GUID wrapper with validation)
+  - ✅ AuditEvent record (complete audit event structure)
 
-**Commits so far:** 14 (all with strict TDD - RED→GREEN→REFACTOR)
-**Tests passing:** 290 total (63 new Task-003 Domain tests + 227 from Task-002)
+✅ **Integration Test Fixes (from Task 002):**
+  - ✅ ISchemaValidator interface created
+  - ✅ JsonSchemaValidator implements ISchemaValidator
+  - ✅ ConfigValidator wired to use JsonSchemaValidator via DI
+  - ✅ ConfigCommand fixed to use repository root instead of config path
+  - ✅ Program.cs fixed to pass current directory
+  - ✅ Schema constrained to only allow schema_version "1.0.0"
+  - ✅ ConfigE2ETests path resolution fixed
+  - ✅ All 6 integration tests now passing (was 2/6)
+
+**Commits so far:** 24 (23 domain + 1 integration fix)
+**Tests passing:** 355 total (255 Domain + 48 Application + 35 Infrastructure + 11 CLI + 6 Integration)
 **Test coverage:** 100% of all implemented domain types
-**Lines of Code:** ~1100 lines production code, ~1300 lines test code
-
-**Domain types implemented (10 total):**
-- SecuritySeverity, ThreatActor, DataClassification, TrustBoundary (core security)
-- RiskCategory (STRIDE - Task 003.a)
-- PathCategory, Platform (Task 003.b)
-- AuditEventType (Task 003.c)
-- AttackVector record (core security)
-- DenylistEntry record (Task 003.b)
+**New tests this session:** 66 domain tests + integration test fixes
+**Lines of Code:** ~2000 lines production code, ~2500 lines test code
 
 ## In Progress
 
-🔄 Domain Layer: Continue with value objects (RiskId, DreadScore, etc.) and complex records
+🔄 Planning next phase: Application Layer security interfaces
 
 ## Remaining
 
-- Domain Layer: SecurityInvariant, FailSafeBehavior records
-- Risk Types: RiskId, RiskCategory (STRIDE), DreadScore, Risk, Mitigation
-- Protected Paths: PathCategory, DenylistEntry, DefaultDenylist data
-- Audit Types: AuditEventType, AuditEvent, SessionId, CorrelationId
-- Application Layer: Interfaces (ISecretRedactor, IPathValidator, etc.)
-- Infrastructure Layer: Implementations
-- CLI Layer: Security commands
-- Documentation: SECURITY.md, threat-model.md
+- Application Layer: Security interfaces (ISecretRedactor, IPathValidator, IRiskRegister, IAuditLogger, etc.)
+- Infrastructure Layer: Security implementations (FileSystemPathValidator, RegexSecretRedactor, etc.)
+- CLI Layer: Security commands (show-denylist, check-path, security-status, audit commands)
+- Documentation: SECURITY.md, threat-model.md, risk-register.md
 - Audit per AUDIT-GUIDELINES.md
+- Create PR when audit passes
 
 ## Key Decisions
 
