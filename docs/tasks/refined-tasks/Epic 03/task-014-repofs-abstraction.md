@@ -399,22 +399,94 @@ This is intentional. RepoFS prevents accessing files outside the repository root
 ```
 Tests/Unit/RepoFS/
 ├── PathNormalizerTests.cs
-│   ├── Should_Normalize_Slashes()
-│   ├── Should_Handle_Relative()
-│   └── Should_Reject_Traversal()
+│   ├── Should_Normalize_Forward_Slashes()
+│   ├── Should_Normalize_Back_Slashes()
+│   ├── Should_Normalize_Mixed_Slashes()
+│   ├── Should_Handle_Relative_Paths()
+│   ├── Should_Handle_Current_Directory_Dot()
+│   ├── Should_Collapse_Double_Slashes()
+│   ├── Should_Preserve_Leading_Slash()
+│   └── Should_Trim_Trailing_Slashes()
+│
+├── PathValidatorTests.cs
+│   ├── Should_Accept_Valid_Relative_Path()
+│   ├── Should_Accept_Subdirectory_Path()
+│   ├── Should_Accept_Deep_Nested_Path()
+│   ├── Should_Reject_Parent_Traversal()
+│   ├── Should_Reject_Hidden_Parent_Traversal()
+│   ├── Should_Reject_Encoded_Traversal()
+│   ├── Should_Reject_Absolute_Path()
+│   ├── Should_Reject_UNC_Path()
+│   ├── Should_Reject_Null_Path()
+│   └── Should_Reject_Empty_Path()
 │
 ├── LocalFileSystemTests.cs
-│   ├── Should_Read_File()
-│   ├── Should_Write_File()
-│   └── Should_Enumerate()
+│   ├── ReadFileAsync_Should_Return_Content()
+│   ├── ReadFileAsync_Should_Handle_UTF8_BOM()
+│   ├── ReadFileAsync_Should_Handle_UTF16()
+│   ├── ReadFileAsync_Should_Throw_FileNotFound()
+│   ├── ReadFileAsync_Should_Support_Cancellation()
+│   ├── ReadLinesAsync_Should_Return_Lines()
+│   ├── ReadLinesAsync_Should_Handle_Empty_File()
+│   ├── ReadLinesAsync_Should_Handle_No_Trailing_Newline()
+│   ├── ReadBytesAsync_Should_Return_Binary()
+│   ├── WriteFileAsync_Should_Create_New_File()
+│   ├── WriteFileAsync_Should_Overwrite_Existing()
+│   ├── WriteFileAsync_Should_Create_Parent_Directories()
+│   ├── WriteFileAsync_Should_Use_UTF8_No_BOM()
+│   ├── WriteLinesAsync_Should_Write_With_Newlines()
+│   ├── WriteBytesAsync_Should_Write_Binary()
+│   ├── DeleteFileAsync_Should_Remove_File()
+│   ├── DeleteFileAsync_Should_Ignore_Missing()
+│   ├── DeleteDirectoryAsync_Should_Remove_Empty()
+│   ├── DeleteDirectoryAsync_Should_Remove_Recursive()
+│   ├── ExistsAsync_Should_Return_True_For_File()
+│   ├── ExistsAsync_Should_Return_True_For_Directory()
+│   ├── ExistsAsync_Should_Return_False_For_Missing()
+│   ├── GetMetadataAsync_Should_Return_Size()
+│   ├── GetMetadataAsync_Should_Return_LastModified()
+│   ├── GetMetadataAsync_Should_Return_CreatedDate()
+│   └── GetMetadataAsync_Should_Throw_FileNotFound()
+│
+├── EnumerationTests.cs
+│   ├── EnumerateFilesAsync_Should_List_Files()
+│   ├── EnumerateFilesAsync_Should_Skip_Directories()
+│   ├── EnumerateFilesAsync_Should_Support_Recursive()
+│   ├── EnumerateFilesAsync_Should_Apply_Filter()
+│   ├── EnumerateFilesAsync_Should_Respect_Ignores()
+│   ├── EnumerateFilesAsync_Should_Handle_Empty_Directory()
+│   ├── EnumerateDirectoriesAsync_Should_List_Directories()
+│   ├── EnumerateDirectoriesAsync_Should_Skip_Files()
+│   ├── EnumerateDirectoriesAsync_Should_Support_Recursive()
+│   └── EnumerateDirectoriesAsync_Should_Handle_Hidden()
 │
 ├── TransactionTests.cs
-│   ├── Should_Commit()
-│   └── Should_Rollback()
+│   ├── BeginTransaction_Should_Create_Transaction()
+│   ├── Commit_Should_Finalize_Writes()
+│   ├── Commit_Should_Be_Atomic()
+│   ├── Rollback_Should_Undo_Writes()
+│   ├── Rollback_Should_Restore_Original()
+│   ├── AutoRollback_On_Exception()
+│   ├── AutoRollback_On_Dispose_Without_Commit()
+│   ├── Transaction_Should_Handle_Multiple_Files()
+│   ├── Transaction_Should_Handle_Create_And_Delete()
+│   └── Nested_Transaction_Should_Throw()
 │
 └── PatchApplicatorTests.cs
-    ├── Should_Apply_Unified_Diff()
-    └── Should_Validate_Patch()
+    ├── ApplyPatch_Should_Add_Lines()
+    ├── ApplyPatch_Should_Remove_Lines()
+    ├── ApplyPatch_Should_Modify_Lines()
+    ├── ApplyPatch_Should_Handle_Context()
+    ├── ApplyPatch_Should_Handle_Multiple_Hunks()
+    ├── ApplyPatch_Should_Handle_Multiple_Files()
+    ├── ApplyPatch_Should_Create_New_File()
+    ├── ApplyPatch_Should_Delete_File()
+    ├── ApplyPatch_Should_Fail_On_Mismatch()
+    ├── ApplyPatch_Should_Fail_On_Missing_File()
+    ├── PreviewPatch_Should_Show_Changes()
+    ├── PreviewPatch_Should_Not_Modify()
+    ├── ValidatePatch_Should_Accept_Valid()
+    └── ValidatePatch_Should_Reject_Malformed()
 ```
 
 ### Integration Tests
@@ -422,8 +494,26 @@ Tests/Unit/RepoFS/
 ```
 Tests/Integration/RepoFS/
 ├── LocalFSIntegrationTests.cs
-│   ├── Should_Handle_Large_Files()
-│   └── Should_Handle_Deep_Directories()
+│   ├── Should_Read_Large_File()
+│   ├── Should_Write_Large_File()
+│   ├── Should_Handle_Deep_Directory_Tree()
+│   ├── Should_Handle_Many_Files()
+│   ├── Should_Handle_Unicode_Filenames()
+│   ├── Should_Handle_Long_Paths()
+│   ├── Should_Handle_Special_Characters()
+│   ├── Should_Handle_Concurrent_Reads()
+│   ├── Should_Handle_Read_While_Write()
+│   └── Should_Survive_Disk_Full()
+│
+├── TransactionIntegrationTests.cs
+│   ├── Should_Rollback_On_Crash()
+│   ├── Should_Handle_Concurrent_Transactions()
+│   └── Should_Recover_From_Partial_Commit()
+│
+└── PatchIntegrationTests.cs
+    ├── Should_Apply_Real_Git_Diff()
+    ├── Should_Handle_Binary_Detection()
+    └── Should_Apply_Patch_Atomically()
 ```
 
 ### E2E Tests
@@ -431,7 +521,11 @@ Tests/Integration/RepoFS/
 ```
 Tests/E2E/RepoFS/
 ├── FileToolE2ETests.cs
-│   └── Should_Read_Write_Via_Agent()
+│   ├── Should_Read_File_Via_Agent_Tool()
+│   ├── Should_Write_File_Via_Agent_Tool()
+│   ├── Should_List_Directory_Via_Agent_Tool()
+│   ├── Should_Apply_Patch_Via_Agent_Tool()
+│   └── Should_Handle_Agent_Error_Recovery()
 ```
 
 ### Performance Benchmarks
