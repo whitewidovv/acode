@@ -352,30 +352,100 @@ The following items are explicitly excluded from Task 014:
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-014-01 to NFR-014-20)
 
-- NFR-001: Small file read < 10ms
-- NFR-002: Large file read < 100ms/MB
-- NFR-003: Directory enumeration < 50ms/1000 files
-- NFR-004: Write < 20ms/MB
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014-01 | Performance | Path normalization MUST complete in < 1ms |
+| NFR-014-02 | Performance | Path validation MUST complete in < 1ms |
+| NFR-014-03 | Performance | Small file read (< 1KB) MUST complete in < 10ms |
+| NFR-014-04 | Performance | Medium file read (1KB-100KB) MUST complete in < 50ms |
+| NFR-014-05 | Performance | Large file read (100KB-1MB) MUST complete in < 100ms |
+| NFR-014-06 | Performance | Very large file read (> 1MB) MUST complete in < 100ms/MB |
+| NFR-014-07 | Performance | File write throughput MUST be > 10MB/s |
+| NFR-014-08 | Performance | Directory enumeration MUST handle 1000 files in < 50ms |
+| NFR-014-09 | Performance | Directory enumeration MUST handle 10,000 files in < 500ms |
+| NFR-014-10 | Performance | Metadata query MUST complete in < 5ms |
+| NFR-014-11 | Performance | Existence check MUST complete in < 2ms |
+| NFR-014-12 | Performance | Transaction begin MUST complete in < 10ms |
+| NFR-014-13 | Performance | Transaction commit MUST complete in < 100ms + write time |
+| NFR-014-14 | Performance | Transaction rollback MUST complete in < 50ms |
+| NFR-014-15 | Performance | Patch validation MUST complete in < 50ms |
+| NFR-014-16 | Performance | Patch application MUST complete in < 100ms typical |
+| NFR-014-17 | Performance | Memory allocation per read MUST be < 2x file size |
+| NFR-014-18 | Performance | Enumeration MUST use streaming (no full materialization) |
+| NFR-014-19 | Performance | Connection pooling MUST be used for Docker FS |
+| NFR-014-20 | Performance | File handle caching SHOULD be used for hot paths |
 
-### Reliability
+### Security (NFR-014-21 to NFR-014-35)
 
-- NFR-005: No partial writes
-- NFR-006: Rollback always works
-- NFR-007: Corruption detection
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014-21 | Security | All paths MUST be validated before use |
+| NFR-014-22 | Security | Path traversal attempts MUST be rejected |
+| NFR-014-23 | Security | Symbolic links MUST be resolved and validated |
+| NFR-014-24 | Security | Symlinks escaping root MUST be rejected |
+| NFR-014-25 | Security | Encoded path attacks MUST be detected |
+| NFR-014-26 | Security | Null bytes in paths MUST be rejected |
+| NFR-014-27 | Security | Write operations MUST be audited |
+| NFR-014-28 | Security | Delete operations MUST be audited |
+| NFR-014-29 | Security | Audit logs MUST NOT contain file content |
+| NFR-014-30 | Security | Error messages MUST NOT expose system paths |
+| NFR-014-31 | Security | Temporary files MUST be in repo temp directory |
+| NFR-014-32 | Security | Temp files MUST have restricted permissions |
+| NFR-014-33 | Security | Backup files MUST be cleaned after transaction |
+| NFR-014-34 | Security | Docker credentials MUST NOT be logged |
+| NFR-014-35 | Security | Read-only mode MUST prevent all writes |
 
-### Security
+### Reliability (NFR-014-36 to NFR-014-50)
 
-- NFR-008: Path validation
-- NFR-009: Boundary enforcement
-- NFR-010: No privilege escalation
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014-36 | Reliability | Atomic writes MUST NOT corrupt on crash |
+| NFR-014-37 | Reliability | Transaction commit MUST be crash-safe |
+| NFR-014-38 | Reliability | Transaction rollback MUST always succeed |
+| NFR-014-39 | Reliability | Partial patch MUST NOT leave files corrupted |
+| NFR-014-40 | Reliability | File locks MUST be released on disposal |
+| NFR-014-41 | Reliability | File locks MUST timeout after configured period |
+| NFR-014-42 | Reliability | Stale locks MUST be detected and cleaned |
+| NFR-014-43 | Reliability | Encoding detection MUST handle edge cases |
+| NFR-014-44 | Reliability | Binary file detection MUST be accurate |
+| NFR-014-45 | Reliability | Large file operations MUST not exhaust memory |
+| NFR-014-46 | Reliability | Disk full MUST be detected and handled |
+| NFR-014-47 | Reliability | Permission denied MUST be reported clearly |
+| NFR-014-48 | Reliability | Network errors (Docker) MUST retry with backoff |
+| NFR-014-49 | Reliability | Docker container restart MUST be handled |
+| NFR-014-50 | Reliability | Concurrent access MUST be handled safely |
 
-### Usability
+### Maintainability (NFR-014-51 to NFR-014-60)
 
-- NFR-011: Clear error messages
-- NFR-012: Helpful exceptions
-- NFR-013: Good logging
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014-51 | Maintainability | Interface MUST be well-documented |
+| NFR-014-52 | Maintainability | All public methods MUST have XML docs |
+| NFR-014-53 | Maintainability | Error codes MUST be documented |
+| NFR-014-54 | Maintainability | Configuration options MUST be documented |
+| NFR-014-55 | Maintainability | Code coverage MUST be > 80% |
+| NFR-014-56 | Maintainability | Cyclomatic complexity MUST be < 10 per method |
+| NFR-014-57 | Maintainability | Each class MUST have single responsibility |
+| NFR-014-58 | Maintainability | Dependencies MUST be injected |
+| NFR-014-59 | Maintainability | No static state (testability) |
+| NFR-014-60 | Maintainability | Platform-specific code MUST be isolated |
+
+### Observability (NFR-014-61 to NFR-014-70)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014-61 | Observability | All operations MUST log at Debug level |
+| NFR-014-62 | Observability | Errors MUST log at Error level with context |
+| NFR-014-63 | Observability | Performance metrics MUST be collected |
+| NFR-014-64 | Observability | Metrics MUST include operation latency |
+| NFR-014-65 | Observability | Metrics MUST include bytes read/written |
+| NFR-014-66 | Observability | Metrics MUST include operation count |
+| NFR-014-67 | Observability | Metrics MUST include error count |
+| NFR-014-68 | Observability | Transaction metrics MUST include commit/rollback ratio |
+| NFR-014-69 | Observability | Structured logging MUST be used |
+| NFR-014-70 | Observability | Log correlation IDs MUST be propagated |
 
 ---
 
@@ -383,145 +453,416 @@ The following items are explicitly excluded from Task 014:
 
 ### Overview
 
-RepoFS provides file system access for the agent. It abstracts local and Docker file systems behind a common interface.
+RepoFS (Repository File System) is the abstraction layer that provides safe, consistent file system access for the Agentic Coding Bot. It ensures the agent can read and modify files within a repository while preventing access to files outside the repository boundary.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Agent Operations                        │
+│         (read_file, write_file, list_directory)             │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      IRepoFS Interface                       │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐  │
+│  │ Read Operations │  │Write Operations │  │ Transactions│  │
+│  └─────────────────┘  └─────────────────┘  └─────────────┘  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐  │
+│  │   Enumeration   │  │    Metadata     │  │   Patching  │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────┘  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+          ┌───────────────┼───────────────┐
+          ▼               ▼               ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│  Path Validator │ │ Path Normalizer │ │  Audit Logger   │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
+          │               │               │
+          └───────────────┼───────────────┘
+                          │
+          ┌───────────────┴───────────────┐
+          ▼                               ▼
+┌─────────────────────────┐   ┌─────────────────────────┐
+│   LocalFileSystem       │   │   DockerFileSystem      │
+│   - Native file I/O     │   │   - Docker API calls    │
+│   - Direct disk access  │   │   - Volume mounts       │
+│   - File locking        │   │   - Container exec      │
+└─────────────────────────┘   └─────────────────────────┘
+```
 
 ### Configuration
+
+RepoFS is configured in the `.agent/config.yml` file under the `repo` section:
 
 ```yaml
 # .agent/config.yml
 repo:
-  # File system type: local, docker
+  # File system type: local, docker, auto (default: auto)
   fs_type: local
   
-  # Root path (default: current directory)
+  # Repository root path (default: current directory)
   root: .
   
-  # Docker-specific settings
+  # Read-only mode (default: false)
+  read_only: false
+  
+  # Transaction timeout in seconds (default: 300)
+  transaction_timeout_seconds: 300
+  
+  # File lock timeout in seconds (default: 30)
+  lock_timeout_seconds: 30
+  
+  # Enable file watching (default: false)
+  watch_enabled: false
+  
+  # Ignore patterns (in addition to .gitignore)
+  ignore_patterns:
+    - "*.log"
+    - "node_modules/"
+    - ".git/"
+  
+  # Docker-specific settings (when fs_type: docker)
   docker:
+    # Container name or ID
     container: my-container
+    
+    # Path inside container
     mount_path: /workspace
+    
+    # Connection timeout in seconds
+    timeout_seconds: 10
 ```
 
-### API Overview
+### API Reference
+
+#### Reading Files
 
 ```csharp
-// Reading files
-var content = await repoFS.ReadFileAsync("src/Program.cs");
-var lines = await repoFS.ReadLinesAsync("README.md");
-var bytes = await repoFS.ReadBytesAsync("image.png");
+// Read entire file as string
+string content = await repoFS.ReadFileAsync("src/Program.cs", cancellationToken);
 
-// Writing files
-await repoFS.WriteFileAsync("output.txt", content);
-await repoFS.WriteLinesAsync("data.txt", lines);
+// Read file as lines
+IReadOnlyList<string> lines = await repoFS.ReadLinesAsync("README.md", cancellationToken);
 
-// Checking existence
-if (await repoFS.ExistsAsync("config.json"))
+// Read file as bytes (for binary files)
+byte[] bytes = await repoFS.ReadBytesAsync("assets/logo.png", cancellationToken);
+```
+
+#### Writing Files
+
+```csharp
+// Write string content (creates parent directories if needed)
+await repoFS.WriteFileAsync("output/report.txt", content, cancellationToken);
+
+// Write lines with platform-appropriate line endings
+await repoFS.WriteLinesAsync("data/items.csv", lines, cancellationToken);
+
+// Write binary content
+await repoFS.WriteBytesAsync("output/image.png", bytes, cancellationToken);
+```
+
+#### Checking Existence and Metadata
+
+```csharp
+// Check if file or directory exists
+bool exists = await repoFS.ExistsAsync("src/config.json", cancellationToken);
+
+// Get detailed metadata
+FileMetadata meta = await repoFS.GetMetadataAsync("src/Program.cs", cancellationToken);
+Console.WriteLine($"Size: {meta.Size} bytes");
+Console.WriteLine($"Modified: {meta.LastModified}");
+Console.WriteLine($"Read-only: {meta.IsReadOnly}");
+```
+
+#### Enumerating Files and Directories
+
+```csharp
+// List all files in a directory
+await foreach (FileEntry file in repoFS.EnumerateFilesAsync("src", recursive: true))
 {
-    var meta = await repoFS.GetMetadataAsync("config.json");
+    Console.WriteLine($"{file.Path} ({file.Size} bytes)");
 }
 
-// Enumerating
-await foreach (var file in repoFS.EnumerateFilesAsync("src"))
+// List directories
+await foreach (DirectoryEntry dir in repoFS.EnumerateDirectoriesAsync(".", recursive: false))
 {
-    Console.WriteLine(file.Path);
+    Console.WriteLine($"Directory: {dir.Path}");
 }
+
+// With filtering
+await foreach (FileEntry file in repoFS.EnumerateFilesAsync("src", pattern: "*.cs"))
+{
+    Console.WriteLine($"C# file: {file.Path}");
+}
+```
+
+#### Deleting Files and Directories
+
+```csharp
+// Delete a file (no error if missing)
+bool deleted = await repoFS.DeleteFileAsync("temp/cache.json", cancellationToken);
+
+// Delete empty directory
+await repoFS.DeleteDirectoryAsync("temp/empty", recursive: false, cancellationToken);
+
+// Delete directory and all contents
+await repoFS.DeleteDirectoryAsync("temp/build", recursive: true, cancellationToken);
 ```
 
 ### Transactions
 
+Transactions group multiple file operations into an atomic unit. Either all operations succeed, or all are rolled back.
+
 ```csharp
-await using var transaction = await repoFS.BeginTransactionAsync();
+// Using block ensures automatic rollback on exception
+await using var transaction = await repoFS.BeginTransactionAsync(cancellationToken);
 
 try
 {
-    await repoFS.WriteFileAsync("file1.txt", content1);
-    await repoFS.WriteFileAsync("file2.txt", content2);
-    await transaction.CommitAsync();
+    // All writes are buffered
+    await repoFS.WriteFileAsync("src/file1.cs", content1);
+    await repoFS.WriteFileAsync("src/file2.cs", content2);
+    await repoFS.DeleteFileAsync("src/obsolete.cs");
+    
+    // Commit applies all changes atomically
+    await transaction.CommitAsync(cancellationToken);
+    Console.WriteLine("All changes applied successfully");
 }
-catch
+catch (Exception ex)
 {
-    // Auto-rollback on exception
+    // Rollback is automatic on exception, but can be explicit
+    await transaction.RollbackAsync(cancellationToken);
+    Console.WriteLine($"Changes rolled back: {ex.Message}");
     throw;
 }
 ```
 
-### Patching
+### Patch Application
+
+The agent primarily modifies files through patches (unified diff format), which enables precise, minimal changes.
 
 ```csharp
+// Define a patch in unified diff format
 var patch = @"
---- a/src/Program.cs
-+++ b/src/Program.cs
-@@ -10,3 +10,4 @@
- using System;
-+using System.Linq;
+--- a/src/Calculator.cs
++++ b/src/Calculator.cs
+@@ -10,6 +10,7 @@ public class Calculator
+     public int Add(int a, int b)
+     {
++        ArgumentOutOfRangeException.ThrowIfNegative(a);
+         return a + b;
+     }
+ }
 ";
 
-var result = await repoFS.ApplyPatchAsync(patch);
-if (!result.Success)
+// Preview patch without applying
+PatchPreview preview = await repoFS.PreviewPatchAsync(patch, cancellationToken);
+foreach (var change in preview.Changes)
+{
+    Console.WriteLine($"{change.ChangeType}: {change.Path}");
+    Console.WriteLine($"  Lines affected: {change.LinesAdded} added, {change.LinesRemoved} removed");
+}
+
+// Validate patch can be applied
+ValidationResult validation = await repoFS.ValidatePatchAsync(patch, cancellationToken);
+if (!validation.IsValid)
+{
+    Console.WriteLine($"Patch cannot be applied: {validation.Error}");
+    return;
+}
+
+// Apply patch (automatically transactional)
+PatchResult result = await repoFS.ApplyPatchAsync(patch, cancellationToken);
+if (result.Success)
+{
+    Console.WriteLine($"Applied patch to {result.AffectedFiles.Count} files");
+}
+else
 {
     Console.WriteLine($"Patch failed: {result.Error}");
 }
 ```
 
+### Path Handling
+
+RepoFS normalizes all paths to a consistent format and validates them for security.
+
+```csharp
+// All these paths are normalized to "src/utils/helpers.cs"
+await repoFS.ReadFileAsync("src/utils/helpers.cs");       // Already normalized
+await repoFS.ReadFileAsync("src\\utils\\helpers.cs");     // Windows backslashes
+await repoFS.ReadFileAsync("./src/utils/helpers.cs");     // Current directory prefix
+await repoFS.ReadFileAsync("src//utils//helpers.cs");     // Double slashes
+
+// These paths are REJECTED (security violations)
+await repoFS.ReadFileAsync("../secret.txt");              // Throws PathTraversalException
+await repoFS.ReadFileAsync("/etc/passwd");                // Throws PathValidationException
+await repoFS.ReadFileAsync("C:\\Windows\\system32");      // Throws PathValidationException
+```
+
 ### Error Handling
+
+RepoFS uses specific exception types for different error conditions:
 
 ```csharp
 try
 {
-    var content = await repoFS.ReadFileAsync("missing.txt");
+    var content = await repoFS.ReadFileAsync(path);
 }
 catch (FileNotFoundException ex)
 {
-    // File doesn't exist
+    // File does not exist
+    Console.WriteLine($"File not found: {ex.Path}");
 }
 catch (PathTraversalException ex)
 {
-    // Attempted to escape root
+    // Attempted to access file outside repository
+    Console.WriteLine($"Security violation: Path traversal attempt");
+}
+catch (PathValidationException ex)
+{
+    // Invalid path format
+    Console.WriteLine($"Invalid path: {ex.Message}");
 }
 catch (AccessDeniedException ex)
 {
     // Permission denied
+    Console.WriteLine($"Access denied: {ex.Path}");
+}
+catch (TransactionException ex)
+{
+    // Transaction-related error
+    Console.WriteLine($"Transaction error: {ex.Message}");
+}
+catch (PatchException ex)
+{
+    // Patch application failed
+    Console.WriteLine($"Patch failed: {ex.Message}");
+    Console.WriteLine($"Conflict at: {ex.ConflictPath}");
 }
 ```
 
 ### CLI Integration
 
-The file tools use RepoFS internally:
+RepoFS is used internally by the agent's file tools. When the agent reads or writes files, it uses RepoFS:
 
 ```bash
-$ acode run "Read the Program.cs file"
+# Reading a file via agent
+$ acode run "Show me the contents of src/Program.cs"
 
 [Tool: read_file]
   Path: src/Program.cs
-  Result: (file content)
+  Result: (file content displayed)
+
+# Writing a file via agent
+$ acode run "Add a comment to the top of Program.cs"
+
+[Tool: apply_patch]
+  Path: src/Program.cs
+  Result: Patch applied successfully
+
+# Listing directory contents
+$ acode run "What files are in the src directory?"
+
+[Tool: list_directory]
+  Path: src
+  Recursive: false
+  Result: 
+    - Program.cs (1.2KB)
+    - Config.cs (0.8KB)
+    - Utils/ (directory)
 ```
 
 ### Troubleshooting
 
-#### Path Not Found
+#### File Not Found
 
-**Problem:** File exists but not found
+**Problem:** `FileNotFoundException` when file should exist
+
+**Diagnosis:**
+```bash
+$ acode debug fs check-path src/Program.cs
+Path: src/Program.cs
+Normalized: src/Program.cs
+Absolute: /home/user/project/src/Program.cs
+Exists: false
+Suggestion: Check case sensitivity on Linux systems
+```
 
 **Solutions:**
-1. Check path is relative to root
-2. Check case sensitivity
-3. Verify .gitignore isn't excluding
-
-#### Permission Denied
-
-**Problem:** Cannot read/write file
-
-**Solutions:**
-1. Check file permissions
-2. Check if file is locked
-3. For Docker: check mount permissions
+1. Check path is relative to repository root
+2. Check case sensitivity (Linux is case-sensitive)
+3. Verify file isn't in `.gitignore` or `.agentignore`
+4. Check file permissions
 
 #### Path Traversal Blocked
 
-**Problem:** Cannot access parent directory
+**Problem:** `PathTraversalException` when accessing file
+
+**Cause:** Attempted to access file outside repository root
 
 **Solutions:**
-This is intentional. RepoFS prevents accessing files outside the repository root for security.
+This is intentional security behavior. Files outside the repository cannot be accessed. If you need files from a parent directory:
+1. Expand the repository root in configuration
+2. Use symbolic links (with caution)
+3. Copy required files into the repository
+
+#### Permission Denied
+
+**Problem:** `AccessDeniedException` on read or write
+
+**Diagnosis:**
+```bash
+$ acode debug fs check-permissions src/readonly.cs
+Path: src/readonly.cs
+Readable: true
+Writable: false
+Owner: root
+Suggestion: File is owned by different user
+```
+
+**Solutions:**
+1. Check file ownership and permissions
+2. For Docker: check mount options
+3. Run agent with appropriate permissions
+
+#### Transaction Timeout
+
+**Problem:** Transaction times out during commit
+
+**Diagnosis:**
+```bash
+$ acode debug fs list-locks
+Active locks:
+  - src/large-file.cs (held for 45s)
+  - src/another.cs (held for 32s)
+```
+
+**Solutions:**
+1. Increase `transaction_timeout_seconds` in config
+2. Break large transactions into smaller ones
+3. Check for external processes locking files
+
+#### Docker Connection Failed
+
+**Problem:** Cannot connect to Docker container
+
+**Diagnosis:**
+```bash
+$ acode debug fs docker-status
+Container: my-container
+Status: running
+Mount: /workspace accessible
+Docker socket: /var/run/docker.sock connected
+```
+
+**Solutions:**
+1. Verify container is running: `docker ps`
+2. Check container name in configuration
+3. Verify mount path exists in container
+4. Check Docker socket permissions
 
 ---
 
