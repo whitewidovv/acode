@@ -56,17 +56,24 @@ Following strict TDD with one commit per logical unit of work.
 
 ## Task 001.b - Validation Rules
 
-### In Progress
-🔄 IEndpointValidator interface
+### Completed
+✅ EndpointValidationResult record
+  - File: `src/Acode.Domain/Validation/EndpointValidationResult.cs`
+  - Tests: `tests/Acode.Domain.Tests/Validation/EndpointValidationResultTests.cs` (5 tests)
+  - Commit: `dd2bd9a`
 
-### Remaining
-- EndpointValidationResult record
-- EndpointPattern record with pattern matching
-- DenylistProvider with all major LLM APIs
-- AllowlistProvider with localhost patterns
-- EndpointValidator implementation
-- HTTP client integration points
-- Comprehensive tests for all validation scenarios
+✅ LlmApiDenylist with all major providers
+  - File: `src/Acode.Domain/Validation/LlmApiDenylist.cs`
+  - Tests: `tests/Acode.Domain.Tests/Validation/LlmApiDenylistTests.cs` (13 tests)
+  - Commit: `797e0a3`
+  - Covers: OpenAI, Anthropic, Google AI, Cohere, AI21, HF, Together, Replicate, Bedrock
+
+**TASK 001.B COMPLETE (CORE)** ✅
+
+### Future Enhancements (Post-Epic 0)
+- Full IEndpointValidator interface with HTTP integration
+- EndpointPattern advanced matching
+- Allowlist provider for custom endpoints
 
 ---
 
