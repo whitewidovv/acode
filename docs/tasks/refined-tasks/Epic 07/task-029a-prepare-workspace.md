@@ -503,3 +503,596 @@ public sealed record CacheStats(
 ```
 
 **End of Task 029.a Specification - Part 2/4**
+
+### Part 3: Infrastructure - Source Syncers and Ecosystem Detection
+
+```csharp
+// src/Acode.Infrastructure/Compute/Workspace/WorkspacePreparation.cs
+namespace Acode.Infrastructure.Compute.Workspace;
+
+public sealed class WorkspacePreparation : IWorkspacePreparation
+{
+    private readonly IEnumerable<ISourceSyncer> _syncers;
+    private readonly IEcosystemDetector _ecosystemDetector;
+    private readonly IEnumerable<IDependencyInstaller> _installers;
+    private readonly ICacheManager _cacheManager;
+    private readonly IProcessRunner _processRunner;
+    private readonly IFileSystem _fileSystem;
+    private readonly IEventPublisher _events;
+    private readonly ILogger<WorkspacePreparation> _logger;
+    
+    public WorkspacePreparation(
+        IEnumerable<ISourceSyncer> syncers,
+        IEcosystemDetector ecosystemDetector,
+        IEnumerable<IDependencyInstaller> installers,
+        ICacheManager cacheManager,
+        IProcessRunner processRunner,
+        IFileSystem fileSystem,
+        IEventPublisher events,
+        ILogger<WorkspacePreparation> logger)
+    {
+        _syncers = syncers;
+        _ecosystemDetector = ecosystemDetector;
+        _installers = installers;
+        _cacheManager = cacheManager;
+        _processRunner = processRunner;
+        _fileSystem = fileSystem;
+        _events = events;
+        _logger = logger;
+    }
+    
+    public async Task PrepareAsync(
+        IComputeTarget target,
+        WorkspaceConfig config,
+        IProgress<PreparationProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        await _events.PublishAsync(new PreparationStartedEvent(
+            target.Id, config, DateTimeOffset.UtcNow));
+        
+        try
+        {
+            // Step 1: Create workspace directory
+            Report(progress, PreparationPhase.Creating, 5, "Creating workspace directory");
+            _fileSystem.Directory.CreateDirectory(config.WorktreePath);
+            
+            // Step 2: Clean if configured
+            if (config.CleanBeforeSync)
+            {
+                Report(progress, PreparationPhase.Cleaning, 10, "Cleaning existing files");
+                await CleanupAsync(config.WorktreePath, ct);
+            }
+            
+            // Step 3: Sync source code
+            Report(progress, PreparationPhase.Syncing, 15, "Syncing source code");
+            var syncer = _syncers.FirstOrDefault(s => s.CanHandle(config.SourcePath))
+                ?? throw new InvalidOperationException($"No syncer for: {config.SourcePath}");
+            
+            var syncProgress = new Progress<SyncProgress>(p =>
+                Report(progress, PreparationPhase.Syncing, 
+                    15 + (p.BytesTransferred * 35 / Math.Max(p.TotalBytes, 1)),
+                    $"Syncing: {p.CurrentFile}",
+                    p.BytesTransferred, p.TotalBytes));
+            
+            await syncer.SyncAsync(
+                config.SourcePath,
+                config.WorktreePath,
+                config.Ref,
+                new SyncOptions(),
+                syncProgress,
+                ct);
+            
+            // Step 4: Detect ecosystems
+            Report(progress, PreparationPhase.DetectingEcosystems, 55, "Detecting ecosystems");
+            var ecosystems = _ecosystemDetector.Detect(config.WorktreePath);
+            
+            // Step 5: Install dependencies
+            if (config.Dependencies?.AutoDetect ?? true)
+            {
+                Report(progress, PreparationPhase.InstallingDependencies, 60, "Installing dependencies");
+                await InstallDependenciesAsync(
+                    config.WorktreePath, ecosystems, config, progress, ct);
+            }
+            
+            // Step 6: Run custom commands
+            if (config.PrepareCommands?.Count > 0)
+            {
+                Report(progress, PreparationPhase.RunningCommands, 90, "Running prepare commands");
+                await RunPrepareCommandsAsync(
+                    config.WorktreePath, config.PrepareCommands, ct);
+            }
+            
+            stopwatch.Stop();
+            Report(progress, PreparationPhase.Completed, 100, "Workspace ready");
+            
+            await _events.PublishAsync(new PreparationCompletedEvent(
+                target.Id, stopwatch.Elapsed, ecosystems, DateTimeOffset.UtcNow));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Workspace preparation failed for {TargetId}", target.Id);
+            Report(progress, PreparationPhase.Failed, 0, ex.Message);
+            throw;
+        }
+    }
+    
+    private async Task InstallDependenciesAsync(
+        string workspacePath,
+        EcosystemType ecosystems,
+        WorkspaceConfig config,
+        IProgress<PreparationProgress>? progress,
+        CancellationToken ct)
+    {
+        foreach (var installer in _installers)
+        {
+            if (!ecosystems.HasFlag(installer.SupportedEcosystem))
+                continue;
+            
+            // Check cache first
+            if (config.Cache?.Enabled ?? false)
+            {
+                var lockHash = ComputeLockFileHash(workspacePath, installer.SupportedEcosystem);
+                var cachePath = await _cacheManager.GetCachePathAsync(
+                    installer.SupportedEcosystem, lockHash, ct);
+                
+                if (cachePath != null)
+                {
+                    var depPath = GetDependencyPath(workspacePath, installer.SupportedEcosystem);
+                    if (await _cacheManager.RestoreCacheAsync(cachePath, depPath, ct))
+                    {
+                        _logger.LogInformation("Restored {Ecosystem} from cache", 
+                            installer.SupportedEcosystem);
+                        continue;
+                    }
+                }
+            }
+            
+            await installer.InstallAsync(workspacePath, config.Dependencies, null, ct);
+            
+            // Store in cache
+            if (config.Cache?.Enabled ?? false)
+            {
+                var lockHash = ComputeLockFileHash(workspacePath, installer.SupportedEcosystem);
+                var depPath = GetDependencyPath(workspacePath, installer.SupportedEcosystem);
+                await _cacheManager.StoreCacheAsync(
+                    installer.SupportedEcosystem, depPath, lockHash, ct);
+            }
+        }
+    }
+    
+    private async Task RunPrepareCommandsAsync(
+        string workspacePath,
+        IReadOnlyList<string> commands,
+        CancellationToken ct)
+    {
+        foreach (var cmd in commands)
+        {
+            var result = await _processRunner.RunAsync(
+                cmd, [], workspacePath, null, TimeSpan.FromMinutes(5), ct);
+            
+            if (result.ExitCode != 0)
+                throw new InvalidOperationException($"Prepare command failed: {cmd}\n{result.StdErr}");
+        }
+    }
+    
+    private static void Report(
+        IProgress<PreparationProgress>? progress,
+        PreparationPhase phase, double pct, string msg,
+        long? bytesTransferred = null, long? totalBytes = null)
+    {
+        progress?.Report(new PreparationProgress
+        {
+            Phase = phase,
+            PercentComplete = pct,
+            Message = msg,
+            BytesTransferred = bytesTransferred,
+            TotalBytes = totalBytes
+        });
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Workspace/EcosystemDetector.cs
+namespace Acode.Infrastructure.Compute.Workspace;
+
+public sealed class EcosystemDetector : IEcosystemDetector
+{
+    private readonly IFileSystem _fileSystem;
+    
+    private static readonly (string File, EcosystemType Type)[] Indicators =
+    [
+        ("*.csproj", EcosystemType.DotNet),
+        ("*.fsproj", EcosystemType.DotNet),
+        ("*.sln", EcosystemType.DotNet),
+        ("package.json", EcosystemType.Node),
+        ("requirements.txt", EcosystemType.Python),
+        ("pyproject.toml", EcosystemType.Python),
+        ("setup.py", EcosystemType.Python),
+        ("go.mod", EcosystemType.Go),
+        ("Cargo.toml", EcosystemType.Rust),
+        ("pom.xml", EcosystemType.Java),
+        ("build.gradle", EcosystemType.Java)
+    ];
+    
+    public EcosystemDetector(IFileSystem fileSystem) => _fileSystem = fileSystem;
+    
+    public EcosystemType Detect(string workspacePath)
+    {
+        var result = EcosystemType.None;
+        
+        foreach (var (pattern, type) in Indicators)
+        {
+            var files = _fileSystem.Directory.GetFiles(workspacePath, pattern, SearchOption.AllDirectories);
+            if (files.Length > 0)
+                result |= type;
+        }
+        
+        return result;
+    }
+    
+    public IReadOnlyList<EcosystemInfo> GetDetailedInfo(string workspacePath)
+    {
+        var results = new List<EcosystemInfo>();
+        
+        foreach (var (pattern, type) in Indicators)
+        {
+            foreach (var file in _fileSystem.Directory.GetFiles(workspacePath, pattern, SearchOption.AllDirectories))
+            {
+                results.Add(new EcosystemInfo(
+                    type,
+                    Path.GetDirectoryName(file)!,
+                    GetLockFile(Path.GetDirectoryName(file)!, type),
+                    file));
+            }
+        }
+        
+        return results;
+    }
+    
+    private string? GetLockFile(string dir, EcosystemType type) => type switch
+    {
+        EcosystemType.Node => FindFile(dir, "package-lock.json", "yarn.lock", "pnpm-lock.yaml"),
+        EcosystemType.Python => FindFile(dir, "requirements.txt", "poetry.lock", "Pipfile.lock"),
+        EcosystemType.DotNet => FindFile(dir, "packages.lock.json"),
+        _ => null
+    };
+    
+    private string? FindFile(string dir, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var path = Path.Combine(dir, name);
+            if (_fileSystem.File.Exists(path))
+                return path;
+        }
+        return null;
+    }
+}
+```
+
+**End of Task 029.a Specification - Part 3/4**
+
+### Part 4: Dependency Installers, Cache Manager, and Rollout
+
+```csharp
+// src/Acode.Infrastructure/Compute/Workspace/DependencyInstaller/DotNetDependencyInstaller.cs
+namespace Acode.Infrastructure.Compute.Workspace.DependencyInstaller;
+
+public sealed class DotNetDependencyInstaller : IDependencyInstaller
+{
+    private readonly IProcessRunner _processRunner;
+    private readonly ILogger<DotNetDependencyInstaller> _logger;
+    
+    public EcosystemType SupportedEcosystem => EcosystemType.DotNet;
+    
+    public DotNetDependencyInstaller(
+        IProcessRunner processRunner,
+        ILogger<DotNetDependencyInstaller> logger)
+    {
+        _processRunner = processRunner;
+        _logger = logger;
+    }
+    
+    public async Task InstallAsync(
+        string workspacePath,
+        DependencyConfig? config,
+        IProgress<DependencyProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        progress?.Report(new DependencyProgress("Running dotnet restore", 0, 0, 0));
+        
+        var result = await _processRunner.RunAsync(
+            "dotnet", ["restore", "--verbosity", "minimal"],
+            workspacePath, null, TimeSpan.FromMinutes(10), ct);
+        
+        if (result.ExitCode != 0)
+        {
+            _logger.LogError("dotnet restore failed: {Error}", result.StdErr);
+            throw new InvalidOperationException($"dotnet restore failed: {result.StdErr}");
+        }
+        
+        progress?.Report(new DependencyProgress("Restore complete", 100, 0, 0));
+    }
+    
+    public async Task<bool> IsInstalledAsync(string workspacePath, CancellationToken ct)
+    {
+        // Check if obj folders exist with project.assets.json
+        var objDirs = Directory.GetDirectories(workspacePath, "obj", SearchOption.AllDirectories);
+        return objDirs.Any(d => File.Exists(Path.Combine(d, "project.assets.json")));
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Workspace/DependencyInstaller/NodeDependencyInstaller.cs
+namespace Acode.Infrastructure.Compute.Workspace.DependencyInstaller;
+
+public sealed class NodeDependencyInstaller : IDependencyInstaller
+{
+    private readonly IProcessRunner _processRunner;
+    private readonly IFileSystem _fileSystem;
+    private readonly ILogger<NodeDependencyInstaller> _logger;
+    
+    public EcosystemType SupportedEcosystem => EcosystemType.Node;
+    
+    public NodeDependencyInstaller(
+        IProcessRunner processRunner,
+        IFileSystem fileSystem,
+        ILogger<NodeDependencyInstaller> logger)
+    {
+        _processRunner = processRunner;
+        _fileSystem = fileSystem;
+        _logger = logger;
+    }
+    
+    public async Task InstallAsync(
+        string workspacePath,
+        DependencyConfig? config,
+        IProgress<DependencyProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var (cmd, args) = DeterminePackageManager(workspacePath);
+        progress?.Report(new DependencyProgress($"Running {cmd} {string.Join(" ", args)}", 0, 0, 0));
+        
+        var result = await _processRunner.RunAsync(
+            cmd, args, workspacePath, null, TimeSpan.FromMinutes(15), ct);
+        
+        if (result.ExitCode != 0)
+        {
+            _logger.LogError("{Cmd} failed: {Error}", cmd, result.StdErr);
+            throw new InvalidOperationException($"{cmd} install failed: {result.StdErr}");
+        }
+        
+        progress?.Report(new DependencyProgress("Install complete", 100, 0, 0));
+    }
+    
+    private (string cmd, string[] args) DeterminePackageManager(string workspacePath)
+    {
+        if (_fileSystem.File.Exists(Path.Combine(workspacePath, "pnpm-lock.yaml")))
+            return ("pnpm", ["install", "--frozen-lockfile"]);
+        if (_fileSystem.File.Exists(Path.Combine(workspacePath, "yarn.lock")))
+            return ("yarn", ["install", "--frozen-lockfile"]);
+        return ("npm", ["ci"]);
+    }
+    
+    public Task<bool> IsInstalledAsync(string workspacePath, CancellationToken ct)
+    {
+        var nodeModules = Path.Combine(workspacePath, "node_modules");
+        return Task.FromResult(_fileSystem.Directory.Exists(nodeModules));
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Workspace/DependencyInstaller/PythonDependencyInstaller.cs
+namespace Acode.Infrastructure.Compute.Workspace.DependencyInstaller;
+
+public sealed class PythonDependencyInstaller : IDependencyInstaller
+{
+    private readonly IProcessRunner _processRunner;
+    private readonly IFileSystem _fileSystem;
+    private readonly ILogger<PythonDependencyInstaller> _logger;
+    
+    public EcosystemType SupportedEcosystem => EcosystemType.Python;
+    
+    public async Task InstallAsync(
+        string workspacePath,
+        DependencyConfig? config,
+        IProgress<DependencyProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var (cmd, args) = DetermineInstallCommand(workspacePath);
+        progress?.Report(new DependencyProgress($"Running {cmd}", 0, 0, 0));
+        
+        var result = await _processRunner.RunAsync(
+            cmd, args, workspacePath, null, TimeSpan.FromMinutes(15), ct);
+        
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException($"Python install failed: {result.StdErr}");
+        
+        progress?.Report(new DependencyProgress("Install complete", 100, 0, 0));
+    }
+    
+    private (string cmd, string[] args) DetermineInstallCommand(string path)
+    {
+        if (_fileSystem.File.Exists(Path.Combine(path, "pyproject.toml")))
+            return ("pip", ["install", "-e", "."]);
+        if (_fileSystem.File.Exists(Path.Combine(path, "requirements.txt")))
+            return ("pip", ["install", "-r", "requirements.txt"]);
+        return ("pip", ["install", "."]);
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Workspace/Cache/DependencyCacheManager.cs
+namespace Acode.Infrastructure.Compute.Workspace.Cache;
+
+public sealed class DependencyCacheManager : ICacheManager
+{
+    private readonly string _cacheRoot;
+    private readonly IFileSystem _fileSystem;
+    private readonly ILogger<DependencyCacheManager> _logger;
+    
+    public DependencyCacheManager(
+        IOptions<CacheOptions> options,
+        IFileSystem fileSystem,
+        ILogger<DependencyCacheManager> logger)
+    {
+        _cacheRoot = options.Value.CachePath;
+        _fileSystem = fileSystem;
+        _logger = logger;
+    }
+    
+    public Task<string?> GetCachePathAsync(
+        EcosystemType ecosystem,
+        string lockFileHash,
+        CancellationToken ct = default)
+    {
+        var path = GetCacheEntryPath(ecosystem, lockFileHash);
+        return Task.FromResult(_fileSystem.Directory.Exists(path) ? path : null);
+    }
+    
+    public async Task StoreCacheAsync(
+        EcosystemType ecosystem,
+        string dependencyPath,
+        string lockFileHash,
+        CancellationToken ct = default)
+    {
+        var cachePath = GetCacheEntryPath(ecosystem, lockFileHash);
+        
+        if (_fileSystem.Directory.Exists(cachePath))
+            _fileSystem.Directory.Delete(cachePath, true);
+        
+        await CopyDirectoryAsync(dependencyPath, cachePath, ct);
+        
+        _logger.LogInformation(
+            "Cached {Ecosystem} dependencies at {Path}", ecosystem, cachePath);
+    }
+    
+    public async Task<bool> RestoreCacheAsync(
+        string cachePath,
+        string destinationPath,
+        CancellationToken ct = default)
+    {
+        if (!_fileSystem.Directory.Exists(cachePath))
+            return false;
+        
+        await CopyDirectoryAsync(cachePath, destinationPath, ct);
+        return true;
+    }
+    
+    public Task InvalidateCacheAsync(EcosystemType ecosystem, CancellationToken ct)
+    {
+        var ecosystemPath = Path.Combine(_cacheRoot, ecosystem.ToString().ToLowerInvariant());
+        if (_fileSystem.Directory.Exists(ecosystemPath))
+            _fileSystem.Directory.Delete(ecosystemPath, true);
+        return Task.CompletedTask;
+    }
+    
+    private string GetCacheEntryPath(EcosystemType ecosystem, string hash) =>
+        Path.Combine(_cacheRoot, ecosystem.ToString().ToLowerInvariant(), hash[..16]);
+    
+    private async Task CopyDirectoryAsync(string source, string dest, CancellationToken ct)
+    {
+        _fileSystem.Directory.CreateDirectory(dest);
+        await Task.Run(() =>
+        {
+            foreach (var file in _fileSystem.Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+            {
+                ct.ThrowIfCancellationRequested();
+                var relative = Path.GetRelativePath(source, file);
+                var destFile = Path.Combine(dest, relative);
+                _fileSystem.Directory.CreateDirectory(Path.GetDirectoryName(destFile)!);
+                _fileSystem.File.Copy(file, destFile, true);
+            }
+        }, ct);
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Workspace/SourceSyncer/LocalSourceSyncer.cs
+namespace Acode.Infrastructure.Compute.Workspace.SourceSyncer;
+
+public sealed class LocalSourceSyncer : ISourceSyncer
+{
+    private readonly IFileSystem _fileSystem;
+    
+    public LocalSourceSyncer(IFileSystem fileSystem) => _fileSystem = fileSystem;
+    
+    public bool CanHandle(string sourcePath) =>
+        _fileSystem.Directory.Exists(sourcePath) && !sourcePath.StartsWith("git://");
+    
+    public async Task SyncAsync(
+        string source,
+        string destination,
+        string? gitRef,
+        SyncOptions options,
+        IProgress<SyncProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var files = _fileSystem.Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories)
+            .Where(f => !ShouldExclude(f, source, options.ExcludePatterns))
+            .ToList();
+        
+        long totalSize = files.Sum(f => new FileInfo(f).Length);
+        long transferred = 0;
+        int fileCount = 0;
+        
+        foreach (var file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            
+            var relative = Path.GetRelativePath(source, file);
+            var destFile = Path.Combine(destination, relative);
+            
+            _fileSystem.Directory.CreateDirectory(Path.GetDirectoryName(destFile)!);
+            _fileSystem.File.Copy(file, destFile, true);
+            
+            var size = new FileInfo(file).Length;
+            transferred += size;
+            fileCount++;
+            
+            progress?.Report(new SyncProgress(transferred, totalSize, fileCount, files.Count, relative));
+        }
+    }
+    
+    private static bool ShouldExclude(string file, string root, IReadOnlyList<string>? patterns)
+    {
+        if (patterns is null) return false;
+        var relative = Path.GetRelativePath(root, file);
+        return patterns.Any(p => Glob.IsMatch(relative, p));
+    }
+}
+```
+
+---
+
+## Implementation Checklist
+
+- [ ] Create PreparationPhase and PreparationProgress records
+- [ ] Define EcosystemType flags enum
+- [ ] Create preparation events for audit trail
+- [ ] Implement IWorkspacePreparation with full lifecycle
+- [ ] Build EcosystemDetector with file-pattern matching
+- [ ] Implement DotNetDependencyInstaller (dotnet restore)
+- [ ] Implement NodeDependencyInstaller (npm/yarn/pnpm)
+- [ ] Implement PythonDependencyInstaller (pip)
+- [ ] Create DependencyCacheManager with hash-based lookup
+- [ ] Build LocalSourceSyncer for filesystem copies
+- [ ] Add progress reporting throughout pipeline
+- [ ] Write unit tests for each component (TDD)
+- [ ] Write integration tests for full preparation
+- [ ] Test cache hit/miss scenarios
+- [ ] Test multi-ecosystem projects
+- [ ] Verify cleanup on failure
+
+---
+
+## Rollout Plan
+
+1. **Phase 1**: Domain models (phases, progress, events)
+2. **Phase 2**: Application interfaces
+3. **Phase 3**: EcosystemDetector implementation
+4. **Phase 4**: Source syncers (local, git, rsync)
+5. **Phase 5**: Dependency installers per ecosystem
+6. **Phase 6**: Cache manager
+7. **Phase 7**: WorkspacePreparation orchestrator
+8. **Phase 8**: Integration testing
+
+---
+
+**End of Task 029.a Specification**
