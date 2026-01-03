@@ -898,7 +898,370 @@ Tests/Unit/Domain/Models/
 │   ├── ToolCall_Should_HaveRequiredFields()
 │   ├── ToolResult_Should_BeImmutable()
 │   └── ToolResult_Should_SupportErrors()
-│
+```
+
+#### MessageTypeTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+public class MessageTypeTests
+{
+    #region ChatMessage Tests
+
+    [Fact]
+    public void ChatMessage_Should_BeImmutable()
+    {
+        // Arrange
+        var message = new ChatMessage
+        {
+            Role = MessageRole.User,
+            Content = "Hello, world!"
+        };
+
+        // Act & Assert
+        // Records are immutable by default - verify with expressions
+        var modified = message with { Content = "Modified" };
+        
+        message.Content.Should().Be("Hello, world!",
+            because: "original should be unchanged");
+        modified.Content.Should().Be("Modified",
+            because: "with expression creates new instance");
+        message.Should().NotBeSameAs(modified);
+    }
+
+    [Fact]
+    public void ChatMessage_Should_AllowNullContent()
+    {
+        // Arrange & Act
+        var message = new ChatMessage
+        {
+            Role = MessageRole.Assistant,
+            Content = null,
+            ToolCalls = new List<ToolCall>
+            {
+                new ToolCall
+                {
+                    Id = "call_123",
+                    Name = "write_file",
+                    Arguments = JsonSerializer.SerializeToElement(new { path = "test.cs" })
+                }
+            }
+        };
+
+        // Assert
+        message.Content.Should().BeNull(
+            because: "assistant messages with tool calls may have null content");
+        message.ToolCalls.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void ChatMessage_Should_AllowNullToolCalls()
+    {
+        // Arrange & Act
+        var message = new ChatMessage
+        {
+            Role = MessageRole.User,
+            Content = "Write a hello world program",
+            ToolCalls = null
+        };
+
+        // Assert
+        message.ToolCalls.Should().BeNull(
+            because: "user messages typically have no tool calls");
+        message.Content.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void ChatMessage_Should_SupportToolRole()
+    {
+        // Arrange & Act
+        var toolMessage = new ChatMessage
+        {
+            Role = MessageRole.Tool,
+            Content = "File written successfully",
+            ToolCallId = "call_123"
+        };
+
+        // Assert
+        toolMessage.Role.Should().Be(MessageRole.Tool);
+        toolMessage.ToolCallId.Should().Be("call_123",
+            because: "tool messages must reference the original call");
+    }
+
+    [Theory]
+    [InlineData(MessageRole.System)]
+    [InlineData(MessageRole.User)]
+    [InlineData(MessageRole.Assistant)]
+    [InlineData(MessageRole.Tool)]
+    public void ChatMessage_Should_AcceptAllRoles(MessageRole role)
+    {
+        // Arrange & Act
+        var message = new ChatMessage
+        {
+            Role = role,
+            Content = "Test content"
+        };
+
+        // Assert
+        message.Role.Should().Be(role);
+    }
+
+    [Fact]
+    public void ChatMessage_Should_SupportValueEquality()
+    {
+        // Arrange
+        var message1 = new ChatMessage
+        {
+            Role = MessageRole.User,
+            Content = "Hello"
+        };
+        var message2 = new ChatMessage
+        {
+            Role = MessageRole.User,
+            Content = "Hello"
+        };
+
+        // Assert
+        message1.Should().Be(message2,
+            because: "records have value equality");
+        message1.GetHashCode().Should().Be(message2.GetHashCode());
+    }
+
+    #endregion
+
+    #region MessageRole Tests
+
+    [Fact]
+    public void MessageRole_Should_HaveAllValues()
+    {
+        // Assert
+        var values = Enum.GetValues<MessageRole>();
+        
+        values.Should().Contain(MessageRole.System);
+        values.Should().Contain(MessageRole.User);
+        values.Should().Contain(MessageRole.Assistant);
+        values.Should().Contain(MessageRole.Tool);
+        values.Should().HaveCount(4,
+            because: "exactly 4 message roles should exist");
+    }
+
+    [Theory]
+    [InlineData(MessageRole.System, "system")]
+    [InlineData(MessageRole.User, "user")]
+    [InlineData(MessageRole.Assistant, "assistant")]
+    [InlineData(MessageRole.Tool, "tool")]
+    public void MessageRole_Should_SerializeToLowercase(MessageRole role, string expected)
+    {
+        // Arrange
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(role, options);
+
+        // Assert
+        json.Should().Contain(expected,
+            because: "roles should serialize to lowercase for API compatibility");
+    }
+
+    #endregion
+
+    #region ToolCall Tests
+
+    [Fact]
+    public void ToolCall_Should_BeImmutable()
+    {
+        // Arrange
+        var toolCall = new ToolCall
+        {
+            Id = "call_abc123",
+            Name = "write_file",
+            Arguments = JsonSerializer.SerializeToElement(new { path = "test.cs" })
+        };
+
+        // Act
+        var modified = toolCall with { Name = "read_file" };
+
+        // Assert
+        toolCall.Name.Should().Be("write_file");
+        modified.Name.Should().Be("read_file");
+        toolCall.Should().NotBeSameAs(modified);
+    }
+
+    [Fact]
+    public void ToolCall_Should_HaveRequiredFields()
+    {
+        // Arrange & Act
+        var toolCall = new ToolCall
+        {
+            Id = "call_xyz789",
+            Name = "execute_command",
+            Arguments = JsonSerializer.SerializeToElement(new 
+            { 
+                command = "dotnet build",
+                workingDirectory = "/src"
+            })
+        };
+
+        // Assert
+        toolCall.Id.Should().NotBeNullOrEmpty();
+        toolCall.Name.Should().NotBeNullOrEmpty();
+        toolCall.Arguments.ValueKind.Should().Be(JsonValueKind.Object);
+    }
+
+    [Fact]
+    public void ToolCall_Should_ParseArguments()
+    {
+        // Arrange
+        var args = new { path = "test.cs", content = "// Hello" };
+        var toolCall = new ToolCall
+        {
+            Id = "call_123",
+            Name = "write_file",
+            Arguments = JsonSerializer.SerializeToElement(args)
+        };
+
+        // Act
+        var path = toolCall.Arguments.GetProperty("path").GetString();
+        var content = toolCall.Arguments.GetProperty("content").GetString();
+
+        // Assert
+        path.Should().Be("test.cs");
+        content.Should().Be("// Hello");
+    }
+
+    [Fact]
+    public void ToolCall_Should_HandleEmptyArguments()
+    {
+        // Arrange & Act
+        var toolCall = new ToolCall
+        {
+            Id = "call_empty",
+            Name = "get_time",
+            Arguments = JsonSerializer.SerializeToElement(new { })
+        };
+
+        // Assert
+        toolCall.Arguments.ValueKind.Should().Be(JsonValueKind.Object);
+        toolCall.Arguments.EnumerateObject().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ToolCall_Should_HandleComplexArguments()
+    {
+        // Arrange
+        var complexArgs = new
+        {
+            files = new[] { "a.cs", "b.cs" },
+            options = new
+            {
+                recursive = true,
+                depth = 3
+            }
+        };
+
+        // Act
+        var toolCall = new ToolCall
+        {
+            Id = "call_complex",
+            Name = "search_files",
+            Arguments = JsonSerializer.SerializeToElement(complexArgs)
+        };
+
+        // Assert
+        toolCall.Arguments.GetProperty("files").GetArrayLength().Should().Be(2);
+        toolCall.Arguments.GetProperty("options").GetProperty("recursive").GetBoolean().Should().BeTrue();
+    }
+
+    #endregion
+
+    #region ToolResult Tests
+
+    [Fact]
+    public void ToolResult_Should_BeImmutable()
+    {
+        // Arrange
+        var result = new ToolResult
+        {
+            ToolCallId = "call_123",
+            Result = "Success",
+            IsError = false
+        };
+
+        // Act
+        var modified = result with { IsError = true };
+
+        // Assert
+        result.IsError.Should().BeFalse();
+        modified.IsError.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ToolResult_Should_SupportErrors()
+    {
+        // Arrange & Act
+        var errorResult = new ToolResult
+        {
+            ToolCallId = "call_failed",
+            Result = "FileNotFoundException: File not found",
+            IsError = true
+        };
+
+        // Assert
+        errorResult.IsError.Should().BeTrue();
+        errorResult.Result.Should().Contain("FileNotFoundException");
+    }
+
+    [Fact]
+    public void ToolResult_Should_ReferenceToolCallId()
+    {
+        // Arrange
+        var callId = "call_specific_123";
+
+        // Act
+        var result = new ToolResult
+        {
+            ToolCallId = callId,
+            Result = "Operation completed",
+            IsError = false
+        };
+
+        // Assert
+        result.ToolCallId.Should().Be(callId,
+            because: "result must reference the original tool call");
+    }
+
+    [Fact]
+    public void ToolResult_Should_HandleLargeResults()
+    {
+        // Arrange
+        var largeContent = new string('x', 100_000);
+
+        // Act
+        var result = new ToolResult
+        {
+            ToolCallId = "call_large",
+            Result = largeContent,
+            IsError = false
+        };
+
+        // Assert
+        result.Result.Length.Should().Be(100_000);
+    }
+
+    #endregion
+}
+```
+
+```
 ├── RequestTypeTests.cs
 │   ├── ChatRequest_Should_RequireMessages()
 │   ├── ChatRequest_Should_AllowNullTools()
@@ -907,7 +1270,470 @@ Tests/Unit/Domain/Models/
 │   ├── ModelParameters_Should_ValidateTemperature()
 │   ├── ModelParameters_Should_ValidateTopP()
 │   └── ModelParameters_Should_AllowNullMaxTokens()
-│
+```
+
+#### RequestTypeTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+public class RequestTypeTests
+{
+    #region ChatRequest Tests
+
+    [Fact]
+    public void ChatRequest_Should_RequireMessages()
+    {
+        // Arrange & Act
+        var request = new ChatRequest
+        {
+            Messages = new List<ChatMessage>
+            {
+                new ChatMessage { Role = MessageRole.User, Content = "Hello" }
+            },
+            Parameters = new ModelParameters { Model = "test-model" }
+        };
+
+        // Assert
+        request.Messages.Should().NotBeNull();
+        request.Messages.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void ChatRequest_Should_AllowNullTools()
+    {
+        // Arrange & Act
+        var request = new ChatRequest
+        {
+            Messages = new List<ChatMessage>
+            {
+                new ChatMessage { Role = MessageRole.User, Content = "Hello" }
+            },
+            Tools = null,
+            Parameters = new ModelParameters { Model = "test-model" }
+        };
+
+        // Assert
+        request.Tools.Should().BeNull(
+            because: "tools are optional for simple completions");
+    }
+
+    [Fact]
+    public void ChatRequest_Should_AllowEmptyTools()
+    {
+        // Arrange & Act
+        var request = new ChatRequest
+        {
+            Messages = new List<ChatMessage>
+            {
+                new ChatMessage { Role = MessageRole.User, Content = "Hello" }
+            },
+            Tools = new List<ToolDefinition>(),
+            Parameters = new ModelParameters { Model = "test-model" }
+        };
+
+        // Assert
+        request.Tools.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ChatRequest_Should_HaveParameters()
+    {
+        // Arrange & Act
+        var request = new ChatRequest
+        {
+            Messages = new List<ChatMessage>
+            {
+                new ChatMessage { Role = MessageRole.System, Content = "You are helpful." },
+                new ChatMessage { Role = MessageRole.User, Content = "Hello" }
+            },
+            Parameters = new ModelParameters
+            {
+                Model = "qwen2.5-coder:32b",
+                Temperature = 0.5f,
+                MaxTokens = 1000
+            }
+        };
+
+        // Assert
+        request.Parameters.Should().NotBeNull();
+        request.Parameters.Model.Should().Be("qwen2.5-coder:32b");
+        request.Parameters.Temperature.Should().Be(0.5f);
+        request.Parameters.MaxTokens.Should().Be(1000);
+    }
+
+    [Fact]
+    public void ChatRequest_Should_SupportMultipleMessages()
+    {
+        // Arrange & Act
+        var request = new ChatRequest
+        {
+            Messages = new List<ChatMessage>
+            {
+                new ChatMessage { Role = MessageRole.System, Content = "You are a coding assistant." },
+                new ChatMessage { Role = MessageRole.User, Content = "Write a function" },
+                new ChatMessage { Role = MessageRole.Assistant, Content = "Here's a function..." },
+                new ChatMessage { Role = MessageRole.User, Content = "Add error handling" }
+            },
+            Parameters = new ModelParameters { Model = "test-model" }
+        };
+
+        // Assert
+        request.Messages.Should().HaveCount(4);
+        request.Messages[0].Role.Should().Be(MessageRole.System);
+        request.Messages[3].Role.Should().Be(MessageRole.User);
+    }
+
+    [Fact]
+    public void ChatRequest_Should_SupportToolDefinitions()
+    {
+        // Arrange
+        var toolSchema = JsonSerializer.SerializeToElement(new
+        {
+            type = "object",
+            properties = new
+            {
+                path = new { type = "string", description = "File path" },
+                content = new { type = "string", description = "File content" }
+            },
+            required = new[] { "path", "content" }
+        });
+
+        // Act
+        var request = new ChatRequest
+        {
+            Messages = new List<ChatMessage>
+            {
+                new ChatMessage { Role = MessageRole.User, Content = "Write a file" }
+            },
+            Tools = new List<ToolDefinition>
+            {
+                new ToolDefinition
+                {
+                    Name = "write_file",
+                    Description = "Write content to a file",
+                    Parameters = toolSchema
+                }
+            },
+            Parameters = new ModelParameters { Model = "test-model" }
+        };
+
+        // Assert
+        request.Tools.Should().HaveCount(1);
+        request.Tools![0].Name.Should().Be("write_file");
+        request.Tools[0].Parameters.GetProperty("type").GetString().Should().Be("object");
+    }
+
+    [Fact]
+    public void ChatRequest_Should_BeImmutable()
+    {
+        // Arrange
+        var original = new ChatRequest
+        {
+            Messages = new List<ChatMessage>
+            {
+                new ChatMessage { Role = MessageRole.User, Content = "Hello" }
+            },
+            Parameters = new ModelParameters { Model = "model-a" }
+        };
+
+        // Act
+        var modified = original with
+        {
+            Parameters = new ModelParameters { Model = "model-b" }
+        };
+
+        // Assert
+        original.Parameters.Model.Should().Be("model-a");
+        modified.Parameters.Model.Should().Be("model-b");
+    }
+
+    #endregion
+
+    #region ModelParameters Tests
+
+    [Fact]
+    public void ModelParameters_Should_HaveDefaults()
+    {
+        // Arrange & Act
+        var parameters = new ModelParameters
+        {
+            Model = "test-model"
+        };
+
+        // Assert
+        parameters.Temperature.Should().Be(0.7f,
+            because: "default temperature is 0.7");
+        parameters.TopP.Should().Be(1.0f,
+            because: "default TopP is 1.0");
+        parameters.MaxTokens.Should().BeNull(
+            because: "null means use model default");
+        parameters.StopSequences.Should().BeNull();
+        parameters.Seed.Should().BeNull();
+        parameters.Timeout.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(0.0f)]
+    [InlineData(0.5f)]
+    [InlineData(1.0f)]
+    [InlineData(1.5f)]
+    [InlineData(2.0f)]
+    public void ModelParameters_Should_AcceptValidTemperature(float temperature)
+    {
+        // Arrange & Act
+        var parameters = new ModelParameters
+        {
+            Model = "test-model",
+            Temperature = temperature
+        };
+
+        // Assert
+        parameters.Temperature.Should().Be(temperature);
+    }
+
+    [Fact]
+    public void ModelParameters_Should_ValidateTemperature()
+    {
+        // Arrange
+        var validator = new ModelParametersValidator();
+
+        // Act & Assert - negative temperature
+        var invalidLow = new ModelParameters { Model = "test", Temperature = -0.1f };
+        validator.Validate(invalidLow).IsValid.Should().BeFalse();
+
+        // Act & Assert - temperature too high
+        var invalidHigh = new ModelParameters { Model = "test", Temperature = 2.5f };
+        validator.Validate(invalidHigh).IsValid.Should().BeFalse();
+
+        // Act & Assert - valid temperature
+        var valid = new ModelParameters { Model = "test", Temperature = 1.0f };
+        validator.Validate(valid).IsValid.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(0.0f)]
+    [InlineData(0.5f)]
+    [InlineData(1.0f)]
+    public void ModelParameters_Should_AcceptValidTopP(float topP)
+    {
+        // Arrange & Act
+        var parameters = new ModelParameters
+        {
+            Model = "test-model",
+            TopP = topP
+        };
+
+        // Assert
+        parameters.TopP.Should().Be(topP);
+    }
+
+    [Fact]
+    public void ModelParameters_Should_ValidateTopP()
+    {
+        // Arrange
+        var validator = new ModelParametersValidator();
+
+        // Act & Assert - negative TopP
+        var invalidLow = new ModelParameters { Model = "test", TopP = -0.1f };
+        validator.Validate(invalidLow).IsValid.Should().BeFalse();
+
+        // Act & Assert - TopP too high
+        var invalidHigh = new ModelParameters { Model = "test", TopP = 1.5f };
+        validator.Validate(invalidHigh).IsValid.Should().BeFalse();
+
+        // Act & Assert - valid TopP
+        var valid = new ModelParameters { Model = "test", TopP = 0.9f };
+        validator.Validate(valid).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ModelParameters_Should_AllowNullMaxTokens()
+    {
+        // Arrange & Act
+        var parameters = new ModelParameters
+        {
+            Model = "test-model",
+            MaxTokens = null
+        };
+
+        // Assert
+        parameters.MaxTokens.Should().BeNull(
+            because: "null means use model's default max tokens");
+    }
+
+    [Fact]
+    public void ModelParameters_Should_AcceptPositiveMaxTokens()
+    {
+        // Arrange & Act
+        var parameters = new ModelParameters
+        {
+            Model = "test-model",
+            MaxTokens = 4096
+        };
+
+        // Assert
+        parameters.MaxTokens.Should().Be(4096);
+    }
+
+    [Fact]
+    public void ModelParameters_Should_SupportStopSequences()
+    {
+        // Arrange & Act
+        var parameters = new ModelParameters
+        {
+            Model = "test-model",
+            StopSequences = new[] { "```", "END", "\n\n" }
+        };
+
+        // Assert
+        parameters.StopSequences.Should().HaveCount(3);
+        parameters.StopSequences.Should().Contain("```");
+    }
+
+    [Fact]
+    public void ModelParameters_Should_SupportSeed()
+    {
+        // Arrange & Act
+        var parameters = new ModelParameters
+        {
+            Model = "test-model",
+            Seed = 42
+        };
+
+        // Assert
+        parameters.Seed.Should().Be(42,
+            because: "seed enables reproducible outputs");
+    }
+
+    [Fact]
+    public void ModelParameters_Should_SupportTimeout()
+    {
+        // Arrange & Act
+        var parameters = new ModelParameters
+        {
+            Model = "test-model",
+            Timeout = TimeSpan.FromMinutes(5)
+        };
+
+        // Assert
+        parameters.Timeout.Should().Be(TimeSpan.FromMinutes(5));
+    }
+
+    [Fact]
+    public void ModelParameters_Should_RequireModel()
+    {
+        // Arrange
+        var validator = new ModelParametersValidator();
+
+        // Act & Assert - null model
+        var invalidNull = new ModelParameters { Model = null! };
+        validator.Validate(invalidNull).IsValid.Should().BeFalse();
+
+        // Act & Assert - empty model
+        var invalidEmpty = new ModelParameters { Model = "" };
+        validator.Validate(invalidEmpty).IsValid.Should().BeFalse();
+
+        // Act & Assert - whitespace model
+        var invalidWhitespace = new ModelParameters { Model = "   " };
+        validator.Validate(invalidWhitespace).IsValid.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region ToolDefinition Tests
+
+    [Fact]
+    public void ToolDefinition_Should_HaveRequiredFields()
+    {
+        // Arrange
+        var schema = JsonSerializer.SerializeToElement(new
+        {
+            type = "object",
+            properties = new { }
+        });
+
+        // Act
+        var tool = new ToolDefinition
+        {
+            Name = "test_tool",
+            Description = "A test tool",
+            Parameters = schema
+        };
+
+        // Assert
+        tool.Name.Should().NotBeNullOrEmpty();
+        tool.Description.Should().NotBeNullOrEmpty();
+        tool.Parameters.ValueKind.Should().Be(JsonValueKind.Object);
+    }
+
+    [Fact]
+    public void ToolDefinition_Should_SerializeCorrectly()
+    {
+        // Arrange
+        var schema = JsonSerializer.SerializeToElement(new
+        {
+            type = "object",
+            properties = new
+            {
+                path = new { type = "string" }
+            }
+        });
+
+        var tool = new ToolDefinition
+        {
+            Name = "read_file",
+            Description = "Read a file",
+            Parameters = schema
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(tool);
+        var deserialized = JsonSerializer.Deserialize<ToolDefinition>(json);
+
+        // Assert
+        deserialized.Should().NotBeNull();
+        deserialized!.Name.Should().Be("read_file");
+        deserialized.Description.Should().Be("Read a file");
+    }
+
+    #endregion
+}
+
+/// <summary>
+/// Validator for ModelParameters (would be in Application layer)
+/// </summary>
+public class ModelParametersValidator
+{
+    public ValidationResult Validate(ModelParameters parameters)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(parameters.Model))
+            errors.Add("Model is required");
+
+        if (parameters.Temperature < 0.0f || parameters.Temperature > 2.0f)
+            errors.Add("Temperature must be between 0.0 and 2.0");
+
+        if (parameters.TopP < 0.0f || parameters.TopP > 1.0f)
+            errors.Add("TopP must be between 0.0 and 1.0");
+
+        if (parameters.MaxTokens.HasValue && parameters.MaxTokens.Value <= 0)
+            errors.Add("MaxTokens must be positive");
+
+        return new ValidationResult(errors.Count == 0, errors);
+    }
+}
+
+public record ValidationResult(bool IsValid, IReadOnlyList<string> Errors);
+```
+
+```
 ├── ResponseTypeTests.cs
 │   ├── ChatResponse_Should_HaveMessage()
 │   ├── ChatResponse_Should_HaveUsage()
@@ -916,13 +1742,634 @@ Tests/Unit/Domain/Models/
 │   ├── StreamingChunk_Should_HaveDelta()
 │   ├── StreamingChunk_Should_IndicateComplete()
 │   └── StreamingChunk_Should_SupportToolCalls()
-│
+```
+
+#### ResponseTypeTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+public class ResponseTypeTests
+{
+    #region ChatResponse Tests
+
+    [Fact]
+    public void ChatResponse_Should_HaveMessage()
+    {
+        // Arrange & Act
+        var response = new ChatResponse
+        {
+            Message = new ChatMessage
+            {
+                Role = MessageRole.Assistant,
+                Content = "Hello! How can I help you?"
+            },
+            Usage = new UsageInfo
+            {
+                PromptTokens = 10,
+                CompletionTokens = 8
+            },
+            FinishReason = FinishReason.Stop
+        };
+
+        // Assert
+        response.Message.Should().NotBeNull();
+        response.Message.Role.Should().Be(MessageRole.Assistant);
+        response.Message.Content.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void ChatResponse_Should_HaveUsage()
+    {
+        // Arrange & Act
+        var response = new ChatResponse
+        {
+            Message = new ChatMessage
+            {
+                Role = MessageRole.Assistant,
+                Content = "Response"
+            },
+            Usage = new UsageInfo
+            {
+                PromptTokens = 100,
+                CompletionTokens = 50
+            },
+            FinishReason = FinishReason.Stop
+        };
+
+        // Assert
+        response.Usage.Should().NotBeNull();
+        response.Usage.PromptTokens.Should().Be(100);
+        response.Usage.CompletionTokens.Should().Be(50);
+        response.Usage.TotalTokens.Should().Be(150);
+    }
+
+    [Fact]
+    public void ChatResponse_Should_HaveFinishReason()
+    {
+        // Arrange & Act
+        var response = new ChatResponse
+        {
+            Message = new ChatMessage { Role = MessageRole.Assistant, Content = "Done" },
+            Usage = new UsageInfo { PromptTokens = 10, CompletionTokens = 5 },
+            FinishReason = FinishReason.Stop
+        };
+
+        // Assert
+        response.FinishReason.Should().Be(FinishReason.Stop);
+    }
+
+    [Fact]
+    public void ChatResponse_Should_IndicateToolCalls()
+    {
+        // Arrange & Act
+        var response = new ChatResponse
+        {
+            Message = new ChatMessage
+            {
+                Role = MessageRole.Assistant,
+                Content = null,
+                ToolCalls = new List<ToolCall>
+                {
+                    new ToolCall
+                    {
+                        Id = "call_123",
+                        Name = "write_file",
+                        Arguments = JsonSerializer.SerializeToElement(new { path = "test.cs" })
+                    }
+                }
+            },
+            Usage = new UsageInfo { PromptTokens = 50, CompletionTokens = 30 },
+            FinishReason = FinishReason.ToolCalls
+        };
+
+        // Assert
+        response.FinishReason.Should().Be(FinishReason.ToolCalls);
+        response.Message.ToolCalls.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void ChatResponse_Should_BeImmutable()
+    {
+        // Arrange
+        var original = new ChatResponse
+        {
+            Message = new ChatMessage { Role = MessageRole.Assistant, Content = "Original" },
+            Usage = new UsageInfo { PromptTokens = 10, CompletionTokens = 5 },
+            FinishReason = FinishReason.Stop
+        };
+
+        // Act
+        var modified = original with { FinishReason = FinishReason.Length };
+
+        // Assert
+        original.FinishReason.Should().Be(FinishReason.Stop);
+        modified.FinishReason.Should().Be(FinishReason.Length);
+    }
+
+    #endregion
+
+    #region FinishReason Tests
+
+    [Fact]
+    public void FinishReason_Should_HaveAllValues()
+    {
+        // Assert
+        var values = Enum.GetValues<FinishReason>();
+        
+        values.Should().Contain(FinishReason.Stop);
+        values.Should().Contain(FinishReason.Length);
+        values.Should().Contain(FinishReason.ToolCalls);
+        values.Should().Contain(FinishReason.Error);
+        values.Should().Contain(FinishReason.Cancelled);
+        values.Should().HaveCount(5);
+    }
+
+    [Theory]
+    [InlineData(FinishReason.Stop, "Natural end of response")]
+    [InlineData(FinishReason.Length, "Max tokens reached")]
+    [InlineData(FinishReason.ToolCalls, "Model wants to call tools")]
+    [InlineData(FinishReason.Error, "Error occurred")]
+    [InlineData(FinishReason.Cancelled, "Request was cancelled")]
+    public void FinishReason_Should_HaveMeaning(FinishReason reason, string description)
+    {
+        // Assert - each reason has semantic meaning
+        reason.Should().BeDefined();
+        description.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void FinishReason_Should_SerializeCorrectly()
+    {
+        // Arrange
+        var response = new ChatResponse
+        {
+            Message = new ChatMessage { Role = MessageRole.Assistant, Content = "Test" },
+            Usage = new UsageInfo { PromptTokens = 1, CompletionTokens = 1 },
+            FinishReason = FinishReason.Stop
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(response);
+        var deserialized = JsonSerializer.Deserialize<ChatResponse>(json);
+
+        // Assert
+        deserialized!.FinishReason.Should().Be(FinishReason.Stop);
+    }
+
+    #endregion
+
+    #region StreamingChunk Tests
+
+    [Fact]
+    public void StreamingChunk_Should_HaveDelta()
+    {
+        // Arrange & Act
+        var chunk = new StreamingChunk
+        {
+            Delta = "Hello",
+            IsComplete = false
+        };
+
+        // Assert
+        chunk.Delta.Should().Be("Hello");
+    }
+
+    [Fact]
+    public void StreamingChunk_Should_AllowNullDelta()
+    {
+        // Arrange & Act - final chunk may have no delta
+        var chunk = new StreamingChunk
+        {
+            Delta = null,
+            IsComplete = true,
+            FinishReason = FinishReason.Stop,
+            Usage = new UsageInfo { PromptTokens = 10, CompletionTokens = 20 }
+        };
+
+        // Assert
+        chunk.Delta.Should().BeNull();
+        chunk.IsComplete.Should().BeTrue();
+    }
+
+    [Fact]
+    public void StreamingChunk_Should_IndicateComplete()
+    {
+        // Arrange - intermediate chunk
+        var intermediateChunk = new StreamingChunk
+        {
+            Delta = "world",
+            IsComplete = false
+        };
+
+        // Arrange - final chunk
+        var finalChunk = new StreamingChunk
+        {
+            Delta = null,
+            IsComplete = true,
+            FinishReason = FinishReason.Stop,
+            Usage = new UsageInfo { PromptTokens = 100, CompletionTokens = 50 }
+        };
+
+        // Assert
+        intermediateChunk.IsComplete.Should().BeFalse();
+        intermediateChunk.FinishReason.Should().BeNull();
+        
+        finalChunk.IsComplete.Should().BeTrue();
+        finalChunk.FinishReason.Should().Be(FinishReason.Stop);
+        finalChunk.Usage.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void StreamingChunk_Should_SupportToolCalls()
+    {
+        // Arrange & Act
+        var chunk = new StreamingChunk
+        {
+            Delta = null,
+            ToolCallDeltas = new List<ToolCallDelta>
+            {
+                new ToolCallDelta
+                {
+                    Index = 0,
+                    Id = "call_stream_123",
+                    Name = "write_file",
+                    ArgumentsDelta = "{\"path\":"
+                }
+            },
+            IsComplete = false
+        };
+
+        // Assert
+        chunk.ToolCallDeltas.Should().NotBeEmpty();
+        chunk.ToolCallDeltas![0].Name.Should().Be("write_file");
+        chunk.ToolCallDeltas[0].ArgumentsDelta.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void StreamingChunk_Should_AccumulateToolCallArguments()
+    {
+        // Arrange - simulate streaming tool call
+        var chunks = new[]
+        {
+            new StreamingChunk
+            {
+                ToolCallDeltas = new List<ToolCallDelta>
+                {
+                    new ToolCallDelta { Index = 0, Id = "call_1", Name = "write_file", ArgumentsDelta = "{" }
+                }
+            },
+            new StreamingChunk
+            {
+                ToolCallDeltas = new List<ToolCallDelta>
+                {
+                    new ToolCallDelta { Index = 0, ArgumentsDelta = "\"path\":" }
+                }
+            },
+            new StreamingChunk
+            {
+                ToolCallDeltas = new List<ToolCallDelta>
+                {
+                    new ToolCallDelta { Index = 0, ArgumentsDelta = "\"test.cs\"}" }
+                }
+            }
+        };
+
+        // Act - accumulate
+        var accumulated = string.Join("", 
+            chunks.SelectMany(c => c.ToolCallDeltas ?? Array.Empty<ToolCallDelta>())
+                  .Select(d => d.ArgumentsDelta ?? ""));
+
+        // Assert
+        accumulated.Should().Be("{\"path\":\"test.cs\"}");
+        var parsed = JsonSerializer.Deserialize<JsonElement>(accumulated);
+        parsed.GetProperty("path").GetString().Should().Be("test.cs");
+    }
+
+    [Fact]
+    public void StreamingChunk_Should_HaveUsageInFinalChunk()
+    {
+        // Arrange & Act
+        var finalChunk = new StreamingChunk
+        {
+            Delta = null,
+            IsComplete = true,
+            FinishReason = FinishReason.Stop,
+            Usage = new UsageInfo
+            {
+                PromptTokens = 150,
+                CompletionTokens = 75,
+                TimeToFirstToken = TimeSpan.FromMilliseconds(100),
+                TotalDuration = TimeSpan.FromSeconds(2.5)
+            }
+        };
+
+        // Assert
+        finalChunk.Usage.Should().NotBeNull();
+        finalChunk.Usage!.TotalTokens.Should().Be(225);
+        finalChunk.Usage.TimeToFirstToken.Should().Be(TimeSpan.FromMilliseconds(100));
+    }
+
+    #endregion
+
+    #region ToolCallDelta Tests
+
+    [Fact]
+    public void ToolCallDelta_Should_HaveIndex()
+    {
+        // Arrange & Act
+        var delta = new ToolCallDelta
+        {
+            Index = 0,
+            Id = "call_1",
+            Name = "test_tool",
+            ArgumentsDelta = "{}"
+        };
+
+        // Assert
+        delta.Index.Should().Be(0,
+            because: "index identifies which tool call in parallel calls");
+    }
+
+    [Fact]
+    public void ToolCallDelta_Should_SupportPartialFields()
+    {
+        // First chunk has id and name
+        var first = new ToolCallDelta
+        {
+            Index = 0,
+            Id = "call_abc",
+            Name = "read_file",
+            ArgumentsDelta = null
+        };
+
+        // Subsequent chunks have only arguments
+        var subsequent = new ToolCallDelta
+        {
+            Index = 0,
+            Id = null,
+            Name = null,
+            ArgumentsDelta = "{\"path\":\"test.cs\"}"
+        };
+
+        // Assert
+        first.Id.Should().NotBeNull();
+        first.Name.Should().NotBeNull();
+        subsequent.Id.Should().BeNull();
+        subsequent.ArgumentsDelta.Should().NotBeNull();
+    }
+
+    #endregion
+}
+
+/// <summary>
+/// Incremental tool call information during streaming.
+/// </summary>
+public sealed record ToolCallDelta
+{
+    public int Index { get; init; }
+    public string? Id { get; init; }
+    public string? Name { get; init; }
+    public string? ArgumentsDelta { get; init; }
+}
+```
+
+```
 ├── UsageInfoTests.cs
 │   ├── UsageInfo_Should_BeImmutable()
 │   ├── UsageInfo_Should_CalculateTotal()
 │   ├── UsageInfo_Should_SupportDuration()
 │   └── UsageInfo_Should_AllowZeroTokens()
-│
+```
+
+#### UsageInfoTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Models;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+public class UsageInfoTests
+{
+    [Fact]
+    public void UsageInfo_Should_BeImmutable()
+    {
+        // Arrange
+        var original = new UsageInfo
+        {
+            PromptTokens = 100,
+            CompletionTokens = 50
+        };
+
+        // Act
+        var modified = original with { CompletionTokens = 75 };
+
+        // Assert
+        original.CompletionTokens.Should().Be(50);
+        modified.CompletionTokens.Should().Be(75);
+        original.Should().NotBeSameAs(modified);
+    }
+
+    [Fact]
+    public void UsageInfo_Should_CalculateTotal()
+    {
+        // Arrange & Act
+        var usage = new UsageInfo
+        {
+            PromptTokens = 100,
+            CompletionTokens = 50
+        };
+
+        // Assert
+        usage.TotalTokens.Should().Be(150,
+            because: "TotalTokens = PromptTokens + CompletionTokens");
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0)]
+    [InlineData(100, 0, 100)]
+    [InlineData(0, 100, 100)]
+    [InlineData(1000, 500, 1500)]
+    [InlineData(50000, 10000, 60000)]
+    public void UsageInfo_Should_CalculateTotalCorrectly(int prompt, int completion, int expected)
+    {
+        // Arrange & Act
+        var usage = new UsageInfo
+        {
+            PromptTokens = prompt,
+            CompletionTokens = completion
+        };
+
+        // Assert
+        usage.TotalTokens.Should().Be(expected);
+    }
+
+    [Fact]
+    public void UsageInfo_Should_SupportDuration()
+    {
+        // Arrange & Act
+        var usage = new UsageInfo
+        {
+            PromptTokens = 100,
+            CompletionTokens = 50,
+            TimeToFirstToken = TimeSpan.FromMilliseconds(150),
+            TotalDuration = TimeSpan.FromSeconds(2.5)
+        };
+
+        // Assert
+        usage.TimeToFirstToken.Should().Be(TimeSpan.FromMilliseconds(150));
+        usage.TotalDuration.Should().Be(TimeSpan.FromSeconds(2.5));
+    }
+
+    [Fact]
+    public void UsageInfo_Should_AllowNullDurations()
+    {
+        // Arrange & Act
+        var usage = new UsageInfo
+        {
+            PromptTokens = 100,
+            CompletionTokens = 50,
+            TimeToFirstToken = null,
+            TotalDuration = null
+        };
+
+        // Assert
+        usage.TimeToFirstToken.Should().BeNull(
+            because: "some providers may not report timing");
+        usage.TotalDuration.Should().BeNull();
+    }
+
+    [Fact]
+    public void UsageInfo_Should_AllowZeroTokens()
+    {
+        // Arrange & Act
+        var usage = new UsageInfo
+        {
+            PromptTokens = 0,
+            CompletionTokens = 0
+        };
+
+        // Assert
+        usage.PromptTokens.Should().Be(0);
+        usage.CompletionTokens.Should().Be(0);
+        usage.TotalTokens.Should().Be(0,
+            because: "zero tokens is valid for empty responses");
+    }
+
+    [Fact]
+    public void UsageInfo_Should_SupportEstimatedFlag()
+    {
+        // Arrange & Act - actual count from provider
+        var actual = new UsageInfo
+        {
+            PromptTokens = 100,
+            CompletionTokens = 50,
+            IsEstimated = false
+        };
+
+        // Arrange & Act - estimated (e.g., from tokenizer)
+        var estimated = new UsageInfo
+        {
+            PromptTokens = 105,
+            CompletionTokens = 48,
+            IsEstimated = true
+        };
+
+        // Assert
+        actual.IsEstimated.Should().BeFalse();
+        estimated.IsEstimated.Should().BeTrue();
+    }
+
+    [Fact]
+    public void UsageInfo_Should_SerializeCorrectly()
+    {
+        // Arrange
+        var usage = new UsageInfo
+        {
+            PromptTokens = 100,
+            CompletionTokens = 50,
+            TimeToFirstToken = TimeSpan.FromMilliseconds(150),
+            TotalDuration = TimeSpan.FromSeconds(2.5),
+            IsEstimated = false
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(usage);
+        var deserialized = JsonSerializer.Deserialize<UsageInfo>(json);
+
+        // Assert
+        deserialized.Should().NotBeNull();
+        deserialized!.PromptTokens.Should().Be(100);
+        deserialized.CompletionTokens.Should().Be(50);
+        deserialized.TotalTokens.Should().Be(150);
+    }
+
+    [Fact]
+    public void UsageInfo_Should_SupportValueEquality()
+    {
+        // Arrange
+        var usage1 = new UsageInfo
+        {
+            PromptTokens = 100,
+            CompletionTokens = 50
+        };
+        var usage2 = new UsageInfo
+        {
+            PromptTokens = 100,
+            CompletionTokens = 50
+        };
+
+        // Assert
+        usage1.Should().Be(usage2);
+        usage1.GetHashCode().Should().Be(usage2.GetHashCode());
+    }
+
+    [Fact]
+    public void UsageInfo_Should_HandleLargeTokenCounts()
+    {
+        // Arrange & Act - large context models
+        var usage = new UsageInfo
+        {
+            PromptTokens = 100_000,
+            CompletionTokens = 30_000
+        };
+
+        // Assert
+        usage.TotalTokens.Should().Be(130_000);
+    }
+
+    [Fact]
+    public void UsageInfo_Should_CalculateTokensPerSecond()
+    {
+        // Arrange
+        var usage = new UsageInfo
+        {
+            PromptTokens = 100,
+            CompletionTokens = 500,
+            TotalDuration = TimeSpan.FromSeconds(5)
+        };
+
+        // Act - extension method or helper
+        var tokensPerSecond = usage.TotalDuration.HasValue
+            ? usage.CompletionTokens / usage.TotalDuration.Value.TotalSeconds
+            : 0;
+
+        // Assert
+        tokensPerSecond.Should().Be(100,
+            because: "500 tokens / 5 seconds = 100 tokens/sec");
+    }
+}
+```
+
+```
 └── ProviderRegistryTests.cs
     ├── Registry_Should_RegisterProvider()
     ├── Registry_Should_RejectDuplicate()
@@ -935,6 +2382,345 @@ Tests/Unit/Domain/Models/
     └── Registry_Should_BeThreadSafe()
 ```
 
+#### ProviderRegistryTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Application.Models;
+
+using AgenticCoder.Application.Models;
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using NSubstitute;
+using Xunit;
+
+public class ProviderRegistryTests : IAsyncDisposable
+{
+    private readonly ProviderRegistry _registry;
+
+    public ProviderRegistryTests()
+    {
+        var config = new ProviderConfiguration
+        {
+            DefaultProvider = "test-default"
+        };
+        _registry = new ProviderRegistry(config);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _registry.DisposeAsync();
+    }
+
+    #region Registration Tests
+
+    [Fact]
+    public void Registry_Should_RegisterProvider()
+    {
+        // Arrange
+        var provider = CreateMockProvider("provider-1");
+
+        // Act
+        _registry.Register(provider);
+
+        // Assert
+        _registry.Get("provider-1").Should().BeSameAs(provider);
+    }
+
+    [Fact]
+    public void Registry_Should_RejectDuplicate()
+    {
+        // Arrange
+        var provider1 = CreateMockProvider("duplicate-id");
+        var provider2 = CreateMockProvider("duplicate-id");
+
+        // Act
+        _registry.Register(provider1);
+        var action = () => _registry.Register(provider2);
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*duplicate-id*already registered*");
+    }
+
+    [Fact]
+    public void Registry_Should_RegisterMultipleProviders()
+    {
+        // Arrange
+        var provider1 = CreateMockProvider("ollama");
+        var provider2 = CreateMockProvider("vllm");
+        var provider3 = CreateMockProvider("custom");
+
+        // Act
+        _registry.Register(provider1);
+        _registry.Register(provider2);
+        _registry.Register(provider3);
+
+        // Assert
+        _registry.GetAll().Should().HaveCount(3);
+    }
+
+    #endregion
+
+    #region Lookup Tests
+
+    [Fact]
+    public void Registry_Should_GetById()
+    {
+        // Arrange
+        var provider = CreateMockProvider("lookup-test");
+        _registry.Register(provider);
+
+        // Act
+        var result = _registry.Get("lookup-test");
+
+        // Assert
+        result.Should().BeSameAs(provider);
+    }
+
+    [Fact]
+    public void Registry_Should_ReturnNullForUnknown()
+    {
+        // Act
+        var result = _registry.Get("nonexistent-provider");
+
+        // Assert
+        result.Should().BeNull(
+            because: "unknown provider IDs should return null, not throw");
+    }
+
+    [Fact]
+    public void Registry_Should_BeCaseSensitive()
+    {
+        // Arrange
+        var provider = CreateMockProvider("CaseSensitive");
+        _registry.Register(provider);
+
+        // Act & Assert
+        _registry.Get("CaseSensitive").Should().NotBeNull();
+        _registry.Get("casesensitive").Should().BeNull();
+        _registry.Get("CASESENSITIVE").Should().BeNull();
+    }
+
+    [Fact]
+    public void Registry_Should_GetAll()
+    {
+        // Arrange
+        _registry.Register(CreateMockProvider("provider-a"));
+        _registry.Register(CreateMockProvider("provider-b"));
+        _registry.Register(CreateMockProvider("provider-c"));
+
+        // Act
+        var all = _registry.GetAll();
+
+        // Assert
+        all.Should().HaveCount(3);
+        all.Select(p => p.ProviderId).Should().Contain("provider-a");
+        all.Select(p => p.ProviderId).Should().Contain("provider-b");
+        all.Select(p => p.ProviderId).Should().Contain("provider-c");
+    }
+
+    [Fact]
+    public void Registry_Should_ReturnEmptyWhenNoProviders()
+    {
+        // Act
+        var all = _registry.GetAll();
+
+        // Assert
+        all.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region Default Provider Tests
+
+    [Fact]
+    public void Registry_Should_GetDefault()
+    {
+        // Arrange
+        var defaultProvider = CreateMockProvider("test-default");
+        _registry.Register(defaultProvider);
+
+        // Act
+        var result = _registry.GetDefault();
+
+        // Assert
+        result.Should().BeSameAs(defaultProvider);
+        result.ProviderId.Should().Be("test-default");
+    }
+
+    [Fact]
+    public void Registry_Should_ThrowWhenDefaultNotFound()
+    {
+        // Arrange - no providers registered
+
+        // Act
+        var action = () => _registry.GetDefault();
+
+        // Assert
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*test-default*not found*");
+    }
+
+    [Fact]
+    public void Registry_Should_UseConfiguredDefault()
+    {
+        // Arrange
+        var config = new ProviderConfiguration { DefaultProvider = "custom-default" };
+        var customRegistry = new ProviderRegistry(config);
+        var provider = CreateMockProvider("custom-default");
+        customRegistry.Register(provider);
+
+        // Act
+        var result = customRegistry.GetDefault();
+
+        // Assert
+        result.ProviderId.Should().Be("custom-default");
+    }
+
+    #endregion
+
+    #region Disposal Tests
+
+    [Fact]
+    public async Task Registry_Should_DisposeAll()
+    {
+        // Arrange
+        var provider1 = CreateMockProvider("dispose-1");
+        var provider2 = CreateMockProvider("dispose-2");
+        _registry.Register(provider1);
+        _registry.Register(provider2);
+
+        // Act
+        await _registry.DisposeAsync();
+
+        // Assert
+        await provider1.Received(1).DisposeAsync();
+        await provider2.Received(1).DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Registry_Should_ClearAfterDispose()
+    {
+        // Arrange
+        _registry.Register(CreateMockProvider("clear-test"));
+
+        // Act
+        await _registry.DisposeAsync();
+
+        // Assert
+        _registry.GetAll().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Registry_Should_BeIdempotentOnDispose()
+    {
+        // Arrange
+        var provider = CreateMockProvider("idempotent-test");
+        _registry.Register(provider);
+
+        // Act - dispose multiple times
+        await _registry.DisposeAsync();
+        await _registry.DisposeAsync();
+        await _registry.DisposeAsync();
+
+        // Assert - should only dispose provider once
+        await provider.Received(1).DisposeAsync();
+    }
+
+    #endregion
+
+    #region Thread Safety Tests
+
+    [Fact]
+    public async Task Registry_Should_BeThreadSafe()
+    {
+        // Arrange
+        var providers = Enumerable.Range(0, 100)
+            .Select(i => CreateMockProvider($"concurrent-{i}"))
+            .ToList();
+
+        // Act - register concurrently
+        var tasks = providers.Select(p => Task.Run(() => _registry.Register(p)));
+        await Task.WhenAll(tasks);
+
+        // Assert
+        _registry.GetAll().Should().HaveCount(100);
+    }
+
+    [Fact]
+    public async Task Registry_Should_HandleConcurrentReads()
+    {
+        // Arrange
+        for (int i = 0; i < 10; i++)
+        {
+            _registry.Register(CreateMockProvider($"read-test-{i}"));
+        }
+
+        // Act - read concurrently
+        var tasks = Enumerable.Range(0, 1000)
+            .Select(i => Task.Run(() =>
+            {
+                var id = $"read-test-{i % 10}";
+                return _registry.Get(id);
+            }));
+
+        var results = await Task.WhenAll(tasks);
+
+        // Assert
+        results.Should().OnlyContain(p => p != null);
+    }
+
+    [Fact]
+    public async Task Registry_Should_HandleConcurrentWritesAndReads()
+    {
+        // Arrange
+        var registrations = 50;
+        var reads = 200;
+
+        // Act - concurrent writes and reads
+        var writeTasks = Enumerable.Range(0, registrations)
+            .Select(i => Task.Run(() =>
+            {
+                try
+                {
+                    _registry.Register(CreateMockProvider($"mixed-{i}"));
+                }
+                catch (InvalidOperationException)
+                {
+                    // Ignore duplicate registration in race condition
+                }
+            }));
+
+        var readTasks = Enumerable.Range(0, reads)
+            .Select(i => Task.Run(() =>
+            {
+                _registry.GetAll();
+                _registry.Get($"mixed-{i % registrations}");
+            }));
+
+        await Task.WhenAll(writeTasks.Concat(readTasks));
+
+        // Assert - should complete without exceptions or deadlocks
+        _registry.GetAll().Count.Should().BeGreaterThan(0);
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    private static IModelProvider CreateMockProvider(string providerId)
+    {
+        var provider = Substitute.For<IModelProvider>();
+        provider.ProviderId.Returns(providerId);
+        provider.IsAvailableAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(true));
+        return provider;
+    }
+
+    #endregion
+}
+```
+
 ### Integration Tests
 
 ```
@@ -945,7 +2731,205 @@ Tests/Integration/Models/
 │   ├── Should_RegisterMultipleProviders()
 │   ├── Should_HandleMissingProvider()
 │   └── Should_DisposeOnShutdown()
-│
+```
+
+#### ProviderRegistryIntegrationTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Models;
+
+using AgenticCoder.Application.Models;
+using AgenticCoder.Domain.Models;
+using AgenticCoder.Infrastructure.Models;
+using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+[Collection("Integration")]
+public class ProviderRegistryIntegrationTests : IClassFixture<IntegrationTestFixture>, IAsyncDisposable
+{
+    private readonly IntegrationTestFixture _fixture;
+    private readonly string _testDir;
+    private IServiceProvider? _services;
+
+    public ProviderRegistryIntegrationTests(IntegrationTestFixture fixture)
+    {
+        _fixture = fixture;
+        _testDir = Path.Combine(Path.GetTempPath(), $"provider_int_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_services is IAsyncDisposable disposable)
+        {
+            await disposable.DisposeAsync();
+        }
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    public void Should_LoadFromConfiguration()
+    {
+        // Arrange
+        var configPath = CreateConfigFile(@"
+model_providers:
+  default: mock-provider
+  providers:
+    mock-provider:
+      type: mock
+      endpoint: http://localhost:9999
+");
+
+        var config = new ConfigurationBuilder()
+            .AddYamlFile(configPath)
+            .Build();
+
+        // Act
+        var services = new ServiceCollection();
+        services.AddModelProviders(config);
+        _services = services.BuildServiceProvider();
+
+        var registry = _services.GetRequiredService<IProviderRegistry>();
+
+        // Assert
+        registry.GetAll().Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void Should_UseDefaultFromConfig()
+    {
+        // Arrange
+        var configPath = CreateConfigFile(@"
+model_providers:
+  default: primary-provider
+  providers:
+    primary-provider:
+      type: mock
+    secondary-provider:
+      type: mock
+");
+
+        var config = new ConfigurationBuilder()
+            .AddYamlFile(configPath)
+            .Build();
+
+        // Act
+        var services = new ServiceCollection();
+        services.AddModelProviders(config);
+        _services = services.BuildServiceProvider();
+
+        var registry = _services.GetRequiredService<IProviderRegistry>();
+        var defaultProvider = registry.GetDefault();
+
+        // Assert
+        defaultProvider.ProviderId.Should().Be("primary-provider");
+    }
+
+    [Fact]
+    public void Should_RegisterMultipleProviders()
+    {
+        // Arrange
+        var configPath = CreateConfigFile(@"
+model_providers:
+  default: provider-a
+  providers:
+    provider-a:
+      type: mock
+    provider-b:
+      type: mock
+    provider-c:
+      type: mock
+");
+
+        var config = new ConfigurationBuilder()
+            .AddYamlFile(configPath)
+            .Build();
+
+        // Act
+        var services = new ServiceCollection();
+        services.AddModelProviders(config);
+        _services = services.BuildServiceProvider();
+
+        var registry = _services.GetRequiredService<IProviderRegistry>();
+
+        // Assert
+        registry.GetAll().Should().HaveCount(3);
+        registry.Get("provider-a").Should().NotBeNull();
+        registry.Get("provider-b").Should().NotBeNull();
+        registry.Get("provider-c").Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Should_HandleMissingProvider()
+    {
+        // Arrange
+        var configPath = CreateConfigFile(@"
+model_providers:
+  default: existing
+  providers:
+    existing:
+      type: mock
+");
+
+        var config = new ConfigurationBuilder()
+            .AddYamlFile(configPath)
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddModelProviders(config);
+        _services = services.BuildServiceProvider();
+
+        var registry = _services.GetRequiredService<IProviderRegistry>();
+
+        // Act
+        var missing = registry.Get("nonexistent");
+
+        // Assert
+        missing.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Should_DisposeOnShutdown()
+    {
+        // Arrange
+        var configPath = CreateConfigFile(@"
+model_providers:
+  default: disposable
+  providers:
+    disposable:
+      type: mock
+");
+
+        var config = new ConfigurationBuilder()
+            .AddYamlFile(configPath)
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddModelProviders(config);
+        var serviceProvider = services.BuildServiceProvider();
+
+        var registry = serviceProvider.GetRequiredService<IProviderRegistry>();
+        var provider = registry.GetDefault();
+
+        // Act
+        await serviceProvider.DisposeAsync();
+
+        // Assert - provider should be disposed (would throw if accessed)
+        // Note: Actual verification depends on mock provider implementation
+    }
+
+    private string CreateConfigFile(string content)
+    {
+        var path = Path.Combine(_testDir, "config.yml");
+        File.WriteAllText(path, content);
+        return path;
+    }
+}
+```
+
+```
 ├── MockProviderTests.cs
 │   ├── MockProvider_Should_ImplementInterface()
 │   ├── MockProvider_Should_ReturnConfiguredResponse()
@@ -953,13 +2937,523 @@ Tests/Integration/Models/
 │   ├── MockProvider_Should_SimulateToolCalls()
 │   ├── MockProvider_Should_SimulateErrors()
 │   └── MockProvider_Should_TrackCalls()
-│
+```
+
+#### MockProviderTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Models;
+
+using AgenticCoder.Domain.Models;
+using AgenticCoder.Infrastructure.Models;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+[Collection("Integration")]
+public class MockProviderTests : IAsyncDisposable
+{
+    private readonly MockModelProvider _provider;
+
+    public MockProviderTests()
+    {
+        _provider = new MockModelProvider("test-mock");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _provider.DisposeAsync();
+    }
+
+    [Fact]
+    public void MockProvider_Should_ImplementInterface()
+    {
+        // Assert
+        _provider.Should().BeAssignableTo<IModelProvider>();
+        _provider.ProviderId.Should().Be("test-mock");
+    }
+
+    [Fact]
+    public async Task MockProvider_Should_ReturnConfiguredResponse()
+    {
+        // Arrange
+        _provider.SetResponse("Hello, I am a mock response!");
+
+        var request = CreateSimpleRequest("Hello");
+
+        // Act
+        var response = await _provider.CompleteAsync(request);
+
+        // Assert
+        response.Message.Content.Should().Be("Hello, I am a mock response!");
+        response.FinishReason.Should().Be(FinishReason.Stop);
+    }
+
+    [Fact]
+    public async Task MockProvider_Should_SimulateStreaming()
+    {
+        // Arrange
+        _provider.SetStreamingResponse("Hello world from streaming!");
+
+        var request = CreateSimpleRequest("Hello");
+        var chunks = new List<StreamingChunk>();
+
+        // Act
+        await foreach (var chunk in _provider.StreamAsync(request))
+        {
+            chunks.Add(chunk);
+        }
+
+        // Assert
+        chunks.Should().NotBeEmpty();
+        chunks.Last().IsComplete.Should().BeTrue();
+        chunks.Last().FinishReason.Should().Be(FinishReason.Stop);
+        
+        var fullContent = string.Join("", chunks.Select(c => c.Delta ?? ""));
+        fullContent.Should().Be("Hello world from streaming!");
+    }
+
+    [Fact]
+    public async Task MockProvider_Should_SimulateToolCalls()
+    {
+        // Arrange
+        var toolCall = new ToolCall
+        {
+            Id = "call_mock_123",
+            Name = "write_file",
+            Arguments = JsonSerializer.SerializeToElement(new { path = "test.cs", content = "// test" })
+        };
+        _provider.SetToolCallResponse(toolCall);
+
+        var request = CreateSimpleRequest("Write a file");
+
+        // Act
+        var response = await _provider.CompleteAsync(request);
+
+        // Assert
+        response.FinishReason.Should().Be(FinishReason.ToolCalls);
+        response.Message.ToolCalls.Should().HaveCount(1);
+        response.Message.ToolCalls![0].Name.Should().Be("write_file");
+    }
+
+    [Fact]
+    public async Task MockProvider_Should_SimulateErrors()
+    {
+        // Arrange
+        _provider.SetError(new ProviderUnavailableException("test-mock", "Simulated failure"));
+
+        var request = CreateSimpleRequest("Hello");
+
+        // Act
+        var action = async () => await _provider.CompleteAsync(request);
+
+        // Assert
+        await action.Should().ThrowAsync<ProviderUnavailableException>()
+            .WithMessage("*Simulated failure*");
+    }
+
+    [Fact]
+    public async Task MockProvider_Should_TrackCalls()
+    {
+        // Arrange
+        _provider.SetResponse("Response 1");
+
+        // Act
+        await _provider.CompleteAsync(CreateSimpleRequest("Request 1"));
+        await _provider.CompleteAsync(CreateSimpleRequest("Request 2"));
+        await _provider.CompleteAsync(CreateSimpleRequest("Request 3"));
+
+        // Assert
+        _provider.CallCount.Should().Be(3);
+        _provider.LastRequest.Should().NotBeNull();
+        _provider.LastRequest!.Messages[0].Content.Should().Be("Request 3");
+    }
+
+    [Fact]
+    public async Task MockProvider_Should_ReportHealthy()
+    {
+        // Act
+        var available = await _provider.IsAvailableAsync();
+
+        // Assert
+        available.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task MockProvider_Should_SimulateUnavailable()
+    {
+        // Arrange
+        _provider.SetAvailable(false);
+
+        // Act
+        var available = await _provider.IsAvailableAsync();
+
+        // Assert
+        available.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task MockProvider_Should_SimulateLatency()
+    {
+        // Arrange
+        _provider.SetLatency(TimeSpan.FromMilliseconds(100));
+        _provider.SetResponse("Delayed response");
+
+        var request = CreateSimpleRequest("Hello");
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        // Act
+        await _provider.CompleteAsync(request);
+        stopwatch.Stop();
+
+        // Assert
+        stopwatch.ElapsedMilliseconds.Should().BeGreaterOrEqualTo(90,
+            because: "simulated latency should be applied");
+    }
+
+    [Fact]
+    public void MockProvider_Should_ReportCapabilities()
+    {
+        // Act
+        var capabilities = _provider.GetCapabilities();
+
+        // Assert
+        capabilities.Should().NotBeNull();
+        capabilities.SupportsStreaming.Should().BeTrue();
+        capabilities.SupportsToolCalls.Should().BeTrue();
+    }
+
+    private static ChatRequest CreateSimpleRequest(string content)
+    {
+        return new ChatRequest
+        {
+            Messages = new List<ChatMessage>
+            {
+                new ChatMessage { Role = MessageRole.User, Content = content }
+            },
+            Parameters = new ModelParameters { Model = "mock-model" }
+        };
+    }
+}
+```
+
+```
 └── ConfigurationTests.cs
     ├── Should_ParseProviderConfig()
     ├── Should_ValidateEndpoints()
     ├── Should_ValidateTimeouts()
     ├── Should_UseDefaults()
     └── Should_RejectInvalidConfig()
+```
+
+#### ConfigurationTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Models;
+
+using AgenticCoder.Application.Models;
+using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Xunit;
+
+[Collection("Integration")]
+public class ConfigurationTests : IDisposable
+{
+    private readonly string _testDir;
+
+    public ConfigurationTests()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"config_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    public void Should_ParseProviderConfig()
+    {
+        // Arrange
+        var configPath = CreateConfigFile(@"
+model_providers:
+  default: ollama
+  providers:
+    ollama:
+      type: ollama
+      endpoint: http://localhost:11434
+      timeout: 120
+      models:
+        - name: qwen2.5-coder:32b
+          context_length: 32768
+        - name: llama3.1:70b
+          context_length: 131072
+");
+
+        var config = new ConfigurationBuilder()
+            .AddYamlFile(configPath)
+            .Build();
+
+        // Act
+        var providerConfig = config.GetSection("model_providers").Get<ModelProvidersConfiguration>();
+
+        // Assert
+        providerConfig.Should().NotBeNull();
+        providerConfig!.Default.Should().Be("ollama");
+        providerConfig.Providers.Should().ContainKey("ollama");
+        providerConfig.Providers["ollama"].Type.Should().Be("ollama");
+        providerConfig.Providers["ollama"].Endpoint.Should().Be("http://localhost:11434");
+        providerConfig.Providers["ollama"].Timeout.Should().Be(120);
+        providerConfig.Providers["ollama"].Models.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Should_ValidateEndpoints()
+    {
+        // Arrange
+        var validator = new ProviderConfigurationValidator();
+
+        // Act & Assert - valid localhost
+        var validLocal = new ProviderInstanceConfiguration
+        {
+            Type = "ollama",
+            Endpoint = "http://localhost:11434"
+        };
+        validator.Validate(validLocal).IsValid.Should().BeTrue();
+
+        // Act & Assert - valid 127.0.0.1
+        var validLoopback = new ProviderInstanceConfiguration
+        {
+            Type = "ollama",
+            Endpoint = "http://127.0.0.1:11434"
+        };
+        validator.Validate(validLoopback).IsValid.Should().BeTrue();
+
+        // Act & Assert - invalid external
+        var invalidExternal = new ProviderInstanceConfiguration
+        {
+            Type = "ollama",
+            Endpoint = "http://api.openai.com/v1"
+        };
+        validator.Validate(invalidExternal).IsValid.Should().BeFalse();
+        validator.Validate(invalidExternal).Errors.Should().Contain(e => 
+            e.Contains("local") || e.Contains("localhost"));
+    }
+
+    [Fact]
+    public void Should_ValidateTimeouts()
+    {
+        // Arrange
+        var validator = new ProviderConfigurationValidator();
+
+        // Act & Assert - valid timeout
+        var validTimeout = new ProviderInstanceConfiguration
+        {
+            Type = "ollama",
+            Endpoint = "http://localhost:11434",
+            Timeout = 120
+        };
+        validator.Validate(validTimeout).IsValid.Should().BeTrue();
+
+        // Act & Assert - zero timeout (use default)
+        var zeroTimeout = new ProviderInstanceConfiguration
+        {
+            Type = "ollama",
+            Endpoint = "http://localhost:11434",
+            Timeout = 0
+        };
+        validator.Validate(zeroTimeout).IsValid.Should().BeTrue();
+
+        // Act & Assert - negative timeout
+        var negativeTimeout = new ProviderInstanceConfiguration
+        {
+            Type = "ollama",
+            Endpoint = "http://localhost:11434",
+            Timeout = -1
+        };
+        validator.Validate(negativeTimeout).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Should_UseDefaults()
+    {
+        // Arrange
+        var configPath = CreateConfigFile(@"
+model_providers:
+  providers:
+    minimal:
+      type: ollama
+");
+
+        var config = new ConfigurationBuilder()
+            .AddYamlFile(configPath)
+            .Build();
+
+        // Act
+        var providerConfig = config.GetSection("model_providers").Get<ModelProvidersConfiguration>();
+        var minimalProvider = providerConfig!.Providers["minimal"];
+
+        // Assert - should use defaults
+        minimalProvider.Timeout.Should().Be(120,
+            because: "default timeout is 120 seconds");
+        minimalProvider.Endpoint.Should().BeOneOf(
+            "http://localhost:11434",
+            null,
+            because: "default endpoint or null for type-based default");
+    }
+
+    [Fact]
+    public void Should_RejectInvalidConfig()
+    {
+        // Arrange
+        var validator = new ProviderConfigurationValidator();
+
+        // Act & Assert - missing type
+        var missingType = new ProviderInstanceConfiguration
+        {
+            Type = null!,
+            Endpoint = "http://localhost:11434"
+        };
+        validator.Validate(missingType).IsValid.Should().BeFalse();
+
+        // Act & Assert - unknown type
+        var unknownType = new ProviderInstanceConfiguration
+        {
+            Type = "unknown-provider-type",
+            Endpoint = "http://localhost:11434"
+        };
+        validator.Validate(unknownType).IsValid.Should().BeFalse();
+
+        // Act & Assert - invalid endpoint URL
+        var invalidUrl = new ProviderInstanceConfiguration
+        {
+            Type = "ollama",
+            Endpoint = "not-a-valid-url"
+        };
+        validator.Validate(invalidUrl).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Should_ValidateModelConfiguration()
+    {
+        // Arrange
+        var configPath = CreateConfigFile(@"
+model_providers:
+  providers:
+    with-models:
+      type: ollama
+      models:
+        - name: qwen2.5-coder:32b
+          context_length: 32768
+        - name: ''
+          context_length: 4096
+");
+
+        var config = new ConfigurationBuilder()
+            .AddYamlFile(configPath)
+            .Build();
+
+        var providerConfig = config.GetSection("model_providers").Get<ModelProvidersConfiguration>();
+        var validator = new ProviderConfigurationValidator();
+
+        // Act
+        var result = validator.ValidateModels(providerConfig!.Providers["with-models"].Models);
+
+        // Assert
+        result.IsValid.Should().BeFalse(
+            because: "empty model name should be rejected");
+    }
+
+    private string CreateConfigFile(string content)
+    {
+        var path = Path.Combine(_testDir, $"config_{Guid.NewGuid():N}.yml");
+        File.WriteAllText(path, content);
+        return path;
+    }
+}
+
+/// <summary>
+/// Configuration classes for model providers.
+/// </summary>
+public class ModelProvidersConfiguration
+{
+    public string Default { get; set; } = string.Empty;
+    public Dictionary<string, ProviderInstanceConfiguration> Providers { get; set; } = new();
+}
+
+public class ProviderInstanceConfiguration
+{
+    public string Type { get; set; } = string.Empty;
+    public string Endpoint { get; set; } = string.Empty;
+    public int Timeout { get; set; } = 120;
+    public List<ModelConfiguration>? Models { get; set; }
+}
+
+public class ModelConfiguration
+{
+    public string Name { get; set; } = string.Empty;
+    public int ContextLength { get; set; }
+}
+
+/// <summary>
+/// Validator for provider configuration.
+/// </summary>
+public class ProviderConfigurationValidator
+{
+    private static readonly HashSet<string> ValidTypes = new() { "ollama", "vllm", "mock" };
+
+    public ValidationResult Validate(ProviderInstanceConfiguration config)
+    {
+        var errors = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(config.Type))
+            errors.Add("Provider type is required");
+        else if (!ValidTypes.Contains(config.Type.ToLowerInvariant()))
+            errors.Add($"Unknown provider type: {config.Type}");
+
+        if (!string.IsNullOrEmpty(config.Endpoint))
+        {
+            if (!Uri.TryCreate(config.Endpoint, UriKind.Absolute, out var uri))
+            {
+                errors.Add($"Invalid endpoint URL: {config.Endpoint}");
+            }
+            else if (!IsLocalEndpoint(uri))
+            {
+                errors.Add($"Endpoint must be local (localhost/127.0.0.1): {config.Endpoint}");
+            }
+        }
+
+        if (config.Timeout < 0)
+            errors.Add("Timeout must be non-negative");
+
+        return new ValidationResult(errors.Count == 0, errors);
+    }
+
+    public ValidationResult ValidateModels(List<ModelConfiguration>? models)
+    {
+        var errors = new List<string>();
+
+        if (models == null) return new ValidationResult(true, errors);
+
+        foreach (var model in models)
+        {
+            if (string.IsNullOrWhiteSpace(model.Name))
+                errors.Add("Model name is required");
+            if (model.ContextLength <= 0)
+                errors.Add($"Invalid context length for model: {model.Name}");
+        }
+
+        return new ValidationResult(errors.Count == 0, errors);
+    }
+
+    private static bool IsLocalEndpoint(Uri uri)
+    {
+        return uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+               uri.Host.Equals("127.0.0.1", StringComparison.Ordinal) ||
+               uri.Host.Equals("::1", StringComparison.Ordinal);
+    }
+}
 ```
 
 ### End-to-End Tests

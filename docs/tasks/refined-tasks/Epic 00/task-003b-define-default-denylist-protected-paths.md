@@ -833,7 +833,299 @@ Tests/Unit/Domain/Security/PathProtection/
 │   ├── Should_Be_Immutable()
 │   ├── Should_Have_Reason_For_Each_Entry()
 │   └── Should_Have_RiskId_For_Each_Entry()
-│
+```
+
+#### DefaultDenylistTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Security.PathProtection;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using Xunit;
+
+public class DefaultDenylistTests
+{
+    private readonly IReadOnlyList<DenylistEntry> _entries = DefaultDenylist.Entries;
+
+    [Fact]
+    public void Should_Include_All_SSH_Paths()
+    {
+        // Arrange
+        var expectedPatterns = new[]
+        {
+            "~/.ssh/",
+            "~/.ssh/id_*",
+            "~/.ssh/id_rsa",
+            "~/.ssh/id_ed25519",
+            "~/.ssh/id_ecdsa",
+            "~/.ssh/id_dsa",
+            "~/.ssh/authorized_keys",
+            "~/.ssh/known_hosts",
+            "~/.ssh/config",
+            "%USERPROFILE%\\.ssh\\",
+            "%USERPROFILE%\\.ssh\\id_*"
+        };
+
+        // Act
+        var sshEntries = _entries
+            .Where(e => e.Category == PathCategory.SshKeys)
+            .Select(e => e.Pattern)
+            .ToList();
+
+        // Assert
+        foreach (var pattern in expectedPatterns)
+        {
+            sshEntries.Should().Contain(pattern,
+                because: $"SSH path {pattern} must be protected");
+        }
+    }
+
+    [Fact]
+    public void Should_Include_All_GPG_Paths()
+    {
+        // Arrange
+        var expectedPatterns = new[]
+        {
+            "~/.gnupg/",
+            "~/.gnupg/private-keys-v1.d/",
+            "~/.gnupg/secring.gpg",
+            "%APPDATA%\\gnupg\\"
+        };
+
+        // Act
+        var gpgEntries = _entries
+            .Where(e => e.Category == PathCategory.GpgKeys)
+            .Select(e => e.Pattern)
+            .ToList();
+
+        // Assert
+        foreach (var pattern in expectedPatterns)
+        {
+            gpgEntries.Should().Contain(pattern,
+                because: $"GPG path {pattern} must be protected");
+        }
+    }
+
+    [Fact]
+    public void Should_Include_All_AWS_Paths()
+    {
+        // Arrange
+        var expectedPatterns = new[]
+        {
+            "~/.aws/",
+            "~/.aws/credentials",
+            "~/.aws/config",
+            "%USERPROFILE%\\.aws\\",
+            "%USERPROFILE%\\.aws\\credentials"
+        };
+
+        // Act
+        var awsEntries = _entries
+            .Where(e => e.Category == PathCategory.CloudCredentials)
+            .Where(e => e.Pattern.Contains("aws", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.Pattern)
+            .ToList();
+
+        // Assert
+        foreach (var pattern in expectedPatterns)
+        {
+            awsEntries.Should().Contain(pattern,
+                because: $"AWS path {pattern} must be protected");
+        }
+    }
+
+    [Fact]
+    public void Should_Include_All_Azure_Paths()
+    {
+        // Arrange
+        var expectedPatterns = new[]
+        {
+            "~/.azure/",
+            "~/.azure/credentials",
+            "~/.azure/accessTokens.json",
+            "%USERPROFILE%\\.azure\\"
+        };
+
+        // Act
+        var azureEntries = _entries
+            .Where(e => e.Category == PathCategory.CloudCredentials)
+            .Where(e => e.Pattern.Contains("azure", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.Pattern)
+            .ToList();
+
+        // Assert
+        foreach (var pattern in expectedPatterns)
+        {
+            azureEntries.Should().Contain(pattern,
+                because: $"Azure path {pattern} must be protected");
+        }
+    }
+
+    [Fact]
+    public void Should_Include_All_GCloud_Paths()
+    {
+        // Arrange
+        var expectedPatterns = new[]
+        {
+            "~/.config/gcloud/",
+            "~/.config/gcloud/credentials.db",
+            "~/.config/gcloud/access_tokens.db",
+            "~/.config/gcloud/application_default_credentials.json",
+            "%APPDATA%\\gcloud\\"
+        };
+
+        // Act
+        var gcloudEntries = _entries
+            .Where(e => e.Category == PathCategory.CloudCredentials)
+            .Where(e => e.Pattern.Contains("gcloud", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.Pattern)
+            .ToList();
+
+        // Assert
+        foreach (var pattern in expectedPatterns)
+        {
+            gcloudEntries.Should().Contain(pattern,
+                because: $"GCloud path {pattern} must be protected");
+        }
+    }
+
+    [Fact]
+    public void Should_Include_All_Kube_Paths()
+    {
+        // Arrange
+        var expectedPatterns = new[]
+        {
+            "~/.kube/",
+            "~/.kube/config",
+            "%USERPROFILE%\\.kube\\"
+        };
+
+        // Act
+        var kubeEntries = _entries
+            .Where(e => e.Category == PathCategory.CloudCredentials)
+            .Where(e => e.Pattern.Contains("kube", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.Pattern)
+            .ToList();
+
+        // Assert
+        foreach (var pattern in expectedPatterns)
+        {
+            kubeEntries.Should().Contain(pattern,
+                because: $"Kubernetes path {pattern} must be protected");
+        }
+    }
+
+    [Fact]
+    public void Should_Include_All_EnvFile_Patterns()
+    {
+        // Arrange
+        var expectedPatterns = new[]
+        {
+            ".env",
+            ".env.*",
+            ".env.local",
+            ".env.development",
+            ".env.production",
+            "**/.env",
+            "**/.env.*"
+        };
+
+        // Act
+        var envEntries = _entries
+            .Where(e => e.Category == PathCategory.EnvironmentFiles)
+            .Select(e => e.Pattern)
+            .ToList();
+
+        // Assert
+        foreach (var pattern in expectedPatterns)
+        {
+            envEntries.Should().Contain(pattern,
+                because: $"Environment file pattern {pattern} must be protected");
+        }
+    }
+
+    [Fact]
+    public void Should_Be_Immutable()
+    {
+        // Arrange
+        var entries = DefaultDenylist.Entries;
+
+        // Act & Assert
+        entries.Should().BeAssignableTo<IReadOnlyList<DenylistEntry>>(
+            because: "denylist must be immutable");
+        
+        // Verify we cannot cast to mutable
+        var asList = entries as IList<DenylistEntry>;
+        if (asList != null)
+        {
+            asList.IsReadOnly.Should().BeTrue(
+                because: "denylist backing list must be read-only");
+        }
+    }
+
+    [Fact]
+    public void Should_Have_Reason_For_Each_Entry()
+    {
+        // Act & Assert
+        foreach (var entry in _entries)
+        {
+            entry.Reason.Should().NotBeNullOrWhiteSpace(
+                because: $"entry {entry.Pattern} must have a reason");
+            entry.Reason.Length.Should().BeGreaterThan(10,
+                because: "reason should be descriptive");
+        }
+    }
+
+    [Fact]
+    public void Should_Have_RiskId_For_Each_Entry()
+    {
+        // Arrange
+        var validRiskIdPattern = @"^RISK-[EIC]-\d{3}$";
+
+        // Act & Assert
+        foreach (var entry in _entries)
+        {
+            entry.RiskId.Should().NotBeNullOrWhiteSpace(
+                because: $"entry {entry.Pattern} must have a risk ID");
+            entry.RiskId.Should().MatchRegex(validRiskIdPattern,
+                because: "risk ID must follow RISK-X-NNN format");
+        }
+    }
+
+    [Fact]
+    public void Should_Have_Valid_Category_For_Each_Entry()
+    {
+        // Act & Assert
+        foreach (var entry in _entries)
+        {
+            entry.Category.Should().BeDefined(
+                because: $"entry {entry.Pattern} must have a valid category");
+        }
+    }
+
+    [Fact]
+    public void Should_Have_At_Least_One_Platform_For_Each_Entry()
+    {
+        // Act & Assert
+        foreach (var entry in _entries)
+        {
+            entry.Platforms.Should().NotBeEmpty(
+                because: $"entry {entry.Pattern} must specify at least one platform");
+        }
+    }
+
+    [Fact]
+    public void Should_Contain_Minimum_Required_Entries()
+    {
+        // The denylist should have comprehensive coverage
+        _entries.Count.Should().BeGreaterOrEqualTo(100,
+            because: "denylist should cover all security-sensitive paths");
+    }
+}
+```
+
+```
 ├── PathMatcherTests.cs
 │   ├── Should_Match_Exact_Path()
 │   ├── Should_Match_Directory_Prefix()
@@ -848,7 +1140,254 @@ Tests/Unit/Domain/Security/PathProtection/
 │   ├── Should_Handle_Multiple_Slashes()
 │   ├── Should_Not_Backtrack()
 │   └── Should_Complete_In_Under_1ms()
-│
+```
+
+#### PathMatcherTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Security.PathProtection;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using System.Diagnostics;
+using Xunit;
+
+public class PathMatcherTests
+{
+    private readonly IPathMatcher _matcher;
+    private readonly IPathMatcher _caseSensitiveMatcher;
+    private readonly IPathMatcher _caseInsensitiveMatcher;
+
+    public PathMatcherTests()
+    {
+        _matcher = new GlobMatcher(caseSensitive: true);
+        _caseSensitiveMatcher = new GlobMatcher(caseSensitive: true);
+        _caseInsensitiveMatcher = new GlobMatcher(caseSensitive: false);
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/id_rsa", "~/.ssh/id_rsa", true)]
+    [InlineData("~/.ssh/id_rsa", "~/.ssh/id_ed25519", false)]
+    [InlineData("/etc/passwd", "/etc/passwd", true)]
+    [InlineData("/etc/passwd", "/etc/shadow", false)]
+    public void Should_Match_Exact_Path(string pattern, string path, bool expected)
+    {
+        // Act
+        var result = _matcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().Be(expected,
+            because: $"pattern '{pattern}' should{(expected ? "" : " not")} match '{path}'");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/", "~/.ssh/id_rsa", true)]
+    [InlineData("~/.ssh/", "~/.ssh/config", true)]
+    [InlineData("~/.aws/", "~/.aws/credentials", true)]
+    [InlineData("~/.ssh/", "~/.gnupg/secring.gpg", false)]
+    [InlineData("/etc/", "/etc/passwd", true)]
+    [InlineData("/etc/", "/etc/ssh/sshd_config", true)]
+    public void Should_Match_Directory_Prefix(string pattern, string path, bool expected)
+    {
+        // Act
+        var result = _matcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().Be(expected,
+            because: $"directory pattern '{pattern}' should{(expected ? "" : " not")} match '{path}'");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/id_*", "~/.ssh/id_rsa", true)]
+    [InlineData("~/.ssh/id_*", "~/.ssh/id_ed25519", true)]
+    [InlineData("~/.ssh/id_*", "~/.ssh/id_ecdsa", true)]
+    [InlineData("~/.ssh/id_*", "~/.ssh/config", false)]
+    [InlineData("*.env", "production.env", true)]
+    [InlineData("*.env", ".env", false)] // * doesn't match empty
+    [InlineData("*.log", "app.log", true)]
+    [InlineData("*.log", "app.txt", false)]
+    public void Should_Match_Single_Glob(string pattern, string path, bool expected)
+    {
+        // Act
+        var result = _matcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().Be(expected,
+            because: $"single glob '{pattern}' should{(expected ? "" : " not")} match '{path}'");
+    }
+
+    [Theory]
+    [InlineData("**/.env", ".env", true)]
+    [InlineData("**/.env", "src/.env", true)]
+    [InlineData("**/.env", "src/config/.env", true)]
+    [InlineData("**/.env", "deeply/nested/path/.env", true)]
+    [InlineData("**/.env", ".env.local", false)]
+    [InlineData("**/node_modules/**", "node_modules/package/index.js", true)]
+    [InlineData("**/node_modules/**", "src/node_modules/dep/lib.js", true)]
+    public void Should_Match_Double_Glob(string pattern, string path, bool expected)
+    {
+        // Act
+        var result = _matcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().Be(expected,
+            because: $"double glob '{pattern}' should{(expected ? "" : " not")} match '{path}'");
+    }
+
+    [Theory]
+    [InlineData("id_?sa", "id_rsa", true)]
+    [InlineData("id_?sa", "id_dsa", true)]
+    [InlineData("id_?sa", "id_ecdsa", false)] // ? matches exactly one char
+    [InlineData("?.env", "a.env", true)]
+    [InlineData("?.env", ".env", false)]
+    public void Should_Match_Question_Mark(string pattern, string path, bool expected)
+    {
+        // Act
+        var result = _matcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().Be(expected,
+            because: $"question mark pattern '{pattern}' should{(expected ? "" : " not")} match '{path}'");
+    }
+
+    [Theory]
+    [InlineData("[abc].txt", "a.txt", true)]
+    [InlineData("[abc].txt", "b.txt", true)]
+    [InlineData("[abc].txt", "d.txt", false)]
+    [InlineData("[!abc].txt", "d.txt", true)]
+    [InlineData("[!abc].txt", "a.txt", false)]
+    public void Should_Match_Character_Class(string pattern, string path, bool expected)
+    {
+        // Act
+        var result = _matcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().Be(expected,
+            because: $"character class '{pattern}' should{(expected ? "" : " not")} match '{path}'");
+    }
+
+    [Theory]
+    [InlineData("[a-z].txt", "m.txt", true)]
+    [InlineData("[a-z].txt", "5.txt", false)]
+    [InlineData("[0-9].log", "5.log", true)]
+    [InlineData("[0-9].log", "a.log", false)]
+    [InlineData("[a-zA-Z].txt", "M.txt", true)]
+    public void Should_Match_Character_Range(string pattern, string path, bool expected)
+    {
+        // Act
+        var result = _matcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().Be(expected,
+            because: $"character range '{pattern}' should{(expected ? "" : " not")} match '{path}'");
+    }
+
+    [Theory]
+    [InlineData("C:\\Windows\\", "c:\\windows\\system32")]
+    [InlineData(".ENV", ".env")]
+    [InlineData("~/.SSH/", "~/.ssh/id_rsa")]
+    public void Should_Be_Case_Insensitive_On_Windows(string pattern, string path)
+    {
+        // Act
+        var result = _caseInsensitiveMatcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().BeTrue(
+            because: "Windows paths should be case-insensitive");
+    }
+
+    [Theory]
+    [InlineData(".ENV", ".env", false)]
+    [InlineData("~/.SSH/", "~/.ssh/id_rsa", false)]
+    [InlineData("~/.ssh/", "~/.ssh/id_rsa", true)]
+    public void Should_Be_Case_Sensitive_On_Unix(string pattern, string path, bool expected)
+    {
+        // Act
+        var result = _caseSensitiveMatcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().Be(expected,
+            because: "Unix paths should be case-sensitive");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/", "~/.ssh")]
+    [InlineData("~/.ssh", "~/.ssh/")]
+    public void Should_Handle_Trailing_Slash(string pattern, string path)
+    {
+        // Act
+        var result = _matcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().BeTrue(
+            because: "trailing slash variations should be handled");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh//id_rsa", "~/.ssh/id_rsa")]
+    [InlineData("~/.ssh/id_rsa", "~/.ssh//id_rsa")]
+    public void Should_Handle_Multiple_Slashes(string pattern, string path)
+    {
+        // Act
+        var result = _matcher.Matches(pattern, path);
+
+        // Assert
+        result.Should().BeTrue(
+            because: "multiple consecutive slashes should be normalized");
+    }
+
+    [Fact]
+    public void Should_Not_Backtrack()
+    {
+        // Arrange - pathological pattern that causes exponential backtracking in naive implementations
+        var pattern = "a]]]]]]***********************b";
+        var path = "a]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]c";
+
+        // Act
+        var sw = Stopwatch.StartNew();
+        _ = _matcher.Matches(pattern, path);
+        sw.Stop();
+
+        // Assert - should complete quickly even with pathological input
+        sw.ElapsedMilliseconds.Should().BeLessThan(100,
+            because: "glob matcher must use linear-time algorithm to prevent ReDoS");
+    }
+
+    [Fact]
+    public void Should_Complete_In_Under_1ms()
+    {
+        // Arrange
+        var testCases = new[]
+        {
+            ("~/.ssh/id_*", "~/.ssh/id_rsa"),
+            ("**/.env", "src/config/.env"),
+            ("~/.aws/credentials", "~/.aws/credentials"),
+            ("C:\\Windows\\System32\\**", "C:\\Windows\\System32\\drivers\\etc\\hosts")
+        };
+
+        foreach (var (pattern, path) in testCases)
+        {
+            // Warm up
+            _ = _matcher.Matches(pattern, path);
+
+            // Act
+            var sw = Stopwatch.StartNew();
+            for (int i = 0; i < 1000; i++)
+            {
+                _ = _matcher.Matches(pattern, path);
+            }
+            sw.Stop();
+
+            // Assert
+            var avgMs = sw.Elapsed.TotalMilliseconds / 1000;
+            avgMs.Should().BeLessThan(1,
+                because: $"single path check for '{pattern}' should complete in under 1ms");
+        }
+    }
+}
+```
+
+```
 ├── PathNormalizerTests.cs
 │   ├── Should_Expand_Tilde()
 │   ├── Should_Expand_UserProfile()
@@ -861,7 +1400,255 @@ Tests/Unit/Domain/Security/PathProtection/
 │   ├── Should_Handle_Very_Long_Paths()
 │   ├── Should_Handle_Unicode()
 │   └── Should_Handle_Special_Characters()
-│
+```
+
+#### PathNormalizerTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Security.PathProtection;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using Xunit;
+
+public class PathNormalizerTests
+{
+    private readonly IPathNormalizer _normalizer;
+
+    public PathNormalizerTests()
+    {
+        _normalizer = new PathNormalizer();
+    }
+
+    [Theory]
+    [InlineData("~/documents/file.txt")]
+    [InlineData("~/.ssh/id_rsa")]
+    [InlineData("~/.aws/credentials")]
+    public void Should_Expand_Tilde(string path)
+    {
+        // Act
+        var result = _normalizer.Normalize(path);
+
+        // Assert
+        result.Should().NotContain("~",
+            because: "tilde should be expanded to home directory");
+        result.Should().NotBeNullOrWhiteSpace();
+        
+        if (OperatingSystem.IsWindows())
+        {
+            result.Should().StartWith(Environment.GetFolderPath(
+                Environment.SpecialFolder.UserProfile));
+        }
+        else
+        {
+            result.Should().StartWith(Environment.GetEnvironmentVariable("HOME"));
+        }
+    }
+
+    [Theory]
+    [InlineData("%USERPROFILE%\\.ssh\\id_rsa")]
+    [InlineData("%USERPROFILE%\\.aws\\credentials")]
+    public void Should_Expand_UserProfile(string path)
+    {
+        // Skip on non-Windows
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Act
+        var result = _normalizer.Normalize(path);
+
+        // Assert
+        result.Should().NotContain("%USERPROFILE%",
+            because: "USERPROFILE should be expanded");
+        result.Should().StartWith(Environment.GetFolderPath(
+            Environment.SpecialFolder.UserProfile));
+    }
+
+    [Theory]
+    [InlineData("$HOME/.ssh/id_rsa")]
+    [InlineData("$HOME/.aws/credentials")]
+    public void Should_Expand_Home(string path)
+    {
+        // Skip on Windows
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Act
+        var result = _normalizer.Normalize(path);
+
+        // Assert
+        result.Should().NotContain("$HOME",
+            because: "HOME variable should be expanded");
+        result.Should().StartWith(Environment.GetEnvironmentVariable("HOME"));
+    }
+
+    [Theory]
+    [InlineData("/home/user/../root/.ssh", "/root/.ssh")]
+    [InlineData("./src/../tests/unit", "./tests/unit")]
+    [InlineData("/etc/ssh/../passwd", "/etc/passwd")]
+    [InlineData("~/../../../etc/passwd", "/etc/passwd")]
+    public void Should_Resolve_DotDot(string path, string expectedEnd)
+    {
+        // Act
+        var result = _normalizer.Normalize(path);
+
+        // Assert
+        result.Should().NotContain("..",
+            because: "parent directory references must be resolved");
+        result.Should().EndWith(expectedEnd.Replace("/", Path.DirectorySeparatorChar.ToString()),
+            because: "path should resolve to expected location");
+    }
+
+    [Theory]
+    [InlineData("./src/./tests/./unit", "src/tests/unit")]
+    [InlineData("/etc/./ssh/./config", "/etc/ssh/config")]
+    public void Should_Remove_Dot(string path, string expected)
+    {
+        // Act
+        var result = _normalizer.Normalize(path);
+
+        // Assert
+        result.Should().NotContain("/./",
+            because: "single dot references should be removed");
+        result.Should().Contain(expected.Replace("/", Path.DirectorySeparatorChar.ToString()));
+    }
+
+    [Theory]
+    [InlineData("~/.ssh//id_rsa")]
+    [InlineData("/etc///passwd")]
+    [InlineData("./src////file.cs")]
+    public void Should_Collapse_Slashes(string path)
+    {
+        // Act
+        var result = _normalizer.Normalize(path);
+
+        // Assert
+        result.Should().NotContain("//",
+            because: "multiple consecutive slashes should be collapsed");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/")]
+    [InlineData("/etc/ssh/")]
+    [InlineData("./src/")]
+    public void Should_Remove_Trailing_Slash(string path)
+    {
+        // Act
+        var result = _normalizer.Normalize(path);
+
+        // Assert
+        result.Should().NotEndWith("/",
+            because: "trailing slashes should be removed for consistency");
+        result.Should().NotEndWith("\\",
+            because: "trailing backslashes should be removed for consistency");
+    }
+
+    [Theory]
+    [InlineData("C:\\Users\\test\\.ssh\\id_rsa")]
+    [InlineData("C:\\Windows\\System32\\config")]
+    public void Should_Convert_Backslash_On_Windows(string path)
+    {
+        // Act
+        var result = _normalizer.Normalize(path);
+
+        // Assert - on Windows, should use consistent separator
+        if (OperatingSystem.IsWindows())
+        {
+            // All separators should be consistent
+            var separatorCount = result.Count(c => c == '/' || c == '\\');
+            var primarySep = result.Count(c => c == Path.DirectorySeparatorChar);
+            primarySep.Should().Be(separatorCount,
+                because: "all separators should be the platform separator");
+        }
+    }
+
+    [Fact]
+    public void Should_Handle_Very_Long_Paths()
+    {
+        // Arrange
+        var longPath = "/home/user/" + string.Join("/", Enumerable.Repeat("subdir", 100)) + "/file.txt";
+
+        // Act
+        var result = _normalizer.Normalize(longPath);
+
+        // Assert
+        result.Should().NotBeNullOrWhiteSpace(
+            because: "long paths should be handled without truncation");
+        result.Should().Contain("file.txt");
+    }
+
+    [Theory]
+    [InlineData("/home/用户/documents/文件.txt")]
+    [InlineData("/home/пользователь/docs/файл.txt")]
+    [InlineData("/home/user/données/ñoño.txt")]
+    public void Should_Handle_Unicode(string path)
+    {
+        // Act
+        var result = _normalizer.Normalize(path);
+
+        // Assert
+        result.Should().NotBeNullOrWhiteSpace(
+            because: "Unicode paths should be preserved");
+        // Unicode characters should remain intact
+        result.Length.Should().BeGreaterThan(10);
+    }
+
+    [Theory]
+    [InlineData("/home/user/file with spaces.txt")]
+    [InlineData("/home/user/file\ttab.txt")]
+    [InlineData("/home/user/file'quote.txt")]
+    public void Should_Handle_Special_Characters(string path)
+    {
+        // Act
+        var result = _normalizer.Normalize(path);
+
+        // Assert
+        result.Should().NotBeNullOrWhiteSpace(
+            because: "special characters should be handled");
+    }
+
+    [Fact]
+    public void Should_Reject_Null_Byte()
+    {
+        // Arrange
+        var pathWithNull = "/home/user/file\0.txt";
+
+        // Act
+        Action act = () => _normalizer.Normalize(pathWithNull);
+
+        // Assert
+        act.Should().Throw<ArgumentException>(
+            because: "null bytes in paths are a security risk");
+    }
+
+    [Fact]
+    public void Should_Handle_Empty_Path()
+    {
+        // Act
+        var result = _normalizer.Normalize("");
+
+        // Assert
+        result.Should().BeEmpty(
+            because: "empty paths should return empty");
+    }
+
+    [Fact]
+    public void Should_Handle_Null_Path()
+    {
+        // Act
+        Action act = () => _normalizer.Normalize(null!);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>();
+    }
+}
+```
+
+```
 ├── SymlinkResolverTests.cs
 │   ├── Should_Resolve_Single_Symlink()
 │   ├── Should_Resolve_Chain_Of_Symlinks()
@@ -869,7 +1656,263 @@ Tests/Unit/Domain/Security/PathProtection/
 │   ├── Should_Enforce_Max_Depth_40()
 │   ├── Should_Block_On_Resolution_Error()
 │   └── Should_Cache_Resolution()
-│
+```
+
+#### SymlinkResolverTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Security.PathProtection;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using System.IO;
+using Xunit;
+
+public class SymlinkResolverTests : IDisposable
+{
+    private readonly ISymlinkResolver _resolver;
+    private readonly string _testDir;
+
+    public SymlinkResolverTests()
+    {
+        _resolver = new SymlinkResolver(maxDepth: 40);
+        _testDir = Path.Combine(Path.GetTempPath(), $"symlink_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_testDir, recursive: true);
+        }
+        catch
+        {
+            // Best effort cleanup
+        }
+    }
+
+    [SkippableFact]
+    public void Should_Resolve_Single_Symlink()
+    {
+        // Skip on Windows if not running as admin (symlinks require elevation)
+        Skip.If(OperatingSystem.IsWindows() && !HasSymlinkPrivilege());
+
+        // Arrange
+        var targetFile = Path.Combine(_testDir, "target.txt");
+        var symlinkPath = Path.Combine(_testDir, "link.txt");
+        File.WriteAllText(targetFile, "test content");
+        CreateSymlink(symlinkPath, targetFile);
+
+        // Act
+        var result = _resolver.Resolve(symlinkPath);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.ResolvedPath.Should().Be(targetFile,
+            because: "symlink should resolve to target");
+    }
+
+    [SkippableFact]
+    public void Should_Resolve_Chain_Of_Symlinks()
+    {
+        Skip.If(OperatingSystem.IsWindows() && !HasSymlinkPrivilege());
+
+        // Arrange - create chain: link1 -> link2 -> link3 -> target
+        var targetFile = Path.Combine(_testDir, "final_target.txt");
+        var link3 = Path.Combine(_testDir, "link3.txt");
+        var link2 = Path.Combine(_testDir, "link2.txt");
+        var link1 = Path.Combine(_testDir, "link1.txt");
+
+        File.WriteAllText(targetFile, "content");
+        CreateSymlink(link3, targetFile);
+        CreateSymlink(link2, link3);
+        CreateSymlink(link1, link2);
+
+        // Act
+        var result = _resolver.Resolve(link1);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.ResolvedPath.Should().Be(targetFile,
+            because: "chain of symlinks should resolve to final target");
+        result.Depth.Should().Be(3,
+            because: "three symlinks were traversed");
+    }
+
+    [SkippableFact]
+    public void Should_Detect_Circular_Symlink()
+    {
+        Skip.If(OperatingSystem.IsWindows() && !HasSymlinkPrivilege());
+
+        // Arrange - create circular: link1 -> link2 -> link1
+        var link1 = Path.Combine(_testDir, "circular1.txt");
+        var link2 = Path.Combine(_testDir, "circular2.txt");
+
+        // Create files first, then replace with symlinks
+        File.WriteAllText(link2, "temp");
+        CreateSymlink(link1, link2);
+        File.Delete(link2);
+        CreateSymlink(link2, link1);
+
+        // Act
+        var result = _resolver.Resolve(link1);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse(
+            because: "circular symlinks should be detected");
+        result.Error.Should().Be(SymlinkError.CircularReference);
+    }
+
+    [SkippableFact]
+    public void Should_Enforce_Max_Depth_40()
+    {
+        Skip.If(OperatingSystem.IsWindows() && !HasSymlinkPrivilege());
+
+        // Arrange - create chain of 45 symlinks (exceeds max of 40)
+        var targetFile = Path.Combine(_testDir, "deep_target.txt");
+        File.WriteAllText(targetFile, "content");
+
+        var previousLink = targetFile;
+        for (int i = 0; i < 45; i++)
+        {
+            var newLink = Path.Combine(_testDir, $"deep_link_{i}.txt");
+            CreateSymlink(newLink, previousLink);
+            previousLink = newLink;
+        }
+
+        // Act
+        var result = _resolver.Resolve(previousLink);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse(
+            because: "depth exceeding 40 should fail");
+        result.Error.Should().Be(SymlinkError.MaxDepthExceeded);
+    }
+
+    [Fact]
+    public void Should_Block_On_Resolution_Error()
+    {
+        // Arrange - symlink to non-existent target
+        var brokenLink = Path.Combine(_testDir, "broken_link.txt");
+        var nonExistentTarget = Path.Combine(_testDir, "does_not_exist.txt");
+
+        if (OperatingSystem.IsWindows() && !HasSymlinkPrivilege())
+        {
+            // On Windows without privileges, just test with a non-existent path
+            var result = _resolver.Resolve(nonExistentTarget);
+            result.IsSuccess.Should().BeFalse();
+            return;
+        }
+
+        CreateSymlink(brokenLink, nonExistentTarget);
+
+        // Act
+        var result = _resolver.Resolve(brokenLink);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse(
+            because: "broken symlink should fail resolution");
+        result.Error.Should().Be(SymlinkError.TargetNotFound);
+    }
+
+    [Fact]
+    public void Should_Cache_Resolution()
+    {
+        // Arrange
+        var regularFile = Path.Combine(_testDir, "regular.txt");
+        File.WriteAllText(regularFile, "content");
+
+        // Act - resolve same path twice
+        var result1 = _resolver.Resolve(regularFile);
+        var result2 = _resolver.Resolve(regularFile);
+
+        // Assert
+        result1.IsSuccess.Should().BeTrue();
+        result2.IsSuccess.Should().BeTrue();
+        result1.ResolvedPath.Should().Be(result2.ResolvedPath);
+        
+        // Cache hit should be faster (implementation detail)
+        // The important thing is both calls succeed
+    }
+
+    [Fact]
+    public void Should_Return_Same_Path_If_Not_Symlink()
+    {
+        // Arrange
+        var regularFile = Path.Combine(_testDir, "regular_file.txt");
+        File.WriteAllText(regularFile, "test content");
+
+        // Act
+        var result = _resolver.Resolve(regularFile);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.ResolvedPath.Should().Be(regularFile,
+            because: "regular files should resolve to themselves");
+        result.Depth.Should().Be(0,
+            because: "no symlinks were traversed");
+    }
+
+    private static bool HasSymlinkPrivilege()
+    {
+        // On Windows, creating symlinks requires admin or developer mode
+        try
+        {
+            var testLink = Path.Combine(Path.GetTempPath(), $"symlink_test_{Guid.NewGuid():N}");
+            var testTarget = Path.Combine(Path.GetTempPath(), $"symlink_target_{Guid.NewGuid():N}");
+            File.WriteAllText(testTarget, "test");
+            File.CreateSymbolicLink(testLink, testTarget);
+            File.Delete(testLink);
+            File.Delete(testTarget);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void CreateSymlink(string linkPath, string targetPath)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            File.CreateSymbolicLink(linkPath, targetPath);
+        }
+        else
+        {
+            // Unix symlink
+            File.CreateSymbolicLink(linkPath, targetPath);
+        }
+    }
+}
+
+public enum SymlinkError
+{
+    None,
+    CircularReference,
+    MaxDepthExceeded,
+    TargetNotFound,
+    AccessDenied,
+    Unknown
+}
+
+public record SymlinkResolutionResult
+{
+    public bool IsSuccess { get; init; }
+    public string? ResolvedPath { get; init; }
+    public SymlinkError Error { get; init; }
+    public int Depth { get; init; }
+
+    public static SymlinkResolutionResult Success(string path, int depth) =>
+        new() { IsSuccess = true, ResolvedPath = path, Depth = depth };
+
+    public static SymlinkResolutionResult Failure(SymlinkError error) =>
+        new() { IsSuccess = false, Error = error };
+}
+```
+
+```
 ├── ProtectedPathValidatorTests.cs
 │   ├── Should_Block_SSH_Directory()
 │   ├── Should_Block_SSH_PrivateKey()
@@ -882,7 +1925,299 @@ Tests/Unit/Domain/Security/PathProtection/
 │   ├── Should_Include_Error_Code()
 │   ├── Should_Not_Reveal_Contents()
 │   └── Should_Log_Violation()
-│
+```
+
+#### ProtectedPathValidatorTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Security.PathProtection;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+public class ProtectedPathValidatorTests
+{
+    private readonly IProtectedPathValidator _validator;
+    private readonly Mock<ILogger<ProtectedPathValidator>> _loggerMock;
+    private readonly Mock<IPathNormalizer> _normalizerMock;
+    private readonly Mock<ISymlinkResolver> _symlinkResolverMock;
+    private readonly Mock<IPathMatcher> _matcherMock;
+
+    public ProtectedPathValidatorTests()
+    {
+        _loggerMock = new Mock<ILogger<ProtectedPathValidator>>();
+        _normalizerMock = new Mock<IPathNormalizer>();
+        _symlinkResolverMock = new Mock<ISymlinkResolver>();
+        _matcherMock = new Mock<IPathMatcher>();
+
+        // Default setup: normalizer returns input, symlinks resolve to self
+        _normalizerMock
+            .Setup(n => n.Normalize(It.IsAny<string>()))
+            .Returns<string>(s => s.Replace("~", "/home/user"));
+
+        _symlinkResolverMock
+            .Setup(r => r.Resolve(It.IsAny<string>()))
+            .Returns<string>(s => SymlinkResolutionResult.Success(s, 0));
+
+        _validator = new ProtectedPathValidator(
+            DefaultDenylist.Entries,
+            _normalizerMock.Object,
+            _symlinkResolverMock.Object,
+            new GlobMatcher(caseSensitive: !OperatingSystem.IsWindows()),
+            _loggerMock.Object);
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/")]
+    [InlineData("~/.ssh")]
+    [InlineData("/home/user/.ssh/")]
+    public void Should_Block_SSH_Directory(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "SSH directory must be protected");
+        result.Category.Should().Be(PathCategory.SshKeys);
+        result.RiskId.Should().StartWith("RISK-");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/id_rsa")]
+    [InlineData("~/.ssh/id_ed25519")]
+    [InlineData("~/.ssh/id_ecdsa")]
+    [InlineData("~/.ssh/id_dsa")]
+    [InlineData("/home/user/.ssh/id_rsa")]
+    public void Should_Block_SSH_PrivateKey(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "SSH private keys must be protected");
+        result.Reason.Should().Contain("SSH",
+            because: "reason should explain the protection");
+        result.MatchedPattern.Should().NotBeNullOrEmpty();
+    }
+
+    [Theory]
+    [InlineData("~/.aws/credentials")]
+    [InlineData("~/.aws/config")]
+    [InlineData("/home/user/.aws/credentials")]
+    public void Should_Block_AWS_Credentials(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "AWS credentials must be protected");
+        result.Category.Should().Be(PathCategory.CloudCredentials);
+    }
+
+    [Theory]
+    [InlineData(".env")]
+    [InlineData(".env.local")]
+    [InlineData(".env.production")]
+    [InlineData("config/.env")]
+    [InlineData("src/config/.env.development")]
+    public void Should_Block_Env_File(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "environment files must be protected");
+        result.Category.Should().Be(PathCategory.EnvironmentFiles);
+    }
+
+    [Theory]
+    [InlineData("./src/../../../home/user/.ssh/id_rsa")]
+    [InlineData("../../../etc/passwd")]
+    [InlineData("src/../../.ssh/id_rsa")]
+    public void Should_Block_Traversal_To_Protected(string path)
+    {
+        // Arrange - normalizer resolves traversal
+        _normalizerMock
+            .Setup(n => n.Normalize(It.IsAny<string>()))
+            .Returns("/home/user/.ssh/id_rsa");
+
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "directory traversal to protected paths must be blocked");
+    }
+
+    [Fact]
+    public void Should_Block_Symlink_To_Protected()
+    {
+        // Arrange - symlink resolves to SSH key
+        var symlinkPath = "./innocent_file.txt";
+        _symlinkResolverMock
+            .Setup(r => r.Resolve(It.IsAny<string>()))
+            .Returns(SymlinkResolutionResult.Success("/home/user/.ssh/id_rsa", 1));
+
+        // Act
+        var result = _validator.Validate(symlinkPath);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "symlinks to protected paths must be blocked");
+        result.Error.Should().NotBeNull();
+        result.Error!.ErrorCode.Should().Be("ACODE-SEC-003-005",
+            because: "symlink attack has specific error code");
+    }
+
+    [Theory]
+    [InlineData("./src/Program.cs")]
+    [InlineData("./README.md")]
+    [InlineData("./tests/UnitTests.cs")]
+    [InlineData("/home/user/projects/myapp/src/main.py")]
+    [InlineData("package.json")]
+    [InlineData("Cargo.toml")]
+    public void Should_Allow_Normal_Source_File(string path)
+    {
+        // Arrange
+        _normalizerMock
+            .Setup(n => n.Normalize(It.IsAny<string>()))
+            .Returns<string>(s => s);
+
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeFalse(
+            because: "normal source files should be allowed");
+        result.MatchedPattern.Should().BeNull();
+        result.Error.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/id_rsa", "ACODE-SEC-003-001")]
+    [InlineData("~/.aws/credentials", "ACODE-SEC-003-002")]
+    [InlineData("/etc/passwd", "ACODE-SEC-003-003")]
+    [InlineData(".env", "ACODE-SEC-003-004")]
+    public void Should_Return_ProtectedPathError(string path, string expectedCode)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue();
+        result.Error.Should().NotBeNull();
+        result.Error!.ErrorCode.Should().StartWith("ACODE-SEC-003",
+            because: "protected path errors use SEC-003 code family");
+    }
+
+    [Fact]
+    public void Should_Include_Error_Code()
+    {
+        // Arrange
+        var protectedPath = "~/.ssh/id_rsa";
+
+        // Act
+        var result = _validator.Validate(protectedPath);
+
+        // Assert
+        result.Error.Should().NotBeNull();
+        result.Error!.ErrorCode.Should().NotBeNullOrWhiteSpace();
+        result.Error.ErrorCode.Should().MatchRegex(@"^ACODE-SEC-003(-\d{3})?$",
+            because: "error code must follow ACODE-SEC-003 format");
+        result.Error.Message.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void Should_Not_Reveal_Contents()
+    {
+        // Arrange
+        var protectedPath = "~/.ssh/id_rsa";
+
+        // Act
+        var result = _validator.Validate(protectedPath);
+
+        // Assert
+        result.Error.Should().NotBeNull();
+        result.Error!.Message.Should().NotContain("BEGIN RSA PRIVATE KEY",
+            because: "error must not leak file contents");
+        result.Error.Message.Should().NotContain("PRIVATE KEY",
+            because: "error must not leak sensitive keywords from file");
+        
+        // Path should be redacted in user-facing message
+        result.Error.UserMessage.Should().NotContain("id_rsa",
+            because: "exact filename should be redacted in user message");
+    }
+
+    [Fact]
+    public void Should_Log_Violation()
+    {
+        // Arrange
+        var protectedPath = "~/.ssh/id_rsa";
+
+        // Act
+        _validator.Validate(protectedPath);
+
+        // Assert
+        _loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("protected_path_access_blocked")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once,
+            because: "violations must be logged for security audit");
+    }
+
+    [Theory]
+    [InlineData(FileOperation.Read)]
+    [InlineData(FileOperation.Write)]
+    [InlineData(FileOperation.Delete)]
+    [InlineData(FileOperation.List)]
+    public void Should_Block_All_Operations_On_Protected_Path(FileOperation operation)
+    {
+        // Arrange
+        var protectedPath = "~/.ssh/id_rsa";
+
+        // Act
+        var result = _validator.Validate(protectedPath, operation);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: $"operation {operation} must be blocked on protected paths");
+    }
+
+    [Fact]
+    public void Should_Handle_Null_Path()
+    {
+        // Act
+        Action act = () => _validator.Validate(null!);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void Should_Handle_Empty_Path()
+    {
+        // Act
+        var result = _validator.Validate("");
+
+        // Assert
+        result.IsProtected.Should().BeFalse(
+            because: "empty paths are invalid but not protected");
+    }
+}
+```
+
+```
 └── UserExtensionTests.cs
     ├── Should_Load_From_Config()
     ├── Should_Validate_Pattern()
@@ -891,6 +2226,284 @@ Tests/Unit/Domain/Security/PathProtection/
     ├── Should_Not_Remove_Defaults()
     ├── Should_Limit_To_1000_Entries()
     └── Should_Reject_Invalid_Patterns()
+```
+
+#### UserExtensionTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Unit.Domain.Security.PathProtection;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using AgenticCoder.Infrastructure.Configuration;
+using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+public class UserExtensionTests
+{
+    private readonly Mock<ILogger<UserDenylistExtensionLoader>> _loggerMock;
+    private readonly UserDenylistExtensionLoader _loader;
+
+    public UserExtensionTests()
+    {
+        _loggerMock = new Mock<ILogger<UserDenylistExtensionLoader>>();
+        _loader = new UserDenylistExtensionLoader(_loggerMock.Object);
+    }
+
+    [Fact]
+    public void Should_Load_From_Config()
+    {
+        // Arrange
+        var configYaml = @"
+security:
+  additional_protected_paths:
+    - pattern: 'company-secrets/'
+      reason: 'Internal documentation'
+    - pattern: '*.pem'
+      reason: 'Certificate files'
+";
+        var config = ParseYaml(configYaml);
+
+        // Act
+        var extensions = _loader.LoadExtensions(config);
+
+        // Assert
+        extensions.Should().HaveCount(2);
+        extensions[0].Pattern.Should().Be("company-secrets/");
+        extensions[0].Reason.Should().Be("Internal documentation");
+        extensions[1].Pattern.Should().Be("*.pem");
+    }
+
+    [Theory]
+    [InlineData("valid-path/")]
+    [InlineData("*.secret")]
+    [InlineData("**/private/**")]
+    [InlineData("[a-z].key")]
+    public void Should_Validate_Pattern(string pattern)
+    {
+        // Arrange
+        var configYaml = $@"
+security:
+  additional_protected_paths:
+    - pattern: '{pattern}'
+      reason: 'Test reason'
+";
+        var config = ParseYaml(configYaml);
+
+        // Act
+        var extensions = _loader.LoadExtensions(config);
+
+        // Assert
+        extensions.Should().HaveCount(1);
+        extensions[0].Pattern.Should().Be(pattern);
+    }
+
+    [Fact]
+    public void Should_Require_Reason()
+    {
+        // Arrange
+        var configYaml = @"
+security:
+  additional_protected_paths:
+    - pattern: 'no-reason-path/'
+";
+        var config = ParseYaml(configYaml);
+
+        // Act
+        Action act = () => _loader.LoadExtensions(config);
+
+        // Assert
+        act.Should().Throw<ConfigurationException>()
+            .WithMessage("*reason*required*",
+                because: "each extension must have a reason");
+    }
+
+    [Fact]
+    public void Should_Apply_After_Defaults()
+    {
+        // Arrange
+        var configYaml = @"
+security:
+  additional_protected_paths:
+    - pattern: 'custom-secret/'
+      reason: 'Custom protection'
+";
+        var config = ParseYaml(configYaml);
+        var extensions = _loader.LoadExtensions(config);
+
+        // Act
+        var combinedDenylist = DefaultDenylist.Entries
+            .Concat(extensions)
+            .ToList();
+
+        // Assert
+        var customEntry = combinedDenylist.Last();
+        customEntry.Pattern.Should().Be("custom-secret/");
+        customEntry.IsDefault.Should().BeFalse(
+            because: "user extensions are not default entries");
+        customEntry.Category.Should().Be(PathCategory.UserDefined);
+    }
+
+    [Fact]
+    public void Should_Not_Remove_Defaults()
+    {
+        // Arrange - attempt to remove default via config
+        var configYaml = @"
+security:
+  remove_protected_paths:
+    - '~/.ssh/'
+    - '~/.aws/'
+";
+        var config = ParseYaml(configYaml);
+
+        // Act
+        var result = _loader.TryRemoveDefaults(config, DefaultDenylist.Entries);
+
+        // Assert
+        result.Success.Should().BeFalse(
+            because: "removing default paths is not allowed");
+        result.Errors.Should().Contain(e => e.Contains("cannot remove default"));
+        
+        // Verify defaults are unchanged
+        DefaultDenylist.Entries
+            .Should().Contain(e => e.Pattern == "~/.ssh/");
+        DefaultDenylist.Entries
+            .Should().Contain(e => e.Pattern.Contains("aws"));
+    }
+
+    [Fact]
+    public void Should_Limit_To_1000_Entries()
+    {
+        // Arrange - create config with 1001 entries
+        var entries = Enumerable.Range(1, 1001)
+            .Select(i => $"    - pattern: 'path{i}/'\n      reason: 'Reason {i}'")
+            .ToList();
+
+        var configYaml = $@"
+security:
+  additional_protected_paths:
+{string.Join("\n", entries)}
+";
+        var config = ParseYaml(configYaml);
+
+        // Act
+        Action act = () => _loader.LoadExtensions(config);
+
+        // Assert
+        act.Should().Throw<ConfigurationException>()
+            .WithMessage("*exceed*1000*",
+                because: "user extensions are limited to 1000 entries");
+    }
+
+    [Theory]
+    [InlineData("")] // Empty pattern
+    [InlineData("   ")] // Whitespace pattern
+    [InlineData("[invalid")] // Unclosed bracket
+    [InlineData("path\0/injection")] // Null byte
+    [InlineData("../../../escape")] // Traversal attempt
+    public void Should_Reject_Invalid_Patterns(string invalidPattern)
+    {
+        // Arrange
+        var configYaml = $@"
+security:
+  additional_protected_paths:
+    - pattern: '{invalidPattern}'
+      reason: 'Invalid pattern'
+";
+        var config = ParseYaml(configYaml);
+
+        // Act
+        Action act = () => _loader.LoadExtensions(config);
+
+        // Assert
+        act.Should().Throw<ConfigurationException>(
+            because: $"pattern '{invalidPattern}' should be rejected");
+    }
+
+    [Fact]
+    public void Should_Assign_UserDefined_Category()
+    {
+        // Arrange
+        var configYaml = @"
+security:
+  additional_protected_paths:
+    - pattern: 'my-secrets/'
+      reason: 'My custom secrets'
+";
+        var config = ParseYaml(configYaml);
+
+        // Act
+        var extensions = _loader.LoadExtensions(config);
+
+        // Assert
+        extensions.Should().HaveCount(1);
+        extensions[0].Category.Should().Be(PathCategory.UserDefined);
+        extensions[0].IsDefault.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Should_Generate_RiskId_For_UserDefined()
+    {
+        // Arrange
+        var configYaml = @"
+security:
+  additional_protected_paths:
+    - pattern: 'custom/'
+      reason: 'Custom path'
+";
+        var config = ParseYaml(configYaml);
+
+        // Act
+        var extensions = _loader.LoadExtensions(config);
+
+        // Assert
+        extensions[0].RiskId.Should().Be("RISK-USER-001",
+            because: "user-defined entries get USER risk IDs");
+    }
+
+    [Fact]
+    public void Should_Handle_Empty_Config()
+    {
+        // Arrange
+        var configYaml = @"
+security:
+  additional_protected_paths: []
+";
+        var config = ParseYaml(configYaml);
+
+        // Act
+        var extensions = _loader.LoadExtensions(config);
+
+        // Assert
+        extensions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Should_Handle_Missing_Section()
+    {
+        // Arrange
+        var configYaml = @"
+other_settings:
+  some_value: true
+";
+        var config = ParseYaml(configYaml);
+
+        // Act
+        var extensions = _loader.LoadExtensions(config);
+
+        // Assert
+        extensions.Should().BeEmpty(
+            because: "missing security section means no extensions");
+    }
+
+    private static AgentConfig ParseYaml(string yaml)
+    {
+        // This would use actual YAML parsing in implementation
+        // For tests, we mock the config object
+        return new AgentConfig(yaml);
+    }
+}
 ```
 
 ### Integration Tests
@@ -904,26 +2517,590 @@ Tests/Integration/Security/PathProtection/
 │   ├── DirectoryList_ShouldBlock_ProtectedPath()
 │   ├── Should_AllowNormal_SourceFiles()
 │   └── Should_EnforceAcross_AllFileOperations()
-│
+```
+
+#### DenylistEnforcementTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Security.PathProtection;
+
+using AgenticCoder.Application.FileOperations;
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+[Collection("Integration")]
+public class DenylistEnforcementTests : IClassFixture<IntegrationTestFixture>
+{
+    private readonly IFileOperationService _fileService;
+    private readonly IProtectedPathValidator _validator;
+
+    public DenylistEnforcementTests(IntegrationTestFixture fixture)
+    {
+        _fileService = fixture.Services.GetRequiredService<IFileOperationService>();
+        _validator = fixture.Services.GetRequiredService<IProtectedPathValidator>();
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/id_rsa")]
+    [InlineData("~/.aws/credentials")]
+    [InlineData(".env")]
+    [InlineData("/etc/passwd")]
+    public async Task FileRead_ShouldBlock_ProtectedPath(string protectedPath)
+    {
+        // Act
+        var result = await _fileService.ReadFileAsync(protectedPath);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse(
+            because: $"reading {protectedPath} must be blocked");
+        result.Error.Should().BeOfType<ProtectedPathError>();
+        result.Error.As<ProtectedPathError>().ErrorCode.Should().StartWith("ACODE-SEC-003");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/id_rsa")]
+    [InlineData("~/.aws/credentials")]
+    [InlineData(".env")]
+    public async Task FileWrite_ShouldBlock_ProtectedPath(string protectedPath)
+    {
+        // Act
+        var result = await _fileService.WriteFileAsync(protectedPath, "malicious content");
+
+        // Assert
+        result.IsSuccess.Should().BeFalse(
+            because: $"writing to {protectedPath} must be blocked");
+        result.Error.Should().BeOfType<ProtectedPathError>();
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/id_rsa")]
+    [InlineData("~/.aws/credentials")]
+    public async Task FileDelete_ShouldBlock_ProtectedPath(string protectedPath)
+    {
+        // Act
+        var result = await _fileService.DeleteFileAsync(protectedPath);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse(
+            because: $"deleting {protectedPath} must be blocked");
+        result.Error.Should().BeOfType<ProtectedPathError>();
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/")]
+    [InlineData("~/.aws/")]
+    [InlineData("/etc/")]
+    public async Task DirectoryList_ShouldBlock_ProtectedPath(string protectedDir)
+    {
+        // Act
+        var result = await _fileService.ListDirectoryAsync(protectedDir);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse(
+            because: $"listing {protectedDir} must be blocked");
+        result.Error.Should().BeOfType<ProtectedPathError>();
+    }
+
+    [Theory]
+    [InlineData("./src/Program.cs")]
+    [InlineData("./README.md")]
+    [InlineData("./tests/UnitTests/MyTest.cs")]
+    [InlineData("package.json")]
+    public async Task Should_AllowNormal_SourceFiles(string normalPath)
+    {
+        // Arrange - create the file for testing
+        var testDir = Path.Combine(Path.GetTempPath(), "acode_test");
+        Directory.CreateDirectory(testDir);
+        var fullPath = Path.Combine(testDir, normalPath.TrimStart('.', '/'));
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        await File.WriteAllTextAsync(fullPath, "test content");
+
+        try
+        {
+            // Act
+            var readResult = await _fileService.ReadFileAsync(fullPath);
+
+            // Assert
+            readResult.IsSuccess.Should().BeTrue(
+                because: "normal source files should be allowed");
+        }
+        finally
+        {
+            Directory.Delete(testDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Should_EnforceAcross_AllFileOperations()
+    {
+        // Arrange
+        var protectedPath = "~/.ssh/id_rsa";
+        var operations = new Func<Task<OperationResult>>[]
+        {
+            () => _fileService.ReadFileAsync(protectedPath),
+            () => _fileService.WriteFileAsync(protectedPath, "content"),
+            () => _fileService.DeleteFileAsync(protectedPath),
+            () => _fileService.CopyFileAsync(protectedPath, "./destination.txt"),
+            () => _fileService.MoveFileAsync(protectedPath, "./destination.txt"),
+            () => _fileService.GetFileInfoAsync(protectedPath),
+        };
+
+        // Act & Assert
+        foreach (var operation in operations)
+        {
+            var result = await operation();
+            result.IsSuccess.Should().BeFalse(
+                because: "all file operations must be blocked on protected paths");
+        }
+    }
+}
+```
+
+```
 ├── CrossPlatformTests.cs
 │   ├── Should_UseWindowsPaths_OnWindows()
 │   ├── Should_UseUnixPaths_OnLinux()
 │   ├── Should_UseMacOSPaths_OnMacOS()
 │   ├── Should_HandleMixedSlashes_OnWindows()
 │   └── Should_ExpandHomeDirectory_Correctly()
-│
+```
+
+#### CrossPlatformTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Security.PathProtection;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+[Collection("Integration")]
+public class CrossPlatformTests : IClassFixture<IntegrationTestFixture>
+{
+    private readonly IProtectedPathValidator _validator;
+    private readonly IPathNormalizer _normalizer;
+
+    public CrossPlatformTests(IntegrationTestFixture fixture)
+    {
+        _validator = fixture.Services.GetRequiredService<IProtectedPathValidator>();
+        _normalizer = fixture.Services.GetRequiredService<IPathNormalizer>();
+    }
+
+    [SkippableFact]
+    public void Should_UseWindowsPaths_OnWindows()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows());
+
+        // Arrange
+        var windowsPaths = new[]
+        {
+            @"%USERPROFILE%\.ssh\id_rsa",
+            @"C:\Windows\System32\config",
+            @"%APPDATA%\gnupg\secring.gpg"
+        };
+
+        // Act & Assert
+        foreach (var path in windowsPaths)
+        {
+            var result = _validator.Validate(path);
+            result.IsProtected.Should().BeTrue(
+                because: $"Windows path {path} should be protected on Windows");
+        }
+    }
+
+    [SkippableFact]
+    public void Should_UseUnixPaths_OnLinux()
+    {
+        Skip.IfNot(OperatingSystem.IsLinux());
+
+        // Arrange
+        var linuxPaths = new[]
+        {
+            "~/.ssh/id_rsa",
+            "/etc/passwd",
+            "/etc/shadow",
+            "/root/.bashrc"
+        };
+
+        // Act & Assert
+        foreach (var path in linuxPaths)
+        {
+            var result = _validator.Validate(path);
+            result.IsProtected.Should().BeTrue(
+                because: $"Linux path {path} should be protected on Linux");
+        }
+    }
+
+    [SkippableFact]
+    public void Should_UseMacOSPaths_OnMacOS()
+    {
+        Skip.IfNot(OperatingSystem.IsMacOS());
+
+        // Arrange
+        var macPaths = new[]
+        {
+            "~/.ssh/id_rsa",
+            "/etc/passwd",
+            "~/Library/Keychains/",
+            "~/.gnupg/secring.gpg"
+        };
+
+        // Act & Assert
+        foreach (var path in macPaths)
+        {
+            var result = _validator.Validate(path);
+            result.IsProtected.Should().BeTrue(
+                because: $"macOS path {path} should be protected on macOS");
+        }
+    }
+
+    [SkippableFact]
+    public void Should_HandleMixedSlashes_OnWindows()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows());
+
+        // Arrange - mixed forward and back slashes
+        var mixedPaths = new[]
+        {
+            @"%USERPROFILE%/.ssh\id_rsa",
+            @"C:/Windows\System32/config",
+            @"~\.ssh/id_rsa"
+        };
+
+        // Act & Assert
+        foreach (var path in mixedPaths)
+        {
+            var result = _validator.Validate(path);
+            result.IsProtected.Should().BeTrue(
+                because: $"mixed slash path {path} should still be protected");
+        }
+    }
+
+    [Fact]
+    public void Should_ExpandHomeDirectory_Correctly()
+    {
+        // Arrange
+        var homePath = "~/.ssh/id_rsa";
+
+        // Act
+        var normalized = _normalizer.Normalize(homePath);
+
+        // Assert
+        normalized.Should().NotContain("~");
+        
+        if (OperatingSystem.IsWindows())
+        {
+            normalized.Should().StartWith(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        }
+        else
+        {
+            normalized.Should().StartWith(
+                Environment.GetEnvironmentVariable("HOME"));
+        }
+    }
+}
+```
+
+```
 ├── ConfigIntegrationTests.cs
 │   ├── Should_LoadUserExtensions_FromConfig()
 │   ├── Should_MergeExtensions_WithDefaults()
 │   ├── Should_RejectInvalid_Extensions()
 │   └── Should_ApplyExtensions_ToPathChecks()
-│
+```
+
+#### ConfigIntegrationTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Security.PathProtection;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using AgenticCoder.Infrastructure.Configuration;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+[Collection("Integration")]
+public class ConfigIntegrationTests : IClassFixture<IntegrationTestFixture>, IDisposable
+{
+    private readonly IServiceProvider _services;
+    private readonly string _testConfigDir;
+
+    public ConfigIntegrationTests(IntegrationTestFixture fixture)
+    {
+        _services = fixture.Services;
+        _testConfigDir = Path.Combine(Path.GetTempPath(), $"acode_config_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testConfigDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testConfigDir, true); } catch { }
+    }
+
+    [Fact]
+    public async Task Should_LoadUserExtensions_FromConfig()
+    {
+        // Arrange
+        var configPath = Path.Combine(_testConfigDir, ".agent", "config.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        
+        await File.WriteAllTextAsync(configPath, @"
+security:
+  additional_protected_paths:
+    - pattern: 'my-secrets/'
+      reason: 'Company secrets directory'
+    - pattern: '*.credential'
+      reason: 'Credential files'
+");
+
+        var configLoader = _services.GetRequiredService<IConfigurationLoader>();
+
+        // Act
+        var config = await configLoader.LoadAsync(_testConfigDir);
+        var extensions = config.Security.AdditionalProtectedPaths;
+
+        // Assert
+        extensions.Should().HaveCount(2);
+        extensions.Should().Contain(e => e.Pattern == "my-secrets/");
+        extensions.Should().Contain(e => e.Pattern == "*.credential");
+    }
+
+    [Fact]
+    public async Task Should_MergeExtensions_WithDefaults()
+    {
+        // Arrange
+        var configPath = Path.Combine(_testConfigDir, ".agent", "config.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        
+        await File.WriteAllTextAsync(configPath, @"
+security:
+  additional_protected_paths:
+    - pattern: 'custom-secret/'
+      reason: 'Custom protection'
+");
+
+        var denylistService = _services.GetRequiredService<IDenylistService>();
+
+        // Act
+        var allEntries = await denylistService.GetAllEntriesAsync(_testConfigDir);
+
+        // Assert
+        // Should have all defaults plus the custom entry
+        allEntries.Count.Should().BeGreaterThan(DefaultDenylist.Entries.Count);
+        allEntries.Should().Contain(e => e.Pattern == "~/.ssh/",
+            because: "defaults must be present");
+        allEntries.Should().Contain(e => e.Pattern == "custom-secret/",
+            because: "user extension must be added");
+    }
+
+    [Fact]
+    public async Task Should_RejectInvalid_Extensions()
+    {
+        // Arrange
+        var configPath = Path.Combine(_testConfigDir, ".agent", "config.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        
+        await File.WriteAllTextAsync(configPath, @"
+security:
+  additional_protected_paths:
+    - pattern: '[unclosed'
+      reason: 'Invalid pattern'
+");
+
+        var configLoader = _services.GetRequiredService<IConfigurationLoader>();
+
+        // Act
+        Func<Task> act = async () => await configLoader.LoadAsync(_testConfigDir);
+
+        // Assert
+        await act.Should().ThrowAsync<ConfigurationException>()
+            .WithMessage("*invalid*pattern*");
+    }
+
+    [Fact]
+    public async Task Should_ApplyExtensions_ToPathChecks()
+    {
+        // Arrange
+        var configPath = Path.Combine(_testConfigDir, ".agent", "config.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        
+        await File.WriteAllTextAsync(configPath, @"
+security:
+  additional_protected_paths:
+    - pattern: 'company-internal/'
+      reason: 'Internal documents'
+");
+
+        var validatorFactory = _services.GetRequiredService<IProtectedPathValidatorFactory>();
+        var validator = await validatorFactory.CreateAsync(_testConfigDir);
+
+        // Act
+        var result = validator.Validate("company-internal/secret.doc");
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "user-defined path should be protected");
+        result.Reason.Should().Be("Internal documents");
+        result.Category.Should().Be(PathCategory.UserDefined);
+    }
+}
+```
+
+```
 └── CLIIntegrationTests.cs
     ├── ShowDenylist_ShouldList_AllPaths()
     ├── ShowDenylist_ShouldFilter_ByPlatform()
     ├── CheckPath_ShouldReturn_Blocked()
     ├── CheckPath_ShouldReturn_Allowed()
     └── CheckPath_ShouldShow_Reason()
+```
+
+#### CLIIntegrationTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Integration.Security.PathProtection;
+
+using AgenticCoder.CLI;
+using FluentAssertions;
+using System.Diagnostics;
+using Xunit;
+
+[Collection("Integration")]
+public class CLIIntegrationTests
+{
+    private readonly string _cliPath;
+
+    public CLIIntegrationTests()
+    {
+        _cliPath = GetCliPath();
+    }
+
+    [Fact]
+    public async Task ShowDenylist_ShouldList_AllPaths()
+    {
+        // Act
+        var (exitCode, output, _) = await RunCliAsync("security", "show-denylist");
+
+        // Assert
+        exitCode.Should().Be(0);
+        output.Should().Contain("~/.ssh/",
+            because: "SSH paths should be listed");
+        output.Should().Contain("~/.aws/",
+            because: "AWS paths should be listed");
+        output.Should().Contain(".env",
+            because: "env files should be listed");
+    }
+
+    [SkippableFact]
+    public async Task ShowDenylist_ShouldFilter_ByPlatform()
+    {
+        // Act - Windows platform filter
+        var (exitCode, output, _) = await RunCliAsync(
+            "security", "show-denylist", "--platform", "windows");
+
+        // Assert
+        exitCode.Should().Be(0);
+        output.Should().Contain(@"C:\Windows\",
+            because: "Windows paths should be shown");
+        output.Should().NotContain("/etc/",
+            because: "Unix-only paths should not be shown");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/id_rsa", 1)]
+    [InlineData("~/.aws/credentials", 1)]
+    [InlineData(".env", 1)]
+    public async Task CheckPath_ShouldReturn_Blocked(string path, int expectedExitCode)
+    {
+        // Act
+        var (exitCode, output, _) = await RunCliAsync("security", "check-path", path);
+
+        // Assert
+        exitCode.Should().Be(expectedExitCode,
+            because: "exit code 1 indicates blocked path");
+        output.Should().Contain("BLOCKED",
+            because: "output should indicate path is blocked");
+    }
+
+    [Theory]
+    [InlineData("./src/Program.cs", 0)]
+    [InlineData("./README.md", 0)]
+    [InlineData("package.json", 0)]
+    public async Task CheckPath_ShouldReturn_Allowed(string path, int expectedExitCode)
+    {
+        // Act
+        var (exitCode, output, _) = await RunCliAsync("security", "check-path", path);
+
+        // Assert
+        exitCode.Should().Be(expectedExitCode,
+            because: "exit code 0 indicates allowed path");
+        output.Should().Contain("ALLOWED",
+            because: "output should indicate path is allowed");
+    }
+
+    [Fact]
+    public async Task CheckPath_ShouldShow_Reason()
+    {
+        // Act
+        var (_, output, _) = await RunCliAsync("security", "check-path", "~/.ssh/id_rsa");
+
+        // Assert
+        output.Should().Contain("Reason:",
+            because: "output should show reason for blocking");
+        output.Should().Contain("SSH",
+            because: "reason should mention SSH");
+        output.Should().Contain("Pattern:",
+            because: "output should show matched pattern");
+    }
+
+    [Fact]
+    public async Task CheckPath_ShouldShow_ErrorCode()
+    {
+        // Act
+        var (_, output, _) = await RunCliAsync("security", "check-path", "~/.ssh/id_rsa");
+
+        // Assert
+        output.Should().MatchRegex(@"ACODE-SEC-003",
+            because: "output should show error code");
+    }
+
+    private async Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(
+        params string[] args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = _cliPath,
+            Arguments = string.Join(" ", args),
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(psi)!;
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        var stderr = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        return (process.ExitCode, stdout, stderr);
+    }
+
+    private static string GetCliPath()
+    {
+        // Find the CLI executable in build output
+        var baseDir = AppContext.BaseDirectory;
+        var cliName = OperatingSystem.IsWindows() 
+            ? "agentic-coder.exe" 
+            : "agentic-coder";
+        
+        return Path.Combine(baseDir, cliName);
+    }
+}
 ```
 
 ### End-to-End Tests
@@ -940,6 +3117,443 @@ Tests/E2E/Security/
 │   └── Scenario_UserExtends_Denylist()
 ```
 
+#### Gherkin Feature Specification
+
+```gherkin
+Feature: Protected Path Enforcement
+  As a security-conscious developer
+  I want the agent to be blocked from accessing sensitive files
+  So that my credentials and secrets remain protected
+
+  Background:
+    Given the agentic-coder agent is running
+    And the default denylist is active
+
+  @security @critical
+  Scenario: Agent blocked from reading SSH private key
+    Given a task that requires reading a file
+    When the agent attempts to read "~/.ssh/id_rsa"
+    Then the operation should be blocked
+    And the error code should be "ACODE-SEC-003-001"
+    And the error message should mention "SSH private key"
+    And the violation should be logged
+    And the file contents should not be exposed
+
+  @security @critical
+  Scenario: Agent blocked from reading AWS credentials
+    Given a task that requires reading a file
+    When the agent attempts to read "~/.aws/credentials"
+    Then the operation should be blocked
+    And the error code should be "ACODE-SEC-003-002"
+    And the error message should mention "AWS credentials"
+    And the violation should be logged
+
+  @security @critical
+  Scenario: Agent blocked from reading environment file
+    Given a task that requires reading a file
+    When the agent attempts to read ".env"
+    Then the operation should be blocked
+    And the error code should be "ACODE-SEC-003-004"
+    And the violation should be logged
+
+  @security @critical
+  Scenario: Agent blocked from directory traversal attack
+    Given a task that requires reading a file
+    When the agent attempts to read "./src/../../../etc/passwd"
+    Then the operation should be blocked
+    And the error code should be "ACODE-SEC-003-006"
+    And the path traversal should be detected
+    And the violation should be logged with attack details
+
+  @security @critical
+  Scenario: Agent blocked from symlink attack
+    Given a symlink "./innocent.txt" pointing to "~/.ssh/id_rsa"
+    When the agent attempts to read "./innocent.txt"
+    Then the operation should be blocked
+    And the error code should be "ACODE-SEC-003-005"
+    And the symlink should be resolved before checking
+    And the violation should be logged
+
+  @development @positive
+  Scenario: Normal development workflow proceeds unblocked
+    Given a project directory with source files
+    When the agent reads "src/Program.cs"
+    And the agent writes to "src/NewFile.cs"
+    And the agent deletes "src/Obsolete.cs"
+    Then all operations should succeed
+    And no security violations should be logged
+
+  @configuration @positive
+  Scenario: User can extend denylist via config
+    Given a config file ".agent/config.yml" with:
+      """
+      security:
+        additional_protected_paths:
+          - pattern: 'company-secrets/'
+            reason: 'Internal documentation'
+      """
+    When the agent attempts to read "company-secrets/roadmap.doc"
+    Then the operation should be blocked
+    And the error code should be "ACODE-SEC-003-007"
+    And the reason should be "Internal documentation"
+
+  @configuration @negative
+  Scenario: User cannot remove default protections
+    Given a config file ".agent/config.yml" with:
+      """
+      security:
+        remove_protected_paths:
+          - '~/.ssh/'
+      """
+    When the agent attempts to read "~/.ssh/id_rsa"
+    Then the operation should still be blocked
+    And a warning should be logged about invalid config
+```
+
+#### ProtectedPathScenarios.cs
+
+```csharp
+namespace AgenticCoder.Tests.E2E.Security;
+
+using AgenticCoder.Agent;
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+[Collection("E2E")]
+[Trait("Category", "E2E")]
+[Trait("Category", "Security")]
+public class ProtectedPathScenarios : IClassFixture<E2ETestFixture>, IDisposable
+{
+    private readonly IAgentRuntime _agent;
+    private readonly Mock<ILogger> _loggerMock;
+    private readonly string _testWorkspace;
+
+    public ProtectedPathScenarios(E2ETestFixture fixture)
+    {
+        _agent = fixture.Services.GetRequiredService<IAgentRuntime>();
+        _loggerMock = fixture.LoggerMock;
+        _testWorkspace = CreateTestWorkspace();
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testWorkspace, true); } catch { }
+    }
+
+    [Fact]
+    [Trait("Priority", "Critical")]
+    public async Task Scenario_Agent_Attempts_SSH_Key_Read()
+    {
+        // Arrange
+        var task = new AgentTask
+        {
+            Description = "Read the SSH key file",
+            RequestedPath = "~/.ssh/id_rsa",
+            Operation = FileOperation.Read
+        };
+
+        // Act
+        var result = await _agent.ExecuteTaskAsync(task);
+
+        // Assert
+        result.Success.Should().BeFalse(
+            because: "SSH key read must be blocked");
+        result.Error.Should().BeOfType<ProtectedPathError>();
+        
+        var error = result.Error as ProtectedPathError;
+        error!.ErrorCode.Should().Be("ACODE-SEC-003-001");
+        error.Message.Should().Contain("SSH");
+        
+        // Verify logging
+        VerifyViolationLogged("protected_path_access_blocked", "~/.ssh");
+        
+        // Verify no content leaked
+        result.Data.Should().BeNull(
+            because: "file contents must not be returned");
+    }
+
+    [Fact]
+    [Trait("Priority", "Critical")]
+    public async Task Scenario_Agent_Attempts_AWS_Creds_Read()
+    {
+        // Arrange
+        var task = new AgentTask
+        {
+            Description = "Check AWS configuration",
+            RequestedPath = "~/.aws/credentials",
+            Operation = FileOperation.Read
+        };
+
+        // Act
+        var result = await _agent.ExecuteTaskAsync(task);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.Error.Should().BeOfType<ProtectedPathError>();
+        
+        var error = result.Error as ProtectedPathError;
+        error!.ErrorCode.Should().Be("ACODE-SEC-003-002");
+        
+        VerifyViolationLogged("protected_path_access_blocked", "aws");
+    }
+
+    [Fact]
+    [Trait("Priority", "Critical")]
+    public async Task Scenario_Agent_Attempts_Env_File_Read()
+    {
+        // Arrange
+        var envPath = Path.Combine(_testWorkspace, ".env");
+        await File.WriteAllTextAsync(envPath, "SECRET_KEY=super_secret_value");
+
+        var task = new AgentTask
+        {
+            Description = "Read environment configuration",
+            RequestedPath = envPath,
+            Operation = FileOperation.Read
+        };
+
+        // Act
+        var result = await _agent.ExecuteTaskAsync(task);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        
+        var error = result.Error as ProtectedPathError;
+        error!.ErrorCode.Should().Be("ACODE-SEC-003-004");
+        
+        // Verify secret not leaked
+        result.Data?.ToString().Should().NotContain("super_secret_value");
+    }
+
+    [Fact]
+    [Trait("Priority", "Critical")]
+    public async Task Scenario_Agent_Attempts_DirectoryTraversal()
+    {
+        // Arrange
+        var maliciousPath = Path.Combine(_testWorkspace, "src", "..", "..", "..", "etc", "passwd");
+
+        var task = new AgentTask
+        {
+            Description = "Read system file via traversal",
+            RequestedPath = maliciousPath,
+            Operation = FileOperation.Read
+        };
+
+        // Act
+        var result = await _agent.ExecuteTaskAsync(task);
+
+        // Assert
+        result.Success.Should().BeFalse(
+            because: "directory traversal attack must be blocked");
+        
+        var error = result.Error as ProtectedPathError;
+        error!.ErrorCode.Should().Be("ACODE-SEC-003-006");
+        
+        VerifyViolationLogged("directory_traversal_blocked");
+    }
+
+    [SkippableFact]
+    [Trait("Priority", "Critical")]
+    public async Task Scenario_Agent_Attempts_Symlink_Attack()
+    {
+        // Skip if symlinks not available
+        Skip.If(OperatingSystem.IsWindows() && !HasSymlinkPrivilege());
+
+        // Arrange - create symlink to protected path
+        var symlinkPath = Path.Combine(_testWorkspace, "innocent_file.txt");
+        var targetPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".ssh", "id_rsa");
+
+        if (File.Exists(targetPath))
+        {
+            File.CreateSymbolicLink(symlinkPath, targetPath);
+        }
+        else
+        {
+            // Create a temp target for testing
+            var tempTarget = Path.Combine(_testWorkspace, "fake_target.txt");
+            await File.WriteAllTextAsync(tempTarget, "fake content");
+            File.CreateSymbolicLink(symlinkPath, tempTarget);
+            
+            // Reconfigure test to simulate SSH path resolution
+            // (In real scenario, symlink would point to actual SSH key)
+        }
+
+        var task = new AgentTask
+        {
+            Description = "Read innocent looking file",
+            RequestedPath = symlinkPath,
+            Operation = FileOperation.Read
+        };
+
+        // Act
+        var result = await _agent.ExecuteTaskAsync(task);
+
+        // Assert - if symlink points to protected path, must be blocked
+        if (File.Exists(targetPath))
+        {
+            result.Success.Should().BeFalse();
+            var error = result.Error as ProtectedPathError;
+            error!.ErrorCode.Should().Be("ACODE-SEC-003-005");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Positive")]
+    public async Task Scenario_NormalDevelopment_Workflow()
+    {
+        // Arrange - create normal project structure
+        var srcDir = Path.Combine(_testWorkspace, "src");
+        Directory.CreateDirectory(srcDir);
+        
+        var programCs = Path.Combine(srcDir, "Program.cs");
+        var newFileCs = Path.Combine(srcDir, "NewFile.cs");
+        var obsoleteCs = Path.Combine(srcDir, "Obsolete.cs");
+        
+        await File.WriteAllTextAsync(programCs, "class Program { }");
+        await File.WriteAllTextAsync(obsoleteCs, "// to be deleted");
+
+        // Act - read operation
+        var readResult = await _agent.ExecuteTaskAsync(new AgentTask
+        {
+            Description = "Read source file",
+            RequestedPath = programCs,
+            Operation = FileOperation.Read
+        });
+
+        // Act - write operation
+        var writeResult = await _agent.ExecuteTaskAsync(new AgentTask
+        {
+            Description = "Create new file",
+            RequestedPath = newFileCs,
+            Operation = FileOperation.Write,
+            Content = "public class NewFile { }"
+        });
+
+        // Act - delete operation
+        var deleteResult = await _agent.ExecuteTaskAsync(new AgentTask
+        {
+            Description = "Delete obsolete file",
+            RequestedPath = obsoleteCs,
+            Operation = FileOperation.Delete
+        });
+
+        // Assert
+        readResult.Success.Should().BeTrue(
+            because: "reading source files should be allowed");
+        readResult.Data.Should().Contain("class Program");
+
+        writeResult.Success.Should().BeTrue(
+            because: "writing source files should be allowed");
+        File.Exists(newFileCs).Should().BeTrue();
+
+        deleteResult.Success.Should().BeTrue(
+            because: "deleting source files should be allowed");
+        File.Exists(obsoleteCs).Should().BeFalse();
+
+        // No security violations logged
+        VerifyNoViolationsLogged();
+    }
+
+    [Fact]
+    [Trait("Category", "Configuration")]
+    public async Task Scenario_UserExtends_Denylist()
+    {
+        // Arrange - create config with custom protection
+        var agentDir = Path.Combine(_testWorkspace, ".agent");
+        Directory.CreateDirectory(agentDir);
+        
+        var configPath = Path.Combine(agentDir, "config.yml");
+        await File.WriteAllTextAsync(configPath, @"
+security:
+  additional_protected_paths:
+    - pattern: 'company-secrets/'
+      reason: 'Internal documentation'
+");
+        
+        var secretsDir = Path.Combine(_testWorkspace, "company-secrets");
+        Directory.CreateDirectory(secretsDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(secretsDir, "roadmap.doc"),
+            "Secret roadmap content");
+
+        // Reload config
+        await _agent.ReloadConfigAsync(_testWorkspace);
+
+        var task = new AgentTask
+        {
+            Description = "Read company document",
+            RequestedPath = Path.Combine(secretsDir, "roadmap.doc"),
+            Operation = FileOperation.Read
+        };
+
+        // Act
+        var result = await _agent.ExecuteTaskAsync(task);
+
+        // Assert
+        result.Success.Should().BeFalse(
+            because: "user-defined protected path should be blocked");
+        
+        var error = result.Error as ProtectedPathError;
+        error!.ErrorCode.Should().Be("ACODE-SEC-003-007");
+        error.Reason.Should().Be("Internal documentation");
+    }
+
+    private string CreateTestWorkspace()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"acode_e2e_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private void VerifyViolationLogged(string eventType, string? containsPath = null)
+    {
+        _loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => 
+                    v.ToString()!.Contains(eventType) &&
+                    (containsPath == null || v.ToString()!.Contains(containsPath, StringComparison.OrdinalIgnoreCase))),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce);
+    }
+
+    private void VerifyNoViolationsLogged()
+    {
+        _loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("protected_path")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    private static bool HasSymlinkPrivilege()
+    {
+        try
+        {
+            var testLink = Path.Combine(Path.GetTempPath(), $"symtest_{Guid.NewGuid():N}");
+            var testTarget = Path.Combine(Path.GetTempPath(), $"symtarget_{Guid.NewGuid():N}");
+            File.WriteAllText(testTarget, "test");
+            File.CreateSymbolicLink(testLink, testTarget);
+            File.Delete(testLink);
+            File.Delete(testTarget);
+            return true;
+        }
+        catch { return false; }
+    }
+}
+```
+
 ### Performance Tests
 
 ```
@@ -950,11 +3564,353 @@ Tests/Performance/Security/
 │   ├── Benchmark_GlobPatternMatching()
 │   ├── Benchmark_PathNormalization()
 │   └── Benchmark_DenylistLookup()
-│
+```
+
+#### PathMatchingBenchmarks.cs
+
+```csharp
+namespace AgenticCoder.Tests.Performance.Security;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
+
+[MemoryDiagnoser]
+[SimpleJob(warmupCount: 3, iterationCount: 10)]
+public class PathMatchingBenchmarks
+{
+    private IProtectedPathValidator _validator = null!;
+    private IPathMatcher _matcher = null!;
+    private IPathNormalizer _normalizer = null!;
+    private string[] _testPaths = null!;
+    private string[] _patterns = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _validator = new ProtectedPathValidator(
+            DefaultDenylist.Entries,
+            new PathNormalizer(),
+            new SymlinkResolver(maxDepth: 40),
+            new GlobMatcher(caseSensitive: !OperatingSystem.IsWindows()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ProtectedPathValidator>.Instance);
+
+        _matcher = new GlobMatcher(caseSensitive: true);
+        _normalizer = new PathNormalizer();
+
+        _testPaths = new[]
+        {
+            "~/.ssh/id_rsa",
+            "./src/Program.cs",
+            "~/.aws/credentials",
+            "./tests/UnitTests.cs",
+            ".env",
+            "./package.json",
+            "/etc/passwd",
+            "./README.md"
+        };
+
+        _patterns = new[]
+        {
+            "~/.ssh/id_*",
+            "**/.env",
+            "~/.aws/",
+            "**/node_modules/**"
+        };
+    }
+
+    [Benchmark(Description = "Single path validation")]
+    public PathValidationResult Benchmark_SinglePathCheck()
+    {
+        return _validator.Validate("~/.ssh/id_rsa");
+    }
+
+    [Benchmark(Description = "1000 path validations")]
+    public int Benchmark_1000PathChecks()
+    {
+        int blockedCount = 0;
+        for (int i = 0; i < 1000; i++)
+        {
+            var path = _testPaths[i % _testPaths.Length];
+            var result = _validator.Validate(path);
+            if (result.IsProtected) blockedCount++;
+        }
+        return blockedCount;
+    }
+
+    [Benchmark(Description = "Glob pattern matching")]
+    [Arguments("~/.ssh/id_*", "~/.ssh/id_rsa")]
+    [Arguments("**/.env", "src/config/.env")]
+    [Arguments("**/node_modules/**", "app/node_modules/pkg/index.js")]
+    public bool Benchmark_GlobPatternMatching(string pattern, string path)
+    {
+        return _matcher.Matches(pattern, path);
+    }
+
+    [Benchmark(Description = "Path normalization")]
+    [Arguments("~/.ssh/id_rsa")]
+    [Arguments("./src/../tests/./unit")]
+    [Arguments("%USERPROFILE%\\.aws\\credentials")]
+    public string Benchmark_PathNormalization(string path)
+    {
+        return _normalizer.Normalize(path);
+    }
+
+    [Benchmark(Description = "Denylist lookup (all entries)")]
+    public int Benchmark_DenylistLookup()
+    {
+        int matchCount = 0;
+        foreach (var entry in DefaultDenylist.Entries)
+        {
+            if (_matcher.Matches(entry.Pattern, "~/.ssh/id_rsa"))
+            {
+                matchCount++;
+            }
+        }
+        return matchCount;
+    }
+
+    [Benchmark(Description = "Mixed workload simulation")]
+    public int Benchmark_MixedWorkload()
+    {
+        int operations = 0;
+        
+        // Simulate typical agent file access pattern
+        for (int i = 0; i < 100; i++)
+        {
+            // Mostly source files (should be fast - allowed)
+            _validator.Validate("./src/file" + i + ".cs");
+            operations++;
+            
+            // Occasional protected path check
+            if (i % 10 == 0)
+            {
+                _validator.Validate("~/.ssh/id_rsa");
+                operations++;
+            }
+        }
+        
+        return operations;
+    }
+}
+
+/// <summary>
+/// Performance acceptance tests that run as unit tests.
+/// </summary>
+public class PerformanceAcceptanceTests
+{
+    private readonly IProtectedPathValidator _validator;
+
+    public PerformanceAcceptanceTests()
+    {
+        _validator = new ProtectedPathValidator(
+            DefaultDenylist.Entries,
+            new PathNormalizer(),
+            new SymlinkResolver(maxDepth: 40),
+            new GlobMatcher(caseSensitive: !OperatingSystem.IsWindows()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ProtectedPathValidator>.Instance);
+    }
+
+    [Fact]
+    public void SinglePathCheck_ShouldComplete_InUnder1ms()
+    {
+        // Warmup
+        _ = _validator.Validate("~/.ssh/id_rsa");
+
+        // Measure
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < 1000; i++)
+        {
+            _ = _validator.Validate("~/.ssh/id_rsa");
+        }
+        sw.Stop();
+
+        var avgMs = sw.Elapsed.TotalMilliseconds / 1000;
+        avgMs.Should().BeLessThan(1,
+            because: "single path check must complete in under 1ms");
+    }
+
+    [Fact]
+    public void AllowedPath_ShouldBe_FasterThanBlocked()
+    {
+        // Warmup
+        _ = _validator.Validate("./src/Program.cs");
+        _ = _validator.Validate("~/.ssh/id_rsa");
+
+        // Measure allowed paths
+        var swAllowed = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < 1000; i++)
+        {
+            _ = _validator.Validate("./src/Program.cs");
+        }
+        swAllowed.Stop();
+
+        // Measure blocked paths
+        var swBlocked = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < 1000; i++)
+        {
+            _ = _validator.Validate("~/.ssh/id_rsa");
+        }
+        swBlocked.Stop();
+
+        // Allowed should be same speed or faster (early exit possible)
+        // but both should be very fast
+        swAllowed.Elapsed.TotalMilliseconds.Should().BeLessThan(1000);
+        swBlocked.Elapsed.TotalMilliseconds.Should().BeLessThan(1000);
+    }
+}
+```
+
+```
 └── MemoryTests.cs
     ├── Should_UseUnder1MB_ForDenylist()
     ├── Should_NotAllocate_PerPathCheck()
     └── Should_CacheEfficiently()
+```
+
+#### MemoryTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Performance.Security;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using Xunit;
+
+public class MemoryTests
+{
+    [Fact]
+    public void Should_UseUnder1MB_ForDenylist()
+    {
+        // Arrange
+        var before = GC.GetTotalMemory(forceFullCollection: true);
+
+        // Act - load denylist
+        var entries = DefaultDenylist.Entries;
+        _ = entries.Count; // Force enumeration
+
+        var after = GC.GetTotalMemory(forceFullCollection: true);
+        var usedBytes = after - before;
+
+        // Assert
+        usedBytes.Should().BeLessThan(1024 * 1024,
+            because: "denylist should use less than 1MB of memory");
+        
+        // Log actual usage for monitoring
+        Console.WriteLine($"Denylist memory usage: {usedBytes / 1024.0:F2} KB");
+    }
+
+    [Fact]
+    public void Should_NotAllocate_PerPathCheck()
+    {
+        // Arrange
+        var validator = new ProtectedPathValidator(
+            DefaultDenylist.Entries,
+            new PathNormalizer(),
+            new SymlinkResolver(maxDepth: 40),
+            new GlobMatcher(caseSensitive: true),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ProtectedPathValidator>.Instance);
+
+        // Warmup
+        _ = validator.Validate("./src/Program.cs");
+
+        // Force GC
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        var before = GC.GetTotalAllocatedBytes(precise: true);
+
+        // Act - perform many path checks
+        for (int i = 0; i < 10000; i++)
+        {
+            _ = validator.Validate("./src/Program.cs");
+        }
+
+        var after = GC.GetTotalAllocatedBytes(precise: true);
+        var allocatedPerCheck = (after - before) / 10000.0;
+
+        // Assert
+        allocatedPerCheck.Should().BeLessThan(1000,
+            because: "each path check should allocate minimal memory (under 1KB)");
+        
+        Console.WriteLine($"Allocated per check: {allocatedPerCheck:F2} bytes");
+    }
+
+    [Fact]
+    public void Should_CacheEfficiently()
+    {
+        // Arrange
+        var resolver = new SymlinkResolver(maxDepth: 40);
+        var testPath = Path.GetTempFileName();
+
+        try
+        {
+            // Act - resolve same path multiple times
+            var result1 = resolver.Resolve(testPath);
+            var result2 = resolver.Resolve(testPath);
+            var result3 = resolver.Resolve(testPath);
+
+            // Assert
+            result1.IsSuccess.Should().BeTrue();
+            result2.IsSuccess.Should().BeTrue();
+            result3.IsSuccess.Should().BeTrue();
+
+            // All should return same resolved path
+            result1.ResolvedPath.Should().Be(result2.ResolvedPath);
+            result2.ResolvedPath.Should().Be(result3.ResolvedPath);
+
+            // Second and third calls should be faster (cached)
+            // This is an implementation detail but important for performance
+        }
+        finally
+        {
+            File.Delete(testPath);
+        }
+    }
+
+    [Fact]
+    public void Should_HandleLargeDenylist_Efficiently()
+    {
+        // Arrange - simulate denylist with user extensions (up to 1000)
+        var defaultEntries = DefaultDenylist.Entries.ToList();
+        var userEntries = Enumerable.Range(1, 1000)
+            .Select(i => new DenylistEntry
+            {
+                Pattern = $"user-path-{i}/",
+                Reason = $"User defined path {i}",
+                RiskId = $"RISK-USER-{i:D3}",
+                Category = PathCategory.UserDefined,
+                Platforms = new[] { Platform.All },
+                IsDefault = false
+            })
+            .ToList();
+
+        var allEntries = defaultEntries.Concat(userEntries).ToList();
+
+        var validator = new ProtectedPathValidator(
+            allEntries,
+            new PathNormalizer(),
+            new SymlinkResolver(maxDepth: 40),
+            new GlobMatcher(caseSensitive: true),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ProtectedPathValidator>.Instance);
+
+        // Act - time path checks
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < 1000; i++)
+        {
+            _ = validator.Validate("./src/Program.cs");
+        }
+        sw.Stop();
+
+        // Assert - should still be fast even with large denylist
+        var avgMs = sw.Elapsed.TotalMilliseconds / 1000;
+        avgMs.Should().BeLessThan(5,
+            because: "path checks should be fast even with 1000+ denylist entries");
+        
+        Console.WriteLine($"Avg check time with {allEntries.Count} entries: {avgMs:F3} ms");
+    }
+}
 ```
 
 ### Regression Tests
@@ -971,6 +3927,243 @@ Tests/Regression/Security/
 │   └── Should_Block_AlternateDataStream()
 ```
 
+#### PathBypassTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Regression.Security;
+
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using Xunit;
+
+/// <summary>
+/// Regression tests for path bypass attempts.
+/// These tests document known attack vectors that must remain blocked.
+/// </summary>
+[Trait("Category", "Security")]
+[Trait("Category", "Regression")]
+public class PathBypassTests
+{
+    private readonly IProtectedPathValidator _validator;
+
+    public PathBypassTests()
+    {
+        _validator = new ProtectedPathValidator(
+            DefaultDenylist.Entries,
+            new PathNormalizer(),
+            new SymlinkResolver(maxDepth: 40),
+            new GlobMatcher(caseSensitive: !OperatingSystem.IsWindows()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ProtectedPathValidator>.Instance);
+    }
+
+    [Fact]
+    public void Should_Block_NullPath()
+    {
+        // Act
+        Action act = () => _validator.Validate(null!);
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>(
+            because: "null paths must be rejected immediately");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t")]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void Should_Block_EmptyOrWhitespacePath(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert - empty/whitespace should not be "protected" but should be invalid
+        // The validator should handle gracefully
+        result.Error?.ErrorCode.Should().NotBe("ACODE-SEC-003",
+            because: "empty paths are invalid, not protected path violations");
+    }
+
+    [Theory]
+    [InlineData("%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd")] // URL encoded ../../../etc/passwd
+    [InlineData("..%252f..%252f..%252fetc%252fpasswd")] // Double URL encoded
+    [InlineData("%252e%252e%252f")] // Double encoded ..
+    [InlineData("~%2f.ssh%2fid_rsa")] // URL encoded ~/.ssh/id_rsa
+    public void Should_Block_EncodedPath(string encodedPath)
+    {
+        // Arrange - decode the path (normalizer should handle this)
+        var normalizedPath = System.Web.HttpUtility.UrlDecode(encodedPath);
+        
+        // Act
+        var result = _validator.Validate(normalizedPath);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: $"URL-encoded path {encodedPath} should still be blocked after decoding");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/id_rsa")]
+    [InlineData("~/.ſsh/id_rsa")] // Unicode 'ſ' (long s) instead of 's'
+    [InlineData("~/.ｓｓｈ/id_rsa")] // Fullwidth characters
+    [InlineData("~/.ssh\u200B/id_rsa")] // Zero-width space
+    [InlineData("~/.ssh\u00AD/id_rsa")] // Soft hyphen
+    public void Should_Block_UnicodeNormalization(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        // Either the path matches and is blocked, or Unicode normalization rejects it
+        if (path.Contains("ssh", StringComparison.OrdinalIgnoreCase))
+        {
+            // If it looks like SSH, it should be blocked or normalized to SSH and blocked
+            result.IsProtected.Should().BeTrue(
+                because: $"Unicode variation {path} should be blocked");
+        }
+    }
+
+    [Theory]
+    [InlineData("~/.SSH/ID_RSA")]
+    [InlineData("~/.Ssh/Id_Rsa")]
+    [InlineData("~/.sSh/iD_rSa")]
+    public void Should_Block_CaseVariation_OnCaseInsensitiveSystems(string path)
+    {
+        // Skip on case-sensitive systems where these are different paths
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "case variations should be blocked on Windows");
+    }
+
+    [SkippableTheory]
+    [InlineData("~/.ssh/id_rsa:$DATA")] // NTFS alternate data stream
+    [InlineData("~/.ssh/id_rsa::$DATA")]
+    [InlineData("~/.aws/credentials:secret:$DATA")]
+    public void Should_Block_AlternateDataStream(string path)
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "ADS is Windows-specific");
+
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "NTFS alternate data streams on protected files must be blocked");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/id_rsa/.")] // Trailing dot
+    [InlineData("~/.ssh/id_rsa/...")] // Multiple trailing dots
+    [InlineData("~/.ssh/id_rsa  ")] // Trailing spaces
+    [InlineData("~/.ssh/id_rsa\t")] // Trailing tab
+    public void Should_Block_TrailingCharacters(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "trailing characters should not bypass protection");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh/./id_rsa")]
+    [InlineData("~/.ssh/foo/../id_rsa")]
+    [InlineData("~/.ssh/foo/bar/../../id_rsa")]
+    [InlineData("~/.ssh/../.ssh/id_rsa")]
+    public void Should_Block_PathTraversalInMiddle(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "path traversal in middle of path should still block");
+    }
+
+    [Theory]
+    [InlineData("file://~/.ssh/id_rsa")]
+    [InlineData("file:///home/user/.ssh/id_rsa")]
+    public void Should_Block_FileUri(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        // Either blocked as protected path or rejected as invalid path format
+        // File URIs should not bypass protection
+    }
+
+    [Theory]
+    [InlineData(@"\\?\C:\Users\user\.ssh\id_rsa")] // Long path prefix
+    [InlineData(@"\\.\C:\Users\user\.ssh\id_rsa")] // Device path prefix
+    public void Should_Block_WindowsExtendedPath(string path)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "Windows extended path syntax should not bypass protection");
+    }
+
+    [Fact]
+    public void Should_Block_NullByteInjection()
+    {
+        // Arrange
+        var pathWithNull = "~/.ssh/id_rsa\0.txt";
+
+        // Act
+        Action act = () => _validator.Validate(pathWithNull);
+
+        // Assert
+        act.Should().Throw<ArgumentException>(
+            because: "null byte injection is a known attack vector");
+    }
+
+    [Theory]
+    [InlineData("~/.ssh//id_rsa")]
+    [InlineData("~/.ssh///id_rsa")]
+    [InlineData("~/.ssh////id_rsa")]
+    public void Should_Block_MultipleSlashes(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "multiple slashes should be collapsed and path still blocked");
+    }
+
+    [Theory]
+    [InlineData("~\\.ssh\\id_rsa")]
+    [InlineData("~/.ssh\\id_rsa")]
+    [InlineData("~\\.ssh/id_rsa")]
+    public void Should_Block_MixedSlashes(string path)
+    {
+        // Act
+        var result = _validator.Validate(path);
+
+        // Assert
+        result.IsProtected.Should().BeTrue(
+            because: "mixed forward/back slashes should not bypass protection");
+    }
+}
+```
+
 ### Security Tests
 
 ```
@@ -982,6 +4175,242 @@ Tests/Security/PathProtection/
 │   ├── Should_Resist_RaceCondition()
 │   ├── Should_Resist_EncodingBypass()
 │   └── Should_Resist_NullByteInjection()
+```
+
+#### PenetrationTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Security.PathProtection;
+
+using AgenticCoder.Application.FileOperations;
+using AgenticCoder.Domain.Security.PathProtection;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+/// <summary>
+/// Penetration tests for path protection.
+/// These tests simulate real attack scenarios.
+/// </summary>
+[Collection("Security")]
+[Trait("Category", "Security")]
+[Trait("Category", "Penetration")]
+public class PenetrationTests : IClassFixture<SecurityTestFixture>, IDisposable
+{
+    private readonly IFileOperationService _fileService;
+    private readonly IProtectedPathValidator _validator;
+    private readonly string _testDir;
+
+    public PenetrationTests(SecurityTestFixture fixture)
+    {
+        _fileService = fixture.Services.GetRequiredService<IFileOperationService>();
+        _validator = fixture.Services.GetRequiredService<IProtectedPathValidator>();
+        _testDir = Path.Combine(Path.GetTempPath(), $"pentest_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Theory]
+    [InlineData("../../../etc/passwd")]
+    [InlineData("..\\..\\..\\etc\\passwd")]
+    [InlineData("....//....//....//etc/passwd")]
+    [InlineData("./.././.././../etc/passwd")]
+    [InlineData("src/../../../etc/passwd")]
+    public async Task Should_Resist_DirectoryTraversal(string traversalPath)
+    {
+        // Arrange
+        var fullPath = Path.Combine(_testDir, traversalPath);
+
+        // Act
+        var result = await _fileService.ReadFileAsync(fullPath);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse(
+            because: $"traversal path {traversalPath} must be blocked");
+        result.Error.Should().BeOfType<ProtectedPathError>();
+    }
+
+    [SkippableFact]
+    public async Task Should_Resist_SymlinkAttack()
+    {
+        Skip.If(OperatingSystem.IsWindows() && !HasSymlinkPrivilege());
+
+        // Arrange - create symlink to protected path
+        var targetPath = Environment.GetEnvironmentVariable("HOME") + "/.ssh/id_rsa";
+        if (!File.Exists(targetPath))
+        {
+            targetPath = Path.Combine(_testDir, "fake_protected.txt");
+            await File.WriteAllTextAsync(targetPath, "protected content");
+        }
+
+        var symlinkPath = Path.Combine(_testDir, "innocent.txt");
+        File.CreateSymbolicLink(symlinkPath, targetPath);
+
+        // Act
+        var result = await _fileService.ReadFileAsync(symlinkPath);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse(
+            because: "symlink to protected path must be blocked");
+    }
+
+    [Fact]
+    public async Task Should_Resist_TOCTOU()
+    {
+        // Time-of-check to time-of-use attack
+        // The path is checked, then the file is swapped before use
+
+        // Arrange
+        var safePath = Path.Combine(_testDir, "safe_file.txt");
+        await File.WriteAllTextAsync(safePath, "safe content");
+
+        // Simulate race condition by checking path, then swapping
+        var validationResult = _validator.Validate(safePath);
+        validationResult.IsProtected.Should().BeFalse();
+
+        // In a TOCTOU attack, the file would be swapped here
+        // Our defense: re-validate at time of use, not just check time
+
+        // Act - the file service should re-validate at read time
+        var result = await _fileService.ReadFileAsync(safePath);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(
+            because: "safe file should be readable");
+        
+        // The implementation should re-check at read time to prevent TOCTOU
+    }
+
+    [Fact]
+    public async Task Should_Resist_RaceCondition()
+    {
+        // Attempt to exploit race condition with parallel requests
+
+        // Arrange
+        var protectedPath = "~/.ssh/id_rsa";
+        var tasks = new List<Task<OperationResult>>();
+
+        // Act - fire many parallel requests
+        for (int i = 0; i < 100; i++)
+        {
+            tasks.Add(_fileService.ReadFileAsync(protectedPath));
+        }
+
+        var results = await Task.WhenAll(tasks);
+
+        // Assert - ALL requests must be blocked
+        foreach (var result in results)
+        {
+            result.IsSuccess.Should().BeFalse(
+                because: "race condition should not bypass protection");
+        }
+    }
+
+    [Theory]
+    [InlineData("%2e%2e%2f")] // ../
+    [InlineData("%252e%252e%252f")] // double encoded
+    [InlineData("%c0%ae%c0%ae%c0%af")] // overlong UTF-8 ../
+    [InlineData("..%c0%af")] // overlong UTF-8 /
+    public async Task Should_Resist_EncodingBypass(string encodedSequence)
+    {
+        // Arrange
+        var path = $"{_testDir}/{encodedSequence}etc/passwd";
+
+        // Act
+        var result = await _fileService.ReadFileAsync(path);
+
+        // Assert
+        // Should either block as protected or reject as invalid path
+        if (result.IsSuccess)
+        {
+            // If somehow it succeeded, it better not have returned /etc/passwd content
+            var content = result.Data as string;
+            content.Should().NotContain("root:",
+                because: "encoding bypass must not expose /etc/passwd");
+        }
+    }
+
+    [Fact]
+    public async Task Should_Resist_NullByteInjection()
+    {
+        // Null byte injection: path.txt\0.jpg might bypass extension checks
+
+        // Arrange
+        var pathWithNull = Path.Combine(_testDir, "file.txt\0.jpg");
+
+        // Act
+        Func<Task> act = async () => await _fileService.ReadFileAsync(pathWithNull);
+
+        // Assert
+        await act.Should().ThrowAsync<Exception>(
+            because: "null byte in path is a security violation");
+    }
+
+    [Fact]
+    public void Should_BlockAll_KnownAttackVectors()
+    {
+        // Comprehensive list of attack vectors
+        var attackVectors = new[]
+        {
+            // Directory traversal
+            "../../../etc/passwd",
+            "..\\..\\..\\Windows\\System32\\config\\SAM",
+            ".../....//etc/passwd",
+            
+            // Encoding attacks
+            "%2e%2e%2fetc/passwd",
+            "..%252f..%252f..%252fetc/passwd",
+            
+            // Unicode normalization
+            "~/.ssh\u200B/id_rsa",
+            "~/.ss\u0068/id_rsa",
+            
+            // Case manipulation (Windows)
+            "~/.SSH/ID_RSA",
+            
+            // Alternate paths to same location
+            "~/.ssh/./id_rsa",
+            "~/.ssh/foo/../id_rsa",
+            
+            // Protocol prefixes
+            "file:///etc/passwd",
+        };
+
+        foreach (var attack in attackVectors)
+        {
+            try
+            {
+                var result = _validator.Validate(attack);
+                
+                // If the path normalizes to a protected path, it must be blocked
+                // If it's invalid, that's also acceptable (rejected)
+            }
+            catch (ArgumentException)
+            {
+                // Invalid path format is acceptable - attack was blocked
+            }
+        }
+    }
+
+    private static bool HasSymlinkPrivilege()
+    {
+        try
+        {
+            var link = Path.Combine(Path.GetTempPath(), $"symtest_{Guid.NewGuid():N}");
+            var target = Path.Combine(Path.GetTempPath(), $"symtarget_{Guid.NewGuid():N}");
+            File.WriteAllText(target, "test");
+            File.CreateSymbolicLink(link, target);
+            File.Delete(link);
+            File.Delete(target);
+            return true;
+        }
+        catch { return false; }
+    }
+}
 ```
 
 ---

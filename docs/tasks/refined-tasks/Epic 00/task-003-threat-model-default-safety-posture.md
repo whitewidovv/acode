@@ -565,6 +565,275 @@ A: No. `.ssh/` is a protected path and inaccessible by default.
 **Q: What happens in Airgapped mode?**
 A: All network access is blocked, including localhost. Use offline models.
 
+**Q: How do I add custom secret patterns?**
+A: Add patterns to `.agent/config.yml` under `security.secret_patterns`.
+
+**Q: Can I whitelist a specific protected path?**
+A: Yes, use `security.protected_paths_whitelist` in config, but this is logged as a security event.
+
+**Q: How do I verify my security configuration is correct?**
+A: Run `acode security check --verbose` to see all active controls and their status.
+
+**Q: What's the difference between Confidential and Secret data?**
+A: Secret data (credentials, keys) is NEVER logged. Confidential data (source code) is logged locally but not sent externally in LocalOnly mode.
+
+**Q: How often should I review the audit logs?**
+A: For enterprise use, daily. For individual developers, weekly or after any security-relevant event.
+
+**Q: Can I export security audit logs for compliance?**
+A: Yes, use `acode security audit --export json --output audit-report.json`.
+
+**Q: What happens if I accidentally commit a secret?**
+A: Acode will detect it during commit and block the push. Use `acode security scan-secrets --fix` to help remediate.
+
+**Q: How do I report a security vulnerability in Acode?**
+A: Email security@acode.dev or use the private vulnerability disclosure process in SECURITY.md.
+
+### Advanced Security Configuration
+
+#### Custom Security Policies
+
+Organizations can define custom security policies by creating a `.agent/security-policy.yml` file:
+
+```yaml
+# .agent/security-policy.yml
+version: "1.0"
+
+# Organization-wide security policy
+policy:
+  name: "Enterprise Security Policy"
+  enforcement: strict  # strict | warn | audit
+
+# Mode restrictions
+modes:
+  allowed:
+    - local-only
+    - airgapped
+  # burst mode requires additional approval
+  burst_requires_approval: true
+  burst_approval_webhook: "https://security.corp.com/acode/approve"
+
+# Enhanced secret detection
+secrets:
+  # Additional patterns beyond defaults
+  patterns:
+    - "(?i)corp[_-]?api[_-]?key"
+    - "(?i)internal[_-]?token"
+    - "AKID[A-Z0-9]{16}"  # AWS access key pattern
+  
+  # Files to always scan
+  always_scan:
+    - "*.env*"
+    - "*config*.json"
+    - "*secrets*"
+  
+  # Block commit if secrets detected
+  block_on_detection: true
+
+# Enhanced path protection
+protected_paths:
+  # Corporate-specific protected paths
+  additional:
+    - ".corp/"
+    - "internal/"
+    - "proprietary/"
+  
+  # Paths that require audit logging when accessed
+  audit_on_access:
+    - "credentials/"
+    - "certs/"
+
+# Data loss prevention
+dlp:
+  enabled: true
+  # Block these file types from being processed
+  blocked_extensions:
+    - ".pem"
+    - ".key"
+    - ".p12"
+    - ".pfx"
+  
+  # Maximum file size (prevents exfiltration of large datasets)
+  max_file_size_mb: 5
+
+# Audit requirements
+audit:
+  # Require audit logging
+  required: true
+  
+  # Minimum retention period
+  retention_days: 90
+  
+  # Events that must be logged
+  required_events:
+    - mode_change
+    - protected_path_access
+    - secret_detection
+    - external_network_attempt
+    - consent_request
+    - consent_response
+
+# Network restrictions
+network:
+  # Allowed endpoints (whitelist) - only applies in Burst mode
+  allowed_endpoints:
+    - "localhost:*"
+    - "ollama.internal.corp.com:11434"
+  
+  # Blocked endpoints (blacklist)
+  blocked_endpoints:
+    - "*.openai.com"
+    - "*.anthropic.com"
+```
+
+#### Security Event Webhook Integration
+
+Configure webhooks to receive security events in real-time:
+
+```yaml
+# .agent/config.yml
+security:
+  webhooks:
+    # Send security events to SIEM
+    - url: "https://siem.corp.com/api/events"
+      events:
+        - invariant_violation
+        - secret_detection
+        - mode_violation
+      format: json
+      headers:
+        Authorization: "Bearer ${SIEM_TOKEN}"
+    
+    # Send to Slack for alerts
+    - url: "https://hooks.slack.com/services/..."
+      events:
+        - invariant_violation
+      format: slack
+```
+
+#### Security Metrics and Reporting
+
+```bash
+# Generate security metrics report
+acode security metrics --period 30d
+
+# Output:
+# Security Metrics Report (Last 30 Days)
+# ═══════════════════════════════════════
+# 
+# Events Summary:
+#   Total Security Events: 1,247
+#   Critical Events: 0
+#   Warning Events: 23
+#   Info Events: 1,224
+# 
+# Top Event Types:
+#   1. Trust Boundary Crossing: 892 (71.5%)
+#   2. Secret Redaction: 234 (18.8%)
+#   3. Protected Path Access Denied: 89 (7.1%)
+#   4. Mode Validation: 32 (2.6%)
+# 
+# Security Posture Score: 98/100
+#   ✓ All invariants enforced
+#   ✓ No unredacted secrets logged
+#   ✓ No mode violations
+#   ⚠ 3 configuration warnings
+
+# Export for compliance audit
+acode security metrics --export pdf --output security-report.pdf
+```
+
+### Security Incident Response
+
+#### Detecting Security Incidents
+
+```bash
+# Real-time security monitoring
+acode security monitor --level warning
+
+# Check for anomalies
+acode security anomalies --period 7d
+
+# Review critical events
+acode security audit --severity critical --period 24h
+```
+
+#### Responding to Incidents
+
+1. **Secret Exposure Detected**
+   ```bash
+   # Immediate: Rotate the exposed credential
+   # Review: Find all instances
+   acode security scan-secrets --all-history
+   
+   # Remediate: Remove from history if needed
+   git filter-branch --force --index-filter \
+     'git rm --cached --ignore-unmatch path/to/secret' HEAD
+   ```
+
+2. **Invariant Violation**
+   ```bash
+   # Review the violation
+   acode security audit --event-code ACODE-SEC-001 --last 1
+   
+   # Check system state
+   acode security status --verbose
+   
+   # If needed, reset to safe state
+   acode security reset --confirm
+   ```
+
+3. **Unauthorized Mode Change Attempt**
+   ```bash
+   # Review who attempted the change
+   acode security audit --event-code ACODE-SEC-005 --verbose
+   
+   # Lock mode if needed
+   acode config set security.mode_lock true
+   ```
+
+### Security Architecture Deep Dive
+
+#### Defense in Depth Layers
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        LAYER 1: INPUT VALIDATION                        │
+│  • Config schema validation    • Path sanitization                      │
+│  • Command argument validation • Input length limits                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                        LAYER 2: ACCESS CONTROL                          │
+│  • Operating mode enforcement  • Protected path blocking                │
+│  • Permission validation       • Consent verification                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                        LAYER 3: DATA PROTECTION                         │
+│  • Secret detection/redaction  • Data classification enforcement        │
+│  • Output sanitization         • Log filtering                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                        LAYER 4: RUNTIME PROTECTION                      │
+│  • Resource limits             • Timeout enforcement                    │
+│  • Process isolation           • Sandboxing (Docker mode)               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                        LAYER 5: MONITORING & AUDIT                      │
+│  • Comprehensive logging       • Tamper-evident audit trail             │
+│  • Real-time alerting          • Anomaly detection                      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Security Control Matrix
+
+| Control | LocalOnly | Burst | Airgapped | Implementation |
+|---------|-----------|-------|-----------|----------------|
+| External LLM Block | ✓ | ✗ | ✓ | ModeEnforcer |
+| Network Block | ✗ | ✗ | ✓ | NetworkGuard |
+| Secret Redaction | ✓ | ✓ | ✓ | SecretRedactor |
+| Path Protection | ✓ | ✓ | ✓ | PathValidator |
+| Audit Logging | ✓ | ✓ | ✓ | AuditLogger |
+| Consent Prompts | N/A | ✓ | N/A | ConsentManager |
+| Resource Limits | ✓ | ✓ | ✓ | ResourceLimiter |
+| Input Validation | ✓ | ✓ | ✓ | InputValidator |
+| Output Sanitization | ✓ | ✓ | ✓ | OutputSanitizer |
+
 ---
 
 ## Acceptance Criteria / Definition of Done
@@ -813,6 +1082,165 @@ A: All network access is blocked, including localhost. Use offline models.
 | UT-003-18 | Mode transition logged | Log entry created |
 | UT-003-19 | Command execution logged | Log entry created |
 | UT-003-20 | Audit log tamper-evident | Hash included |
+| UT-003-21 | Multiple secret patterns detected in single file | All secrets flagged |
+| UT-003-22 | Nested path traversal detected (../../..) | Access denied |
+| UT-003-23 | Unicode path traversal detected | Access denied |
+| UT-003-24 | Null byte injection in path rejected | Access denied |
+| UT-003-25 | Case-insensitive protected path matching | Access denied for .SSH/ |
+
+#### Unit Test Code Examples
+
+```csharp
+[Fact]
+public async Task LocalOnlyMode_BlocksExternalLlmRequest()
+{
+    // Arrange
+    var modeEnforcer = new ModeEnforcer(OperatingMode.LocalOnly);
+    var externalEndpoint = new Uri("https://api.external-llm.com/v1/chat");
+    
+    // Act
+    var result = modeEnforcer.IsEndpointAllowed(externalEndpoint);
+    
+    // Assert
+    result.Should().BeFalse();
+    result.BlockReason.Should().Be("External LLM endpoints blocked in LocalOnly mode");
+    result.EventCode.Should().Be("ACODE-SEC-005");
+}
+
+[Fact]
+public async Task SecretRedactor_RedactsAllPatterns()
+{
+    // Arrange
+    var redactor = new SecretRedactor(SecretRedactor.DefaultPatterns);
+    var input = """
+        API_KEY=sk-1234567890abcdef
+        password=mysecretpassword
+        token=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        """;
+    
+    // Act
+    var result = redactor.Redact(input);
+    
+    // Assert
+    result.Should().NotContain("sk-1234567890abcdef");
+    result.Should().NotContain("mysecretpassword");
+    result.Should().NotContain("ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+    result.Should().Contain("[REDACTED]");
+}
+
+[Fact]
+public async Task PathValidator_BlocksProtectedPaths()
+{
+    // Arrange
+    var validator = new PathValidator(PathValidator.DefaultProtectedPaths);
+    var protectedPath = "/home/user/.ssh/id_rsa";
+    var repoRoot = "/home/user/projects/myrepo";
+    
+    // Act
+    var result = validator.Validate(protectedPath, repoRoot);
+    
+    // Assert
+    result.IsValid.Should().BeFalse();
+    result.Reason.Should().Be("Path is in protected directory: .ssh");
+    result.EventCode.Should().Be("ACODE-SEC-003");
+}
+
+[Fact]
+public async Task PathValidator_DetectsTraversalAttack()
+{
+    // Arrange
+    var validator = new PathValidator(PathValidator.DefaultProtectedPaths);
+    var maliciousPath = "src/../../../etc/passwd";
+    var repoRoot = "/home/user/projects/myrepo";
+    
+    // Act
+    var result = validator.Validate(maliciousPath, repoRoot);
+    
+    // Assert
+    result.IsValid.Should().BeFalse();
+    result.Reason.Should().Be("Path traversal detected");
+    result.EventCode.Should().Be("ACODE-SEC-006");
+}
+
+[Fact]
+public async Task InvariantEnforcer_HaltsOnViolation()
+{
+    // Arrange
+    var enforcer = new InvariantEnforcer();
+    var invariant = SecurityInvariant.NoExternalLlmInLocalOnly;
+    var context = new InvariantContext
+    {
+        CurrentMode = OperatingMode.LocalOnly,
+        AttemptedOperation = "ExternalLlmRequest"
+    };
+    
+    // Act & Assert
+    var exception = await Assert.ThrowsAsync<SecurityInvariantViolationException>(
+        () => enforcer.EnforceAsync(invariant, context));
+    
+    exception.EventCode.Should().Be("ACODE-SEC-001");
+    exception.Invariant.Should().Be(invariant);
+    exception.Severity.Should().Be(SecuritySeverity.Critical);
+}
+
+[Fact]
+public async Task FailSafeBehavior_UsesRestrictiveDefaultsOnConfigError()
+{
+    // Arrange
+    var configLoader = new SecurityConfigLoader();
+    var malformedConfig = "invalid: yaml: content: [";
+    
+    // Act
+    var result = await configLoader.LoadAsync(malformedConfig);
+    
+    // Assert
+    result.Mode.Should().Be(OperatingMode.LocalOnly);
+    result.ProtectedPathsEnabled.Should().BeTrue();
+    result.SecretRedactionEnabled.Should().BeTrue();
+    result.AuditLoggingEnabled.Should().BeTrue();
+    result.LoadWarnings.Should().Contain("Failed to parse config, using restrictive defaults");
+}
+
+[Fact]
+public async Task AuditLogger_CreatesTamperEvidentLog()
+{
+    // Arrange
+    var logger = new SecurityAuditLogger();
+    var securityEvent = new SecurityEvent
+    {
+        EventCode = "ACODE-SEC-002",
+        EventType = "TrustBoundaryCrossing",
+        Severity = SecuritySeverity.Info,
+        Timestamp = DateTimeOffset.UtcNow,
+        Details = new { Boundary = "LLM Output", Direction = "Inbound" }
+    };
+    
+    // Act
+    var logEntry = await logger.LogAsync(securityEvent);
+    
+    // Assert
+    logEntry.Hash.Should().NotBeNullOrEmpty();
+    logEntry.PreviousHash.Should().NotBeNullOrEmpty();
+    logEntry.Signature.Should().NotBeNullOrEmpty();
+    
+    // Verify tamper detection
+    var isValid = await logger.VerifyIntegrityAsync(logEntry);
+    isValid.Should().BeTrue();
+}
+
+[Fact]
+public async Task DataClassifier_ReturnsCorrectLevel()
+{
+    // Arrange
+    var classifier = new DataClassifier();
+    
+    // Act & Assert
+    classifier.Classify("api_key=sk-123").Should().Be(DataClassification.Secret);
+    classifier.Classify("public readme content").Should().Be(DataClassification.Public);
+    classifier.Classify("internal config value").Should().Be(DataClassification.Internal);
+    classifier.Classify("source code content").Should().Be(DataClassification.Confidential);
+}
+```
 
 ### Integration Tests
 
@@ -833,6 +1261,87 @@ A: All network access is blocked, including localhost. Use offline models.
 | IT-003-13 | All security controls active | Controls verified |
 | IT-003-14 | Security logging complete | All events logged |
 | IT-003-15 | Security configuration applied | Settings effective |
+| IT-003-16 | Webhook notification sent on critical event | Webhook receives event |
+| IT-003-17 | Security policy file merged with config | Policy applied |
+| IT-003-18 | Multiple concurrent security checks | No race conditions |
+
+#### Integration Test Code Examples
+
+```csharp
+[Fact]
+public async Task FullRequest_LocalOnlyMode_NoExternalNetwork()
+{
+    // Arrange
+    var services = new ServiceCollection();
+    services.AddAcodeSecurityServices(options =>
+    {
+        options.Mode = OperatingMode.LocalOnly;
+    });
+    var provider = services.BuildServiceProvider();
+    var networkMonitor = provider.GetRequiredService<INetworkMonitor>();
+    var agentRunner = provider.GetRequiredService<IAgentRunner>();
+    
+    networkMonitor.StartCapture();
+    
+    // Act
+    await agentRunner.ExecuteAsync(new AgentRequest
+    {
+        Task = "Analyze this code",
+        Files = new[] { "src/Program.cs" }
+    });
+    
+    // Assert
+    var externalCalls = networkMonitor.GetExternalNetworkCalls();
+    externalCalls.Should().BeEmpty();
+}
+
+[Fact]
+public async Task BurstMode_RequiresConsent_PromptsUser()
+{
+    // Arrange
+    var consentManager = new MockConsentManager();
+    var modeManager = new ModeManager(consentManager);
+    
+    // Act
+    var canUseBurst = await modeManager.RequestModeAsync(OperatingMode.Burst);
+    
+    // Assert
+    consentManager.ConsentWasRequested.Should().BeTrue();
+    consentManager.ConsentMessage.Should().Contain("send data to external LLM");
+    consentManager.ConsentMessage.Should().Contain("source code may be transmitted");
+}
+
+[Fact]
+public async Task SecurityControlsIntegration_AllLayersActive()
+{
+    // Arrange
+    var securityStack = new SecurityStackBuilder()
+        .AddInputValidation()
+        .AddAccessControl()
+        .AddDataProtection()
+        .AddRuntimeProtection()
+        .AddMonitoring()
+        .Build();
+    
+    var testRequest = new SecurityTestRequest
+    {
+        Path = "../../../etc/passwd",
+        Content = "API_KEY=secret123",
+        Mode = OperatingMode.LocalOnly,
+        ExternalEndpoint = "https://evil.com/exfiltrate"
+    };
+    
+    // Act
+    var results = await securityStack.ValidateAsync(testRequest);
+    
+    // Assert
+    results.Should().HaveCount(4);
+    results.Should().Contain(r => r.Layer == "InputValidation" && !r.Passed);
+    results.Should().Contain(r => r.Layer == "AccessControl" && !r.Passed);
+    results.Should().Contain(r => r.Layer == "DataProtection" && r.Passed); // Secret will be redacted
+    results.Should().Contain(r => r.Layer == "RuntimeProtection" && !r.Passed);
+}
+```
 
 ### End-to-End Tests
 
@@ -850,6 +1359,60 @@ A: All network access is blocked, including localhost. Use offline models.
 | E2E-003-10 | Invariant violation scenario | Operation halted |
 | E2E-003-11 | Trust boundary diagram accessible | Diagram shown |
 | E2E-003-12 | Security documentation accessible | Docs available |
+| E2E-003-13 | Security metrics report generation | Report generated |
+| E2E-003-14 | Security policy file enforcement | Policy applied |
+| E2E-003-15 | Multi-user concurrent security operations | All isolated |
+
+#### E2E Test Scenarios
+
+```gherkin
+Feature: Security Status Command
+  As a developer
+  I want to check my security status
+  So that I know my security posture
+
+  Scenario: Display security status in LocalOnly mode
+    Given Acode is configured in LocalOnly mode
+    When I run "acode security status"
+    Then the output should contain "Operating Mode: LocalOnly"
+    And the output should contain "External LLM: Blocked"
+    And the output should contain "Protected Paths: Enabled"
+    And the output should contain "Secret Redaction: Enabled"
+    And the exit code should be 0
+
+  Scenario: Security check passes with valid configuration
+    Given Acode has a valid security configuration
+    When I run "acode security check"
+    Then the output should contain "All security controls verified"
+    And the output should contain "✓ Mode enforcement active"
+    And the output should contain "✓ Path protection active"
+    And the output should contain "✓ Secret redaction active"
+    And the exit code should be 0
+
+  Scenario: Access to protected path is blocked
+    Given a file exists at "/home/user/.ssh/id_rsa"
+    When I run "acode read /home/user/.ssh/id_rsa"
+    Then the output should contain "Access denied: protected path"
+    And the audit log should contain event code "ACODE-SEC-003"
+    And the exit code should be 3
+
+  Scenario: External LLM blocked in LocalOnly mode
+    Given Acode is configured in LocalOnly mode
+    And an external LLM provider is configured
+    When I run "acode chat --provider external-llm"
+    Then the output should contain "External LLM blocked by security policy"
+    And the audit log should contain event code "ACODE-SEC-005"
+    And the exit code should be 3
+
+  Scenario: Invariant violation halts operation
+    Given Acode is in a test mode that can trigger invariant violations
+    When an operation attempts to violate "NoExternalLlmInLocalOnly"
+    Then the operation should halt immediately
+    And the output should contain "CRITICAL: Security invariant violated"
+    And the audit log should contain event code "ACODE-SEC-001"
+    And the audit log severity should be "Critical"
+    And the exit code should be 1
+```
 
 ### Performance / Benchmarks
 
@@ -857,12 +1420,72 @@ A: All network access is blocked, including localhost. Use offline models.
 |----|-----------|--------|-------------------|
 | PERF-003-01 | Security check overhead | < 10% total | Comparison timing |
 | PERF-003-02 | Path validation | < 10ms | Stopwatch, 1000 iterations |
-| PERF-003-03 | Secret redaction | < 5ms | Stopwatch, 1000 iterations |
+| PERF-003-03 | Secret redaction | < 5ms per KB | Stopwatch, 1000 iterations |
 | PERF-003-04 | Input validation | < 50ms | Stopwatch, 100 iterations |
 | PERF-003-05 | Security logging latency | < 10ms | Async measurement |
 | PERF-003-06 | Security initialization | < 500ms | Startup timing |
 | PERF-003-07 | Trust boundary check | < 1ms | Stopwatch, 10000 iterations |
 | PERF-003-08 | Data classification lookup | < 1ms | Stopwatch, 10000 iterations |
+| PERF-003-09 | Concurrent security checks (100) | < 100ms total | Parallel execution |
+| PERF-003-10 | Large file secret scan (10MB) | < 2s | Stopwatch, 10 iterations |
+
+#### Benchmark Code Examples
+
+```csharp
+[MemoryDiagnoser]
+[SimpleJob(RuntimeMoniker.Net80)]
+public class SecurityBenchmarks
+{
+    private PathValidator _pathValidator;
+    private SecretRedactor _secretRedactor;
+    private DataClassifier _dataClassifier;
+    private string _sampleContent;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _pathValidator = new PathValidator(PathValidator.DefaultProtectedPaths);
+        _secretRedactor = new SecretRedactor(SecretRedactor.DefaultPatterns);
+        _dataClassifier = new DataClassifier();
+        _sampleContent = GenerateSampleContent(1024); // 1KB
+    }
+
+    [Benchmark]
+    public PathValidationResult PathValidation()
+    {
+        return _pathValidator.Validate("src/services/UserService.cs", "/repo");
+    }
+
+    [Benchmark]
+    public string SecretRedaction_1KB()
+    {
+        return _secretRedactor.Redact(_sampleContent);
+    }
+
+    [Benchmark]
+    public DataClassification DataClassification()
+    {
+        return _dataClassifier.Classify(_sampleContent);
+    }
+
+    [Benchmark]
+    public async Task<bool> ConcurrentSecurityChecks_100()
+    {
+        var tasks = Enumerable.Range(0, 100)
+            .Select(_ => Task.Run(() => _pathValidator.Validate("src/file.cs", "/repo")));
+        await Task.WhenAll(tasks);
+        return true;
+    }
+}
+
+// Expected benchmark results:
+// | Method                        | Mean      | Allocated |
+// |-------------------------------|-----------|-----------|
+// | PathValidation                | 0.8 ms    | 256 B     |
+// | SecretRedaction_1KB           | 3.2 ms    | 4 KB      |
+// | DataClassification            | 0.5 ms    | 128 B     |
+// | ConcurrentSecurityChecks_100  | 45 ms     | 25 KB     |
+```
 
 ### Regression / Impacted Areas
 
@@ -876,6 +1499,10 @@ A: All network access is blocked, including localhost. Use offline models.
 | File access | Path checking | Paths validated |
 | Network | Mode blocking | Network controlled |
 | Error handling | Fail-safes | Safe failures |
+| CLI commands | Security commands | Commands work |
+| Agent loop | Security integration | Security checks run |
+| LLM integration | Output validation | Outputs validated |
+| Git operations | Secret scanning | Commits scanned |
 
 ---
 
@@ -977,84 +1604,305 @@ Define and document the threat model and default safety posture for Acode. This 
 - **Defense in Depth** — Multiple layers of security controls
 - **Fail-Safe** — Errors result in secure state
 - **Transparency** — Security posture is visible and documented
+- **Clean Architecture** — Security interfaces in Application layer, implementations in Infrastructure
+- **No External Dependencies for Core Security** — Core security checks must work offline
 
 ### File Structure
 
 ```
 docs/
-├── SECURITY.md                    # Public security documentation
+├── SECURITY.md                           # Public security documentation
 ├── security/
-│   ├── threat-model.md           # Detailed threat model
-│   ├── trust-boundaries.md       # Trust boundary documentation
-│   ├── data-classification.md    # Data handling requirements
+│   ├── threat-model.md                   # Detailed threat model
+│   ├── trust-boundaries.md               # Trust boundary documentation
+│   ├── data-classification.md            # Data handling requirements
+│   ├── security-controls.md              # Control implementation guide
 │   └── diagrams/
-│       ├── trust-boundaries.png  # Trust boundary diagram
-│       └── data-flow.png         # Data flow diagram
+│       ├── trust-boundaries.png          # Trust boundary diagram
+│       ├── data-flow.png                 # Data flow diagram
+│       └── defense-in-depth.png          # Defense layers diagram
 src/
 ├── Acode.Domain/
 │   └── Security/
-│       ├── ThreatActor.cs
-│       ├── AttackVector.cs
-│       ├── TrustBoundary.cs
-│       ├── DataClassification.cs
-│       ├── SecurityInvariant.cs
-│       └── FailSafeBehavior.cs
+│       ├── ThreatActor.cs                # Threat actor enumeration
+│       ├── AttackVector.cs               # Attack vector definitions
+│       ├── TrustBoundary.cs              # Trust boundary types
+│       ├── DataClassification.cs         # Data classification levels
+│       ├── SecurityInvariant.cs          # Security invariant definitions
+│       ├── FailSafeBehavior.cs           # Fail-safe behavior types
+│       ├── SecurityEvent.cs              # Security event record
+│       ├── SecuritySeverity.cs           # Severity enumeration
+│       └── SecurityEventCodes.cs         # Event code constants
 ├── Acode.Application/
 │   └── Security/
-│       ├── ISecurityChecker.cs
-│       ├── ISecretRedactor.cs
-│       ├── IPathValidator.cs
-│       ├── IInvariantEnforcer.cs
-│       ├── SecurityChecker.cs
-│       ├── SecretRedactor.cs
-│       ├── PathValidator.cs
-│       └── InvariantEnforcer.cs
+│       ├── Interfaces/
+│       │   ├── ISecurityChecker.cs       # Security status checking
+│       │   ├── ISecretRedactor.cs        # Secret detection/redaction
+│       │   ├── IPathValidator.cs         # Path safety validation
+│       │   ├── IInvariantEnforcer.cs     # Invariant enforcement
+│       │   ├── IDataClassifier.cs        # Data classification
+│       │   ├── ITrustBoundaryMonitor.cs  # Trust boundary monitoring
+│       │   ├── ISecurityAuditLogger.cs   # Security audit logging
+│       │   └── IConsentManager.cs        # User consent handling
+│       ├── Services/
+│       │   ├── SecurityChecker.cs        # Security checker implementation
+│       │   ├── SecretRedactor.cs         # Secret redactor implementation
+│       │   ├── PathValidator.cs          # Path validator implementation
+│       │   ├── InvariantEnforcer.cs      # Invariant enforcer implementation
+│       │   ├── DataClassifier.cs         # Data classifier implementation
+│       │   ├── TrustBoundaryMonitor.cs   # Trust boundary monitor implementation
+│       │   └── SecurityAuditLogger.cs    # Audit logger implementation
+│       └── Configuration/
+│           ├── SecurityOptions.cs        # Security configuration options
+│           └── SecurityPolicyLoader.cs   # Policy file loader
+├── Acode.Infrastructure/
+│   └── Security/
+│       ├── FileSystemPathValidator.cs    # File system path validation
+│       ├── RegexSecretRedactor.cs        # Regex-based secret redaction
+│       ├── JsonSecurityAuditLogger.cs    # JSON file audit logger
+│       ├── ConsoleConsentManager.cs      # Console-based consent UI
+│       └── WebhookSecurityNotifier.cs    # Webhook notification sender
 └── Acode.Cli/
     └── Commands/
-        └── SecurityCommands.cs
+        ├── SecurityCommand.cs            # Parent security command
+        ├── SecurityStatusCommand.cs      # security status subcommand
+        ├── SecurityCheckCommand.cs       # security check subcommand
+        ├── SecurityAuditCommand.cs       # security audit subcommand
+        ├── SecurityThreatsCommand.cs     # security threats subcommand
+        ├── SecurityScanSecretsCommand.cs # security scan-secrets subcommand
+        └── SecurityMetricsCommand.cs     # security metrics subcommand
+tests/
+├── Acode.Domain.Tests/
+│   └── Security/
+│       ├── SecurityInvariantTests.cs
+│       └── DataClassificationTests.cs
+├── Acode.Application.Tests/
+│   └── Security/
+│       ├── SecretRedactorTests.cs
+│       ├── PathValidatorTests.cs
+│       ├── InvariantEnforcerTests.cs
+│       └── SecurityCheckerTests.cs
+├── Acode.Infrastructure.Tests/
+│   └── Security/
+│       ├── FileSystemPathValidatorTests.cs
+│       └── RegexSecretRedactorTests.cs
+└── Acode.Cli.Tests/
+    └── Commands/
+        └── SecurityCommandTests.cs
 ```
 
 ### Interface Contracts
 
 ```csharp
 // ISecurityChecker.cs
+namespace Acode.Application.Security.Interfaces;
+
 public interface ISecurityChecker
 {
-    Task<SecurityStatus> GetStatusAsync();
-    Task<SecurityCheckResult> CheckAsync();
+    /// <summary>
+    /// Gets the current security status including mode, controls, and configuration.
+    /// </summary>
+    Task<SecurityStatus> GetStatusAsync(CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Performs a comprehensive security check and returns results.
+    /// </summary>
+    Task<SecurityCheckResult> CheckAsync(CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Checks if a specific operation is allowed in the current mode.
+    /// </summary>
     bool IsOperationAllowed(string operation, OperatingMode mode);
+    
+    /// <summary>
+    /// Gets the list of active security controls.
+    /// </summary>
+    IReadOnlyList<SecurityControl> GetActiveControls();
 }
 
 // ISecretRedactor.cs
+namespace Acode.Application.Security.Interfaces;
+
 public interface ISecretRedactor
 {
+    /// <summary>
+    /// Redacts all detected secrets in the input string.
+    /// </summary>
     string Redact(string input);
+    
+    /// <summary>
+    /// Redacts secrets in the input and returns detailed findings.
+    /// </summary>
+    RedactionResult RedactWithDetails(string input);
+    
+    /// <summary>
+    /// Checks if the input contains any secrets without modifying it.
+    /// </summary>
     bool ContainsSecrets(string input);
-    IReadOnlyList<string> GetDefaultPatterns();
+    
+    /// <summary>
+    /// Gets all secret matches in the input.
+    /// </summary>
+    IReadOnlyList<SecretMatch> FindSecrets(string input);
+    
+    /// <summary>
+    /// Gets the default secret detection patterns.
+    /// </summary>
+    IReadOnlyList<SecretPattern> GetDefaultPatterns();
+    
+    /// <summary>
+    /// Adds a custom secret pattern.
+    /// </summary>
+    void AddPattern(SecretPattern pattern);
 }
 
 // IPathValidator.cs
+namespace Acode.Application.Security.Interfaces;
+
 public interface IPathValidator
 {
-    bool IsPathSafe(string path, string repositoryRoot);
-    bool IsProtectedPath(string path);
+    /// <summary>
+    /// Validates if a path is safe to access.
+    /// </summary>
     PathValidationResult Validate(string path, string repositoryRoot);
+    
+    /// <summary>
+    /// Checks if a path is in a protected directory.
+    /// </summary>
+    bool IsProtectedPath(string path);
+    
+    /// <summary>
+    /// Checks if a path contains traversal attempts.
+    /// </summary>
+    bool ContainsTraversal(string path);
+    
+    /// <summary>
+    /// Gets the list of protected paths.
+    /// </summary>
+    IReadOnlyList<string> GetProtectedPaths();
+    
+    /// <summary>
+    /// Normalizes and resolves a path safely.
+    /// </summary>
+    string NormalizePath(string path, string basePath);
 }
 
 // IInvariantEnforcer.cs
+namespace Acode.Application.Security.Interfaces;
+
 public interface IInvariantEnforcer
 {
-    void Enforce(SecurityInvariant invariant, object context);
+    /// <summary>
+    /// Enforces a security invariant, throwing if violated.
+    /// </summary>
+    Task EnforceAsync(SecurityInvariant invariant, InvariantContext context);
+    
+    /// <summary>
+    /// Checks an invariant without throwing.
+    /// </summary>
+    Task<InvariantCheckResult> CheckAsync(SecurityInvariant invariant, InvariantContext context);
+    
+    /// <summary>
+    /// Registers an invariant for enforcement.
+    /// </summary>
     void RegisterInvariant(SecurityInvariant invariant);
+    
+    /// <summary>
+    /// Gets all registered invariants.
+    /// </summary>
     IReadOnlyList<SecurityInvariant> GetAllInvariants();
+    
+    /// <summary>
+    /// Event raised when an invariant is violated.
+    /// </summary>
+    event EventHandler<InvariantViolationEventArgs> InvariantViolated;
+}
+
+// ISecurityAuditLogger.cs
+namespace Acode.Application.Security.Interfaces;
+
+public interface ISecurityAuditLogger
+{
+    /// <summary>
+    /// Logs a security event with tamper-evident hashing.
+    /// </summary>
+    Task<AuditLogEntry> LogAsync(SecurityEvent securityEvent);
+    
+    /// <summary>
+    /// Retrieves audit log entries within a time range.
+    /// </summary>
+    Task<IReadOnlyList<AuditLogEntry>> GetEntriesAsync(
+        DateTimeOffset from, 
+        DateTimeOffset to,
+        SecuritySeverity? minSeverity = null);
+    
+    /// <summary>
+    /// Verifies the integrity of an audit log entry.
+    /// </summary>
+    Task<bool> VerifyIntegrityAsync(AuditLogEntry entry);
+    
+    /// <summary>
+    /// Verifies the integrity of the entire audit log chain.
+    /// </summary>
+    Task<AuditIntegrityResult> VerifyChainIntegrityAsync();
+    
+    /// <summary>
+    /// Exports audit logs in the specified format.
+    /// </summary>
+    Task<byte[]> ExportAsync(AuditExportFormat format, DateTimeOffset from, DateTimeOffset to);
 }
 ```
 
-### Security Event Codes
+### Domain Types
 
 ```csharp
+// SecurityInvariant.cs
+namespace Acode.Domain.Security;
+
+public sealed record SecurityInvariant
+{
+    public string Id { get; init; }
+    public string Name { get; init; }
+    public string Description { get; init; }
+    public SecuritySeverity ViolationSeverity { get; init; }
+    public Func<InvariantContext, bool> Predicate { get; init; }
+    
+    public static readonly SecurityInvariant NoExternalLlmInLocalOnly = new()
+    {
+        Id = "INV-001",
+        Name = "NoExternalLlmInLocalOnly",
+        Description = "External LLM calls are not permitted in LocalOnly mode",
+        ViolationSeverity = SecuritySeverity.Critical,
+        Predicate = ctx => !(ctx.CurrentMode == OperatingMode.LocalOnly && ctx.IsExternalLlmCall)
+    };
+    
+    public static readonly SecurityInvariant NoNetworkInAirgapped = new()
+    {
+        Id = "INV-002",
+        Name = "NoNetworkInAirgapped",
+        Description = "No network calls are permitted in Airgapped mode",
+        ViolationSeverity = SecuritySeverity.Critical,
+        Predicate = ctx => !(ctx.CurrentMode == OperatingMode.Airgapped && ctx.IsNetworkCall)
+    };
+    
+    public static readonly SecurityInvariant SecretsNeverLogged = new()
+    {
+        Id = "INV-003",
+        Name = "SecretsNeverLogged",
+        Description = "Secrets must never appear in logs unredacted",
+        ViolationSeverity = SecuritySeverity.Critical,
+        Predicate = ctx => !ctx.LogContent?.ContainsUnredactedSecrets() ?? true
+    };
+    
+    // ... additional invariants
+}
+
+// SecurityEventCodes.cs
+namespace Acode.Domain.Security;
+
 public static class SecurityEventCodes
 {
+    // Invariant violations (001-010)
     public const string InvariantViolation = "ACODE-SEC-001";
     public const string TrustBoundaryCrossing = "ACODE-SEC-002";
     public const string ProtectedPathAccess = "ACODE-SEC-003";
@@ -1062,87 +1910,276 @@ public static class SecurityEventCodes
     public const string ModeViolation = "ACODE-SEC-005";
     public const string PathTraversalAttempt = "ACODE-SEC-006";
     public const string FailSafeTriggered = "ACODE-SEC-007";
+    
+    // Consent events (008-010)
     public const string ConsentRequired = "ACODE-SEC-008";
     public const string ConsentGranted = "ACODE-SEC-009";
     public const string ConsentDenied = "ACODE-SEC-010";
+    
+    // Audit events (011-015)
     public const string AuditEvent = "ACODE-SEC-011";
     public const string SecurityCheckFailed = "ACODE-SEC-012";
     public const string SecurityCheckPassed = "ACODE-SEC-013";
+    public const string SecurityConfigChanged = "ACODE-SEC-014";
+    public const string SecurityPolicyLoaded = "ACODE-SEC-015";
+    
+    // Data events (016-020)
+    public const string DataClassificationApplied = "ACODE-SEC-016";
+    public const string SensitiveDataAccessed = "ACODE-SEC-017";
+    public const string DataRedacted = "ACODE-SEC-018";
+    public const string DataExportAttempt = "ACODE-SEC-019";
+    public const string DataRetentionApplied = "ACODE-SEC-020";
 }
 ```
 
 ### Logging Schema
 
 ```csharp
+// SecurityLogFields.cs
+namespace Acode.Domain.Security;
+
 public static class SecurityLogFields
 {
+    // Event identification
     public const string EventCode = "security_event_code";
     public const string EventType = "security_event_type";
+    public const string EventId = "security_event_id";
     public const string Severity = "security_severity";
+    
+    // Threat context
     public const string ThreatActor = "threat_actor";
     public const string AttackVector = "attack_vector";
+    public const string ThreatCategory = "threat_category";
+    
+    // Boundary context
     public const string TrustBoundary = "trust_boundary";
+    public const string BoundaryDirection = "boundary_direction";
+    
+    // Data context
     public const string DataClassification = "data_classification";
+    public const string DataType = "data_type";
+    
+    // Invariant context
     public const string Invariant = "security_invariant";
+    public const string InvariantId = "invariant_id";
+    
+    // Operation context
     public const string OperatingMode = "operating_mode";
     public const string ActionTaken = "action_taken";
+    public const string ActionResult = "action_result";
+    
+    // Resource context
     public const string ResourcePath = "resource_path";
+    public const string ResourceType = "resource_type";
+    
+    // User context
     public const string UserId = "user_id";
+    public const string SessionId = "session_id";
+    
+    // Audit chain
+    public const string AuditHash = "audit_hash";
+    public const string PreviousHash = "previous_hash";
+    public const string ChainPosition = "chain_position";
 }
+
+// Example structured log output:
+// {
+//   "timestamp": "2026-01-03T10:15:30.000Z",
+//   "level": "Warning",
+//   "message": "Protected path access denied",
+//   "security_event_code": "ACODE-SEC-003",
+//   "security_event_type": "ProtectedPathAccess",
+//   "security_severity": "Warning",
+//   "operating_mode": "LocalOnly",
+//   "resource_path": "/home/user/.ssh/id_rsa",
+//   "action_taken": "Denied",
+//   "session_id": "sess_abc123",
+//   "audit_hash": "sha256:abc123...",
+//   "previous_hash": "sha256:def456..."
+// }
+```
+
+### CLI Exit Codes
+
+```csharp
+public static class SecurityExitCodes
+{
+    public const int Success = 0;
+    public const int SecurityCheckFailed = 1;
+    public const int InvalidArguments = 2;
+    public const int SecurityPolicyViolation = 3;
+    public const int InvariantViolation = 4;
+    public const int ConfigurationError = 5;
+    public const int AuditIntegrityFailed = 6;
+    public const int ConsentDenied = 7;
+    public const int UnknownError = 99;
+}
+```
+
+### Configuration Defaults
+
+```yaml
+# Default security configuration (built-in, not from file)
+security:
+  # Operating mode (default to most restrictive)
+  default_mode: local-only
+  
+  # Secret detection patterns
+  secret_patterns:
+    - pattern: "(?i)api[_-]?key[s]?['\"]?\\s*[:=]\\s*['\"]?([a-zA-Z0-9_-]{20,})"
+      name: "API Key"
+      severity: critical
+    - pattern: "(?i)password[s]?['\"]?\\s*[:=]\\s*['\"]?([^'\"\\s]{8,})"
+      name: "Password"
+      severity: critical
+    - pattern: "(?i)secret[s]?['\"]?\\s*[:=]\\s*['\"]?([a-zA-Z0-9_-]{16,})"
+      name: "Secret"
+      severity: critical
+    - pattern: "(?i)token[s]?['\"]?\\s*[:=]\\s*['\"]?([a-zA-Z0-9_-]{20,})"
+      name: "Token"
+      severity: critical
+    - pattern: "ghp_[a-zA-Z0-9]{36}"
+      name: "GitHub Personal Access Token"
+      severity: critical
+    - pattern: "sk-[a-zA-Z0-9]{48}"
+      name: "OpenAI API Key"
+      severity: critical
+  
+  # Protected paths (relative to home or absolute)
+  protected_paths:
+    - ".ssh/"
+    - ".gnupg/"
+    - ".aws/"
+    - ".azure/"
+    - ".kube/"
+    - ".docker/config.json"
+    - ".npmrc"
+    - ".pypirc"
+    - ".netrc"
+  
+  # File handling
+  max_file_size_mb: 10
+  skip_binary_files: true
+  follow_symlinks: false
+  
+  # Audit logging
+  audit:
+    enabled: true
+    retention_days: 30
+    include_hash_chain: true
+    
+  # Fail-safe defaults
+  fail_safe:
+    on_config_error: use_restrictive_defaults
+    on_mode_uncertainty: local_only
+    on_network_error: fail_closed
 ```
 
 ### Validation Checklist Before Merge
 
-- [ ] All 115 functional requirements documented
-- [ ] All 50 non-functional requirements documented
-- [ ] SECURITY.md complete and accurate
-- [ ] Threat model documented
-- [ ] All threat actors identified
-- [ ] All attack vectors documented
-- [ ] All trust boundaries documented
-- [ ] Data classification complete
-- [ ] Default safety posture defined
-- [ ] All invariants defined
-- [ ] All fail-safes defined
-- [ ] Trust boundary diagram created
-- [ ] Data flow diagram created
-- [ ] All unit tests passing
-- [ ] All integration tests passing
-- [ ] All E2E tests passing
-- [ ] Security review completed
-- [ ] Documentation reviewed
+- [ ] SECURITY.md created and complete
+- [ ] All 115+ functional requirements documented
+- [ ] All 50+ non-functional requirements documented
+- [ ] Threat model documented with all actors
+- [ ] All attack vectors documented with STRIDE/DREAD
+- [ ] All trust boundaries documented with diagrams
+- [ ] Data classification complete with handling requirements
+- [ ] Default safety posture defined and documented
+- [ ] All security invariants defined with predicates
+- [ ] All fail-safe behaviors defined and documented
+- [ ] Trust boundary diagram created and reviewed
+- [ ] Data flow diagram created and reviewed
+- [ ] Defense-in-depth diagram created
+- [ ] ISecurityChecker interface defined and implemented
+- [ ] ISecretRedactor interface defined and implemented
+- [ ] IPathValidator interface defined and implemented
+- [ ] IInvariantEnforcer interface defined and implemented
+- [ ] ISecurityAuditLogger interface defined and implemented
+- [ ] Security CLI commands implemented
+- [ ] All 25+ unit tests passing with >90% coverage
+- [ ] All 18+ integration tests passing
+- [ ] All 15+ E2E tests passing
+- [ ] All 10+ performance benchmarks meeting targets
+- [ ] Security event codes documented
+- [ ] Logging schema documented
+- [ ] Exit codes documented
+- [ ] Configuration defaults documented
+- [ ] Security review completed by second engineer
+- [ ] Documentation reviewed for accuracy
 
 ### Rollout Plan
 
-1. **Phase 1: Documentation**
-   - Create SECURITY.md
-   - Document threat actors
-   - Document attack vectors
-   - Create diagrams
+#### Phase 1: Documentation (Week 1)
+1. Create SECURITY.md in repository root
+2. Create docs/security/ directory structure
+3. Document all threat actors with full details
+4. Document all attack vectors with STRIDE/DREAD analysis
+5. Create trust boundary diagrams
+6. Create data flow diagrams
+7. Document data classification scheme
+8. Review and approve documentation
 
-2. **Phase 2: Domain Models**
-   - Implement security domain types
-   - Implement invariant definitions
-   - Implement fail-safe definitions
-   - Add unit tests
+#### Phase 2: Domain Models (Week 2)
+1. Implement ThreatActor enumeration
+2. Implement AttackVector definitions
+3. Implement TrustBoundary types
+4. Implement DataClassification levels
+5. Implement SecurityInvariant records with all invariants
+6. Implement FailSafeBehavior types
+7. Implement SecurityEvent and related records
+8. Add comprehensive unit tests for domain types
+9. Code review and merge
 
-3. **Phase 3: Application Services**
-   - Implement security checker
-   - Implement secret redactor
-   - Implement path validator
-   - Implement invariant enforcer
-   - Add integration tests
+#### Phase 3: Application Services (Week 3)
+1. Implement ISecurityChecker and SecurityChecker
+2. Implement ISecretRedactor and SecretRedactor
+3. Implement IPathValidator and PathValidator
+4. Implement IInvariantEnforcer and InvariantEnforcer
+5. Implement IDataClassifier and DataClassifier
+6. Implement ISecurityAuditLogger and SecurityAuditLogger
+7. Implement ITrustBoundaryMonitor and TrustBoundaryMonitor
+8. Add comprehensive unit tests for all services
+9. Add integration tests for service interactions
+10. Code review and merge
 
-4. **Phase 4: CLI Integration**
-   - Implement security commands
-   - Integrate with existing commands
-   - Add E2E tests
+#### Phase 4: Infrastructure (Week 4)
+1. Implement FileSystemPathValidator
+2. Implement RegexSecretRedactor with all patterns
+3. Implement JsonSecurityAuditLogger with hash chain
+4. Implement ConsoleConsentManager
+5. Implement WebhookSecurityNotifier
+6. Add infrastructure-specific tests
+7. Code review and merge
 
-5. **Phase 5: Review**
-   - Security review
-   - Documentation review
-   - Penetration test planning
-   - Final validation
+#### Phase 5: CLI Integration (Week 5)
+1. Implement SecurityCommand parent command
+2. Implement SecurityStatusCommand
+3. Implement SecurityCheckCommand
+4. Implement SecurityAuditCommand
+5. Implement SecurityThreatsCommand
+6. Implement SecurityScanSecretsCommand
+7. Implement SecurityMetricsCommand
+8. Add E2E tests for all commands
+9. Add CLI help documentation
+10. Code review and merge
+
+#### Phase 6: Integration & Testing (Week 6)
+1. Integrate security checks into agent loop
+2. Integrate security checks into all file operations
+3. Integrate security checks into command execution
+4. Integrate security checks into LLM client
+5. Run full test suite
+6. Run performance benchmarks
+7. Fix any issues found
+
+#### Phase 7: Review & Release (Week 7)
+1. Security review by second engineer
+2. Documentation final review
+3. Penetration test planning (schedule for future)
+4. Create release notes
+5. Update CHANGELOG
+6. Tag release
+7. Monitor for issues
 
 ---
 
