@@ -1,3 +1,4 @@
+using Acode.Application.Configuration;
 using Acode.Domain.Configuration;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -6,8 +7,9 @@ namespace Acode.Infrastructure.Configuration;
 
 /// <summary>
 /// Reads and deserializes YAML configuration files.
+/// Implements <see cref="IConfigReader"/> from Application layer.
 /// </summary>
-public sealed class YamlConfigReader
+public sealed class YamlConfigReader : IConfigReader
 {
     private readonly IDeserializer _deserializer;
 

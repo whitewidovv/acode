@@ -4,14 +4,22 @@ namespace Acode.Application.Configuration;
 
 /// <summary>
 /// Loads configuration from .agent/config.yml files.
+/// Orchestrates validation and reading.
 /// </summary>
 public sealed class ConfigLoader : IConfigLoader
 {
     private readonly IConfigValidator _validator;
+    private readonly IConfigReader _reader;
 
-    public ConfigLoader(IConfigValidator validator)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConfigLoader"/> class.
+    /// </summary>
+    /// <param name="validator">The configuration validator.</param>
+    /// <param name="reader">The configuration reader.</param>
+    public ConfigLoader(IConfigValidator validator, IConfigReader reader)
     {
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
+        _reader = reader ?? throw new ArgumentNullException(nameof(reader));
     }
 
     /// <inheritdoc/>
@@ -38,9 +46,9 @@ public sealed class ConfigLoader : IConfigLoader
                 $"Configuration validation failed:{Environment.NewLine}{errorMessages}");
         }
 
-        // For now, this is a placeholder - actual loading would use YamlConfigReader
-        // This will be implemented once we wire up the Infrastructure layer
-        throw new NotImplementedException(
-            "Configuration loading requires Infrastructure layer integration (YamlConfigReader)");
+        // Read the configuration using the injected reader
+        var config = await _reader.ReadAsync(configFilePath, cancellationToken).ConfigureAwait(false);
+
+        return config;
     }
 }
