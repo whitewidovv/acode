@@ -966,80 +966,341 @@ acode exec printenv PATH
 
 ### Unit Tests
 
-```
-Tests/Unit/Execution/
-├── CommandTests.cs
-│   ├── Should_Validate_Command()
-│   └── Should_Reject_Empty()
-│
-├── CommandExecutorTests.cs
-│   ├── Should_Execute_Command()
-│   ├── Should_Capture_Output()
-│   ├── Should_Return_Exit_Code()
-│   └── Should_Handle_Timeout()
-│
-├── CommandResultTests.cs
-│   ├── Should_Store_Output()
-│   └── Should_Calculate_Duration()
-│
-└── AuditRecordTests.cs
-    ├── Should_Include_Correlation_Ids()
-    └── Should_Persist_To_Db()
-```
+#### Command Model Tests (`Tests/Unit/Execution/CommandTests.cs`)
+
+- `Command_Constructor_SetsAllProperties`
+- `Command_WithExecutable_SetsExecutable`
+- `Command_WithArguments_SetsArguments`
+- `Command_WithWorkingDirectory_SetsWorkingDirectory`
+- `Command_WithEnvironment_SetsEnvironment`
+- `Command_WithTimeout_SetsTimeout`
+- `Command_Builder_CreatesValidCommand`
+- `Command_Builder_ChainsMethodsCorrectly`
+- `Command_Validation_RejectsNullExecutable`
+- `Command_Validation_RejectsEmptyExecutable`
+- `Command_Validation_RejectsWhitespaceExecutable`
+- `Command_Validation_RejectsNullArguments`
+- `Command_Validation_RejectsNegativeTimeout`
+- `Command_Validation_AcceptsValidCommand`
+- `Command_Serialization_RoundTripsCorrectly`
+- `Command_Equality_WorksCorrectly`
+- `Command_HashCode_ConsistentWithEquality`
+
+#### Command Result Tests (`Tests/Unit/Execution/CommandResultTests.cs`)
+
+- `CommandResult_Constructor_SetsAllProperties`
+- `CommandResult_Duration_CalculatesCorrectly`
+- `CommandResult_Success_TrueWhenExitCodeZero`
+- `CommandResult_Success_FalseWhenExitCodeNonZero`
+- `CommandResult_Success_FalseWhenTimedOut`
+- `CommandResult_CorrelationIds_AllPresent`
+- `CommandResult_TruncationInfo_SetWhenTruncated`
+- `CommandResult_Serialization_RoundTripsCorrectly`
+- `CommandResult_Immutability_CannotModify`
+
+#### Execution Options Tests (`Tests/Unit/Execution/ExecutionOptionsTests.cs`)
+
+- `ExecutionOptions_DefaultValues_Correct`
+- `ExecutionOptions_TimeoutOverride_TakesPrecedence`
+- `ExecutionOptions_EnvironmentMergeMode_Inherit_MergesHost`
+- `ExecutionOptions_EnvironmentMergeMode_Replace_OnlySpecified`
+- `ExecutionOptions_EnvironmentMergeMode_Merge_CombinesBoth`
+- `ExecutionOptions_UseShell_DefaultsFalse`
+- `ExecutionOptions_CaptureMode_DefaultsAll`
+- `ExecutionOptions_MaxOutputSize_DefaultsToConfig`
+- `ExecutionOptions_RedactSecrets_DefaultsTrue`
+
+#### Command Executor Tests (`Tests/Unit/Execution/CommandExecutorTests.cs`)
+
+- `CommandExecutor_ExecuteAsync_ReturnsResult`
+- `CommandExecutor_ExecuteAsync_CapturesStdout`
+- `CommandExecutor_ExecuteAsync_CapturesStderr`
+- `CommandExecutor_ExecuteAsync_ReturnsExitCode`
+- `CommandExecutor_ExecuteAsync_RecordsStartTime`
+- `CommandExecutor_ExecuteAsync_RecordsEndTime`
+- `CommandExecutor_ExecuteAsync_CalculatesDuration`
+- `CommandExecutor_ExecuteAsync_SetsSuccess`
+- `CommandExecutor_ExecuteAsync_HandlesTimeout`
+- `CommandExecutor_ExecuteAsync_SetsTimedOutFlag`
+- `CommandExecutor_ExecuteAsync_HandlesProcessStartFailure`
+- `CommandExecutor_ExecuteAsync_HandlesCancellation`
+- `CommandExecutor_ExecuteAsync_ThrowsForNullCommand`
+- `CommandExecutor_ExecuteAsync_ThrowsForInvalidCommand`
+- `CommandExecutor_ExecuteAsync_SetsCorrelationIds`
+- `CommandExecutor_ExecuteAsync_RecordsToAudit`
+- `CommandExecutor_ExecuteAsync_EnforcesConcurrencyLimit`
+- `CommandExecutor_ExecuteAsync_SelectsCorrectMode`
+
+#### Process Runner Tests (`Tests/Unit/Execution/ProcessRunnerTests.cs`)
+
+- `ProcessRunner_StartProcess_ConfiguresProcessStartInfo`
+- `ProcessRunner_StartProcess_SetsExecutable`
+- `ProcessRunner_StartProcess_SetsArguments`
+- `ProcessRunner_StartProcess_SetsWorkingDirectory`
+- `ProcessRunner_StartProcess_MergesEnvironment`
+- `ProcessRunner_StartProcess_RedirectsStdout`
+- `ProcessRunner_StartProcess_RedirectsStderr`
+- `ProcessRunner_StartProcess_SetsNoWindow`
+- `ProcessRunner_StartProcess_SetsNoShellByDefault`
+- `ProcessRunner_StartProcess_UsesShellWhenEnabled`
+- `ProcessRunner_WaitForExit_ReturnsOnCompletion`
+- `ProcessRunner_WaitForExit_TimesOutCorrectly`
+- `ProcessRunner_KillProcess_KillsProcessTree`
+- `ProcessRunner_KillProcess_HandlesAlreadyExited`
+- `ProcessRunner_Dispose_ReleasesResources`
+- `ProcessRunner_OutputCapture_HandlesLargeOutput`
+- `ProcessRunner_OutputCapture_TruncatesAtLimit`
+- `ProcessRunner_OutputCapture_HandlesInterleaved`
+
+#### Audit Recording Tests (`Tests/Unit/Execution/ExecutionAuditTests.cs`)
+
+- `ExecutionAudit_RecordStart_CreatesEvent`
+- `ExecutionAudit_RecordStart_IncludesCorrelationIds`
+- `ExecutionAudit_RecordStart_IncludesCommand`
+- `ExecutionAudit_RecordComplete_CreatesEvent`
+- `ExecutionAudit_RecordComplete_IncludesResult`
+- `ExecutionAudit_RecordComplete_IncludesDuration`
+- `ExecutionAudit_RedactsSecrets_InEnvironment`
+- `ExecutionAudit_RedactsSecrets_InOutput`
+- `ExecutionAudit_Persist_WritesToDatabase`
+- `ExecutionAudit_Query_FiltersByRunId`
+- `ExecutionAudit_Query_FiltersBySessionId`
+- `ExecutionAudit_Query_FiltersByTaskId`
+- `ExecutionAudit_Query_FiltersByTimeRange`
+- `ExecutionAudit_Retention_PrunesOldRecords`
+
+#### Validation Tests (`Tests/Unit/Execution/CommandValidationTests.cs`)
+
+- `CommandValidation_ValidCommand_Passes`
+- `CommandValidation_NullExecutable_ThrowsException`
+- `CommandValidation_EmptyExecutable_ThrowsException`
+- `CommandValidation_WhitespaceExecutable_ThrowsException`
+- `CommandValidation_MissingWorkingDirectory_ThrowsException`
+- `CommandValidation_NegativeTimeout_ThrowsException`
+- `CommandValidation_NullInArguments_ThrowsException`
+- `CommandValidation_InvalidEnvironmentKey_ThrowsException`
+- `CommandValidation_ExceptionIncludesPropertyName`
+- `CommandValidation_ExceptionIncludesMessage`
 
 ### Integration Tests
 
-```
-Tests/Integration/Execution/
-├── CommandExecutorIntegrationTests.cs
-│   ├── Should_Execute_Real_Command()
-│   └── Should_Handle_Real_Timeout()
-│
-└── AuditIntegrationTests.cs
-    └── Should_Query_History()
-```
+#### Command Executor Integration Tests (`Tests/Integration/Execution/CommandExecutorIntegrationTests.cs`)
 
-### E2E Tests
+- `CommandExecutor_RealCommand_Executes`
+- `CommandExecutor_EchoCommand_CapturesOutput`
+- `CommandExecutor_ExitCode_Captured`
+- `CommandExecutor_NonZeroExit_RecordsFailure`
+- `CommandExecutor_Timeout_KillsProcess`
+- `CommandExecutor_WorkingDirectory_Changes`
+- `CommandExecutor_Environment_Passed`
+- `CommandExecutor_LargeOutput_Truncated`
+- `CommandExecutor_SlowCommand_TimesOut`
+- `CommandExecutor_Cancellation_AbortsExecution`
+- `CommandExecutor_ProcessTree_KilledOnTimeout`
 
-```
-Tests/E2E/Execution/
-├── ExecutionE2ETests.cs
-│   ├── Should_Execute_Via_CLI()
-│   └── Should_Show_History()
-```
+#### Audit Integration Tests (`Tests/Integration/Execution/AuditIntegrationTests.cs`)
+
+- `Audit_Execution_RecordedToDatabase`
+- `Audit_MultipleExecutions_AllRecorded`
+- `Audit_Query_ReturnsCorrectRecords`
+- `Audit_Query_FiltersWork`
+- `Audit_Retention_PrunesCorrectly`
+- `Audit_CorrelationIds_Preserved`
+
+#### CLI Integration Tests (`Tests/Integration/CLI/ExecCommandTests.cs`)
+
+- `ExecCommand_SimpleCommand_Executes`
+- `ExecCommand_TimeoutFlag_Applied`
+- `ExecCommand_CwdFlag_Changes`
+- `ExecCommand_EnvFlag_Passed`
+- `ExecCommand_ShellFlag_EnablesShell`
+- `RunsListCommand_ShowsExecutions`
+- `RunsShowCommand_ShowsDetails`
+
+### End-to-End Tests
+
+#### Execution E2E Tests (`Tests/E2E/Execution/ExecutionE2ETests.cs`)
+
+- `E2E_ExecuteViaCLI_WorksEndToEnd`
+- `E2E_ExecuteWithTimeout_KillsAndReports`
+- `E2E_ExecuteInDirectory_UsesCorrectPath`
+- `E2E_ViewRunHistory_ShowsAllRuns`
+- `E2E_ViewRunDetails_ShowsCompleteInfo`
+- `E2E_AuditPersistence_SurvivesRestart`
+- `E2E_ConcurrentExecutions_AllComplete`
+- `E2E_DockerMode_DelegatesToSandbox`
 
 ### Performance Benchmarks
 
-| Benchmark | Target | Maximum |
-|-----------|--------|---------|
-| Process start overhead | 30ms | 50ms |
-| Output capture 1MB | 5ms | 10ms |
-| Audit write | 2ms | 5ms |
+| Benchmark | Method | Target | Maximum | Notes |
+|-----------|--------|--------|---------|-------|
+| ProcessStartOverhead | `Benchmark_ProcessStart` | 30ms | 50ms | Measure from call to process running |
+| OutputCapture1MB | `Benchmark_OutputCapture_1MB` | 5ms | 10ms | 1MB stdout capture time |
+| OutputCapture10MB | `Benchmark_OutputCapture_10MB` | 50ms | 100ms | 10MB stdout capture with truncation |
+| AuditWrite | `Benchmark_AuditWrite` | 2ms | 5ms | Single audit event write |
+| CommandValidation | `Benchmark_Validation` | 0.5ms | 1ms | Full command validation |
+| ConcurrentExecution | `Benchmark_Concurrent_4` | N/A | N/A | 4 parallel commands throughput |
+
+### Test Coverage Requirements
+
+| Component | Minimum Coverage |
+|-----------|------------------|
+| Command.cs | 95% |
+| CommandResult.cs | 95% |
+| CommandExecutor.cs | 90% |
+| ProcessRunner.cs | 85% |
+| ExecutionAuditRepository.cs | 85% |
+| CommandValidation.cs | 95% |
+| Overall | 85% |
 
 ---
 
 ## User Verification Steps
 
-### Scenario 1: Execute Command
+### Scenario 1: Execute Simple Command
 
-1. Run `acode exec "echo hello"`
-2. Verify: Output shows "hello"
+**Objective:** Verify basic command execution works
 
-### Scenario 2: Capture Exit Code
+**Steps:**
+1. Open terminal in repository directory
+2. Run `acode exec "echo hello world"`
+3. Observe output
 
-1. Run `acode exec "exit 42"`
-2. Verify: Exit code 42 returned
+**Expected Results:**
+- Output shows "hello world"
+- Exit code is 0
+- Success is true
+- Duration is recorded
 
-### Scenario 3: Timeout
+### Scenario 2: Execute Command with Arguments
 
-1. Run `acode exec "sleep 60" --timeout 2`
-2. Verify: Timeout after 2 seconds
+**Objective:** Verify argument passing works correctly
 
-### Scenario 4: View History
+**Steps:**
+1. Run `acode exec dotnet --version`
+2. Observe version output
 
-1. Execute several commands
+**Expected Results:**
+- .NET version displayed (e.g., "8.0.100")
+- Exit code is 0
+- Arguments passed correctly
+
+### Scenario 3: Capture Exit Code
+
+**Objective:** Verify non-zero exit codes are captured
+
+**Steps:**
+1. Run `acode exec "exit 42"` (with --shell flag on Windows)
+2. Observe result
+
+**Expected Results:**
+- Exit code is 42
+- Success is false
+- Error message indicates non-zero exit
+
+### Scenario 4: Command Timeout
+
+**Objective:** Verify timeout enforcement works
+
+**Steps:**
+1. Run `acode exec "ping -n 60 localhost" --timeout 2` (Windows)
+2. Or `acode exec "sleep 60" --timeout 2` (Unix)
+3. Observe timeout behavior
+
+**Expected Results:**
+- Command killed after ~2 seconds
+- TimedOut is true
+- Partial output captured
+- Duration approximately 2 seconds
+
+### Scenario 5: Working Directory
+
+**Objective:** Verify working directory is respected
+
+**Steps:**
+1. Create subdirectory `test-dir` with file `marker.txt`
+2. Run `acode exec "ls" --cwd ./test-dir` (Unix) or `acode exec "dir" --cwd ./test-dir` (Windows)
+3. Observe output
+
+**Expected Results:**
+- Output shows `marker.txt`
+- Command executed in specified directory
+- Working directory validated before execution
+
+### Scenario 6: Environment Variables
+
+**Objective:** Verify environment variable passing
+
+**Steps:**
+1. Run `acode exec "printenv MY_VAR" --env "MY_VAR=test123"` (Unix)
+2. Or `acode exec "echo %MY_VAR%" --env "MY_VAR=test123" --shell` (Windows)
+3. Observe output
+
+**Expected Results:**
+- Output shows "test123"
+- Environment variable was passed to command
+- Environment merge mode respected
+
+### Scenario 7: View Execution History
+
+**Objective:** Verify audit trail is maintained
+
+**Steps:**
+1. Execute several commands: `acode exec "echo one"`, `acode exec "echo two"`, `acode exec "echo three"`
 2. Run `acode runs list`
-3. Verify: All runs shown
+3. Observe history
+
+**Expected Results:**
+- All three executions listed
+- Each has unique execution ID
+- Timestamps are correct
+- Commands are shown
+
+### Scenario 8: View Execution Details
+
+**Objective:** Verify detailed execution info is available
+
+**Steps:**
+1. Execute `acode exec "dotnet build"`
+2. Note the execution ID from output
+3. Run `acode runs show <exec-id>`
+4. Observe details
+
+**Expected Results:**
+- Full command details shown
+- Complete stdout/stderr captured
+- Correlation IDs present
+- Duration and timestamps accurate
+
+### Scenario 9: Large Output Handling
+
+**Objective:** Verify output truncation works
+
+**Steps:**
+1. Create or find command that produces large output (> 1MB)
+2. Run with default max_output_kb
+3. Observe truncation
+
+**Expected Results:**
+- Output is truncated
+- Truncation info shows original and truncated sizes
+- "[OUTPUT TRUNCATED]" marker present
+- No memory exhaustion
+
+### Scenario 10: Concurrent Execution Limit
+
+**Objective:** Verify concurrency limit is enforced
+
+**Steps:**
+1. Configure `max_concurrent: 2` in config
+2. Start 4 concurrent long-running commands
+3. Observe behavior
+
+**Expected Results:**
+- Only 2 commands run simultaneously
+- Additional commands queue and wait
+- All commands eventually complete
+- No deadlock occurs
 
 ---
 
@@ -1050,33 +1311,85 @@ Tests/E2E/Execution/
 ```
 src/AgenticCoder.Domain/
 ├── Execution/
-│   ├── ICommand.cs
-│   ├── Command.cs
-│   └── CommandResult.cs
+│   ├── ICommand.cs              # Command interface
+│   ├── Command.cs               # Command record
+│   ├── CommandBuilder.cs        # Fluent builder
+│   ├── CommandResult.cs         # Execution result
+│   ├── CommandError.cs          # Structured error
+│   ├── CorrelationIds.cs        # Correlation context
+│   ├── TruncationInfo.cs        # Output truncation info
+│   └── ExecutionOptions.cs      # Execution options
 │
 src/AgenticCoder.Application/
 ├── Execution/
-│   ├── ICommandExecutor.cs
-│   └── ExecutionOptions.cs
+│   ├── ICommandExecutor.cs      # Executor interface
+│   ├── CommandExecutor.cs       # Main implementation
+│   └── IExecutionAuditService.cs # Audit service interface
 │
 src/AgenticCoder.Infrastructure/
 ├── Execution/
-│   ├── CommandExecutor.cs
-│   ├── ProcessRunner.cs
-│   └── ExecutionAuditRepository.cs
+│   ├── ProcessRunner.cs         # Process execution
+│   ├── ProcessKiller.cs         # Process tree killer
+│   ├── OutputCapture.cs         # Async output capture
+│   ├── EnvironmentMerger.cs     # Environment handling
+│   ├── SecretRedactor.cs        # Secret redaction
+│   ├── ExecutionAuditRepository.cs # Audit persistence
+│   └── ExecutionConfiguration.cs # Config binding
+│
+src/AgenticCoder.CLI/
+├── Commands/
+│   ├── ExecCommand.cs           # acode exec
+│   ├── RunsListCommand.cs       # acode runs list
+│   └── RunsShowCommand.cs       # acode runs show
+│
+Tests/Unit/Execution/
+├── CommandTests.cs
+├── CommandResultTests.cs
+├── CommandExecutorTests.cs
+├── ProcessRunnerTests.cs
+├── ExecutionAuditTests.cs
+└── CommandValidationTests.cs
+│
+Tests/Integration/Execution/
+├── CommandExecutorIntegrationTests.cs
+├── AuditIntegrationTests.cs
+└── CLIIntegrationTests.cs
 ```
 
-### ICommandExecutor Interface
+### ICommand Interface
 
 ```csharp
-namespace AgenticCoder.Application.Execution;
+namespace AgenticCoder.Domain.Execution;
 
-public interface ICommandExecutor
+/// <summary>
+/// Represents a command to be executed by the command runner.
+/// </summary>
+public interface ICommand
 {
-    Task<CommandResult> ExecuteAsync(
-        Command command,
-        ExecutionOptions? options = null,
-        CancellationToken ct = default);
+    /// <summary>
+    /// The executable to run (e.g., "dotnet", "npm", "/usr/bin/make").
+    /// </summary>
+    string Executable { get; }
+    
+    /// <summary>
+    /// Arguments to pass to the executable.
+    /// </summary>
+    IReadOnlyList<string> Arguments { get; }
+    
+    /// <summary>
+    /// Working directory for execution. Null means repository root.
+    /// </summary>
+    string? WorkingDirectory { get; }
+    
+    /// <summary>
+    /// Environment variables to set. Null means inherit only.
+    /// </summary>
+    IReadOnlyDictionary<string, string>? Environment { get; }
+    
+    /// <summary>
+    /// Timeout for execution. Null means use default.
+    /// </summary>
+    TimeSpan? Timeout { get; }
 }
 ```
 
@@ -1085,20 +1398,88 @@ public interface ICommandExecutor
 ```csharp
 namespace AgenticCoder.Domain.Execution;
 
-public record Command
+/// <summary>
+/// Immutable command definition.
+/// </summary>
+public sealed record Command : ICommand
 {
     public required string Executable { get; init; }
     public IReadOnlyList<string> Arguments { get; init; } = [];
     public string? WorkingDirectory { get; init; }
     public IReadOnlyDictionary<string, string>? Environment { get; init; }
     public TimeSpan? Timeout { get; init; }
+    public ResourceLimits? ResourceLimits { get; init; }
+    
+    /// <summary>
+    /// Creates a fluent builder for command construction.
+    /// </summary>
+    public static CommandBuilder Create(string executable) => 
+        new CommandBuilder(executable);
+}
+
+/// <summary>
+/// Fluent builder for Command construction.
+/// </summary>
+public sealed class CommandBuilder
+{
+    private readonly string _executable;
+    private readonly List<string> _arguments = [];
+    private string? _workingDirectory;
+    private readonly Dictionary<string, string> _environment = [];
+    private TimeSpan? _timeout;
+    
+    public CommandBuilder(string executable)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executable);
+        _executable = executable;
+    }
+    
+    public CommandBuilder WithArguments(params string[] args)
+    {
+        _arguments.AddRange(args);
+        return this;
+    }
+    
+    public CommandBuilder WithWorkingDirectory(string directory)
+    {
+        _workingDirectory = directory;
+        return this;
+    }
+    
+    public CommandBuilder WithEnvironment(string key, string value)
+    {
+        _environment[key] = value;
+        return this;
+    }
+    
+    public CommandBuilder WithTimeout(TimeSpan timeout)
+    {
+        _timeout = timeout;
+        return this;
+    }
+    
+    public Command Build() => new Command
+    {
+        Executable = _executable,
+        Arguments = _arguments.AsReadOnly(),
+        WorkingDirectory = _workingDirectory,
+        Environment = _environment.Count > 0 
+            ? _environment.AsReadOnly() 
+            : null,
+        Timeout = _timeout
+    };
 }
 ```
 
 ### CommandResult Record
 
 ```csharp
-public record CommandResult
+namespace AgenticCoder.Domain.Execution;
+
+/// <summary>
+/// Immutable result from command execution.
+/// </summary>
+public sealed record CommandResult
 {
     public required string Stdout { get; init; }
     public required string Stderr { get; init; }
@@ -1106,39 +1487,266 @@ public record CommandResult
     public required DateTimeOffset StartTime { get; init; }
     public required DateTimeOffset EndTime { get; init; }
     public TimeSpan Duration => EndTime - StartTime;
-    public bool Success => ExitCode == 0;
+    public bool Success => ExitCode == 0 && !TimedOut;
     public bool TimedOut { get; init; }
-    public string? Error { get; init; }
+    public CommandError? Error { get; init; }
+    public required CorrelationIds CorrelationIds { get; init; }
+    public TruncationInfo? Truncation { get; init; }
+}
+
+/// <summary>
+/// Structured error information.
+/// </summary>
+public sealed record CommandError(
+    string Code,
+    string Message,
+    string? Details = null
+);
+
+/// <summary>
+/// Correlation IDs for tracing.
+/// </summary>
+public sealed record CorrelationIds
+{
+    public required string RunId { get; init; }
+    public required string SessionId { get; init; }
+    public required string TaskId { get; init; }
+    public required string StepId { get; init; }
+    public required string ToolCallId { get; init; }
+    public string? WorktreeId { get; init; }
+    public string? RepoSha { get; init; }
+}
+
+/// <summary>
+/// Information about output truncation.
+/// </summary>
+public sealed record TruncationInfo(
+    long OriginalBytes,
+    long TruncatedBytes,
+    string Stream // "stdout", "stderr", or "both"
+);
+```
+
+### ICommandExecutor Interface
+
+```csharp
+namespace AgenticCoder.Application.Execution;
+
+/// <summary>
+/// Executes commands and returns structured results.
+/// </summary>
+public interface ICommandExecutor
+{
+    /// <summary>
+    /// Executes a command and returns the result.
+    /// </summary>
+    /// <param name="command">The command to execute.</param>
+    /// <param name="options">Optional execution options.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Structured execution result.</returns>
+    /// <exception cref="ArgumentNullException">Command is null.</exception>
+    /// <exception cref="CommandValidationException">Command is invalid.</exception>
+    Task<CommandResult> ExecuteAsync(
+        Command command,
+        ExecutionOptions? options = null,
+        CancellationToken ct = default);
+}
+```
+
+### ProcessRunner Core Logic
+
+```csharp
+namespace AgenticCoder.Infrastructure.Execution;
+
+/// <summary>
+/// Executes processes and captures output.
+/// </summary>
+internal sealed class ProcessRunner : IAsyncDisposable
+{
+    private readonly ILogger<ProcessRunner> _logger;
+    private readonly Process _process;
+    private readonly StringBuilder _stdout = new();
+    private readonly StringBuilder _stderr = new();
+    
+    public async Task<(string stdout, string stderr, int exitCode)> RunAsync(
+        Command command,
+        ExecutionOptions options,
+        CancellationToken ct)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = command.Executable,
+            UseShellExecute = options.UseShell,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            WorkingDirectory = command.WorkingDirectory ?? Environment.CurrentDirectory
+        };
+        
+        // Add arguments
+        foreach (var arg in command.Arguments)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+        
+        // Merge environment
+        MergeEnvironment(startInfo, command.Environment, options.EnvironmentMergeMode);
+        
+        _process = new Process { StartInfo = startInfo };
+        
+        // Set up async output capture
+        _process.OutputDataReceived += (_, e) => 
+        {
+            if (e.Data != null) _stdout.AppendLine(e.Data);
+        };
+        _process.ErrorDataReceived += (_, e) => 
+        {
+            if (e.Data != null) _stderr.AppendLine(e.Data);
+        };
+        
+        // Start process
+        if (!_process.Start())
+        {
+            throw new InvalidOperationException("Failed to start process");
+        }
+        
+        _process.BeginOutputReadLine();
+        _process.BeginErrorReadLine();
+        
+        // Wait with timeout
+        var timeout = options.TimeoutOverride ?? 
+                     command.Timeout ?? 
+                     TimeSpan.FromSeconds(300);
+        
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        
+        try
+        {
+            await _process.WaitForExitAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+        {
+            await KillProcessTreeAsync();
+            throw new TimeoutException($"Command timed out after {timeout}");
+        }
+        
+        return (_stdout.ToString(), _stderr.ToString(), _process.ExitCode);
+    }
+    
+    private async Task KillProcessTreeAsync()
+    {
+        try
+        {
+            // Kill entire process tree
+            ProcessKiller.KillTree(_process.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to kill process tree");
+        }
+    }
+    
+    public async ValueTask DisposeAsync()
+    {
+        _process?.Dispose();
+    }
 }
 ```
 
 ### Error Codes
 
-| Code | Meaning |
-|------|---------|
-| ACODE-EXE-001 | Command not found |
-| ACODE-EXE-002 | Timeout exceeded |
-| ACODE-EXE-003 | Process failed |
-| ACODE-EXE-004 | Output too large |
+| Code | Meaning | Resolution |
+|------|---------|------------|
+| ACODE-EXE-001 | Command not found | Verify executable path and PATH |
+| ACODE-EXE-002 | Permission denied | Check file permissions |
+| ACODE-EXE-003 | Working directory not found | Verify directory exists |
+| ACODE-EXE-004 | Timeout exceeded | Increase timeout or investigate command |
+| ACODE-EXE-005 | Process crashed | Check command and environment |
+| ACODE-EXE-006 | Output too large | Reduce verbosity or increase limit |
+| ACODE-EXE-007 | Validation failed | Check command parameters |
+| ACODE-EXE-008 | Concurrency limit | Wait for other commands to complete |
+
+### Configuration Schema
+
+```yaml
+# JSON Schema for execution configuration
+$schema: http://json-schema.org/draft-07/schema#
+type: object
+properties:
+  execution:
+    type: object
+    properties:
+      default_timeout_seconds:
+        type: integer
+        minimum: 1
+        maximum: 3600
+        default: 300
+      max_output_kb:
+        type: integer
+        minimum: 1
+        maximum: 102400
+        default: 1024
+      use_shell:
+        type: boolean
+        default: false
+      max_concurrent:
+        type: integer
+        minimum: 1
+        maximum: 32
+        default: 4
+      environment:
+        type: object
+        properties:
+          mode:
+            type: string
+            enum: [inherit, replace, merge]
+            default: inherit
+      audit:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+            default: true
+          retention_days:
+            type: integer
+            minimum: 1
+            default: 30
+```
 
 ### Implementation Checklist
 
-1. [ ] Create command model
-2. [ ] Create result model
-3. [ ] Create executor interface
-4. [ ] Implement process runner
-5. [ ] Add output capture
-6. [ ] Add timeout handling
-7. [ ] Add audit recording
-8. [ ] Add CLI commands
+1. [ ] Create Domain models (Command, CommandResult, etc.)
+2. [ ] Create CommandBuilder with fluent API
+3. [ ] Implement command validation
+4. [ ] Create ICommandExecutor interface
+5. [ ] Implement ProcessRunner for native execution
+6. [ ] Implement ProcessKiller for process tree termination
+7. [ ] Implement OutputCapture with truncation
+8. [ ] Implement EnvironmentMerger
+9. [ ] Implement SecretRedactor
+10. [ ] Create ExecutionAuditRepository
+11. [ ] Register services in DI container
+12. [ ] Create acode exec CLI command
+13. [ ] Create acode runs list CLI command
+14. [ ] Create acode runs show CLI command
+15. [ ] Write unit tests for all components
+16. [ ] Write integration tests
+17. [ ] Write E2E tests
+18. [ ] Create performance benchmarks
+19. [ ] Document configuration options
+20. [ ] Document error codes
 
 ### Rollout Plan
 
-1. **Phase 1:** Command model
-2. **Phase 2:** Process execution
-3. **Phase 3:** Output capture
-4. **Phase 4:** Audit recording
-5. **Phase 5:** CLI integration
+| Phase | Description | Duration | Success Criteria |
+|-------|-------------|----------|------------------|
+| 1 | Domain models | 2 days | Command, CommandResult defined, validated, serializable |
+| 2 | Process execution | 3 days | Commands execute, output captured, timeout works |
+| 3 | Error handling | 2 days | All failure modes handled, structured errors |
+| 4 | Audit recording | 2 days | All executions logged, queryable |
+| 5 | CLI commands | 2 days | acode exec and runs commands work |
+| 6 | Testing & docs | 3 days | 85%+ coverage, docs complete |
 
 ---
 
