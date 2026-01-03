@@ -257,52 +257,860 @@ scopePatterns:
 
 ## Implementation Prompt
 
-### Interface
+### File Structure
+
+```
+src/
+├── Acode.Domain/
+│   └── Merge/
+│       ├── FileChange.cs
+│       ├── LineDiff.cs
+│       ├── ConflictSeverity.cs
+│       └── ScopeType.cs
+├── Acode.Application/
+│   └── Merge/
+│       ├── IConflictHeuristics.cs
+│       ├── IScopeDetector.cs
+│       └── IFileRuleEngine.cs
+├── Acode.Infrastructure/
+│   └── Merge/
+│       ├── Heuristics/
+│       │   ├── ConflictHeuristics.cs
+│       │   ├── LineOverlapAnalyzer.cs
+│       │   ├── ScopeDetector.cs
+│       │   ├── FileRuleEngine.cs
+│       │   └── HeuristicsOptions.cs
+│       └── Patterns/
+│           ├── ScopePatterns.cs
+│           └── LanguagePatterns.cs
+└── Acode.Cli/
+    └── Commands/
+        └── Merge/
+            └── AnalyzeConflictsCommand.cs
+tests/
+└── Acode.Infrastructure.Tests/
+    └── Merge/
+        └── Heuristics/
+            ├── LineOverlapAnalyzerTests.cs
+            ├── ScopeDetectorTests.cs
+            └── FileRuleEngineTests.cs
+```
+
+### Part 1: Domain Models
 
 ```csharp
+// File: src/Acode.Domain/Merge/ConflictSeverity.cs
+namespace Acode.Domain.Merge;
+
+/// <summary>
+/// Severity level of detected conflicts.
+/// </summary>
+public enum ConflictSeverity
+{
+    /// <summary>Unlikely conflict, auto-merge safe.</summary>
+    Low = 0,
+    
+    /// <summary>Possible conflict, warning issued.</summary>
+    Medium = 1,
+    
+    /// <summary>Likely conflict, needs review.</summary>
+    High = 2,
+    
+    /// <summary>Direct conflict, blocks merge.</summary>
+    Critical = 3
+}
+
+// File: src/Acode.Domain/Merge/FileChange.cs
+namespace Acode.Domain.Merge;
+
+/// <summary>
+/// Represents changes to a file.
+/// </summary>
+public sealed record FileChange
+{
+    public required string Path { get; init; }
+    public required ChangeType Type { get; init; }
+    public required IReadOnlyList<LineDiff> Diffs { get; init; }
+    public string? OldPath { get; init; } // For renames
+    public bool IsBinary { get; init; } = false;
+    
+    /// <summary>
+    /// Total lines changed (added + removed + modified).
+    /// </summary>
+    public int TotalLinesChanged => Diffs.Sum(d => d.LineCount);
+}
+
+public enum ChangeType
+{
+    Added,
+    Modified,
+    Deleted,
+    Renamed
+}
+
+// File: src/Acode.Domain/Merge/LineDiff.cs
+namespace Acode.Domain.Merge;
+
+/// <summary>
+/// A contiguous diff hunk within a file.
+/// </summary>
+public sealed record LineDiff
+{
+    public required int StartLine { get; init; }
+    public required int EndLine { get; init; }
+    public required DiffType Type { get; init; }
+    public string? Content { get; init; }
+    
+    public int LineCount => EndLine - StartLine + 1;
+    
+    /// <summary>
+    /// Expand range by context lines.
+    /// </summary>
+    public LineDiff WithContext(int contextLines) => this with
+    {
+        StartLine = Math.Max(1, StartLine - contextLines),
+        EndLine = EndLine + contextLines
+    };
+    
+    /// <summary>
+    /// Check if this diff overlaps with another.
+    /// </summary>
+    public bool Overlaps(LineDiff other) =>
+        StartLine <= other.EndLine && EndLine >= other.StartLine;
+    
+    /// <summary>
+    /// Calculate overlap size with another diff.
+    /// </summary>
+    public int OverlapSize(LineDiff other)
+    {
+        if (!Overlaps(other)) return 0;
+        
+        var overlapStart = Math.Max(StartLine, other.StartLine);
+        var overlapEnd = Math.Min(EndLine, other.EndLine);
+        return overlapEnd - overlapStart + 1;
+    }
+}
+
+public enum DiffType
+{
+    Add,
+    Remove,
+    Modify
+}
+
+// File: src/Acode.Domain/Merge/ScopeType.cs
+namespace Acode.Domain.Merge;
+
+public enum ScopeType
+{
+    Unknown,
+    File,
+    Namespace,
+    Class,
+    Method,
+    Property,
+    Constructor,
+    Import,
+    Comment
+}
+```
+
+### Part 2: Analysis Result Models
+
+```csharp
+// File: src/Acode.Domain/Merge/ConflictAnalysis.cs
+namespace Acode.Domain.Merge;
+
+/// <summary>
+/// Result of conflict heuristic analysis.
+/// </summary>
+public sealed record ConflictAnalysis
+{
+    public required IReadOnlyList<FileConflict> Conflicts { get; init; }
+    public required ConflictSeverity MaxSeverity { get; init; }
+    public required TimeSpan AnalysisDuration { get; init; }
+    public required int FilesAnalyzed { get; init; }
+    
+    public bool HasCriticalConflicts => MaxSeverity == ConflictSeverity.Critical;
+    public bool HasHighConflicts => MaxSeverity >= ConflictSeverity.High;
+    public bool IsSafeToMerge => MaxSeverity <= ConflictSeverity.Medium;
+    
+    public IReadOnlyList<FileConflict> GetByMinSeverity(ConflictSeverity min) =>
+        Conflicts.Where(c => c.Severity >= min).ToList();
+}
+
+/// <summary>
+/// Conflict analysis for a single file.
+/// </summary>
+public sealed record FileConflict
+{
+    public required string Path { get; init; }
+    public required double OverlapScore { get; init; }
+    public required ConflictSeverity Severity { get; init; }
+    public required IReadOnlyList<LineOverlap> Overlaps { get; init; }
+    public ScopeMatch? Scope { get; init; }
+    public required string AppliedRule { get; init; }
+    public string? Details { get; init; }
+}
+
+/// <summary>
+/// Overlapping line ranges between local and remote changes.
+/// </summary>
+public sealed record LineOverlap
+{
+    public required LineRange Local { get; init; }
+    public required LineRange Remote { get; init; }
+    public required double Score { get; init; }
+}
+
+public sealed record LineRange(int Start, int End)
+{
+    public int Length => End - Start + 1;
+}
+
+/// <summary>
+/// Scope match information for increased severity.
+/// </summary>
+public sealed record ScopeMatch
+{
+    public required ScopeType Type { get; init; }
+    public required string Name { get; init; }
+    public required double SeverityMultiplier { get; init; }
+}
+```
+
+### Part 3: Application Interfaces
+
+```csharp
+// File: src/Acode.Application/Merge/IConflictHeuristics.cs
+namespace Acode.Application.Merge;
+
+/// <summary>
+/// Predicts merge conflicts using heuristics.
+/// </summary>
 public interface IConflictHeuristics
 {
+    /// <summary>
+    /// Analyze changes for potential conflicts.
+    /// </summary>
     Task<ConflictAnalysis> AnalyzeAsync(
+        IReadOnlyList<FileChange> localChanges,
+        IReadOnlyList<FileChange> remoteChanges,
+        HeuristicsOptions? options = null,
+        CancellationToken ct = default);
+    
+    /// <summary>
+    /// Quick check if any conflicts are critical.
+    /// </summary>
+    Task<bool> HasCriticalConflictsAsync(
         IReadOnlyList<FileChange> localChanges,
         IReadOnlyList<FileChange> remoteChanges,
         CancellationToken ct = default);
 }
 
-public record FileChange(
-    string Path,
-    ChangeType Type,
-    IReadOnlyList<LineDiff> Diffs);
+// File: src/Acode.Application/Merge/IScopeDetector.cs
+namespace Acode.Application.Merge;
 
-public record LineDiff(
-    int StartLine,
-    int EndLine,
-    DiffType Type);
+/// <summary>
+/// Detects code scope (function, class) at line positions.
+/// </summary>
+public interface IScopeDetector
+{
+    /// <summary>
+    /// Detect scope at a specific line in a file.
+    /// </summary>
+    Task<ScopeInfo?> DetectScopeAsync(
+        string filePath,
+        int lineNumber,
+        CancellationToken ct = default);
+    
+    /// <summary>
+    /// Get all scopes in a file.
+    /// </summary>
+    Task<IReadOnlyList<ScopeInfo>> GetScopesAsync(
+        string filePath,
+        CancellationToken ct = default);
+}
 
-public enum DiffType { Add, Remove, Modify }
+public sealed record ScopeInfo
+{
+    public required ScopeType Type { get; init; }
+    public required string Name { get; init; }
+    public required int StartLine { get; init; }
+    public required int EndLine { get; init; }
+}
 
-public record ConflictAnalysis(
-    IReadOnlyList<FileConflict> Conflicts,
-    ConflictSeverity MaxSeverity,
-    TimeSpan AnalysisDuration);
+// File: src/Acode.Application/Merge/IFileRuleEngine.cs
+namespace Acode.Application.Merge;
 
-public record FileConflict(
-    string Path,
-    double OverlapScore,
-    ConflictSeverity Severity,
-    IReadOnlyList<LineOverlap> Overlaps,
-    ScopeMatch? Scope,
-    string AppliedRule);
+/// <summary>
+/// Applies file-specific rules for conflict handling.
+/// </summary>
+public interface IFileRuleEngine
+{
+    /// <summary>
+    /// Get the rule that applies to a file.
+    /// </summary>
+    FileRule GetRule(string filePath);
+    
+    /// <summary>
+    /// Check if file should block on any conflict.
+    /// </summary>
+    bool IsStrictFile(string filePath);
+    
+    /// <summary>
+    /// Check if file should use lenient rules.
+    /// </summary>
+    bool IsLenientFile(string filePath);
+    
+    /// <summary>
+    /// Check if file should be regenerated instead of merged.
+    /// </summary>
+    bool ShouldRegenerate(string filePath);
+}
 
-public record LineOverlap(
-    LineRange Local,
-    LineRange Remote,
-    double Score);
+public sealed record FileRule
+{
+    public required string Pattern { get; init; }
+    public required FileRuleAction Action { get; init; }
+    public ConflictSeverity? MaxSeverity { get; init; }
+    public string? Description { get; init; }
+}
 
-public record ScopeMatch(
-    string ScopeType,  // method, class, etc.
-    string ScopeName,
-    double SeverityMultiplier);
+public enum FileRuleAction
+{
+    Normal,
+    Strict,
+    Lenient,
+    Regenerate,
+    Block
+}
 ```
+
+### Part 4: Heuristics Implementation
+
+```csharp
+// File: src/Acode.Infrastructure/Merge/Heuristics/HeuristicsOptions.cs
+namespace Acode.Infrastructure.Merge.Heuristics;
+
+public sealed record HeuristicsOptions
+{
+    public int ContextLines { get; init; } = 5;
+    public int NearThresholdLines { get; init; } = 10;
+    public bool IgnoreWhitespace { get; init; } = true;
+    
+    public double CriticalThreshold { get; init; } = 0.8;
+    public double HighThreshold { get; init; } = 0.5;
+    public double MediumThreshold { get; init; } = 0.2;
+    
+    public bool ScopeAnalysisEnabled { get; init; } = true;
+    public double SameFunctionMultiplier { get; init; } = 2.0;
+    public double SameClassMultiplier { get; init; } = 1.5;
+    
+    public IReadOnlyList<FileRule> FileRules { get; init; } = DefaultRules;
+    
+    public static IReadOnlyList<FileRule> DefaultRules => new[]
+    {
+        new FileRule { Pattern = "*.lock", Action = FileRuleAction.Regenerate },
+        new FileRule { Pattern = "*.generated.cs", Action = FileRuleAction.Regenerate },
+        new FileRule { Pattern = "**/migrations/*.cs", Action = FileRuleAction.Strict },
+        new FileRule { Pattern = "**/*.test.cs", Action = FileRuleAction.Lenient }
+    };
+}
+
+// File: src/Acode.Infrastructure/Merge/Heuristics/LineOverlapAnalyzer.cs
+namespace Acode.Infrastructure.Merge.Heuristics;
+
+public sealed class LineOverlapAnalyzer
+{
+    private readonly HeuristicsOptions _options;
+    
+    public LineOverlapAnalyzer(HeuristicsOptions options)
+    {
+        _options = options;
+    }
+    
+    public IReadOnlyList<LineOverlap> FindOverlaps(
+        IReadOnlyList<LineDiff> localDiffs,
+        IReadOnlyList<LineDiff> remoteDiffs)
+    {
+        var overlaps = new List<LineOverlap>();
+        
+        // Expand diffs with context
+        var localExpanded = localDiffs
+            .Select(d => d.WithContext(_options.ContextLines))
+            .ToList();
+        var remoteExpanded = remoteDiffs
+            .Select(d => d.WithContext(_options.ContextLines))
+            .ToList();
+        
+        foreach (var local in localExpanded)
+        {
+            foreach (var remote in remoteExpanded)
+            {
+                if (local.Overlaps(remote))
+                {
+                    var overlapSize = local.OverlapSize(remote);
+                    var unionSize = (local.EndLine - local.StartLine + 1) +
+                                   (remote.EndLine - remote.StartLine + 1) -
+                                   overlapSize;
+                    var score = (double)overlapSize / unionSize;
+                    
+                    overlaps.Add(new LineOverlap
+                    {
+                        Local = new LineRange(local.StartLine, local.EndLine),
+                        Remote = new LineRange(remote.StartLine, remote.EndLine),
+                        Score = score
+                    });
+                }
+            }
+        }
+        
+        return overlaps;
+    }
+    
+    public double ComputeOverlapScore(IReadOnlyList<LineOverlap> overlaps)
+    {
+        if (overlaps.Count == 0) return 0;
+        return overlaps.Max(o => o.Score);
+    }
+    
+    public ConflictSeverity ScoreToSeverity(double score)
+    {
+        if (score >= _options.CriticalThreshold) return ConflictSeverity.Critical;
+        if (score >= _options.HighThreshold) return ConflictSeverity.High;
+        if (score >= _options.MediumThreshold) return ConflictSeverity.Medium;
+        return ConflictSeverity.Low;
+    }
+}
+
+// File: src/Acode.Infrastructure/Merge/Heuristics/ConflictHeuristics.cs
+namespace Acode.Infrastructure.Merge.Heuristics;
+
+public sealed class ConflictHeuristics : IConflictHeuristics
+{
+    private readonly IScopeDetector _scopeDetector;
+    private readonly IFileRuleEngine _ruleEngine;
+    private readonly ILogger<ConflictHeuristics> _logger;
+    
+    public ConflictHeuristics(
+        IScopeDetector scopeDetector,
+        IFileRuleEngine ruleEngine,
+        ILogger<ConflictHeuristics> logger)
+    {
+        _scopeDetector = scopeDetector;
+        _ruleEngine = ruleEngine;
+        _logger = logger;
+    }
+    
+    public async Task<ConflictAnalysis> AnalyzeAsync(
+        IReadOnlyList<FileChange> localChanges,
+        IReadOnlyList<FileChange> remoteChanges,
+        HeuristicsOptions? options = null,
+        CancellationToken ct = default)
+    {
+        options ??= new HeuristicsOptions();
+        var stopwatch = Stopwatch.StartNew();
+        var conflicts = new List<FileConflict>();
+        
+        // Group changes by file
+        var localByPath = localChanges.ToDictionary(c => c.Path);
+        var remoteByPath = remoteChanges.ToDictionary(c => c.Path);
+        
+        // Find files modified in both
+        var commonPaths = localByPath.Keys.Intersect(remoteByPath.Keys);
+        
+        foreach (var path in commonPaths)
+        {
+            ct.ThrowIfCancellationRequested();
+            
+            var local = localByPath[path];
+            var remote = remoteByPath[path];
+            
+            var conflict = await AnalyzeFileAsync(
+                path, local, remote, options, ct);
+            
+            if (conflict != null)
+            {
+                conflicts.Add(conflict);
+                _logger.LogDebug(
+                    "Conflict detected in {Path}: {Severity} (score: {Score:F2})",
+                    path, conflict.Severity, conflict.OverlapScore);
+            }
+        }
+        
+        stopwatch.Stop();
+        
+        return new ConflictAnalysis
+        {
+            Conflicts = conflicts,
+            MaxSeverity = conflicts.Count > 0 
+                ? conflicts.Max(c => c.Severity) 
+                : ConflictSeverity.Low,
+            AnalysisDuration = stopwatch.Elapsed,
+            FilesAnalyzed = commonPaths.Count()
+        };
+    }
+    
+    private async Task<FileConflict?> AnalyzeFileAsync(
+        string path,
+        FileChange local,
+        FileChange remote,
+        HeuristicsOptions options,
+        CancellationToken ct)
+    {
+        // Check file rules first
+        var rule = _ruleEngine.GetRule(path);
+        
+        if (rule.Action == FileRuleAction.Regenerate)
+        {
+            return new FileConflict
+            {
+                Path = path,
+                OverlapScore = 0,
+                Severity = ConflictSeverity.Low,
+                Overlaps = [],
+                AppliedRule = $"Regenerate: {rule.Pattern}",
+                Details = "File will be regenerated, no conflict analysis needed"
+            };
+        }
+        
+        // Binary files always block
+        if (local.IsBinary || remote.IsBinary)
+        {
+            return new FileConflict
+            {
+                Path = path,
+                OverlapScore = 1.0,
+                Severity = ConflictSeverity.Critical,
+                Overlaps = [],
+                AppliedRule = "Binary file",
+                Details = "Binary files cannot be merged"
+            };
+        }
+        
+        // Line overlap analysis
+        var analyzer = new LineOverlapAnalyzer(options);
+        var overlaps = analyzer.FindOverlaps(local.Diffs, remote.Diffs);
+        
+        if (overlaps.Count == 0)
+            return null; // No conflict
+        
+        var score = analyzer.ComputeOverlapScore(overlaps);
+        var severity = analyzer.ScoreToSeverity(score);
+        
+        // Scope analysis for severity adjustment
+        ScopeMatch? scopeMatch = null;
+        if (options.ScopeAnalysisEnabled)
+        {
+            scopeMatch = await CheckScopeOverlapAsync(
+                path, overlaps, options, ct);
+            
+            if (scopeMatch != null)
+            {
+                score = Math.Min(1.0, score * scopeMatch.SeverityMultiplier);
+                severity = analyzer.ScoreToSeverity(score);
+            }
+        }
+        
+        // Apply rule severity limits
+        if (rule.MaxSeverity.HasValue && severity > rule.MaxSeverity.Value)
+        {
+            severity = rule.MaxSeverity.Value;
+        }
+        
+        return new FileConflict
+        {
+            Path = path,
+            OverlapScore = score,
+            Severity = severity,
+            Overlaps = overlaps,
+            Scope = scopeMatch,
+            AppliedRule = rule.Pattern
+        };
+    }
+    
+    private async Task<ScopeMatch?> CheckScopeOverlapAsync(
+        string path,
+        IReadOnlyList<LineOverlap> overlaps,
+        HeuristicsOptions options,
+        CancellationToken ct)
+    {
+        try
+        {
+            var scopes = await _scopeDetector.GetScopesAsync(path, ct);
+            
+            foreach (var overlap in overlaps)
+            {
+                // Find scope containing the overlap
+                var matchingScope = scopes.FirstOrDefault(s =>
+                    s.StartLine <= overlap.Local.Start &&
+                    s.EndLine >= overlap.Local.End);
+                
+                if (matchingScope != null)
+                {
+                    var multiplier = matchingScope.Type switch
+                    {
+                        ScopeType.Method => options.SameFunctionMultiplier,
+                        ScopeType.Class => options.SameClassMultiplier,
+                        _ => 1.0
+                    };
+                    
+                    return new ScopeMatch
+                    {
+                        Type = matchingScope.Type,
+                        Name = matchingScope.Name,
+                        SeverityMultiplier = multiplier
+                    };
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, 
+                "Scope detection failed for {Path}, continuing without", path);
+        }
+        
+        return null;
+    }
+    
+    public async Task<bool> HasCriticalConflictsAsync(
+        IReadOnlyList<FileChange> localChanges,
+        IReadOnlyList<FileChange> remoteChanges,
+        CancellationToken ct = default)
+    {
+        var analysis = await AnalyzeAsync(
+            localChanges, remoteChanges, ct: ct);
+        return analysis.HasCriticalConflicts;
+    }
+}
+```
+
+### Part 5: Scope Detector & File Rules
+
+```csharp
+// File: src/Acode.Infrastructure/Merge/Heuristics/ScopeDetector.cs
+namespace Acode.Infrastructure.Merge.Heuristics;
+
+public sealed class ScopeDetector : IScopeDetector
+{
+    private readonly Dictionary<string, LanguagePatterns> _patterns;
+    
+    public ScopeDetector()
+    {
+        _patterns = new Dictionary<string, LanguagePatterns>(
+            StringComparer.OrdinalIgnoreCase)
+        {
+            [".cs"] = new LanguagePatterns
+            {
+                MethodPattern = new Regex(
+                    @"^\s*(public|private|protected|internal|static|\s)*" +
+                    @"(\w+\s+)+(\w+)\s*\(", RegexOptions.Compiled),
+                ClassPattern = new Regex(
+                    @"^\s*(public|private|protected|internal|static|sealed|abstract|\s)*" +
+                    @"class\s+(\w+)", RegexOptions.Compiled),
+                ImportPattern = new Regex(
+                    @"^\s*using\s+", RegexOptions.Compiled)
+            },
+            [".py"] = new LanguagePatterns
+            {
+                MethodPattern = new Regex(
+                    @"^\s*def\s+(\w+)\s*\(", RegexOptions.Compiled),
+                ClassPattern = new Regex(
+                    @"^\s*class\s+(\w+)", RegexOptions.Compiled),
+                ImportPattern = new Regex(
+                    @"^\s*(import|from)\s+", RegexOptions.Compiled)
+            },
+            [".js"] = new LanguagePatterns
+            {
+                MethodPattern = new Regex(
+                    @"^\s*(async\s+)?function\s+(\w+)|" +
+                    @"^\s*(const|let|var)\s+(\w+)\s*=\s*(async\s+)?\(",
+                    RegexOptions.Compiled),
+                ClassPattern = new Regex(
+                    @"^\s*class\s+(\w+)", RegexOptions.Compiled),
+                ImportPattern = new Regex(
+                    @"^\s*(import|require)\s*", RegexOptions.Compiled)
+            },
+            [".ts"] = new LanguagePatterns
+            {
+                MethodPattern = new Regex(
+                    @"^\s*(public|private|protected|async|static|\s)*" +
+                    @"(\w+)\s*\(", RegexOptions.Compiled),
+                ClassPattern = new Regex(
+                    @"^\s*(export\s+)?(abstract\s+)?class\s+(\w+)",
+                    RegexOptions.Compiled),
+                ImportPattern = new Regex(
+                    @"^\s*import\s+", RegexOptions.Compiled)
+            }
+        };
+    }
+    
+    public async Task<ScopeInfo?> DetectScopeAsync(
+        string filePath,
+        int lineNumber,
+        CancellationToken ct = default)
+    {
+        var scopes = await GetScopesAsync(filePath, ct);
+        return scopes.FirstOrDefault(s => 
+            lineNumber >= s.StartLine && lineNumber <= s.EndLine);
+    }
+    
+    public async Task<IReadOnlyList<ScopeInfo>> GetScopesAsync(
+        string filePath,
+        CancellationToken ct = default)
+    {
+        var ext = Path.GetExtension(filePath);
+        if (!_patterns.TryGetValue(ext, out var patterns))
+            return [];
+        
+        var lines = await File.ReadAllLinesAsync(filePath, ct);
+        var scopes = new List<ScopeInfo>();
+        var scopeStack = new Stack<(ScopeType Type, string Name, int Start)>();
+        
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            var lineNum = i + 1;
+            
+            // Check for import
+            if (patterns.ImportPattern?.IsMatch(line) == true)
+            {
+                scopes.Add(new ScopeInfo
+                {
+                    Type = ScopeType.Import,
+                    Name = "imports",
+                    StartLine = lineNum,
+                    EndLine = lineNum
+                });
+                continue;
+            }
+            
+            // Check for class
+            var classMatch = patterns.ClassPattern?.Match(line);
+            if (classMatch?.Success == true)
+            {
+                var name = classMatch.Groups[^1].Value;
+                scopeStack.Push((ScopeType.Class, name, lineNum));
+            }
+            
+            // Check for method
+            var methodMatch = patterns.MethodPattern?.Match(line);
+            if (methodMatch?.Success == true)
+            {
+                var name = methodMatch.Groups
+                    .Cast<Group>()
+                    .LastOrDefault(g => g.Success && !string.IsNullOrEmpty(g.Value))
+                    ?.Value ?? "unknown";
+                scopeStack.Push((ScopeType.Method, name, lineNum));
+            }
+            
+            // Check for scope end (simple brace counting)
+            // Note: This is a simplified implementation
+            if (line.TrimEnd().EndsWith("}") && scopeStack.Count > 0)
+            {
+                var (type, name, start) = scopeStack.Pop();
+                scopes.Add(new ScopeInfo
+                {
+                    Type = type,
+                    Name = name,
+                    StartLine = start,
+                    EndLine = lineNum
+                });
+            }
+        }
+        
+        return scopes;
+    }
+}
+
+public sealed record LanguagePatterns
+{
+    public Regex? MethodPattern { get; init; }
+    public Regex? ClassPattern { get; init; }
+    public Regex? ImportPattern { get; init; }
+}
+
+// File: src/Acode.Infrastructure/Merge/Heuristics/FileRuleEngine.cs
+namespace Acode.Infrastructure.Merge.Heuristics;
+
+public sealed class FileRuleEngine : IFileRuleEngine
+{
+    private readonly IReadOnlyList<FileRule> _rules;
+    private readonly FileRule _defaultRule;
+    
+    public FileRuleEngine(IReadOnlyList<FileRule>? rules = null)
+    {
+        _rules = rules ?? HeuristicsOptions.DefaultRules;
+        _defaultRule = new FileRule 
+        { 
+            Pattern = "*", 
+            Action = FileRuleAction.Normal 
+        };
+    }
+    
+    public FileRule GetRule(string filePath)
+    {
+        foreach (var rule in _rules)
+        {
+            if (MatchesPattern(filePath, rule.Pattern))
+                return rule;
+        }
+        return _defaultRule;
+    }
+    
+    public bool IsStrictFile(string filePath) =>
+        GetRule(filePath).Action == FileRuleAction.Strict;
+    
+    public bool IsLenientFile(string filePath) =>
+        GetRule(filePath).Action == FileRuleAction.Lenient;
+    
+    public bool ShouldRegenerate(string filePath) =>
+        GetRule(filePath).Action == FileRuleAction.Regenerate;
+    
+    private static bool MatchesPattern(string path, string pattern)
+    {
+        // Convert glob pattern to regex
+        var regexPattern = "^" + Regex.Escape(pattern)
+            .Replace(@"\*\*", ".*")
+            .Replace(@"\*", "[^/]*")
+            .Replace(@"\?", ".") + "$";
+        
+        return Regex.IsMatch(path, regexPattern, RegexOptions.IgnoreCase);
+    }
+}
+```
+
+### Implementation Checklist
+
+- [ ] Create `ConflictSeverity`, `FileChange`, `LineDiff` domain models
+- [ ] Create `ConflictAnalysis`, `FileConflict`, `LineOverlap` result models
+- [ ] Create `IConflictHeuristics` interface
+- [ ] Create `IScopeDetector` interface with language patterns
+- [ ] Create `IFileRuleEngine` interface with glob matching
+- [ ] Create `HeuristicsOptions` with configurable thresholds
+- [ ] Implement `LineOverlapAnalyzer` with context expansion
+- [ ] Implement `ConflictHeuristics` with full analysis pipeline
+- [ ] Implement `ScopeDetector` for C#, Python, JS, TS
+- [ ] Implement `FileRuleEngine` with pattern priorities
+- [ ] Add binary file detection
+- [ ] Add rename tracking
+- [ ] Add lock file regeneration rules
+- [ ] Write unit tests for overlap detection
+- [ ] Write unit tests for scope detection
+- [ ] Write unit tests for file rules
+- [ ] Write integration tests with real diffs
+
+### Rollout Plan
+
+1. **Day 1**: Domain models and interfaces
+2. **Day 2**: LineOverlapAnalyzer with scoring
+3. **Day 3**: ConflictHeuristics main logic
+4. **Day 4**: ScopeDetector with language patterns
+5. **Day 5**: FileRuleEngine with glob matching
+6. **Day 6**: Configuration and CLI
+7. **Day 7**: Unit tests
+8. **Day 8**: Integration tests with real scenarios
 
 ---
 
