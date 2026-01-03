@@ -1,0 +1,457 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acode.dev/schemas/config-v1.json",
+  "title": "Acode Configuration",
+  "description": "Configuration schema for Acode .agent/config.yml repository contract",
+  "type": "object",
+  "required": ["schema_version"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Schema version following semantic versioning (semver)",
+      "default": "1.0.0",
+      "examples": ["1.0.0", "1.1.0", "2.0.0"]
+    },
+    "project": {
+      "$ref": "#/$defs/project"
+    },
+    "mode": {
+      "$ref": "#/$defs/mode"
+    },
+    "model": {
+      "$ref": "#/$defs/model"
+    },
+    "commands": {
+      "$ref": "#/$defs/commands"
+    },
+    "paths": {
+      "$ref": "#/$defs/paths"
+    },
+    "ignore": {
+      "$ref": "#/$defs/ignore"
+    },
+    "network": {
+      "$ref": "#/$defs/network"
+    },
+    "storage": {
+      "$ref": "#/$defs/storage"
+    }
+  },
+  "$defs": {
+    "project": {
+      "type": "object",
+      "description": "Project metadata and identification",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-_]*$",
+          "description": "Project identifier (lowercase, alphanumeric, hyphens, underscores)",
+          "examples": ["my-app", "acme_project", "service123"]
+        },
+        "type": {
+          "type": "string",
+          "enum": ["dotnet", "node", "python", "go", "rust", "java", "other"],
+          "description": "Project type for framework-specific defaults",
+          "examples": ["dotnet", "node", "python"]
+        },
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Programming languages used in this project",
+          "examples": [["csharp", "fsharp"], ["typescript", "javascript"], ["python"]]
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable project description",
+          "examples": ["A web API built with .NET 8", "React frontend application"]
+        }
+      }
+    },
+    "mode": {
+      "type": "object",
+      "description": "Operating mode configuration (LocalOnly, Burst, Airgapped)",
+      "properties": {
+        "default": {
+          "type": "string",
+          "enum": ["local-only", "airgapped"],
+          "default": "local-only",
+          "description": "Default operating mode (burst not allowed as default per HC-03)"
+        },
+        "allow_burst": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow CLI to enter burst mode (requires user consent)"
+        },
+        "airgapped_lock": {
+          "type": "boolean",
+          "default": false,
+          "description": "Lock to airgapped mode permanently (cannot be overridden)"
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "description": "LLM model configuration",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "default": "ollama",
+          "description": "LLM provider name (ollama, lmstudio, etc.)",
+          "examples": ["ollama", "lmstudio"]
+        },
+        "name": {
+          "type": "string",
+          "default": "codellama:7b",
+          "description": "Model identifier or name",
+          "examples": ["codellama:7b", "deepseek-coder:6.7b", "llama3:8b"]
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "default": "http://localhost:11434",
+          "description": "Provider endpoint URL (must be localhost in LocalOnly mode)",
+          "examples": ["http://localhost:11434", "http://127.0.0.1:1234"]
+        },
+        "parameters": {
+          "$ref": "#/$defs/model_parameters"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 120,
+          "description": "Request timeout in seconds"
+        },
+        "retry_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 3,
+          "description": "Number of retry attempts on failure"
+        }
+      }
+    },
+    "model_parameters": {
+      "type": "object",
+      "description": "LLM inference parameters",
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 0.7,
+          "description": "Sampling temperature (0 = deterministic, higher = more creative)"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 4096,
+          "description": "Maximum tokens in response"
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.95,
+          "description": "Nucleus sampling threshold"
+        }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "description": "Command groups for project lifecycle operations",
+      "properties": {
+        "setup": {
+          "$ref": "#/$defs/command",
+          "description": "Initialize development environment (install dependencies)"
+        },
+        "build": {
+          "$ref": "#/$defs/command",
+          "description": "Compile or bundle the project"
+        },
+        "test": {
+          "$ref": "#/$defs/command",
+          "description": "Run test suite"
+        },
+        "lint": {
+          "$ref": "#/$defs/command",
+          "description": "Check code quality and style (read-only)"
+        },
+        "format": {
+          "$ref": "#/$defs/command",
+          "description": "Auto-format source code (modifies files)"
+        },
+        "start": {
+          "$ref": "#/$defs/command",
+          "description": "Run the application"
+        }
+      },
+      "additionalProperties": false
+    },
+    "command": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Single shell command as string",
+          "examples": ["npm install", "dotnet build"]
+        },
+        {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/command_object"
+              }
+            ]
+          },
+          "description": "Array of commands executed in sequence"
+        },
+        {
+          "$ref": "#/$defs/command_object"
+        }
+      ]
+    },
+    "command_object": {
+      "type": "object",
+      "required": ["run"],
+      "properties": {
+        "run": {
+          "type": "string",
+          "description": "The shell command to execute"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory (relative to repository root)",
+          "examples": ["src/frontend", "packages/api"]
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Additional environment variables"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 300,
+          "description": "Timeout in seconds (0 = no timeout)"
+        },
+        "retry": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Number of retry attempts on failure"
+        },
+        "continue_on_error": {
+          "type": "boolean",
+          "default": false,
+          "description": "Continue sequence even if this command fails"
+        },
+        "platforms": {
+          "type": "object",
+          "properties": {
+            "windows": {
+              "type": "string",
+              "description": "Windows-specific command variant"
+            },
+            "linux": {
+              "type": "string",
+              "description": "Linux-specific command variant"
+            },
+            "macos": {
+              "type": "string",
+              "description": "macOS-specific command variant"
+            }
+          },
+          "description": "Platform-specific command overrides"
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "description": "Directory classifications for context management",
+      "properties": {
+        "source": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Source code directories",
+          "examples": [["src/"], ["lib/", "packages/"]]
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Test directories",
+          "examples": [["tests/"], ["test/", "__tests__/"]]
+        },
+        "output": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Build output directories",
+          "examples": [["bin/", "obj/"], ["dist/", "build/"]]
+        },
+        "docs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Documentation directories",
+          "examples": [["docs/"], ["documentation/"]]
+        }
+      }
+    },
+    "ignore": {
+      "type": "object",
+      "description": "Files and patterns to exclude from context",
+      "properties": {
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob patterns to ignore",
+          "examples": [["**/node_modules/**", "**/.git/**"], ["**/bin/**", "**/obj/**"]]
+        },
+        "additional": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional patterns beyond defaults",
+          "examples": [["**/temp/**", "**/*.log"]]
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "description": "Network access configuration (Burst mode only)",
+      "properties": {
+        "allowlist": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["host"],
+            "properties": {
+              "host": {
+                "type": "string",
+                "description": "Hostname or IP address",
+                "examples": ["api.example.com", "192.168.1.100"]
+              },
+              "ports": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "description": "Allowed port numbers",
+                "examples": [[443], [80, 443], [8080, 8443]]
+              },
+              "reason": {
+                "type": "string",
+                "description": "Justification for allowlist entry",
+                "examples": ["Company API server", "Internal test environment"]
+              }
+            }
+          },
+          "description": "Allowed external hosts (requires Burst mode)"
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "description": "Storage and sync configuration",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["local_cache_only", "offline_first_sync", "remote_required"],
+          "default": "local_cache_only",
+          "description": "Storage mode for conversation/context data"
+        },
+        "local": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["sqlite"],
+              "default": "sqlite",
+              "description": "Local storage type"
+            },
+            "sqlite_path": {
+              "type": "string",
+              "default": ".acode/workspace.db",
+              "description": "Path to SQLite database file"
+            }
+          }
+        },
+        "remote": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["postgres"],
+              "description": "Remote storage type"
+            },
+            "postgres": {
+              "type": "object",
+              "properties": {
+                "dsn": {
+                  "type": "string",
+                  "description": "PostgreSQL DSN (use env var indirection for secrets)",
+                  "examples": ["${ACODE_POSTGRES_DSN}", "postgresql://user:pass@host:5432/db"]
+                }
+              }
+            }
+          }
+        },
+        "sync": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable sync (default true for offline_first_sync mode)"
+            },
+            "batch_size": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 100,
+              "description": "Number of records per sync batch"
+            },
+            "retry_policy": {
+              "type": "object",
+              "properties": {
+                "max_attempts": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 3
+                },
+                "backoff_ms": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "default": 1000
+                }
+              }
+            },
+            "conflict_policy": {
+              "type": "string",
+              "enum": ["lww", "reject"],
+              "default": "lww",
+              "description": "Conflict resolution: last-write-wins or reject"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+# Minimal .agent/config.yml
+# This is the absolute minimum configuration required for Acode
+
+schema_version: "1.0.0"
+
+project:
+  name: my-project
+  type: dotnet

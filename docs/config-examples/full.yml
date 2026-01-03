@@ -1,0 +1,114 @@
+# Full .agent/config.yml example
+# Shows ALL available configuration options with documentation
+
+schema_version: "1.0.0"
+
+# Project metadata
+project:
+  name: full-example-app
+  type: other  # dotnet|node|python|go|rust|java|other
+  languages: [typescript, javascript, python]
+  description: Comprehensive example showing all config options
+
+# Operating mode configuration
+mode:
+  default: local-only  # local-only|airgapped (burst not allowed as default)
+  allow_burst: true  # Allow user to switch to burst mode
+  airgapped_lock: false  # Lock to airgapped mode permanently
+
+# LLM model configuration
+model:
+  provider: ollama  # ollama, lmstudio, etc.
+  name: codellama:7b
+  endpoint: http://localhost:11434  # Must be localhost in LocalOnly mode
+  parameters:
+    temperature: 0.7  # 0.0 (deterministic) to 2.0 (creative)
+    max_tokens: 4096  # Maximum response length
+    top_p: 0.95  # Nucleus sampling (0.0 to 1.0)
+  timeout_seconds: 120  # Request timeout
+  retry_count: 3  # Number of retries on failure
+
+# Command groups (all optional)
+commands:
+  # Setup: Initialize development environment
+  setup:
+    - npm install
+    - run: pip install -r requirements.txt
+      cwd: backend
+      timeout: 600  # 10 minutes for large dependency installs
+
+  # Build: Compile or bundle project
+  build:
+    run: npm run build
+    env:
+      NODE_ENV: production
+      BUILD_NUMBER: ${BUILD_NUMBER:-0}
+    timeout: 300
+
+  # Test: Run test suite
+  test:
+    - npm run test:unit
+    - npm run test:integration
+
+  # Lint: Check code quality (read-only)
+  lint:
+    run: npm run lint
+    continue_on_error: false
+
+  # Format: Auto-format code (modifies files)
+  format: npm run format
+
+  # Start: Run the application
+  start:
+    run: npm start
+    timeout: 0  # No timeout for long-running server
+    platforms:
+      windows: npm run start:windows
+      linux: npm run start:linux
+      macos: npm run start:macos
+
+# Directory classifications
+paths:
+  source: [src/, lib/]
+  tests: [tests/, __tests__/]
+  output: [dist/, build/, .next/]
+  docs: [docs/, documentation/]
+
+# Ignore patterns
+ignore:
+  patterns:
+    - "**/node_modules/**"
+    - "**/.git/**"
+    - "**/dist/**"
+    - "**/*.log"
+  additional:
+    - "**/temp/**"
+    - "**/.cache/**"
+
+# Network allowlist (Burst mode only)
+network:
+  allowlist:
+    - host: api.example.com
+      ports: [443]
+      reason: Company API server
+    - host: 192.168.1.100
+      ports: [8080, 8443]
+      reason: Internal development server
+
+# Storage configuration
+storage:
+  mode: offline_first_sync  # local_cache_only|offline_first_sync|remote_required
+  local:
+    type: sqlite
+    sqlite_path: .acode/workspace.db
+  remote:
+    type: postgres
+    postgres:
+      dsn: ${ACODE_POSTGRES_DSN:?PostgreSQL DSN required for sync}
+  sync:
+    enabled: true
+    batch_size: 100
+    retry_policy:
+      max_attempts: 3
+      backoff_ms: 1000
+    conflict_policy: lww  # lww (last-write-wins) | reject

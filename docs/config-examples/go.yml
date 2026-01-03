@@ -1,0 +1,37 @@
+# .agent/config.yml for Go project
+# Example for Go applications
+
+schema_version: "1.0.0"
+
+project:
+  name: my-go-app
+  type: go
+  languages: [go]
+  description: A Go microservice
+
+mode:
+  default: local-only
+
+model:
+  provider: ollama
+  name: codellama:7b
+
+commands:
+  setup: go mod download
+  build: go build -o bin/app ./cmd/app
+  test: go test ./...
+  lint: golangci-lint run
+  format: go fmt ./...
+  start: go run ./cmd/app
+
+paths:
+  source: [cmd/, internal/, pkg/]
+  tests: [.]  # Go tests in same dir as code
+  output: [bin/]
+  docs: [docs/]
+
+ignore:
+  patterns:
+    - "**/vendor/**"
+    - "**/bin/**"
+    - "**/.idea/**"

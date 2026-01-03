@@ -1,0 +1,58 @@
+# .agent/config.yml for .NET project
+# Comprehensive example for .NET 8+ applications
+
+schema_version: "1.0.0"
+
+project:
+  name: my-dotnet-app
+  type: dotnet
+  languages: [csharp, fsharp]
+  description: A .NET 8 web API with Clean Architecture
+
+mode:
+  default: local-only
+  allow_burst: true
+  airgapped_lock: false
+
+model:
+  provider: ollama
+  name: codellama:7b
+  endpoint: http://localhost:11434
+  parameters:
+    temperature: 0.7
+    max_tokens: 4096
+    top_p: 0.95
+  timeout_seconds: 120
+  retry_count: 3
+
+commands:
+  setup:
+    - dotnet restore
+    - dotnet tool restore
+  build: dotnet build --configuration Release
+  test: dotnet test --collect:"XPlat Code Coverage"
+  lint: dotnet format --verify-no-changes
+  format: dotnet format
+  start: dotnet run --project src/MyApp
+
+paths:
+  source: [src/]
+  tests: [tests/]
+  output: [bin/, obj/]
+  docs: [docs/]
+
+ignore:
+  patterns:
+    - "**/bin/**"
+    - "**/obj/**"
+    - "**/.vs/**"
+    - "**/TestResults/**"
+  additional:
+    - "**/*.user"
+    - "**/*.suo"
+
+storage:
+  mode: local_cache_only
+  local:
+    type: sqlite
+    sqlite_path: .acode/workspace.db
