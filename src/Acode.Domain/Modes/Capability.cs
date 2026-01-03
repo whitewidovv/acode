@@ -37,7 +37,7 @@ public enum Capability
 
     /// <summary>
     /// Access to local Ollama instance.
-    /// Allowed in all modes (with network restrictions per mode).
+    /// Allowed in LocalOnly and Burst modes. Denied in Airgapped (no network).
     /// </summary>
     OllamaLocal,
 

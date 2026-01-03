@@ -69,11 +69,18 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 050
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update (DB-aware redaction):** Redaction/secret scanning MUST apply to DB-derived snapshots included in exports, and must occur before remote sync writes.
+
+**Update (Workspace DB Foundation):** This task MUST use the Workspace DB abstraction introduced in **Task 050**.
+- SQLite is the REQUIRED local workspace cache (fast, offline, crash-safe).
+- When configured, Postgres is the canonical source-of-truth; local changes MUST sync via outbox/idempotency (Task 049.f / Task 050).
+- No direct dependency on a concrete DB engine outside Infrastructure; Application must depend on storage interfaces only.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

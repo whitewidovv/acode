@@ -137,7 +137,7 @@ public static class ModeMatrix
             OperatingMode.LocalOnly,
             Capability.ReadSystemFiles,
             Permission.LimitedScope,
-            "System file reads allowed only for specific whitelisted paths"));
+            "System file reads allowed only for specific allowlisted paths"));
         entries.Add(new MatrixEntry(
             OperatingMode.LocalOnly,
             Capability.WriteSystemFiles,
@@ -279,7 +279,7 @@ public static class ModeMatrix
             OperatingMode.Burst,
             Capability.ReadSystemFiles,
             Permission.LimitedScope,
-            "System file reads allowed only for specific whitelisted paths"));
+            "System file reads allowed only for specific allowlisted paths"));
         entries.Add(new MatrixEntry(
             OperatingMode.Burst,
             Capability.WriteSystemFiles,
@@ -421,7 +421,7 @@ public static class ModeMatrix
             OperatingMode.Airgapped,
             Capability.ReadSystemFiles,
             Permission.LimitedScope,
-            "System file reads allowed only for specific whitelisted paths"));
+            "System file reads allowed only for specific allowlisted paths"));
         entries.Add(new MatrixEntry(
             OperatingMode.Airgapped,
             Capability.WriteSystemFiles,

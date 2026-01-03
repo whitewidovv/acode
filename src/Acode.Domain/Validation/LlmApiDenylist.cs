@@ -72,16 +72,8 @@ public static class LlmApiDenylist
         }
 
         // Subdomain match (e.g., xxx.openai.azure.com)
-        foreach (var deniedHost in _deniedHosts)
-        {
-            if (host.EndsWith("." + deniedHost, StringComparison.OrdinalIgnoreCase) ||
-                host.Equals(deniedHost, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return _deniedHosts
+            .Any(deniedHost => host.EndsWith("." + deniedHost, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
