@@ -59,7 +59,56 @@ This is the **Agentic Coding Bot (Acode)** project - a locally-hosted, privacy-f
 - Layer boundaries violated
 - Documentation missing
 
-### 4. Git Workflow
+### 4. Parent Tasks and Subtasks: Task Completion Logic
+
+**CRITICAL RULE:** A parent task is **NOT COMPLETE** until **ALL** its subtasks are complete.
+
+#### Task Naming Convention
+- Parent tasks: `task-XXX-description.md` (e.g., `task-003-threat-model-default-safety-posture.md`)
+- Subtasks: `task-XXXa-description.md`, `task-XXXb-description.md`, `task-XXXc-description.md`, etc.
+
+#### Completion Logic
+
+**Example Scenario:**
+- Task 003: Threat Model & Default Safety Posture (parent)
+  - Task 003a: Enumerate Risk Categories + Mitigations (subtask)
+  - Task 003b: Define Default Denylist + Protected Paths (subtask)
+  - Task 003c: Define Audit Baseline Requirements (subtask)
+
+**WRONG Completion Claim:**
+- "Task 003 is complete! I implemented the threat model framework."
+- **Problem:** Task 003 has subtasks (003a, 003b, 003c) that are not complete
+
+**CORRECT Completion Claim:**
+- "Task 003 parent framework is complete. Now implementing subtask 003a..."
+- "Task 003a is complete. Now implementing subtask 003b..."
+- "Task 003b is complete. Now implementing subtask 003c..."
+- "Task 003c is complete. **All subtasks done, therefore Task 003 is now fully complete.**"
+
+#### How to Identify Subtasks
+
+**Before claiming task complete, ALWAYS check:**
+1. Look for files matching `task-XXXa-*.md`, `task-XXXb-*.md`, etc. in the same directory
+2. Example: `find docs/tasks/refined-tasks -name "task-003*.md"` will show all Task 003 related files
+3. If subtasks exist, parent task is NOT complete until ALL subtasks are done
+
+#### Audit Check for Subtasks
+
+**Audit checklist MUST include:**
+- [ ] Check for subtask files: `task-XXXa`, `task-XXXb`, `task-XXXc`, etc.
+- [ ] If subtasks exist, verify ALL subtasks are complete
+- [ ] If any subtask is incomplete, parent task is incomplete
+- [ ] Only mark parent task complete when all subtasks pass audit
+
+#### Communication with User
+
+**When subtasks exist, be explicit:**
+- "Task 003 has 3 subtasks (003a, 003b, 003c). I've completed the parent framework. Now working on subtask 003a..."
+- **DO NOT** claim "Task 003 complete" until ALL subtasks are done
+- **DO NOT** hide the existence of subtasks from the user
+- **DO NOT** assume subtasks are "future work" unless explicitly stated in spec
+
+### 5. Git Workflow
 
 **Key Constraint:** All work MUST use feature branches with one commit per task objective, and create a PR when the task is complete. DO NOT commit directly to main.
 
