@@ -189,14 +189,22 @@ Each subtask will be completed with:
 ✅ Domain Layer - Audit Types (Task 003.c):
   - ✅ AuditEventType enum (25 mandatory event types)
 
-**Commits so far:** 11 (all with strict TDD - RED→GREEN→REFACTOR)
-**Tests passing:** 189 total (57 new Task-003 tests + 132 from Task-002)
+**Commits so far:** 14 (all with strict TDD - RED→GREEN→REFACTOR)
+**Tests passing:** 290 total (63 new Task-003 Domain tests + 227 from Task-002)
 **Test coverage:** 100% of all implemented domain types
-**Lines of Code:** ~900 lines production code, ~1100 lines test code
+**Lines of Code:** ~1100 lines production code, ~1300 lines test code
+
+**Domain types implemented (10 total):**
+- SecuritySeverity, ThreatActor, DataClassification, TrustBoundary (core security)
+- RiskCategory (STRIDE - Task 003.a)
+- PathCategory, Platform (Task 003.b)
+- AuditEventType (Task 003.c)
+- AttackVector record (core security)
+- DenylistEntry record (Task 003.b)
 
 ## In Progress
 
-🔄 Domain Layer: Continue with value objects and complex records
+🔄 Domain Layer: Continue with value objects (RiskId, DreadScore, etc.) and complex records
 
 ## Remaining
 
