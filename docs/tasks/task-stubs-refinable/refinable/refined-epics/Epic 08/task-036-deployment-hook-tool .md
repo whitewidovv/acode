@@ -52,35 +52,35 @@ These specs must be on par with our e-commerce task samples:
 ## Canonical Context (from task-list.md)
 
 - **Epic:** EPIC 8 — CI/CD Authoring + Deployment Hooks
-- **Canonical Task Title:** Task 034.a: GitHub Actions templates (dotnet/node)
+- **Canonical Task Title:** Task 036: Deployment Hook Tool
 - **Sibling Subtasks (if applicable):**
-  - Task 034.a: GitHub Actions templates (dotnet/node)
-  - Task 034.b: pinned versions + minimal permissions
-  - Task 034.c: caching setup
+  - Task 036.a: deploy tool schema
+  - Task 036.b: disabled by default
+  - Task 036.c: non-bypassable approvals (default)
 
 - **Hard constraints reminder:** MUST comply with Task 001 operating modes and the “no external LLM API” constraint set.
 - **Repo contract reminder:** MUST align with Task 002 `.agent/config.yml` contract where relevant.
 
 ---
 
-# Task 034.a: GitHub Actions templates (dotnet/node)
+# Task 036: Deployment Hook Tool
 
 **Priority:** TBD  
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** Task 021.c, Task 039, Task 050
+**Dependencies:** Task 038, Task 021.c, Task 039, Task 050
 
 ---
 
 ## Description (EXPAND THIS)
 
-**Update:** Templates MUST include optional steps to publish provenance metadata (build ID, git SHA) into the Workspace DB for later inspection/export.
+**Update (export/provenance):** Any deploy artifacts (manifests, logs, diffs) included in export bundles MUST include provenance metadata and be redacted prior to packaging.
 
-**Update (security posture):**
-- Generated CI templates MUST avoid leaking secrets and MUST prefer OIDC/short-lived credentials when targeting cloud providers.
-- The generator MUST support referencing secrets via environment variables or GitHub Secrets, never embedding raw secret values.
-- Templates MUST include minimal permissions and pinned action versions (Task 034.b).
+**Update (auditable deployments):** Deployment hook executions MUST be recorded as structured audit events in the Workspace DB (Task 050) with:
+- inputs (redacted), approvals, targets, artifacts produced, and final status,
+- correlation fields (run_id, worktree_id, repo_sha),
+- sync state (Pending/Acked/Failed) if mirrored to remote Postgres.
 
 **Update (Workspace DB Foundation / provenance):** This task MUST integrate with the Workspace DB (Task 050) to:
 - persist and surface provenance metadata (repo SHA, worktree id, run_id/session_id, timestamps),
@@ -148,4 +148,4 @@ Provide a step-by-step implementation guide (file paths, contracts, interfaces, 
 
 ---
 
-**END OF TASK 034.a**
+**END OF TASK 036**
