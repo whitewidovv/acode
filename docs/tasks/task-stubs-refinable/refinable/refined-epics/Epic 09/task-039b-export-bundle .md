@@ -69,11 +69,16 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 039, Task 050, Task 021.c, Task 038
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update:** Export bundle generation MUST assemble from:
+- DB audit events + run metadata snapshots,
+- filesystem artifacts (logs, patches, diffs),
+and MUST enforce redaction policies during packaging.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

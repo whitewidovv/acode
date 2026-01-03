@@ -69,11 +69,16 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 039, Task 050, Task 038, Task 018
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update:** Recording MUST write structured audit events into the Workspace DB with:
+- event_id (ULID/UUID), timestamps, tool name, inputs/outputs references,
+- redaction status + hash, and
+- links to run/session/task/step entities for correlation.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

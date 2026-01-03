@@ -69,11 +69,13 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 021, Task 050, Task 011
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update:** CLI inspection commands MUST query the Workspace DB as the primary index (with fallbacks to filesystem when artifacts are missing).
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

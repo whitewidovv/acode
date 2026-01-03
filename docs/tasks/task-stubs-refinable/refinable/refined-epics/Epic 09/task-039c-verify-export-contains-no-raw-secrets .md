@@ -69,11 +69,16 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 039.b, Task 038, Task 050
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update:** Secret verification MUST scan BOTH:
+- the export bundle contents, and
+- the DB-derived metadata snapshots included in the bundle.
+It MUST fail the export if raw secrets or high-risk patterns are found.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

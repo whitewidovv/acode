@@ -69,11 +69,15 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 050, Task 011, Task 018, Task 038, Task 021.c, Task 049.e
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update (DB-backed audit):** Audit records MUST be written to the Workspace DB (Task 050) as structured events.
+- Exports MUST pull audit evidence from DB + artifact store.
+- Redaction MUST occur *before* persistence to remote Postgres and *before* writing export bundles.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

@@ -69,11 +69,16 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 050, Task 010, Task 002, Task 018, Task 026
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update (DB foundation / offline-first):** This task MUST persist run/session state using the **Workspace DB Foundation (Task 050)** abstractions.  
+- Local persistence MUST be written to the **workspace SQLite** database (cache + durable queue semantics).  
+- When configured, state MUST also be mirrored to a **remote Postgres** canonical store via sync mechanisms (see Task 049.f / Task 050).  
+- No run/session logic may depend directly on a concrete DB engine; it MUST depend on `IWorkspaceDb` / `IRunStateStore` abstractions.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

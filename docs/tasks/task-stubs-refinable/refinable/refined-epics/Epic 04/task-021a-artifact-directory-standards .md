@@ -69,11 +69,13 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 021, Task 050
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update:** Artifact directories remain on disk, but MUST be indexed/registered in the Workspace DB for fast lookup and export packaging.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 
