@@ -3469,6 +3469,347 @@ Tests/E2E/Models/
 │   └── Scenario_HandleUnavailableProvider()
 ```
 
+#### ProviderScenarios.cs
+
+```csharp
+namespace AgenticCoder.Tests.E2E.Models;
+
+using AgenticCoder.CLI;
+using AgenticCoder.Domain.Models;
+using AgenticCoder.Infrastructure.Models;
+using FluentAssertions;
+using System.Diagnostics;
+using Xunit;
+using Xunit.Abstractions;
+
+[Collection("E2E")]
+[Trait("Category", "E2E")]
+public class ProviderScenarios : IClassFixture<E2ETestFixture>, IAsyncDisposable
+{
+    private readonly E2ETestFixture _fixture;
+    private readonly ITestOutputHelper _output;
+    private readonly string _testDir;
+    private readonly string _configPath;
+
+    public ProviderScenarios(E2ETestFixture fixture, ITestOutputHelper output)
+    {
+        _fixture = fixture;
+        _output = output;
+        _testDir = Path.Combine(Path.GetTempPath(), $"e2e_provider_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDir);
+        _configPath = Path.Combine(_testDir, ".agent", "config.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(_configPath)!);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await Task.Delay(100); // Allow file handles to release
+        try { Directory.Delete(_testDir, true); } catch { }
+    }
+
+    [Fact]
+    public async Task Scenario_ListProviders()
+    {
+        // Arrange
+        await WriteConfigFile(@"
+model_providers:
+  default: primary
+  providers:
+    primary:
+      type: mock
+    secondary:
+      type: mock
+    tertiary:
+      type: mock
+");
+
+        // Act
+        var result = await RunCliAsync("provider", "list");
+
+        // Assert
+        result.ExitCode.Should().Be(0, because: "command should succeed");
+        result.Output.Should().Contain("primary");
+        result.Output.Should().Contain("secondary");
+        result.Output.Should().Contain("tertiary");
+        result.Output.Should().MatchRegex(@"primary.*\(default\)|\*.*primary",
+            because: "default provider should be indicated");
+    }
+
+    [Fact]
+    public async Task Scenario_CheckProviderHealth()
+    {
+        // Arrange - configure with mock providers that simulate health
+        await WriteConfigFile(@"
+model_providers:
+  default: healthy-provider
+  providers:
+    healthy-provider:
+      type: mock
+      healthy: true
+    unhealthy-provider:
+      type: mock
+      healthy: false
+");
+
+        // Act
+        var result = await RunCliAsync("provider", "health");
+
+        // Assert
+        result.ExitCode.Should().Be(0, because: "health command should succeed");
+        result.Output.Should().MatchRegex(@"healthy-provider.*✓|healthy-provider.*available",
+            because: "healthy provider should show success indicator");
+        result.Output.Should().MatchRegex(@"unhealthy-provider.*✗|unhealthy-provider.*unavailable",
+            because: "unhealthy provider should show failure indicator");
+    }
+
+    [Fact]
+    public async Task Scenario_GetProviderInfo()
+    {
+        // Arrange
+        await WriteConfigFile(@"
+model_providers:
+  default: info-test
+  providers:
+    info-test:
+      type: mock
+      endpoint: http://localhost:11434
+      timeout: 120
+      models:
+        - name: test-model
+          context_length: 32768
+");
+
+        // Act
+        var result = await RunCliAsync("provider", "info", "info-test");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("info-test");
+        result.Output.Should().Contain("mock");
+        result.Output.Should().Contain("localhost:11434");
+        result.Output.Should().Contain("test-model");
+    }
+
+    [Fact]
+    public async Task Scenario_TestProviderWithPrompt()
+    {
+        // Arrange - set up mock to return specific response
+        await WriteConfigFile(@"
+model_providers:
+  default: test-provider
+  providers:
+    test-provider:
+      type: mock
+      response: 'Test response from mock provider'
+");
+
+        // Act
+        var result = await RunCliAsync("provider", "test", "--prompt", "Hello world");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("Test response from mock provider");
+    }
+
+    [Fact]
+    public async Task Scenario_SwitchDefaultProvider()
+    {
+        // Arrange
+        await WriteConfigFile(@"
+model_providers:
+  default: original-default
+  providers:
+    original-default:
+      type: mock
+    new-default:
+      type: mock
+");
+
+        // Act - switch default
+        var switchResult = await RunCliAsync("provider", "set-default", "new-default");
+
+        // Assert switch succeeded
+        switchResult.ExitCode.Should().Be(0);
+        switchResult.Output.Should().MatchRegex(@"default.*new-default|new-default.*set.*default",
+            because: "confirmation message should be shown");
+
+        // Verify by listing
+        var listResult = await RunCliAsync("provider", "list");
+        listResult.Output.Should().MatchRegex(@"new-default.*\(default\)|\*.*new-default",
+            because: "new default should be indicated in list");
+    }
+
+    [Fact]
+    public async Task Scenario_HandleUnavailableProvider()
+    {
+        // Arrange - configure provider that will fail
+        await WriteConfigFile(@"
+model_providers:
+  default: unavailable
+  providers:
+    unavailable:
+      type: mock
+      available: false
+");
+
+        // Act
+        var result = await RunCliAsync("provider", "test", "--prompt", "Hello");
+
+        // Assert
+        result.ExitCode.Should().NotBe(0, because: "should fail for unavailable provider");
+        result.Output.Should().MatchRegex(
+            @"unavailable|not available|connection|failed",
+            because: "error message should indicate provider issue");
+    }
+
+    [Fact]
+    public async Task Scenario_ProviderFallbackChain()
+    {
+        // Arrange - primary unavailable, should fall back
+        await WriteConfigFile(@"
+model_providers:
+  default: primary
+  fallback_order:
+    - secondary
+    - tertiary
+  providers:
+    primary:
+      type: mock
+      available: false
+    secondary:
+      type: mock
+      available: true
+      response: 'Response from secondary'
+    tertiary:
+      type: mock
+");
+
+        // Act
+        var result = await RunCliAsync("provider", "test", "--prompt", "Hello", "--fallback");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("Response from secondary");
+    }
+
+    [Fact]
+    public async Task Scenario_StreamingResponse()
+    {
+        // Arrange
+        await WriteConfigFile(@"
+model_providers:
+  default: streaming-test
+  providers:
+    streaming-test:
+      type: mock
+      streaming_response: 'This is a streaming response from the mock provider.'
+");
+
+        // Act
+        var result = await RunCliAsync("provider", "test", "--prompt", "Hello", "--stream");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Output.Should().Contain("streaming response from the mock provider");
+    }
+
+    private async Task WriteConfigFile(string content)
+    {
+        await File.WriteAllTextAsync(_configPath, content);
+    }
+
+    private async Task<CliResult> RunCliAsync(params string[] args)
+    {
+        var allArgs = args.Concat(new[] { "--config-dir", Path.GetDirectoryName(_configPath)! });
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _fixture.CliBinaryPath,
+            Arguments = string.Join(" ", allArgs.Select(QuoteIfNeeded)),
+            WorkingDirectory = _testDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(startInfo)!;
+        
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+
+        await process.WaitForExitAsync();
+
+        var output = await outputTask;
+        var error = await errorTask;
+
+        _output.WriteLine($"Exit code: {process.ExitCode}");
+        _output.WriteLine($"Output: {output}");
+        if (!string.IsNullOrEmpty(error))
+            _output.WriteLine($"Error: {error}");
+
+        return new CliResult(process.ExitCode, output + error);
+    }
+
+    private static string QuoteIfNeeded(string arg)
+    {
+        return arg.Contains(' ') ? $"\"{arg}\"" : arg;
+    }
+
+    private record CliResult(int ExitCode, string Output);
+}
+
+/// <summary>
+/// E2E test fixture providing common setup for end-to-end tests.
+/// </summary>
+public class E2ETestFixture : IAsyncLifetime
+{
+    public string CliBinaryPath { get; private set; } = string.Empty;
+
+    public async Task InitializeAsync()
+    {
+        // Build the CLI if needed
+        var solutionDir = FindSolutionDirectory();
+        var cliProject = Path.Combine(solutionDir, "src", "CLI", "AgenticCoder.CLI.csproj");
+
+        if (File.Exists(cliProject))
+        {
+            var buildProcess = Process.Start(new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = $"build \"{cliProject}\" -c Release --no-incremental",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            });
+
+            await buildProcess!.WaitForExitAsync();
+
+            CliBinaryPath = Path.Combine(
+                Path.GetDirectoryName(cliProject)!,
+                "bin", "Release", "net8.0", "agentic-coder.exe");
+        }
+        else
+        {
+            // Fallback for test environments
+            CliBinaryPath = "agentic-coder";
+        }
+    }
+
+    public Task DisposeAsync() => Task.CompletedTask;
+
+    private static string FindSolutionDirectory()
+    {
+        var dir = Directory.GetCurrentDirectory();
+        while (dir != null && !File.Exists(Path.Combine(dir, "AgenticCoder.sln")))
+        {
+            dir = Directory.GetParent(dir)?.FullName;
+        }
+        return dir ?? Directory.GetCurrentDirectory();
+    }
+}
+```
+
 ### Performance Tests
 
 ```
@@ -3481,6 +3822,367 @@ Tests/Performance/Models/
 │   └── Benchmark_ConcurrentRequests()
 ```
 
+#### ProviderBenchmarks.cs
+
+```csharp
+namespace AgenticCoder.Tests.Performance.Models;
+
+using AgenticCoder.Application.Models;
+using AgenticCoder.Domain.Models;
+using AgenticCoder.Infrastructure.Models;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
+using System.Text.Json;
+using Xunit;
+using Xunit.Abstractions;
+
+/// <summary>
+/// Performance benchmarks for model provider operations.
+/// Run with: dotnet run -c Release -- --filter ProviderBenchmarks*
+/// </summary>
+[MemoryDiagnoser]
+[SimpleJob(launchCount: 1, warmupCount: 3, iterationCount: 10)]
+public class ProviderBenchmarks
+{
+    private ProviderRegistry _registry = null!;
+    private ChatRequest _request = null!;
+    private string _serializedRequest = null!;
+    private ChatResponse _response = null!;
+    private string _serializedResponse = null!;
+    private IModelProvider _mockProvider = null!;
+    private JsonSerializerOptions _jsonOptions = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        // Initialize registry with multiple providers
+        _registry = new ProviderRegistry();
+        for (int i = 0; i < 10; i++)
+        {
+            _registry.Register(new MockModelProvider($"provider-{i}"));
+        }
+        _registry.SetDefault("provider-5");
+
+        // Create request for serialization tests
+        _request = CreateLargeRequest();
+        _serializedRequest = JsonSerializer.Serialize(_request);
+
+        // Create response for deserialization tests
+        _response = CreateResponse();
+        _serializedResponse = JsonSerializer.Serialize(_response);
+
+        // Mock provider for health checks
+        _mockProvider = new MockModelProvider("benchmark-mock");
+
+        // JSON options
+        _jsonOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = false
+        };
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _registry.Dispose();
+        (_mockProvider as IDisposable)?.Dispose();
+    }
+
+    [Benchmark(Description = "Registry lookup by ID")]
+    public IModelProvider? Benchmark_RegistryLookup()
+    {
+        return _registry.Get("provider-7");
+    }
+
+    [Benchmark(Description = "Registry get default")]
+    public IModelProvider? Benchmark_GetDefaultProvider()
+    {
+        return _registry.GetDefault();
+    }
+
+    [Benchmark(Description = "Registry get all providers")]
+    public IReadOnlyList<IModelProvider> Benchmark_GetAllProviders()
+    {
+        return _registry.GetAll();
+    }
+
+    [Benchmark(Description = "Serialize chat request")]
+    public string Benchmark_RequestSerialization()
+    {
+        return JsonSerializer.Serialize(_request, _jsonOptions);
+    }
+
+    [Benchmark(Description = "Serialize small request")]
+    public string Benchmark_SmallRequestSerialization()
+    {
+        var smallRequest = new ChatRequest
+        {
+            Messages = new List<ChatMessage>
+            {
+                new() { Role = MessageRole.User, Content = "Hello" }
+            },
+            Parameters = new ModelParameters { Model = "test" }
+        };
+        return JsonSerializer.Serialize(smallRequest, _jsonOptions);
+    }
+
+    [Benchmark(Description = "Deserialize chat response")]
+    public ChatResponse? Benchmark_ResponseDeserialization()
+    {
+        return JsonSerializer.Deserialize<ChatResponse>(_serializedResponse, _jsonOptions);
+    }
+
+    [Benchmark(Description = "Health check (mock)")]
+    public async Task<bool> Benchmark_HealthCheck()
+    {
+        return await _mockProvider.IsAvailableAsync();
+    }
+
+    [Benchmark(Description = "Concurrent registry reads")]
+    public async Task Benchmark_ConcurrentRegistryReads()
+    {
+        var tasks = Enumerable.Range(0, 100)
+            .Select(i => Task.Run(() => _registry.Get($"provider-{i % 10}")));
+        await Task.WhenAll(tasks);
+    }
+
+    [Benchmark(Description = "Message creation")]
+    public ChatMessage Benchmark_MessageCreation()
+    {
+        return new ChatMessage
+        {
+            Role = MessageRole.Assistant,
+            Content = "This is a response with some typical length content that you might see in a real response."
+        };
+    }
+
+    [Benchmark(Description = "ToolCall creation with arguments")]
+    public ToolCall Benchmark_ToolCallCreation()
+    {
+        return new ToolCall
+        {
+            Id = "call_benchmark_test_123",
+            Name = "write_file",
+            Arguments = JsonSerializer.SerializeToElement(new
+            {
+                path = "/src/example.cs",
+                content = "public class Example { public void Method() { } }"
+            })
+        };
+    }
+
+    private static ChatRequest CreateLargeRequest()
+    {
+        var messages = new List<ChatMessage>();
+        
+        // System message
+        messages.Add(new ChatMessage
+        {
+            Role = MessageRole.System,
+            Content = "You are a helpful coding assistant. " + new string('x', 1000)
+        });
+
+        // Simulate conversation history
+        for (int i = 0; i < 20; i++)
+        {
+            messages.Add(new ChatMessage
+            {
+                Role = MessageRole.User,
+                Content = $"User message {i}: " + new string('y', 200)
+            });
+            messages.Add(new ChatMessage
+            {
+                Role = MessageRole.Assistant,
+                Content = $"Assistant response {i}: " + new string('z', 500)
+            });
+        }
+
+        return new ChatRequest
+        {
+            Messages = messages,
+            Parameters = new ModelParameters
+            {
+                Model = "benchmark-model",
+                Temperature = 0.7f,
+                MaxTokens = 4096,
+                TopP = 0.9f,
+                FrequencyPenalty = 0.0f,
+                PresencePenalty = 0.0f
+            },
+            ToolDefinitions = CreateToolDefinitions()
+        };
+    }
+
+    private static List<ToolDefinition> CreateToolDefinitions()
+    {
+        return new List<ToolDefinition>
+        {
+            new ToolDefinition
+            {
+                Name = "read_file",
+                Description = "Read contents of a file",
+                Parameters = JsonSerializer.SerializeToElement(new
+                {
+                    type = "object",
+                    properties = new { path = new { type = "string" } }
+                })
+            },
+            new ToolDefinition
+            {
+                Name = "write_file",
+                Description = "Write content to a file",
+                Parameters = JsonSerializer.SerializeToElement(new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        path = new { type = "string" },
+                        content = new { type = "string" }
+                    }
+                })
+            }
+        };
+    }
+
+    private static ChatResponse CreateResponse()
+    {
+        return new ChatResponse
+        {
+            Message = new ChatMessage
+            {
+                Role = MessageRole.Assistant,
+                Content = "This is a typical response content with reasonable length. " +
+                          new string('w', 1000)
+            },
+            FinishReason = FinishReason.Stop,
+            Usage = new UsageInfo
+            {
+                PromptTokens = 1500,
+                CompletionTokens = 500,
+                TotalTokens = 2000
+            }
+        };
+    }
+}
+
+/// <summary>
+/// xUnit wrapper to run benchmarks as tests for CI validation.
+/// </summary>
+[Collection("Performance")]
+[Trait("Category", "Performance")]
+public class ProviderBenchmarkTests
+{
+    private readonly ITestOutputHelper _output;
+
+    public ProviderBenchmarkTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
+    [Fact]
+    public void Benchmark_RegistryLookup_MeetsPerformanceTarget()
+    {
+        // Arrange
+        var benchmarks = new ProviderBenchmarks();
+        benchmarks.Setup();
+
+        try
+        {
+            // Warm up
+            for (int i = 0; i < 100; i++)
+                benchmarks.Benchmark_RegistryLookup();
+
+            // Measure
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            const int iterations = 10000;
+            
+            for (int i = 0; i < iterations; i++)
+                benchmarks.Benchmark_RegistryLookup();
+            
+            sw.Stop();
+
+            var avgMicroseconds = (sw.Elapsed.TotalMilliseconds * 1000) / iterations;
+            _output.WriteLine($"Average lookup time: {avgMicroseconds:F3} μs");
+
+            // Assert - lookup should be < 10 microseconds
+            avgMicroseconds.Should().BeLessThan(10,
+                because: "registry lookup should be fast O(1) operation");
+        }
+        finally
+        {
+            benchmarks.Cleanup();
+        }
+    }
+
+    [Fact]
+    public void Benchmark_Serialization_MeetsPerformanceTarget()
+    {
+        // Arrange
+        var benchmarks = new ProviderBenchmarks();
+        benchmarks.Setup();
+
+        try
+        {
+            // Warm up
+            for (int i = 0; i < 10; i++)
+                benchmarks.Benchmark_RequestSerialization();
+
+            // Measure
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            const int iterations = 1000;
+            
+            for (int i = 0; i < iterations; i++)
+                benchmarks.Benchmark_RequestSerialization();
+            
+            sw.Stop();
+
+            var avgMilliseconds = sw.Elapsed.TotalMilliseconds / iterations;
+            _output.WriteLine($"Average serialization time: {avgMilliseconds:F3} ms");
+
+            // Assert - serialization should be < 5ms for large request
+            avgMilliseconds.Should().BeLessThan(5,
+                because: "serialization should be efficient");
+        }
+        finally
+        {
+            benchmarks.Cleanup();
+        }
+    }
+
+    [Fact]
+    public async Task Benchmark_ConcurrentReads_NoContentionIssues()
+    {
+        // Arrange
+        var benchmarks = new ProviderBenchmarks();
+        benchmarks.Setup();
+
+        try
+        {
+            // Measure concurrent performance
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            
+            await Task.WhenAll(
+                Enumerable.Range(0, 10)
+                    .Select(_ => benchmarks.Benchmark_ConcurrentRegistryReads())
+            );
+            
+            sw.Stop();
+
+            _output.WriteLine($"Concurrent reads (10 * 100): {sw.ElapsedMilliseconds} ms");
+
+            // Assert - 1000 concurrent reads should complete quickly
+            sw.ElapsedMilliseconds.Should().BeLessThan(100,
+                because: "concurrent reads should not cause contention");
+        }
+        finally
+        {
+            benchmarks.Cleanup();
+        }
+    }
+}
+```
+
 ### Regression Tests
 
 ```
@@ -3490,6 +4192,370 @@ Tests/Regression/Models/
 │   ├── Should_SerializeCorrectly()
 │   ├── Should_DeserializeOldFormats()
 │   └── Should_HandleNullsGracefully()
+```
+
+#### InterfaceCompatibilityTests.cs
+
+```csharp
+namespace AgenticCoder.Tests.Regression.Models;
+
+using AgenticCoder.Domain.Models;
+using FluentAssertions;
+using System.Reflection;
+using System.Text.Json;
+using Xunit;
+
+/// <summary>
+/// Regression tests ensuring interface and type compatibility across versions.
+/// These tests help prevent breaking changes to the model provider contracts.
+/// </summary>
+[Collection("Regression")]
+[Trait("Category", "Regression")]
+public class InterfaceCompatibilityTests
+{
+    #region Type Compatibility Tests
+
+    [Fact]
+    public void Should_MaintainTypeCompatibility_IModelProvider()
+    {
+        // Arrange
+        var interfaceType = typeof(IModelProvider);
+
+        // Act & Assert - core methods must exist
+        var methods = interfaceType.GetMethods();
+
+        methods.Should().Contain(m => m.Name == "CompleteAsync",
+            because: "CompleteAsync is core contract");
+        methods.Should().Contain(m => m.Name == "StreamAsync",
+            because: "StreamAsync is core contract");
+        methods.Should().Contain(m => m.Name == "IsAvailableAsync",
+            because: "IsAvailableAsync is core contract");
+        methods.Should().Contain(m => m.Name == "GetCapabilities",
+            because: "GetCapabilities is core contract");
+
+        // Properties must exist
+        var properties = interfaceType.GetProperties();
+        properties.Should().Contain(p => p.Name == "ProviderId",
+            because: "ProviderId is required for identification");
+    }
+
+    [Fact]
+    public void Should_MaintainTypeCompatibility_ChatMessage()
+    {
+        // Arrange
+        var type = typeof(ChatMessage);
+
+        // Assert - required properties
+        type.GetProperty("Role").Should().NotBeNull();
+        type.GetProperty("Content").Should().NotBeNull();
+        type.GetProperty("ToolCalls").Should().NotBeNull();
+        type.GetProperty("ToolCallId").Should().NotBeNull();
+
+        // Assert - should be record or immutable
+        type.IsClass.Should().BeTrue();
+        type.GetMethod("Equals", new[] { typeof(object) }).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Should_MaintainTypeCompatibility_ChatRequest()
+    {
+        // Arrange
+        var type = typeof(ChatRequest);
+
+        // Assert - required properties
+        type.GetProperty("Messages").Should().NotBeNull();
+        type.GetProperty("Parameters").Should().NotBeNull();
+        type.GetProperty("ToolDefinitions").Should().NotBeNull();
+
+        // Messages should be collection
+        var messagesProp = type.GetProperty("Messages")!;
+        messagesProp.PropertyType.Should().BeAssignableTo(typeof(IEnumerable<ChatMessage>));
+    }
+
+    [Fact]
+    public void Should_MaintainTypeCompatibility_ChatResponse()
+    {
+        // Arrange
+        var type = typeof(ChatResponse);
+
+        // Assert - required properties
+        type.GetProperty("Message").Should().NotBeNull();
+        type.GetProperty("FinishReason").Should().NotBeNull();
+        type.GetProperty("Usage").Should().NotBeNull();
+
+        // FinishReason should be enum
+        var finishProp = type.GetProperty("FinishReason")!;
+        finishProp.PropertyType.Should().Be(typeof(FinishReason));
+    }
+
+    [Fact]
+    public void Should_MaintainEnumValues_MessageRole()
+    {
+        // These values are part of API contract
+        Enum.IsDefined(typeof(MessageRole), "System").Should().BeTrue();
+        Enum.IsDefined(typeof(MessageRole), "User").Should().BeTrue();
+        Enum.IsDefined(typeof(MessageRole), "Assistant").Should().BeTrue();
+        Enum.IsDefined(typeof(MessageRole), "Tool").Should().BeTrue();
+
+        // Validate ordinal values for serialization compatibility
+        ((int)MessageRole.System).Should().Be(0);
+        ((int)MessageRole.User).Should().Be(1);
+        ((int)MessageRole.Assistant).Should().Be(2);
+        ((int)MessageRole.Tool).Should().Be(3);
+    }
+
+    [Fact]
+    public void Should_MaintainEnumValues_FinishReason()
+    {
+        // These values are part of API contract
+        Enum.IsDefined(typeof(FinishReason), "Stop").Should().BeTrue();
+        Enum.IsDefined(typeof(FinishReason), "Length").Should().BeTrue();
+        Enum.IsDefined(typeof(FinishReason), "ToolCalls").Should().BeTrue();
+        Enum.IsDefined(typeof(FinishReason), "Error").Should().BeTrue();
+    }
+
+    #endregion
+
+    #region Serialization Compatibility Tests
+
+    [Fact]
+    public void Should_SerializeCorrectly_ChatMessage()
+    {
+        // Arrange
+        var message = new ChatMessage
+        {
+            Role = MessageRole.User,
+            Content = "Hello, world!"
+        };
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(message, options);
+
+        // Assert - expected JSON structure
+        json.Should().Contain("\"role\":");
+        json.Should().Contain("\"content\":");
+        json.Should().Contain("\"user\"");
+        json.Should().Contain("Hello, world!");
+    }
+
+    [Fact]
+    public void Should_SerializeCorrectly_ToolCall()
+    {
+        // Arrange
+        var toolCall = new ToolCall
+        {
+            Id = "call_abc123",
+            Name = "write_file",
+            Arguments = JsonSerializer.SerializeToElement(new { path = "test.cs" })
+        };
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(toolCall, options);
+
+        // Assert
+        json.Should().Contain("\"id\":\"call_abc123\"");
+        json.Should().Contain("\"name\":\"write_file\"");
+        json.Should().Contain("\"arguments\":");
+        json.Should().Contain("\"path\":\"test.cs\"");
+    }
+
+    [Fact]
+    public void Should_DeserializeOldFormats_ChatResponse()
+    {
+        // Arrange - simulate old format JSON
+        var oldFormatJson = @"{
+            ""message"": {
+                ""role"": ""assistant"",
+                ""content"": ""Response from old version""
+            },
+            ""finish_reason"": ""stop"",
+            ""usage"": {
+                ""prompt_tokens"": 100,
+                ""completion_tokens"": 50,
+                ""total_tokens"": 150
+            }
+        }";
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNameCaseInsensitive = true
+        };
+
+        // Act
+        var response = JsonSerializer.Deserialize<ChatResponse>(oldFormatJson, options);
+
+        // Assert
+        response.Should().NotBeNull();
+        response!.Message.Content.Should().Be("Response from old version");
+        response.Message.Role.Should().Be(MessageRole.Assistant);
+        response.Usage.Should().NotBeNull();
+        response.Usage!.TotalTokens.Should().Be(150);
+    }
+
+    [Fact]
+    public void Should_DeserializeOldFormats_WithMissingOptionalFields()
+    {
+        // Arrange - minimal valid JSON
+        var minimalJson = @"{
+            ""message"": {
+                ""role"": ""assistant"",
+                ""content"": ""Minimal response""
+            },
+            ""finish_reason"": ""stop""
+        }";
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNameCaseInsensitive = true
+        };
+
+        // Act
+        var response = JsonSerializer.Deserialize<ChatResponse>(minimalJson, options);
+
+        // Assert - should handle missing optional fields
+        response.Should().NotBeNull();
+        response!.Message.Content.Should().Be("Minimal response");
+        response.Usage.Should().BeNull(); // Optional field
+    }
+
+    #endregion
+
+    #region Null Handling Tests
+
+    [Fact]
+    public void Should_HandleNullsGracefully_ChatMessage()
+    {
+        // Arrange & Act
+        var message = new ChatMessage
+        {
+            Role = MessageRole.User,
+            Content = null! // Explicitly null
+        };
+
+        // Assert - should not throw
+        var action = () => JsonSerializer.Serialize(message);
+        action.Should().NotThrow();
+    }
+
+    [Fact]
+    public void Should_HandleNullsGracefully_ToolCalls()
+    {
+        // Arrange
+        var message = new ChatMessage
+        {
+            Role = MessageRole.Assistant,
+            Content = "Response",
+            ToolCalls = null // No tool calls
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(message);
+        var deserialized = JsonSerializer.Deserialize<ChatMessage>(json);
+
+        // Assert
+        deserialized!.ToolCalls.Should().BeNull();
+    }
+
+    [Fact]
+    public void Should_HandleNullsGracefully_ChatRequest_EmptyMessages()
+    {
+        // Arrange - edge case: empty messages
+        var request = new ChatRequest
+        {
+            Messages = new List<ChatMessage>(),
+            Parameters = new ModelParameters { Model = "test" }
+        };
+
+        // Act
+        var action = () => JsonSerializer.Serialize(request);
+
+        // Assert
+        action.Should().NotThrow();
+    }
+
+    [Fact]
+    public void Should_HandleNullsGracefully_UsageInfo()
+    {
+        // Arrange
+        var response = new ChatResponse
+        {
+            Message = new ChatMessage { Role = MessageRole.Assistant, Content = "Test" },
+            FinishReason = FinishReason.Stop,
+            Usage = null
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(response);
+        var deserialized = JsonSerializer.Deserialize<ChatResponse>(json);
+
+        // Assert
+        deserialized!.Usage.Should().BeNull();
+    }
+
+    #endregion
+
+    #region Interface Contract Tests
+
+    [Fact]
+    public void Should_HaveAsyncMethods_IModelProvider()
+    {
+        // All I/O methods should be async
+        var type = typeof(IModelProvider);
+
+        var completeMethod = type.GetMethod("CompleteAsync");
+        completeMethod.Should().NotBeNull();
+        completeMethod!.ReturnType.Name.Should().Contain("Task");
+
+        var healthMethod = type.GetMethod("IsAvailableAsync");
+        healthMethod.Should().NotBeNull();
+        healthMethod!.ReturnType.Name.Should().Contain("Task");
+    }
+
+    [Fact]
+    public void Should_SupportCancellation_IModelProvider()
+    {
+        // Async methods should accept CancellationToken
+        var type = typeof(IModelProvider);
+
+        var completeMethod = type.GetMethod("CompleteAsync");
+        var parameters = completeMethod!.GetParameters();
+        parameters.Should().Contain(p => p.ParameterType == typeof(CancellationToken),
+            because: "async methods should be cancellable");
+    }
+
+    [Fact]
+    public void Should_BeDisposable_IModelProvider()
+    {
+        // Provider should be disposable for cleanup
+        typeof(IModelProvider).Should().Implement<IAsyncDisposable>()
+            .Or.Implement<IDisposable>();
+    }
+
+    [Fact]
+    public void Should_ReturnStreamingEnumerable()
+    {
+        // StreamAsync should return IAsyncEnumerable
+        var type = typeof(IModelProvider);
+        var streamMethod = type.GetMethod("StreamAsync");
+        
+        streamMethod.Should().NotBeNull();
+        streamMethod!.ReturnType.Name.Should().Contain("IAsyncEnumerable");
+    }
+
+    #endregion
+}
 ```
 
 ---
