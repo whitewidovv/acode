@@ -975,3 +975,614 @@ Tests/Regression/Audit/
 
 ---
 
+## User Verification Steps
+
+### Scenario 1: Verify Session Logging
+
+**Objective:** Confirm session start and end are logged
+
+1. Start agentic-coder: `agentic-coder start`
+2. Perform a simple operation
+3. Exit gracefully
+4. Run: `agentic-coder audit list`
+5. Verify new session appears in list
+6. Run: `agentic-coder audit show <session_id>`
+7. Verify `session_start` event at beginning
+8. Verify `session_end` event at end
+9. Verify both have correct timestamps
+
+**Expected Result:**
+- Session is listed with correct timestamp
+- Start and end events present
+- Events have all required fields
+
+### Scenario 2: Verify File Operation Logging
+
+**Objective:** Confirm file operations are audited
+
+1. Start agentic-coder
+2. Execute command that reads a file
+3. Execute command that writes a file
+4. Exit gracefully
+5. Run: `agentic-coder audit show <session_id> --type file_read`
+6. Verify file_read event logged
+7. Verify path is relative to repo root
+8. Verify file contents are NOT logged
+9. Run: `agentic-coder audit show <session_id> --type file_write`
+10. Verify file_write event logged
+11. Verify bytes_written is recorded
+
+**Expected Result:**
+- All file operations captured
+- Paths are relative
+- No file contents in logs
+
+### Scenario 3: Verify Security Event Logging
+
+**Objective:** Confirm security violations are captured
+
+1. Start agentic-coder
+2. Attempt to access protected path (e.g., ~/.ssh/)
+3. Verify operation is blocked
+4. Exit gracefully
+5. Run: `agentic-coder audit show <session_id> --type protected_path_blocked`
+6. Verify event contains risk_id
+7. Verify event contains pattern matched
+8. Verify event has WARNING severity
+
+**Expected Result:**
+- Security violation captured
+- Risk ID referenced
+- Appropriate severity
+
+### Scenario 4: Verify Command Logging with Redaction
+
+**Objective:** Confirm commands are logged with secrets redacted
+
+1. Configure a command with sensitive parameter
+2. Execute command that includes password or token
+3. Exit gracefully
+4. Check audit log
+5. Verify command_start and command_end events
+6. Verify sensitive arguments are redacted (shown as [REDACTED])
+7. Verify exit code is captured
+8. Verify duration is captured
+
+**Expected Result:**
+- Commands logged with arguments
+- Secrets properly redacted
+- Exit code and duration present
+
+### Scenario 5: Verify Correlation ID Tracking
+
+**Objective:** Confirm related events share correlation ID
+
+1. Start agentic-coder
+2. Execute a multi-step task
+3. Exit gracefully
+4. Run: `agentic-coder audit show <session_id>`
+5. Note correlation_id on first event
+6. Verify subsequent related events have same correlation_id
+7. Verify span_id hierarchy is correct
+
+**Expected Result:**
+- Related events share correlation_id
+- Span hierarchy is traceable
+- Events can be grouped by correlation
+
+### Scenario 6: Verify Audit Log Location
+
+**Objective:** Confirm logs are in correct location
+
+1. Check `.agent/logs/audit/` directory exists
+2. Start and complete a session
+3. Verify new .jsonl file created
+4. Verify .sha256 file created alongside
+5. Verify filename includes timestamp and session_id
+
+**Expected Result:**
+- Logs in correct directory
+- Proper file naming
+- Checksum file present
+
+### Scenario 7: Verify Integrity Verification
+
+**Objective:** Confirm integrity check works
+
+1. Complete a session
+2. Run: `agentic-coder audit verify <session_id>`
+3. Verify output shows VALID
+4. Manually modify the log file (add a character)
+5. Run: `agentic-coder audit verify <session_id>`
+6. Verify output shows INVALID - Checksum mismatch
+7. Restore the log file
+
+**Expected Result:**
+- Valid logs pass verification
+- Modified logs detected
+- Clear error message on mismatch
+
+### Scenario 8: Verify Log Rotation
+
+**Objective:** Confirm logs rotate at size limit
+
+1. Configure max_file_size to small value (1MB)
+2. Generate many audit events
+3. Observe log rotation occurs
+4. Verify rotated file has .1 suffix
+5. Verify new events go to fresh file
+6. Verify no events lost during rotation
+
+**Expected Result:**
+- Rotation occurs at size limit
+- Files properly numbered
+- No event loss
+
+### Scenario 9: Verify Retention Policy
+
+**Objective:** Confirm old logs are cleaned up
+
+1. Configure retention_days to 1
+2. Create a fake old log file with old timestamp
+3. Run: `agentic-coder audit cleanup`
+4. Verify old log is deleted
+5. Verify recent logs are retained
+6. Verify deletion was logged
+
+**Expected Result:**
+- Old logs deleted
+- Recent logs kept
+- Cleanup logged
+
+### Scenario 10: Verify CLI Search
+
+**Objective:** Confirm search across sessions works
+
+1. Complete multiple sessions with various events
+2. Run: `agentic-coder audit search --type file_write`
+3. Verify results from multiple sessions
+4. Run: `agentic-coder audit search --level warning`
+5. Verify only warning/error events shown
+6. Run: `agentic-coder audit search --query "protected"`
+7. Verify text search finds relevant events
+
+**Expected Result:**
+- Search works across sessions
+- Filters apply correctly
+- Text search functional
+
+### Scenario 11: Verify Export Functionality
+
+**Objective:** Confirm audit export works
+
+1. Complete a session
+2. Run: `agentic-coder audit export <session_id> --output export.json`
+3. Verify export.json created
+4. Verify JSON is valid
+5. Run: `agentic-coder audit export <session_id> --format csv --output export.csv`
+6. Verify CSV is valid
+7. Open in spreadsheet application
+
+**Expected Result:**
+- JSON export valid
+- CSV export valid
+- Data matches original
+
+### Scenario 12: Verify Disk Full Handling
+
+**Objective:** Confirm graceful handling of disk full
+
+1. Simulate disk full scenario (if safe to do)
+2. Attempt operations
+3. Verify configured behavior (halt or warn)
+4. Verify no data corruption
+5. Clear space and verify recovery
+
+**Expected Result:**
+- Configured behavior followed
+- No data loss or corruption
+- Graceful recovery
+
+---
+
+## Implementation Prompt
+
+### File Structure
+
+```
+src/
+├── AgenticCoder.Domain/
+│   ├── Audit/
+│   │   ├── AuditEvent.cs
+│   │   ├── AuditEventType.cs
+│   │   ├── AuditSeverity.cs
+│   │   ├── IAuditLogger.cs
+│   │   ├── AuditSession.cs
+│   │   ├── CorrelationContext.cs
+│   │   ├── SpanContext.cs
+│   │   └── AuditConfiguration.cs
+│   └── ValueObjects/
+│       ├── EventId.cs
+│       ├── SessionId.cs
+│       ├── CorrelationId.cs
+│       └── SpanId.cs
+│
+├── AgenticCoder.Application/
+│   ├── Audit/
+│   │   ├── Commands/
+│   │   │   ├── StartAuditSessionCommand.cs
+│   │   │   ├── EndAuditSessionCommand.cs
+│   │   │   ├── LogEventCommand.cs
+│   │   │   └── CleanupLogsCommand.cs
+│   │   ├── Queries/
+│   │   │   ├── ListSessionsQuery.cs
+│   │   │   ├── GetSessionEventsQuery.cs
+│   │   │   ├── SearchEventsQuery.cs
+│   │   │   └── GetAuditStatsQuery.cs
+│   │   └── Services/
+│   │       ├── AuditService.cs
+│   │       └── CorrelationService.cs
+│
+├── AgenticCoder.Infrastructure/
+│   ├── Audit/
+│   │   ├── FileAuditWriter.cs
+│   │   ├── AuditLogRotator.cs
+│   │   ├── AuditIntegrityVerifier.cs
+│   │   ├── AuditRedactor.cs
+│   │   ├── AuditExporter.cs
+│   │   └── AuditConfigurationLoader.cs
+│
+└── AgenticCoder.CLI/
+    └── Commands/
+        └── Audit/
+            ├── AuditListCommand.cs
+            ├── AuditShowCommand.cs
+            ├── AuditSearchCommand.cs
+            ├── AuditVerifyCommand.cs
+            ├── AuditExportCommand.cs
+            ├── AuditStatsCommand.cs
+            ├── AuditTailCommand.cs
+            └── AuditCleanupCommand.cs
+```
+
+### Core Interfaces
+
+```csharp
+namespace AgenticCoder.Domain.Audit;
+
+/// <summary>
+/// Represents a single audit event.
+/// Immutable and serializable to JSON.
+/// </summary>
+public sealed record AuditEvent
+{
+    public required string SchemaVersion { get; init; }
+    public required EventId EventId { get; init; }
+    public required DateTimeOffset Timestamp { get; init; }
+    public required SessionId SessionId { get; init; }
+    public required CorrelationId CorrelationId { get; init; }
+    public SpanId? SpanId { get; init; }
+    public SpanId? ParentSpanId { get; init; }
+    public required AuditEventType EventType { get; init; }
+    public required AuditSeverity Severity { get; init; }
+    public required string Source { get; init; }
+    public required string OperatingMode { get; init; }
+    public required IReadOnlyDictionary<string, object> Data { get; init; }
+    public IReadOnlyDictionary<string, object>? Context { get; init; }
+}
+
+public enum AuditEventType
+{
+    SessionStart,
+    SessionEnd,
+    ConfigLoad,
+    ConfigError,
+    ModeSelect,
+    CommandStart,
+    CommandEnd,
+    CommandError,
+    FileRead,
+    FileWrite,
+    FileDelete,
+    DirCreate,
+    DirDelete,
+    ProtectedPathBlocked,
+    SecurityViolation,
+    TaskStart,
+    TaskEnd,
+    TaskError,
+    ApprovalRequest,
+    ApprovalResponse,
+    CodeGenerated,
+    TestExecution,
+    BuildExecution,
+    ErrorRecovery,
+    Shutdown
+}
+
+public enum AuditSeverity
+{
+    Debug,
+    Info,
+    Warning,
+    Error,
+    Critical
+}
+
+/// <summary>
+/// Interface for audit logging operations.
+/// All operations MUST be non-blocking.
+/// </summary>
+public interface IAuditLogger
+{
+    /// <summary>
+    /// Logs an audit event. MUST NOT block the calling thread.
+    /// </summary>
+    Task LogAsync(AuditEvent auditEvent);
+    
+    /// <summary>
+    /// Logs an audit event with automatic timestamp and session context.
+    /// </summary>
+    Task LogAsync(
+        AuditEventType eventType,
+        AuditSeverity severity,
+        string source,
+        IDictionary<string, object> data,
+        IDictionary<string, object>? context = null);
+    
+    /// <summary>
+    /// Starts a new correlation scope. Events within scope share correlation ID.
+    /// </summary>
+    IDisposable BeginCorrelation(string description);
+    
+    /// <summary>
+    /// Starts a new span within current correlation.
+    /// </summary>
+    IDisposable BeginSpan(string operation);
+    
+    /// <summary>
+    /// Flushes all pending audit events.
+    /// MUST be called during graceful shutdown.
+    /// </summary>
+    Task FlushAsync();
+}
+```
+
+### Audit Writer Implementation
+
+```csharp
+namespace AgenticCoder.Infrastructure.Audit;
+
+/// <summary>
+/// Writes audit events to JSONL files with integrity checksums.
+/// SECURITY CRITICAL: Append-only, tamper-evident logging.
+/// </summary>
+public sealed class FileAuditWriter : IAuditWriter, IAsyncDisposable
+{
+    private readonly string _auditDirectory;
+    private readonly AuditConfiguration _config;
+    private readonly ConcurrentQueue<AuditEvent> _buffer;
+    private readonly SemaphoreSlim _writeLock;
+    private StreamWriter? _currentWriter;
+    private string? _currentFilePath;
+    private IncrementalHash? _runningHash;
+    
+    public async Task WriteAsync(AuditEvent auditEvent)
+    {
+        // Serialize event to JSON (single line)
+        var json = JsonSerializer.Serialize(auditEvent, _jsonOptions);
+        
+        // Ensure no newlines in output (prevent log injection)
+        if (json.Contains('\n') || json.Contains('\r'))
+        {
+            throw new InvalidOperationException("Event contains invalid characters");
+        }
+        
+        await _writeLock.WaitAsync();
+        try
+        {
+            // Check rotation needed
+            if (await NeedsRotationAsync())
+            {
+                await RotateAsync();
+            }
+            
+            // Write event
+            await _currentWriter!.WriteLineAsync(json);
+            await _currentWriter.FlushAsync();
+            
+            // Update checksum
+            UpdateChecksum(json);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+    
+    private void UpdateChecksum(string json)
+    {
+        var bytes = Encoding.UTF8.GetBytes(json + "\n");
+        _runningHash!.AppendData(bytes);
+        
+        // Write updated checksum
+        var checksumPath = _currentFilePath + ".sha256";
+        var hash = _runningHash.GetHashAndReset();
+        File.WriteAllText(checksumPath, Convert.ToHexString(hash).ToLowerInvariant());
+    }
+}
+```
+
+### Redaction Implementation
+
+```csharp
+namespace AgenticCoder.Infrastructure.Audit;
+
+/// <summary>
+/// Redacts sensitive data from audit events.
+/// SECURITY CRITICAL: MUST catch all sensitive patterns.
+/// </summary>
+public sealed class AuditRedactor
+{
+    private static readonly Regex[] SensitivePatterns = new[]
+    {
+        new Regex(@"password[""']?\s*[:=]\s*[""']?[^""'\s,}]+", RegexOptions.IgnoreCase),
+        new Regex(@"token[""']?\s*[:=]\s*[""']?[^""'\s,}]+", RegexOptions.IgnoreCase),
+        new Regex(@"api[_-]?key[""']?\s*[:=]\s*[""']?[^""'\s,}]+", RegexOptions.IgnoreCase),
+        new Regex(@"secret[""']?\s*[:=]\s*[""']?[^""'\s,}]+", RegexOptions.IgnoreCase),
+        new Regex(@"bearer\s+[a-zA-Z0-9\-._~+/]+=*", RegexOptions.IgnoreCase),
+        new Regex(@"-----BEGIN\s+[A-Z\s]+-----", RegexOptions.IgnoreCase),
+    };
+    
+    private const string RedactedMarker = "[REDACTED]";
+    
+    public string Redact(string input)
+    {
+        var result = input;
+        foreach (var pattern in SensitivePatterns)
+        {
+            result = pattern.Replace(result, match =>
+            {
+                var prefix = match.Value.Split(new[] { ':', '=' }, 2)[0];
+                return $"{prefix}={RedactedMarker}";
+            });
+        }
+        return result;
+    }
+    
+    public IDictionary<string, object> RedactData(IDictionary<string, object> data)
+    {
+        var redacted = new Dictionary<string, object>();
+        foreach (var (key, value) in data)
+        {
+            if (IsSensitiveKey(key))
+            {
+                redacted[key] = RedactedMarker;
+            }
+            else if (value is string strValue)
+            {
+                redacted[key] = Redact(strValue);
+            }
+            else
+            {
+                redacted[key] = value;
+            }
+        }
+        return redacted;
+    }
+    
+    private bool IsSensitiveKey(string key)
+    {
+        var lower = key.ToLowerInvariant();
+        return lower.Contains("password") ||
+               lower.Contains("secret") ||
+               lower.Contains("token") ||
+               lower.Contains("api_key") ||
+               lower.Contains("apikey") ||
+               lower.Contains("credential");
+    }
+}
+```
+
+### Error Codes
+
+| Code | Description |
+|------|-------------|
+| ACODE-AUD-001 | Audit initialization failed |
+| ACODE-AUD-002 | Audit write failed |
+| ACODE-AUD-003 | Audit directory not writable |
+| ACODE-AUD-004 | Disk full - audit halted |
+| ACODE-AUD-005 | Log rotation failed |
+| ACODE-AUD-006 | Integrity verification failed |
+| ACODE-AUD-007 | Checksum mismatch detected |
+| ACODE-AUD-008 | Session not found |
+| ACODE-AUD-009 | Export failed |
+| ACODE-AUD-010 | Invalid query parameters |
+
+### CLI Exit Codes
+
+| Exit Code | Meaning |
+|-----------|---------|
+| 0 | Success |
+| 1 | Verification failed (integrity issue) |
+| 2 | Invalid arguments |
+| 3 | Audit system error |
+| 4 | Session not found |
+
+### Logging Schema Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| schema_version | string | Event schema version (e.g., "1.0") |
+| event_id | string | Unique event identifier |
+| timestamp | string | ISO 8601 timestamp with timezone |
+| session_id | string | Session identifier |
+| correlation_id | string | Correlation identifier |
+| span_id | string? | Span identifier (optional) |
+| parent_span_id | string? | Parent span identifier (optional) |
+| event_type | string | Event type from enumeration |
+| severity | string | debug, info, warning, error, critical |
+| source | string | Component that generated event |
+| operating_mode | string | Current operating mode |
+| data | object | Event-specific data |
+| context | object? | Additional context (optional) |
+
+### Implementation Checklist
+
+1. [ ] Implement `AuditEvent` record with all fields
+2. [ ] Implement `AuditEventType` enumeration
+3. [ ] Implement `AuditSeverity` enumeration
+4. [ ] Implement `IAuditLogger` interface
+5. [ ] Implement `FileAuditWriter` with append-only writes
+6. [ ] Implement checksum generation and update
+7. [ ] Implement log rotation logic
+8. [ ] Implement retention policy enforcement
+9. [ ] Implement `AuditRedactor` for secret redaction
+10. [ ] Implement correlation ID tracking
+11. [ ] Implement span hierarchy
+12. [ ] Implement CLI `audit list` command
+13. [ ] Implement CLI `audit show` command
+14. [ ] Implement CLI `audit search` command
+15. [ ] Implement CLI `audit verify` command
+16. [ ] Implement CLI `audit export` command
+17. [ ] Implement CLI `audit stats` command
+18. [ ] Implement CLI `audit tail` command
+19. [ ] Implement CLI `audit cleanup` command
+20. [ ] Add audit events for all mandatory event types
+21. [ ] Integrate with file operations
+22. [ ] Integrate with command execution
+23. [ ] Integrate with security violations
+24. [ ] Write unit tests for all event types
+25. [ ] Write integration tests for storage
+26. [ ] Write performance benchmarks
+27. [ ] Document event schema
+28. [ ] Document CLI commands
+29. [ ] Conduct security review
+
+### Dependencies
+
+- Task 001 (Operating Modes) - for mode-aware logging
+- Task 002 (Config Contract) - for audit configuration
+- Task 002.b (Parser/Validator) - for config loading
+- Task 003.a (Risk Categories) - for risk ID references
+- Task 003.b (Protected Paths) - for security event logging
+
+### Verification Command
+
+```bash
+# Run all audit tests
+dotnet test --filter "FullyQualifiedName~Audit"
+
+# Run security tests
+dotnet test --filter "Category=Security&FullyQualifiedName~Audit"
+
+# Run performance benchmarks
+dotnet run --project Tests/Performance -- --filter "*Audit*"
+
+# Verify audit functionality
+agentic-coder audit verify --all
+```
+
+---
+
+**End of Task 003.c Specification**
