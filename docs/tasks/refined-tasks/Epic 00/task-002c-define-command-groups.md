@@ -127,6 +127,25 @@ Command groups provide:
 
 ### Command Group Definitions (FR-002c-01 to FR-002c-30)
 
+### Storage configuration (NEW)
+
+Add support in `.agent/config.yml` for a `storage:` block.
+
+Minimum keys:
+- `storage.mode`: `local_cache_only` | `offline_first_sync` | `remote_required`
+- `storage.local.type`: `sqlite`
+- `storage.local.sqlite_path`: path (default: `.acode/workspace.db`)
+- `storage.remote.type`: `postgres`
+- `storage.remote.postgres.dsn`: secret reference or DSN (MUST support env var indirection)
+- `storage.sync.enabled`: bool (default true for offline_first_sync)
+- `storage.sync.batch_size`: int
+- `storage.sync.retry_policy`: (max_attempts, backoff)
+- `storage.sync.conflict_policy`: `lww` | `reject` (default `lww` for metadata; append-only for messages/events)
+
+Notes:
+- This MUST integrate with Task 050 (DB foundation) and Task 049.f (sync engine).
+- Secret material MUST NOT be stored directly in config; use env vars or secret references.
+
 | ID | Requirement |
 |----|-------------|
 | FR-002c-01 | System MUST support exactly six command groups |

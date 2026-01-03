@@ -49,91 +49,44 @@ These specs must be on par with our e-commerce task samples:
 
 ---
 
-## Canonical Context (from task-list.md)
+# Task 049.e: Define retention, export, privacy + redaction controls (local cache + remote DB)
 
-- **Epic:** EPIC 8 — CI/CD Authoring + Deployment Hooks
-- **Canonical Task Title:** Task 036.c: non-bypassable approvals (default)
-- **Sibling Subtasks (if applicable):**
-  - Task 036.a: deploy tool schema
-  - Task 036.b: disabled by default
-  - Task 036.c: non-bypassable approvals (default)
-
-- **Hard constraints reminder:** MUST comply with Task 001 operating modes and the “no external LLM API” constraint set.
-- **Repo contract reminder:** MUST align with Task 002 `.agent/config.yml` contract where relevant.
-
----
-
-# Task 036.c: non-bypassable approvals (default)
-
-**Priority:** TBD  
-**Tier:** TBD  
-**Complexity:** TBD (Fibonacci points)  
-**Phase:** TBD  
-**Dependencies:** TBD  
+**Priority:** 49 / 49  
+**Tier:** S  
+**Complexity:** 8 (Fibonacci points)  
+**Phase:** Phase 2 - CLI + Orchestration Core  
+**Dependencies:** Task 049.a, Task 049.f, Task 039  
 
 ---
 
 ## Description (EXPAND THIS)
 
-Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
+Define retention policy, export formats, privacy model, and redaction rules across local cache and remote canonical DB.
 
 ---
 
-## Glossary / Terms (ADD AS NEEDED)
+## Use Cases (CREATE 3 DETAILED SCENARIOS)
 
 ---
 
-## Out of Scope (EXPLICIT)
+## User Manual Documentation (WRITE COMPLETE DOCUMENTATION)
 
 ---
 
-## Functional Requirements (LIST)
+## Acceptance Criteria / Definition of Done (CREATE COMPREHENSIVE CHECKLIST)
 
 ---
 
-## Non-Functional Requirements (LIST)
+## Testing Requirements (WRITE ALL 5 TEST TYPES)
 
 ---
 
-## User Manual Documentation (WRITE COMPLETE)
+## User Verification Steps (CREATE 8-10 MANUAL TESTS)
 
 ---
 
-## Acceptance Criteria / Definition of Done (CHECKLIST)
-
-- [ ] TODO
+## Implementation Prompt for Claude (WRITE DETAILED GUIDE)
 
 ---
 
-## Testing Requirements
-
-### Unit Tests
-- [ ] TODO
-
-### Integration Tests
-- [ ] TODO
-
-### End-to-End Tests
-- [ ] TODO
-
-### Performance / Benchmarks
-- [ ] TODO
-
-### Regression / Impacted Areas
-- [ ] TODO
-
----
-
-## User Verification Steps
-
-- [ ] TODO
-
----
-
-## Implementation Prompt for Claude
-
-Provide a step-by-step implementation guide (file paths, contracts, interfaces, error handling, logging, validation checklist, rollout plan).
-
----
-
-**END OF TASK 036.c**
+**END OF TASK 049.e**

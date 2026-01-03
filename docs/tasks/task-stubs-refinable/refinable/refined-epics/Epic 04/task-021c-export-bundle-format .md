@@ -69,11 +69,17 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 021, Task 050, Task 039, Task 038, Task 049.e
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update (export contents):** Export bundle format MUST include:
+- DB snapshot of run/session/task/step/tool-call metadata (redacted),
+- outbox/sync status summary (pending/acked/failed counts),
+- stable pointers to included artifacts,
+- provenance fields (repo sha, worktree id, timestamps) to support replay/audit.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

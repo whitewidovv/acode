@@ -188,6 +188,35 @@ All task specifications must:
 
 Tasks are implemented iteratively following the epic structure. Each task builds upon the previous work, gradually constructing the complete system according to the comprehensive specifications in `docs/tasks/`.
 
+### Implementation Plans
+
+**IMPORTANT**: Create and maintain implementation plans for all tasks.
+
+- Create `docs/implementation-plans/task-XXX-plan.md` at the start of each task
+- Include strategic approach, subtasks breakdown, and progress tracking
+- Update the plan as you complete each logical unit
+- Mark completed items with ✅, in-progress with 🔄, remaining with -
+- If context runs out mid-task, the plan shows exactly where to resume
+
+Example structure:
+```markdown
+# Task XXX Implementation Plan
+
+## Status: In Progress
+
+## Completed
+✅ Subtask A - OperatingMode enum
+✅ Subtask A - Capability enum
+
+## In Progress
+🔄 Subtask A - Permission enum
+
+## Remaining
+- Subtask A - ModeMatrix implementation
+- Subtask B - Validation rules
+- Subtask C - Documentation
+```
+
 ## Test-Driven Development (TDD) - MANDATORY
 
 **You MUST follow strict Test-Driven Development with no exceptions.**
@@ -281,24 +310,29 @@ Do not skip steps. Do not implement ahead of tests. If you deviate, stop and exp
 
 ### Git Workflow
 
-**IMPORTANT**: Commit and push code after EVERY complete unit of work (task / subtask completion).
+**IMPORTANT**: Commit and push code after EVERY complete unit of work (logical increment).
 
-- Each task/subtask should result in at least one commit
+- One commit per logical unit of work (e.g., one enum, one interface, one feature increment)
 - Use meaningful commit messages following Conventional Commits
 - Push to feature branch after each commit
-- One task objective per commit preferred (may have multiple commits per task if complex)
+- Multiple commits per task/subtask is expected and encouraged for complex work
+
+**IMPORTANT**: Work autonomously until the assigned task is fully complete or context runs out.
+- Do NOT stop after each commit to ask for permission to continue
+- Continue implementing all subtasks (a, b, c, etc.) autonomously
+- Only stop when the entire task is complete or you run out of context
 
 Example workflow:
 ```bash
-# After completing Task 000.a
+# First logical unit
 git add .
-git commit -m "feat(task-000a): create .NET solution and project structure"
-git push origin feature/task-000-project-bootstrap
+git commit -m "feat(task-001a): implement OperatingMode enum"
+git push origin feature/task-001-operating-modes
 
-# After completing Task 000.b
+# Second logical unit (don't wait for user input, keep going)
 git add .
-git commit -m "feat(task-000b): add baseline documentation"
-git push origin feature/task-000-project-bootstrap
+git commit -m "feat(task-001a): implement Capability enum"
+git push origin feature/task-001-operating-modes
 
-# etc.
+# Continue until task complete...
 ```

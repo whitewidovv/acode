@@ -52,7 +52,7 @@ These specs must be on par with our e-commerce task samples:
 ## Canonical Context (from task-list.md)
 
 - **Epic:** EPIC 2 — CLI + Agent Orchestration Core
-- **Canonical Task Title:** Task 011.b: Persistence model (SQLite recommended)
+- **Canonical Task Title:** Task 011.b: Persistence model (SQLite workspace cache + Postgres source-of-truth)
 - **Sibling Subtasks (if applicable):**
   - Task 011.a: Run entities (session/task/step/tool call/artifacts)
   - Task 011.b: Persistence model (SQLite recommended)
@@ -63,17 +63,23 @@ These specs must be on par with our e-commerce task samples:
 
 ---
 
-# Task 011.b: Persistence model (SQLite recommended)
+# Task 011.b: Persistence model (SQLite workspace cache + Postgres source-of-truth)
 
 **Priority:** TBD  
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 050, Task 011.a, Task 026
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update (two-tier persistence model):**
+- SQLite is REQUIRED as the **workspace cache + outbox** (fast, offline, crash-safe).
+- Postgres is OPTIONAL but RECOMMENDED as the **canonical system of record** when available.
+- Define an outbox/inbox event model and idempotency keys so replay is safe.
+- Define how the agent behaves when remote is unavailable (no blocking, queue for sync).
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

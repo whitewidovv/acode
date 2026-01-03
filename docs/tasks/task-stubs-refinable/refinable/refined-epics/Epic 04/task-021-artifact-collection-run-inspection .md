@@ -69,11 +69,15 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 050, Task 011, Task 018, Task 019, Task 039
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update (DB-backed inspection):** Run inspection MUST read from the Workspace DB (Task 050) + on-disk artifacts.
+- “run show/logs/diff” MUST be supported without scanning the filesystem exclusively.
+- Export bundles MUST include DB-derived run metadata + sync status, plus referenced artifacts.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

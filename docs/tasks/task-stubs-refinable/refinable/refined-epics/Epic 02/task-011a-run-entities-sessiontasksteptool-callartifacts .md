@@ -69,11 +69,17 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 011, Task 050
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update (storage contract):** Define entities so they can be stored in both:
+- local SQLite workspace DB (authoritative for offline operation), and
+- remote Postgres canonical store (authoritative when connected).
+
+Entity IDs MUST be globally unique (ULID/UUID) and safe for idempotent sync.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 

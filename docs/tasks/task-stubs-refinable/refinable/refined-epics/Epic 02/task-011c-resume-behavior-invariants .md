@@ -69,11 +69,18 @@ These specs must be on par with our e-commerce task samples:
 **Tier:** TBD  
 **Complexity:** TBD (Fibonacci points)  
 **Phase:** TBD  
-**Dependencies:** TBD  
+**Dependencies:** Task 011, Task 011.b, Task 050, Task 049.f
 
 ---
 
 ## Description (EXPAND THIS)
+
+**Update (resume + sync invariants):**
+Resume MUST account for *pending local events not yet synced* and MUST guarantee:
+- idempotent re-application of pending transitions,
+- deterministic replay order (timestamp + event_id),
+- safe resume when remote reconnects mid-run (no duplicate steps, no double-commit),
+- clear surfacing of “sync pending / degraded mode” in CLI status.
 
 Provide a complete description including business value, scope, integration points, assumptions, and failure modes.
 
