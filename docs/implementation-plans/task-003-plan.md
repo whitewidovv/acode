@@ -218,20 +218,33 @@ Each subtask will be completed with:
   - ✅ ConfigE2ETests path resolution fixed
   - ✅ All 6 integration tests now passing (was 2/6)
 
-**Commits so far:** 24 (23 domain + 1 integration fix)
-**Tests passing:** 355 total (255 Domain + 48 Application + 35 Infrastructure + 11 CLI + 6 Integration)
-**Test coverage:** 100% of all implemented domain types
-**New tests this session:** 66 domain tests + integration test fixes
-**Lines of Code:** ~2000 lines production code, ~2500 lines test code
+**Commits so far:** 29 (22 domain + 1 integration fix + 1 plan update + 3 app interfaces + 2 app types)
+**Tests passing:** 366 total (255 Domain + 59 Application + 35 Infrastructure + 11 CLI + 6 Integration)
+**Test coverage:** 100% of all implemented types
+**New tests this session:** 66 domain tests + 11 application tests + integration test fixes
+**Lines of Code:** ~2400 lines production code, ~3000 lines test code
+
+### Application Layer - Interfaces Complete
+
+✅ **Path Protection:**
+  - ✅ FileOperation enum (Read, Write, Delete, List)
+  - ✅ PathValidationResult record (Allowed/Blocked factory methods)
+  - ✅ IProtectedPathValidator interface
+
+✅ **Audit:**
+  - ✅ IAuditLogger interface (LogAsync, FlushAsync)
+
+✅ **Secret Redaction:**
+  - ✅ RedactedContent record
+  - ✅ ISecretRedactor interface (Redact with optional file path context)
 
 ## In Progress
 
-🔄 Planning next phase: Application Layer security interfaces
+🔄 Infrastructure Layer: Implementing security services (ProtectedPathValidator, JsonAuditLogger, etc.)
 
 ## Remaining
 
-- Application Layer: Security interfaces (ISecretRedactor, IPathValidator, IRiskRegister, IAuditLogger, etc.)
-- Infrastructure Layer: Security implementations (FileSystemPathValidator, RegexSecretRedactor, etc.)
+- Infrastructure Layer: Security implementations (ProtectedPathValidator, RegexSecretRedactor, JsonAuditLogger)
 - CLI Layer: Security commands (show-denylist, check-path, security-status, audit commands)
 - Documentation: SECURITY.md, threat-model.md, risk-register.md
 - Audit per AUDIT-GUIDELINES.md
