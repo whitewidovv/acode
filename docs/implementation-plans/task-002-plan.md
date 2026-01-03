@@ -193,16 +193,22 @@ All three subtasks implemented and tested:
 
 **Pull Request:** https://github.com/whitewidovv/acode/pull/4
 
-### Future Work (Separate PR)
+### Future Work (Task 002.b - Separate PR)
 
-When ready to implement parsing/validation:
+**Note:** Parser/validator implementation is **fully specified** in the existing refined task:
+- 📄 See: `docs/tasks/refined-tasks/Epic 00/task-002b-implement-parser-validator-requirements.md`
+
+When implementing Task 002.b (separate feature branch + PR):
 1. Add YamlDotNet package to Acode.Infrastructure
 2. Add NJsonSchema package to Acode.Infrastructure
-3. Implement `IConfigLoader` in Application layer
+3. Implement `IConfigLoader`, `IConfigValidator`, `IConfigCache` interfaces
 4. Implement `YamlConfigReader` in Infrastructure layer
 5. Implement `JsonSchemaValidator` in Infrastructure layer
-6. Add environment variable interpolation
-7. Add semantic validation rules
+6. Implement `ConfigLoader`, `ConfigValidator` in Application layer
+7. Add environment variable interpolation (EnvironmentInterpolator)
+8. Add default value application (DefaultValueApplicator)
+9. Add semantic validation rules (SemanticValidator)
+10. Add validation result models (ValidationResult, ValidationError, ConfigErrorCodes)
 
 ---
 
