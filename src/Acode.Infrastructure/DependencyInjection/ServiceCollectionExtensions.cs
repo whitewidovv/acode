@@ -25,7 +25,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IConfigReader, YamlConfigReader>();
 
         // Register JsonSchemaValidator as a factory to handle async initialization
-        services.AddSingleton<JsonSchemaValidator>(sp =>
+        services.AddSingleton<ISchemaValidator>(sp =>
         {
             return schemaPath is null
                 ? JsonSchemaValidator.CreateFromEmbeddedResourceAsync().GetAwaiter().GetResult()

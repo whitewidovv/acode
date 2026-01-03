@@ -123,10 +123,21 @@ project:
 
     private static (int ExitCode, string StdOut, string StdErr) RunAcodeCli(string workingDir, params string[] args)
     {
+        // Find the CLI project by searching up from test assembly location
+        var testAssembly = typeof(ConfigE2ETests).Assembly.Location;
+        var testDir = Path.GetDirectoryName(testAssembly)!;
+        var solutionDir = Path.GetFullPath(Path.Combine(testDir, "..", "..", "..", "..", ".."));
+        var cliProjectPath = Path.Combine(solutionDir, "src", "Acode.Cli", "Acode.Cli.csproj");
+
+        if (!File.Exists(cliProjectPath))
+        {
+            throw new InvalidOperationException($"CLI project not found at: {cliProjectPath}");
+        }
+
         var startInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = "run --project " + Path.GetFullPath("../../../../../src/Acode.Cli") + " " + string.Join(" ", args),
+            Arguments = $"run --project \"{cliProjectPath}\" --no-build -- {string.Join(" ", args)}",
             WorkingDirectory = workingDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

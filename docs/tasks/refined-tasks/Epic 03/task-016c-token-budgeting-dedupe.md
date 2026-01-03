@@ -319,27 +319,77 @@ Deduplication:
 ```
 Tests/Unit/Context/Budget/
 ├── TokenCounterTests.cs
-│   ├── Should_Count_Accurately()
+│   ├── Should_Count_Empty_String()
+│   ├── Should_Count_Single_Word()
+│   ├── Should_Count_Sentence()
+│   ├── Should_Count_Paragraph()
+│   ├── Should_Count_Code()
+│   ├── Should_Handle_Whitespace()
 │   ├── Should_Handle_Unicode()
-│   └── Should_Cache_Counts()
+│   ├── Should_Handle_Emojis()
+│   ├── Should_Handle_Long_Identifiers()
+│   ├── Should_Cache_Repeated_Counts()
+│   ├── Should_Count_Batch()
+│   └── Should_Match_Model_Tokenizer()
 │
 ├── BudgetManagerTests.cs
-│   ├── Should_Calculate_Available()
+│   ├── Should_Calculate_Total_Available()
+│   ├── Should_Apply_System_Reserve()
+│   ├── Should_Apply_Response_Reserve()
 │   ├── Should_Allocate_Categories()
-│   └── Should_Enforce_Limits()
+│   ├── Should_Track_Consumption()
+│   ├── Should_Enforce_Total_Limit()
+│   ├── Should_Enforce_Category_Limit()
+│   ├── Should_Report_Remaining()
+│   ├── Should_Handle_Zero_Budget()
+│   └── Should_Load_Config()
+│
+├── CategoryAllocatorTests.cs
+│   ├── Should_Allocate_By_Percentage()
+│   ├── Should_Handle_Fixed_Allocation()
+│   ├── Should_Sum_To_Available()
+│   ├── Should_Handle_Single_Category()
+│   ├── Should_Handle_Empty_Category()
+│   └── Should_Redistribute_Unused()
 │
 ├── ExactDedupTests.cs
-│   ├── Should_Detect_Duplicates()
-│   └── Should_Keep_Best()
+│   ├── Should_Detect_Exact_Duplicate()
+│   ├── Should_Keep_First_Occurrence()
+│   ├── Should_Keep_Highest_Ranked()
+│   ├── Should_Handle_Different_Sources()
+│   ├── Should_Handle_No_Duplicates()
+│   ├── Should_Handle_All_Duplicates()
+│   └── Should_Report_Removed_Count()
 │
 ├── OverlapDedupTests.cs
-│   ├── Should_Detect_Overlap()
-│   ├── Should_Calculate_Amount()
-│   └── Should_Merge()
+│   ├── Should_Detect_Overlap_By_Lines()
+│   ├── Should_Calculate_Overlap_Percentage()
+│   ├── Should_Merge_Overlapping_Chunks()
+│   ├── Should_Handle_Adjacent_Chunks()
+│   ├── Should_Handle_Contained_Chunk()
+│   ├── Should_Respect_Threshold()
+│   ├── Should_Handle_Different_Files()
+│   ├── Should_Handle_No_Overlap()
+│   └── Should_Report_Merged_Count()
 │
-└── SelectorTests.cs
-    ├── Should_Fill_Budget()
-    └── Should_Respect_Categories()
+├── SelectorTests.cs
+│   ├── Should_Select_By_Rank_Order()
+│   ├── Should_Fill_To_Budget()
+│   ├── Should_Not_Exceed_Budget()
+│   ├── Should_Respect_Category_Limits()
+│   ├── Should_Skip_Chunk_If_Too_Large()
+│   ├── Should_Balance_Across_Categories()
+│   ├── Should_Handle_Empty_Candidates()
+│   ├── Should_Handle_Single_Candidate()
+│   └── Should_Return_Selected_With_Reasons()
+│
+└── BudgetReportTests.cs
+    ├── Should_Report_Total_Used()
+    ├── Should_Report_Category_Breakdown()
+    ├── Should_Report_Duplicates_Removed()
+    ├── Should_Report_Overlaps_Merged()
+    ├── Should_Report_Tokens_Saved()
+    └── Should_Format_Percentages()
 ```
 
 ### Integration Tests
@@ -347,7 +397,14 @@ Tests/Unit/Context/Budget/
 ```
 Tests/Integration/Context/Budget/
 ├── BudgetIntegrationTests.cs
-│   └── Should_Manage_Real_Context()
+│   ├── Should_Manage_Real_Context()
+│   ├── Should_Handle_Large_Chunk_Set()
+│   ├── Should_Work_With_Real_Tokenizer()
+│   └── Should_Apply_Config_Settings()
+│
+└── DedupIntegrationTests.cs
+    ├── Should_Dedup_Real_Search_Results()
+    └── Should_Merge_Real_Overlapping_Chunks()
 ```
 
 ### E2E Tests
@@ -355,7 +412,9 @@ Tests/Integration/Context/Budget/
 ```
 Tests/E2E/Context/Budget/
 ├── BudgetE2ETests.cs
-│   └── Should_Budget_For_Agent()
+│   ├── Should_Budget_For_Agent_Context()
+│   ├── Should_Show_Budget_Report_Via_CLI()
+│   └── Should_Respect_Config_Changes()
 ```
 
 ### Performance Benchmarks

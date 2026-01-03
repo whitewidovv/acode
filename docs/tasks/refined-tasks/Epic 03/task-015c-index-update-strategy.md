@@ -332,22 +332,65 @@ index:
 ```
 Tests/Unit/Index/Update/
 ├── ChangeDetectorTests.cs
-│   ├── Should_Detect_By_Mtime()
-│   ├── Should_Detect_New()
-│   └── Should_Detect_Deleted()
+│   ├── Should_Detect_Modified_By_Mtime()
+│   ├── Should_Detect_Modified_By_Size()
+│   ├── Should_Detect_New_File()
+│   ├── Should_Detect_Deleted_File()
+│   ├── Should_Detect_Renamed_File()
+│   ├── Should_Handle_Many_Changes()
+│   ├── Should_Handle_No_Changes()
+│   ├── Should_Handle_Missing_Baseline()
+│   ├── Should_Ignore_Excluded_Files()
+│   └── Should_Track_Scan_Progress()
 │
 ├── IncrementalUpdaterTests.cs
-│   ├── Should_Update_Changed()
-│   ├── Should_Skip_Unchanged()
-│   └── Should_Remove_Deleted()
+│   ├── Should_Update_Modified_File()
+│   ├── Should_Add_New_File()
+│   ├── Should_Remove_Deleted_File()
+│   ├── Should_Skip_Unchanged_File()
+│   ├── Should_Batch_Updates()
+│   ├── Should_Handle_Large_Batch()
+│   ├── Should_Report_Update_Progress()
+│   ├── Should_Support_Cancellation()
+│   ├── Should_Handle_Parse_Errors()
+│   └── Should_Continue_After_Single_Failure()
 │
 ├── UpdateTriggerTests.cs
 │   ├── Should_Trigger_On_Startup()
-│   └── Should_Trigger_On_Stale()
+│   ├── Should_Trigger_On_Stale()
+│   ├── Should_Trigger_Before_Search()
+│   ├── Should_Trigger_After_Write()
+│   ├── Should_Respect_Stale_Threshold()
+│   ├── Should_Load_Trigger_Config()
+│   ├── Should_Debounce_Rapid_Triggers()
+│   └── Should_Skip_If_Already_Running()
 │
-└── AtomicUpdateTests.cs
-    ├── Should_Rollback_On_Failure()
-    └── Should_Be_Atomic()
+├── StalenessCheckerTests.cs
+│   ├── Should_Report_Last_Update_Time()
+│   ├── Should_Report_Pending_Count()
+│   ├── Should_Determine_Stale_Status()
+│   ├── Should_Respect_Threshold_Config()
+│   └── Should_Handle_Never_Updated()
+│
+├── UpdateBatcherTests.cs
+│   ├── Should_Batch_By_Count()
+│   ├── Should_Checkpoint_By_Time()
+│   ├── Should_Flush_On_Complete()
+│   └── Should_Handle_Empty_Batch()
+│
+├── AtomicUpdateTests.cs
+│   ├── Should_Write_Atomically()
+│   ├── Should_Rollback_On_Failure()
+│   ├── Should_Preserve_Index_On_Error()
+│   ├── Should_Handle_Disk_Full()
+│   ├── Should_Handle_Concurrent_Update()
+│   └── Should_Lock_During_Update()
+│
+└── UpdateProgressTests.cs
+    ├── Should_Report_Scan_Progress()
+    ├── Should_Report_Index_Progress()
+    ├── Should_Calculate_ETA()
+    └── Should_Report_File_Count()
 ```
 
 ### Integration Tests
@@ -355,7 +398,16 @@ Tests/Unit/Index/Update/
 ```
 Tests/Integration/Index/Update/
 ├── UpdateIntegrationTests.cs
-│   └── Should_Update_Real_Index()
+│   ├── Should_Update_Real_Index()
+│   ├── Should_Handle_Large_Change_Set()
+│   ├── Should_Handle_Concurrent_File_Changes()
+│   ├── Should_Survive_Interruption()
+│   └── Should_Recover_From_Crash()
+│
+└── UpdateTriggerIntegrationTests.cs
+    ├── Should_Auto_Update_On_Startup()
+    ├── Should_Auto_Update_Before_Search()
+    └── Should_Auto_Update_After_Agent_Write()
 ```
 
 ### E2E Tests
@@ -363,7 +415,11 @@ Tests/Integration/Index/Update/
 ```
 Tests/E2E/Index/Update/
 ├── UpdateE2ETests.cs
-│   └── Should_Detect_Agent_Changes()
+│   ├── Should_Update_Via_CLI()
+│   ├── Should_Rebuild_Via_CLI()
+│   ├── Should_Show_Status_Via_CLI()
+│   ├── Should_Detect_Agent_Write_Changes()
+│   └── Should_Work_With_Background_Update()
 ```
 
 ### Performance Benchmarks

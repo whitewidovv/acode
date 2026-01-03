@@ -315,22 +315,71 @@ Source: auto-binary
 ```
 Tests/Unit/Ignore/
 ├── GitignoreParserTests.cs
-│   ├── Should_Parse_Comments()
-│   ├── Should_Parse_Patterns()
-│   └── Should_Handle_Negation()
+│   ├── Should_Parse_Empty_File()
+│   ├── Should_Parse_Comment_Lines()
+│   ├── Should_Parse_Blank_Lines()
+│   ├── Should_Parse_Simple_Pattern()
+│   ├── Should_Parse_Directory_Pattern()
+│   ├── Should_Parse_Negation_Pattern()
+│   ├── Should_Parse_Escaped_Characters()
+│   ├── Should_Parse_Trailing_Spaces()
+│   ├── Should_Handle_BOM()
+│   ├── Should_Handle_Different_Line_Endings()
+│   └── Should_Return_Line_Numbers()
 │
 ├── PatternMatcherTests.cs
-│   ├── Should_Match_Wildcard()
-│   ├── Should_Match_DoubleWildcard()
-│   └── Should_Match_Directory()
+│   ├── Should_Match_Exact_Filename()
+│   ├── Should_Match_Single_Wildcard()
+│   ├── Should_Match_Double_Wildcard()
+│   ├── Should_Match_Question_Mark()
+│   ├── Should_Match_Character_Class()
+│   ├── Should_Match_Negated_Class()
+│   ├── Should_Match_Directory_Only()
+│   ├── Should_Match_Rooted_Pattern()
+│   ├── Should_Match_Deeply_Nested()
+│   ├── Should_Handle_Case_Sensitivity()
+│   ├── Should_Handle_Leading_Slash()
+│   ├── Should_Handle_Trailing_Slash()
+│   └── Should_Not_Match_Non_Matching()
+│
+├── NegationTests.cs
+│   ├── Should_Negate_Previous_Pattern()
+│   ├── Should_Handle_Multiple_Negations()
+│   ├── Should_Apply_Order_Correctly()
+│   ├── Should_Handle_Directory_Negation()
+│   └── Should_Handle_Nested_Negation()
 │
 ├── BinaryDetectorTests.cs
-│   ├── Should_Detect_By_Extension()
-│   └── Should_Detect_By_MagicNumber()
+│   ├── Should_Detect_Image_Extensions()
+│   ├── Should_Detect_Archive_Extensions()
+│   ├── Should_Detect_Executable_Extensions()
+│   ├── Should_Detect_Media_Extensions()
+│   ├── Should_Detect_Office_Extensions()
+│   ├── Should_Detect_By_Magic_Number()
+│   ├── Should_Detect_ELF_Binary()
+│   ├── Should_Detect_PE_Binary()
+│   ├── Should_Detect_Mach_O_Binary()
+│   ├── Should_Handle_Text_File()
+│   ├── Should_Handle_Unknown_Extension()
+│   └── Should_Handle_No_Extension()
 │
-└── IgnoreServiceTests.cs
-    ├── Should_Combine_Sources()
-    └── Should_Handle_Precedence()
+├── IgnoreServiceTests.cs
+│   ├── Should_Load_Gitignore()
+│   ├── Should_Load_Nested_Gitignores()
+│   ├── Should_Load_Config_Ignores()
+│   ├── Should_Load_Global_Ignores()
+│   ├── Should_Combine_All_Sources()
+│   ├── Should_Apply_Precedence_Order()
+│   ├── Should_Cache_Results()
+│   ├── Should_Refresh_On_Demand()
+│   ├── Should_Handle_Missing_Gitignore()
+│   └── Should_Handle_Invalid_Pattern()
+│
+└── IgnoreCacheTests.cs
+    ├── Should_Cache_Check_Results()
+    ├── Should_Invalidate_On_Pattern_Change()
+    ├── Should_Invalidate_On_Refresh()
+    └── Should_Handle_Large_Path_Count()
 ```
 
 ### Integration Tests
@@ -338,7 +387,15 @@ Tests/Unit/Ignore/
 ```
 Tests/Integration/Ignore/
 ├── IgnoreIntegrationTests.cs
-│   └── Should_Work_With_Real_Repo()
+│   ├── Should_Work_With_Real_Gitignore()
+│   ├── Should_Work_With_Nested_Directories()
+│   ├── Should_Handle_Large_Gitignore()
+│   ├── Should_Handle_Many_Ignore_Files()
+│   └── Should_Work_With_Index_Build()
+│
+└── BinaryIntegrationTests.cs
+    ├── Should_Detect_Real_Binaries()
+    └── Should_Not_False_Positive()
 ```
 
 ### E2E Tests
@@ -346,7 +403,10 @@ Tests/Integration/Ignore/
 ```
 Tests/E2E/Ignore/
 ├── IgnoreE2ETests.cs
-│   └── Should_Filter_Index()
+│   ├── Should_Filter_Index_Build()
+│   ├── Should_Filter_Search_Results()
+│   ├── Should_Show_Check_Command()
+│   └── Should_Show_List_Command()
 ```
 
 ### Performance Benchmarks

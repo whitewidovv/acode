@@ -7,6 +7,17 @@ namespace Acode.Application.Configuration;
 /// </summary>
 public sealed class ConfigValidator : IConfigValidator
 {
+    private readonly ISchemaValidator? _schemaValidator;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ConfigValidator"/> class.
+    /// </summary>
+    /// <param name="schemaValidator">Optional schema validator for JSON schema validation.</param>
+    public ConfigValidator(ISchemaValidator? schemaValidator = null)
+    {
+        _schemaValidator = schemaValidator;
+    }
+
     /// <inheritdoc/>
     public async Task<ValidationResult> ValidateFileAsync(string configFilePath, CancellationToken cancellationToken = default)
     {
@@ -34,9 +45,17 @@ public sealed class ConfigValidator : IConfigValidator
             });
         }
 
-        // For now, this is a basic implementation
-        // Full implementation would use JsonSchemaValidator from Infrastructure
-        await Task.CompletedTask.ConfigureAwait(false);
+        // Use schema validator if available
+        if (_schemaValidator != null)
+        {
+            var schemaResult = await _schemaValidator.ValidateAsync(configFilePath, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!schemaResult.IsValid)
+            {
+                return schemaResult;
+            }
+        }
 
         return ValidationResult.Success();
     }

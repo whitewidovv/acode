@@ -325,26 +325,71 @@ Top 10 chunks:
 ```
 Tests/Unit/Context/Ranking/
 ├── RelevanceScorerTests.cs
-│   ├── Should_Score_Search_Results()
-│   ├── Should_Score_Keywords()
-│   └── Should_Normalize()
+│   ├── Should_Score_Search_Result()
+│   ├── Should_Score_High_Relevance()
+│   ├── Should_Score_Low_Relevance()
+│   ├── Should_Score_Keyword_Match()
+│   ├── Should_Score_Multiple_Keywords()
+│   ├── Should_Normalize_To_Zero_One()
+│   ├── Should_Handle_No_Relevance_Signal()
+│   └── Should_Handle_Empty_Query()
 │
 ├── SourceScorerTests.cs
-│   ├── Should_Assign_Priorities()
-│   └── Should_Be_Configurable()
+│   ├── Should_Score_Tool_Result()
+│   ├── Should_Score_Open_File()
+│   ├── Should_Score_Search_Result()
+│   ├── Should_Score_Reference()
+│   ├── Should_Load_Config_Priorities()
+│   ├── Should_Handle_Unknown_Source()
+│   └── Should_Normalize_To_Zero_One()
 │
 ├── RecencyScorerTests.cs
-│   ├── Should_Score_By_Time()
-│   └── Should_Apply_Decay()
+│   ├── Should_Score_Today()
+│   ├── Should_Score_Yesterday()
+│   ├── Should_Score_Last_Week()
+│   ├── Should_Score_Last_Month()
+│   ├── Should_Score_Older()
+│   ├── Should_Apply_Decay_Function()
+│   ├── Should_Load_Config_Decay()
+│   ├── Should_Handle_Missing_Date()
+│   └── Should_Normalize_To_Zero_One()
+│
+├── PositionScorerTests.cs
+│   ├── Should_Boost_Top_Of_File()
+│   ├── Should_Boost_Class_Header()
+│   ├── Should_Boost_Related_To_Other_Chunks()
+│   ├── Should_Handle_Middle_Of_File()
+│   └── Should_Normalize_To_Zero_One()
 │
 ├── CombinedRankerTests.cs
-│   ├── Should_Apply_Weights()
-│   ├── Should_Sum_Correctly()
-│   └── Should_Handle_Ties()
+│   ├── Should_Apply_Default_Weights()
+│   ├── Should_Apply_Custom_Weights()
+│   ├── Should_Sum_Weighted_Scores()
+│   ├── Should_Normalize_Final_Score()
+│   ├── Should_Handle_Zero_Weight()
+│   ├── Should_Handle_Single_Factor()
+│   ├── Should_Sort_By_Score_Descending()
+│   ├── Should_Handle_Tie_Deterministically()
+│   ├── Should_Apply_Min_Score_Threshold()
+│   └── Should_Return_Ranking_Factors()
 │
-└── BoostPenaltyTests.cs
-    ├── Should_Apply_Boosts()
-    └── Should_Apply_Penalties()
+├── BoostPenaltyTests.cs
+│   ├── Should_Apply_Path_Boost()
+│   ├── Should_Apply_Pattern_Boost()
+│   ├── Should_Apply_Multiple_Boosts()
+│   ├── Should_Apply_Path_Penalty()
+│   ├── Should_Apply_Pattern_Penalty()
+│   ├── Should_Apply_Multiple_Penalties()
+│   ├── Should_Stack_Boosts_And_Penalties()
+│   ├── Should_Match_Glob_Patterns()
+│   ├── Should_Handle_No_Match()
+│   └── Should_Cap_Final_Score()
+│
+└── TieBreakingTests.cs
+    ├── Should_Break_By_Source_Priority()
+    ├── Should_Break_By_Path_Alpha()
+    ├── Should_Break_By_Line_Number()
+    └── Should_Be_Deterministic()
 ```
 
 ### Integration Tests
@@ -352,7 +397,14 @@ Tests/Unit/Context/Ranking/
 ```
 Tests/Integration/Context/Ranking/
 ├── RankingIntegrationTests.cs
-│   └── Should_Rank_Real_Chunks()
+│   ├── Should_Rank_Real_Chunks()
+│   ├── Should_Rank_Large_Chunk_Set()
+│   ├── Should_Apply_Config_Settings()
+│   └── Should_Produce_Stable_Ranking()
+│
+└── RankingDebugIntegrationTests.cs
+    ├── Should_Output_Debug_Info()
+    └── Should_Show_Factor_Breakdown()
 ```
 
 ### E2E Tests
@@ -360,7 +412,9 @@ Tests/Integration/Context/Ranking/
 ```
 Tests/E2E/Context/Ranking/
 ├── RankingE2ETests.cs
-│   └── Should_Rank_For_Agent()
+│   ├── Should_Rank_For_Agent_Context()
+│   ├── Should_Debug_Via_CLI()
+│   └── Should_Respect_Config_Changes()
 ```
 
 ### Performance Benchmarks

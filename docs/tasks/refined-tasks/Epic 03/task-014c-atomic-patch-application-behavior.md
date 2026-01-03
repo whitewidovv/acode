@@ -396,22 +396,81 @@ $ acode run "Add error handling to the API controller"
 Tests/Unit/Patching/
 ├── PatchParserTests.cs
 │   ├── Should_Parse_Simple_Diff()
+│   ├── Should_Parse_Unified_Diff_Header()
+│   ├── Should_Parse_Single_Hunk()
 │   ├── Should_Parse_Multi_Hunk()
-│   └── Should_Parse_Multi_File()
+│   ├── Should_Parse_Multi_File()
+│   ├── Should_Parse_New_File()
+│   ├── Should_Parse_Deleted_File()
+│   ├── Should_Parse_Renamed_File()
+│   ├── Should_Extract_Line_Numbers()
+│   ├── Should_Extract_Context_Lines()
+│   ├── Should_Extract_Added_Lines()
+│   ├── Should_Extract_Removed_Lines()
+│   ├── Should_Handle_No_Newline_At_EOF()
+│   ├── Should_Handle_Empty_Patch()
+│   └── Should_Reject_Malformed_Patch()
 │
 ├── PatchValidatorTests.cs
-│   ├── Should_Validate_Context()
-│   ├── Should_Detect_Mismatch()
-│   └── Should_Allow_Fuzz()
+│   ├── Should_Validate_Context_Matches()
+│   ├── Should_Detect_Context_Mismatch()
+│   ├── Should_Detect_Line_Already_Removed()
+│   ├── Should_Detect_Line_Already_Added()
+│   ├── Should_Allow_Fuzz_Factor()
+│   ├── Should_Respect_Max_Fuzz()
+│   ├── Should_Validate_Line_Numbers()
+│   ├── Should_Handle_Modified_File()
+│   ├── Should_Handle_Missing_File()
+│   ├── Should_Report_All_Errors()
+│   └── Should_Return_Conflict_Details()
 │
 ├── PatchApplicatorTests.cs
-│   ├── Should_Apply_Addition()
-│   ├── Should_Apply_Removal()
-│   └── Should_Apply_Atomically()
+│   ├── Should_Apply_Single_Addition()
+│   ├── Should_Apply_Multiple_Additions()
+│   ├── Should_Apply_Single_Removal()
+│   ├── Should_Apply_Multiple_Removals()
+│   ├── Should_Apply_Modification()
+│   ├── Should_Apply_Multi_Hunk()
+│   ├── Should_Apply_In_Reverse_Order()
+│   ├── Should_Apply_With_Fuzz()
+│   ├── Should_Create_New_File()
+│   ├── Should_Delete_File()
+│   ├── Should_Apply_Atomically()
+│   ├── Should_Rollback_On_Failure()
+│   ├── Should_Create_Backup()
+│   ├── Should_Preserve_File_Permissions()
+│   └── Should_Preserve_Line_Endings()
 │
-└── PatchRollbackTests.cs
-    ├── Should_Rollback_Single()
-    └── Should_Rollback_Multi()
+├── MultiFilePatchTests.cs
+│   ├── Should_Apply_All_Files()
+│   ├── Should_Rollback_All_On_Failure()
+│   ├── Should_Apply_In_Order()
+│   ├── Should_Handle_Partial_Failure()
+│   └── Should_Report_Per_File_Status()
+│
+├── DryRunTests.cs
+│   ├── Should_Preview_Changes()
+│   ├── Should_Not_Modify_Files()
+│   ├── Should_Show_Added_Lines()
+│   ├── Should_Show_Removed_Lines()
+│   ├── Should_Show_Conflicts()
+│   └── Should_Validate_All_Hunks()
+│
+├── PatchRollbackTests.cs
+│   ├── Should_Rollback_Single_File()
+│   ├── Should_Rollback_Multi_File()
+│   ├── Should_Restore_Original_Content()
+│   ├── Should_Restore_Deleted_File()
+│   ├── Should_Delete_Created_File()
+│   ├── Should_Handle_Missing_Backup()
+│   ├── Should_Cleanup_Backup_After_Rollback()
+│   └── Should_Respect_Retention_Period()
+│
+└── PatchLineEndingTests.cs
+    ├── Should_Handle_LF_Files()
+    ├── Should_Handle_CRLF_Files()
+    ├── Should_Handle_Mixed_Line_Endings()
+    └── Should_Preserve_Original_Line_Endings()
 ```
 
 ### Integration Tests
@@ -420,7 +479,16 @@ Tests/Unit/Patching/
 Tests/Integration/Patching/
 ├── PatchIntegrationTests.cs
 │   ├── Should_Apply_Complex_Patch()
-│   └── Should_Handle_Large_Files()
+│   ├── Should_Apply_Large_Patch()
+│   ├── Should_Apply_To_Large_File()
+│   ├── Should_Handle_Binary_Detection()
+│   ├── Should_Work_With_Real_Git_Diff()
+│   └── Should_Handle_Concurrent_Patches()
+│
+└── PatchAtomicityIntegrationTests.cs
+    ├── Should_Survive_Process_Crash()
+    ├── Should_Recover_From_Partial_Apply()
+    └── Should_Handle_Disk_Full()
 ```
 
 ### E2E Tests
@@ -428,7 +496,11 @@ Tests/Integration/Patching/
 ```
 Tests/E2E/Patching/
 ├── PatchE2ETests.cs
-│   └── Should_Apply_Via_Agent()
+│   ├── Should_Apply_Via_Agent_Tool()
+│   ├── Should_Preview_Via_Agent_Tool()
+│   ├── Should_Rollback_Via_Agent_Tool()
+│   ├── Should_Work_With_Confirmation_Flow()
+│   └── Should_Handle_User_Rejection()
 ```
 
 ### Performance Benchmarks

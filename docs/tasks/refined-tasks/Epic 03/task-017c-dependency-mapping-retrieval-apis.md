@@ -379,25 +379,79 @@ var path = await dependencyService.FindPathAsync(fromId, toId);
 
 ```
 Tests/Unit/Symbols/Dependencies/
-├── DependencyTests.cs
-│   ├── Should_Store_Metadata()
-│   └── Should_Support_All_Kinds()
+├── DependencyModelTests.cs
+│   ├── Should_Store_Source_Id()
+│   ├── Should_Store_Target_Id()
+│   ├── Should_Store_Kind()
+│   ├── Should_Store_Location()
+│   ├── Should_Support_Calls_Kind()
+│   ├── Should_Support_Uses_Kind()
+│   ├── Should_Support_Inherits_Kind()
+│   ├── Should_Support_Implements_Kind()
+│   ├── Should_Support_Contains_Kind()
+│   └── Should_Support_References_Kind()
 │
 ├── DependencyStoreTests.cs
-│   ├── Should_Add_Dependency()
+│   ├── Should_Add_Single_Dependency()
+│   ├── Should_Add_Batch_Dependencies()
 │   ├── Should_Remove_Dependency()
+│   ├── Should_Remove_By_Source()
+│   ├── Should_Remove_By_Target()
 │   ├── Should_Query_By_Source()
-│   └── Should_Query_By_Target()
+│   ├── Should_Query_By_Target()
+│   ├── Should_Query_By_Kind()
+│   ├── Should_Query_By_File()
+│   ├── Should_Handle_Empty_Store()
+│   └── Should_Handle_No_Matches()
 │
 ├── DependencyExtractorTests.cs
-│   ├── Should_Extract_Calls()
-│   ├── Should_Extract_Uses()
-│   └── Should_Extract_Inherits()
+│   ├── Should_Extract_Method_Calls()
+│   ├── Should_Extract_Constructor_Calls()
+│   ├── Should_Extract_Property_Access()
+│   ├── Should_Extract_Field_Access()
+│   ├── Should_Extract_Type_Usage()
+│   ├── Should_Extract_Base_Class()
+│   ├── Should_Extract_Interface_Implementation()
+│   ├── Should_Extract_Generic_Type_Args()
+│   ├── Should_Track_Call_Location()
+│   ├── Should_Handle_Chained_Calls()
+│   ├── Should_Handle_Conditional_Access()
+│   └── Should_Handle_Lambda_Calls()
 │
-└── DependencyGraphTests.cs
-    ├── Should_Get_Direct()
-    ├── Should_Get_Transitive()
-    └── Should_Handle_Cycles()
+├── DependencyGraphTests.cs
+│   ├── Should_Get_Direct_Dependencies()
+│   ├── Should_Get_Direct_Dependents()
+│   ├── Should_Get_Transitive_Depth_1()
+│   ├── Should_Get_Transitive_Depth_2()
+│   ├── Should_Get_Transitive_Depth_N()
+│   ├── Should_Respect_Max_Depth()
+│   ├── Should_Respect_Max_Nodes()
+│   ├── Should_Handle_Cycles()
+│   ├── Should_Detect_Cycle()
+│   ├── Should_Not_Infinite_Loop()
+│   ├── Should_Filter_By_Kind()
+│   └── Should_Return_Graph_Structure()
+│
+├── UsageFinderTests.cs
+│   ├── Should_Find_All_Usages()
+│   ├── Should_Return_Usage_Location()
+│   ├── Should_Return_Usage_Context()
+│   ├── Should_Find_Read_Usages()
+│   ├── Should_Find_Write_Usages()
+│   └── Should_Find_Call_Usages()
+│
+├── ImplementorFinderTests.cs
+│   ├── Should_Find_Interface_Implementors()
+│   ├── Should_Find_Base_Class_Subclasses()
+│   ├── Should_Find_Abstract_Implementors()
+│   └── Should_Handle_Multiple_Levels()
+│
+└── PathFinderTests.cs
+    ├── Should_Find_Direct_Path()
+    ├── Should_Find_Shortest_Path()
+    ├── Should_Return_Empty_If_No_Path()
+    ├── Should_Handle_Multiple_Paths()
+    └── Should_Respect_Max_Path_Length()
 ```
 
 ### Integration Tests
@@ -405,10 +459,21 @@ Tests/Unit/Symbols/Dependencies/
 ```
 Tests/Integration/Symbols/Dependencies/
 ├── DependencyStoreIntegrationTests.cs
-│   └── Should_Persist_And_Load()
+│   ├── Should_Persist_To_Database()
+│   ├── Should_Load_From_Database()
+│   ├── Should_Handle_Large_Graph()
+│   └── Should_Handle_Concurrent_Updates()
+│
+├── DependencyExtractionIntegrationTests.cs
+│   ├── Should_Extract_From_CSharp()
+│   ├── Should_Extract_From_TypeScript()
+│   ├── Should_Extract_Cross_File()
+│   └── Should_Handle_Real_Codebase()
 │
 └── DependencyGraphIntegrationTests.cs
-    └── Should_Build_Real_Graph()
+    ├── Should_Build_Real_Graph()
+    ├── Should_Query_Large_Graph()
+    └── Should_Handle_Complex_Cycles()
 ```
 
 ### E2E Tests
@@ -416,8 +481,11 @@ Tests/Integration/Symbols/Dependencies/
 ```
 Tests/E2E/Symbols/Dependencies/
 ├── DependencyE2ETests.cs
-│   ├── Should_Query_Via_CLI()
-│   └── Should_Show_Call_Graph()
+│   ├── Should_Query_Deps_Of_Via_CLI()
+│   ├── Should_Query_Deps_On_Via_CLI()
+│   ├── Should_Show_Call_Graph_Via_CLI()
+│   ├── Should_Work_With_Agent_Context()
+│   └── Should_Provide_Context_For_Refactoring()
 ```
 
 ### Performance Benchmarks

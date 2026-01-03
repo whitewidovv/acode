@@ -338,18 +338,87 @@ fs.ClearCache();
 
 ```
 Tests/Unit/FileSystem/Docker/
-├── DockerFSTests.cs
-│   ├── Should_Read_File()
-│   ├── Should_Write_File()
-│   └── Should_Translate_Paths()
+├── DockerFSReadTests.cs
+│   ├── Should_Read_Text_File()
+│   ├── Should_Read_Binary_File()
+│   ├── Should_Read_Large_File()
+│   ├── Should_Handle_Missing_File()
+│   ├── Should_Handle_Permission_Denied()
+│   ├── Should_Handle_Container_Not_Running()
+│   └── Should_Support_Cancellation()
+│
+├── DockerFSWriteTests.cs
+│   ├── Should_Write_Text_File()
+│   ├── Should_Write_Binary_File()
+│   ├── Should_Write_Atomically()
+│   ├── Should_Create_Parent_Directories()
+│   ├── Should_Overwrite_Existing()
+│   ├── Should_Handle_Write_Errors()
+│   └── Should_Invalidate_Cache_On_Write()
+│
+├── DockerFSDeleteTests.cs
+│   ├── Should_Delete_File()
+│   ├── Should_Delete_Directory()
+│   ├── Should_Delete_Recursive()
+│   ├── Should_Handle_Missing_Gracefully()
+│   └── Should_Handle_Permission_Denied()
+│
+├── DockerFSEnumerationTests.cs
+│   ├── Should_List_Files()
+│   ├── Should_List_Recursively()
+│   ├── Should_Apply_Filter()
+│   ├── Should_Handle_Large_Directory()
+│   └── Should_Parse_Find_Output()
+│
+├── DockerFSMetadataTests.cs
+│   ├── Should_Check_Exists()
+│   ├── Should_Get_File_Size()
+│   ├── Should_Get_Modified_Time()
+│   ├── Should_Detect_File_Type()
+│   └── Should_Parse_Stat_Output()
 │
 ├── DockerCommandBuilderTests.cs
-│   ├── Should_Escape_Arguments()
-│   └── Should_Build_Commands()
+│   ├── Should_Escape_Single_Quotes()
+│   ├── Should_Escape_Double_Quotes()
+│   ├── Should_Escape_Spaces()
+│   ├── Should_Escape_Special_Characters()
+│   ├── Should_Escape_Newlines()
+│   ├── Should_Build_Cat_Command()
+│   ├── Should_Build_Find_Command()
+│   ├── Should_Build_Stat_Command()
+│   ├── Should_Build_Mkdir_Command()
+│   └── Should_Build_Rm_Command()
 │
-└── DockerCacheTests.cs
-    ├── Should_Cache_Listings()
-    └── Should_Invalidate_On_Write()
+├── DockerCommandExecutorTests.cs
+│   ├── Should_Execute_Simple_Command()
+│   ├── Should_Handle_Exit_Code_Zero()
+│   ├── Should_Handle_Exit_Code_NonZero()
+│   ├── Should_Handle_Timeout()
+│   ├── Should_Handle_Large_Output()
+│   └── Should_Support_Cancellation()
+│
+├── MountMappingTests.cs
+│   ├── Should_Translate_Host_To_Container()
+│   ├── Should_Translate_Container_To_Host()
+│   ├── Should_Handle_Multiple_Mounts()
+│   ├── Should_Find_Best_Mount_Match()
+│   └── Should_Handle_Unmapped_Path()
+│
+├── DockerCacheTests.cs
+│   ├── Should_Cache_Directory_Listing()
+│   ├── Should_Cache_Existence_Check()
+│   ├── Should_Return_Cached_Value()
+│   ├── Should_Invalidate_On_Write()
+│   ├── Should_Invalidate_On_Delete()
+│   ├── Should_Expire_After_TTL()
+│   ├── Should_Clear_All_Cache()
+│   └── Should_Disable_Cache()
+│
+└── DockerSecurityTests.cs
+    ├── Should_Prevent_Shell_Injection()
+    ├── Should_Block_Path_Traversal()
+    ├── Should_Enforce_Mount_Boundary()
+    └── Should_Reject_Invalid_Container_Name()
 ```
 
 ### Integration Tests
@@ -358,7 +427,16 @@ Tests/Unit/FileSystem/Docker/
 Tests/Integration/FileSystem/Docker/
 ├── DockerFSIntegrationTests.cs
 │   ├── Should_Work_With_Real_Container()
-│   └── Should_Handle_Large_Files()
+│   ├── Should_Handle_Large_Files()
+│   ├── Should_Handle_Many_Small_Files()
+│   ├── Should_Handle_Concurrent_Operations()
+│   ├── Should_Survive_Container_Restart()
+│   └── Should_Handle_Slow_Container()
+│
+└── DockerMountIntegrationTests.cs
+    ├── Should_Work_With_Bind_Mount()
+    ├── Should_Work_With_Volume_Mount()
+    └── Should_Handle_Multiple_Mounts()
 ```
 
 ### E2E Tests
@@ -366,7 +444,10 @@ Tests/Integration/FileSystem/Docker/
 ```
 Tests/E2E/FileSystem/Docker/
 ├── DockerFSE2ETests.cs
-│   └── Should_Work_With_Agent()
+│   ├── Should_Read_File_Via_Agent_Tool()
+│   ├── Should_Write_File_Via_Agent_Tool()
+│   ├── Should_List_Files_Via_Agent_Tool()
+│   └── Should_Work_With_Containerized_Project()
 ```
 
 ### Performance Benchmarks

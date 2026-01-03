@@ -384,22 +384,92 @@ By Kind:
 ```
 Tests/Unit/Symbols/
 ├── SymbolTests.cs
-│   ├── Should_Store_All_Metadata()
-│   └── Should_Support_All_Kinds()
+│   ├── Should_Store_Name()
+│   ├── Should_Store_FullyQualifiedName()
+│   ├── Should_Store_Kind()
+│   ├── Should_Store_Location()
+│   ├── Should_Store_Signature()
+│   ├── Should_Store_Visibility()
+│   ├── Should_Store_ContainingSymbol()
+│   ├── Should_Support_Class_Kind()
+│   ├── Should_Support_Interface_Kind()
+│   ├── Should_Support_Struct_Kind()
+│   ├── Should_Support_Enum_Kind()
+│   ├── Should_Support_Method_Kind()
+│   ├── Should_Support_Property_Kind()
+│   ├── Should_Support_Field_Kind()
+│   ├── Should_Support_Function_Kind()
+│   ├── Should_Support_TypeAlias_Kind()
+│   └── Should_Support_Namespace_Kind()
+│
+├── SymbolLocationTests.cs
+│   ├── Should_Store_FilePath()
+│   ├── Should_Store_StartLine()
+│   ├── Should_Store_EndLine()
+│   ├── Should_Store_StartColumn()
+│   ├── Should_Store_EndColumn()
+│   └── Should_Calculate_Range()
 │
 ├── SymbolStoreTests.cs
 │   ├── Should_Add_Symbol()
-│   ├── Should_Remove_Symbol()
-│   ├── Should_Query_By_Name()
-│   └── Should_Query_By_Kind()
+│   ├── Should_Add_Multiple_Symbols()
+│   ├── Should_Add_Batch_Symbols()
+│   ├── Should_Remove_Symbol_By_Id()
+│   ├── Should_Remove_Symbols_By_File()
+│   ├── Should_Update_Symbol()
+│   ├── Should_Query_By_Exact_Name()
+│   ├── Should_Query_By_Prefix()
+│   ├── Should_Query_By_Fuzzy_Match()
+│   ├── Should_Query_By_Kind()
+│   ├── Should_Query_By_Visibility()
+│   ├── Should_Query_By_File_Pattern()
+│   ├── Should_Query_By_Namespace()
+│   ├── Should_Query_By_ContainingSymbol()
+│   ├── Should_Return_Paginated_Results()
+│   ├── Should_Order_By_Name()
+│   ├── Should_Order_By_Relevance()
+│   ├── Should_Order_By_File()
+│   ├── Should_Handle_Empty_Store()
+│   └── Should_Handle_No_Matches()
 │
 ├── SymbolIndexTests.cs
-│   ├── Should_Build_Index()
-│   └── Should_Update_Incrementally()
+│   ├── Should_Build_Full_Index()
+│   ├── Should_Track_Indexed_Files()
+│   ├── Should_Detect_Changed_Files()
+│   ├── Should_Detect_New_Files()
+│   ├── Should_Detect_Deleted_Files()
+│   ├── Should_Update_Incrementally()
+│   ├── Should_Index_Specific_Files()
+│   ├── Should_Remove_File_From_Index()
+│   ├── Should_Clear_Index()
+│   ├── Should_Report_Status()
+│   ├── Should_Report_Progress()
+│   ├── Should_Support_Cancellation()
+│   ├── Should_Index_In_Parallel()
+│   ├── Should_Handle_Parse_Errors()
+│   └── Should_Provide_Partial_Results()
 │
-└── ExtractorRegistryTests.cs
-    ├── Should_Register_Extractor()
-    └── Should_Get_By_Language()
+├── ExtractorRegistryTests.cs
+│   ├── Should_Register_Extractor()
+│   ├── Should_Get_Extractor_By_Extension()
+│   ├── Should_Get_Extractor_By_Language()
+│   ├── Should_Return_Null_For_Unknown()
+│   ├── Should_Support_Multiple_Extensions()
+│   ├── Should_Handle_Fallback_Extractor()
+│   └── Should_List_Supported_Languages()
+│
+├── ExtractorConfigTests.cs
+│   ├── Should_Respect_Max_File_Size()
+│   ├── Should_Skip_Test_Files()
+│   ├── Should_Skip_Generated_Files()
+│   └── Should_Apply_Extraction_Depth()
+│
+└── SymbolResolutionTests.cs
+    ├── Should_Resolve_Symbol_By_Id()
+    ├── Should_Get_Symbol_Source_Code()
+    ├── Should_Get_Symbol_Documentation()
+    ├── Should_Get_Containing_Context()
+    └── Should_Navigate_To_Definition()
 ```
 
 ### Integration Tests
@@ -407,10 +477,25 @@ Tests/Unit/Symbols/
 ```
 Tests/Integration/Symbols/
 ├── SymbolStoreIntegrationTests.cs
-│   └── Should_Persist_And_Load()
+│   ├── Should_Persist_To_Database()
+│   ├── Should_Load_From_Database()
+│   ├── Should_Handle_Concurrent_Writes()
+│   ├── Should_Handle_Large_Symbol_Count()
+│   └── Should_Survive_Restart()
 │
-└── SymbolIndexIntegrationTests.cs
-    └── Should_Index_Real_Files()
+├── SymbolIndexIntegrationTests.cs
+│   ├── Should_Index_CSharp_Files()
+│   ├── Should_Index_TypeScript_Files()
+│   ├── Should_Index_JavaScript_Files()
+│   ├── Should_Index_Mixed_Languages()
+│   ├── Should_Handle_Large_Codebase()
+│   ├── Should_Handle_Incremental_With_Many_Changes()
+│   └── Should_Recover_From_Crash()
+│
+└── QueryIntegrationTests.cs
+    ├── Should_Search_Across_Languages()
+    ├── Should_Combine_Filters()
+    └── Should_Handle_Complex_Queries()
 ```
 
 ### E2E Tests
@@ -418,8 +503,14 @@ Tests/Integration/Symbols/
 ```
 Tests/E2E/Symbols/
 ├── SymbolE2ETests.cs
-│   ├── Should_Build_Via_CLI()
-│   └── Should_Search_Via_CLI()
+│   ├── Should_Build_Index_Via_CLI()
+│   ├── Should_Build_With_Progress_Via_CLI()
+│   ├── Should_Update_Index_Via_CLI()
+│   ├── Should_Search_Symbols_Via_CLI()
+│   ├── Should_Search_By_Kind_Via_CLI()
+│   ├── Should_Show_Status_Via_CLI()
+│   ├── Should_Clear_Index_Via_CLI()
+│   └── Should_Integrate_With_Context_Packer()
 ```
 
 ### Performance Benchmarks

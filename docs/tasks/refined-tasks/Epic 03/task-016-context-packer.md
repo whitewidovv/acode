@@ -344,27 +344,94 @@ Chunks:
 ```
 Tests/Unit/Context/
 ├── ChunkerTests.cs
-│   ├── Should_Chunk_By_Structure()
-│   ├── Should_Respect_Limits()
-│   └── Should_Preserve_Units()
+│   ├── Should_Chunk_By_Function_Boundaries()
+│   ├── Should_Chunk_By_Class_Boundaries()
+│   ├── Should_Chunk_By_Line_Count()
+│   ├── Should_Chunk_By_Token_Count()
+│   ├── Should_Respect_Max_Chunk_Size()
+│   ├── Should_Respect_Min_Chunk_Size()
+│   ├── Should_Handle_Empty_File()
+│   ├── Should_Handle_Single_Line_File()
+│   ├── Should_Handle_Oversized_Function()
+│   ├── Should_Preserve_Complete_Functions()
+│   ├── Should_Preserve_Complete_Classes()
+│   ├── Should_Handle_Nested_Structures()
+│   ├── Should_Handle_Anonymous_Functions()
+│   └── Should_Handle_Markdown_Sections()
 │
 ├── RankerTests.cs
-│   ├── Should_Rank_By_Relevance()
-│   ├── Should_Weight_Sources()
-│   └── Should_Combine_Scores()
+│   ├── Should_Rank_By_Relevance_Score()
+│   ├── Should_Rank_By_Recency()
+│   ├── Should_Rank_By_Source_Priority()
+│   ├── Should_Combine_Scores_Weighted()
+│   ├── Should_Apply_Custom_Weights()
+│   ├── Should_Handle_Equal_Scores()
+│   ├── Should_Handle_Zero_Relevance()
+│   ├── Should_Handle_Missing_Recency()
+│   ├── Should_Normalize_Scores()
+│   └── Should_Produce_Stable_Ordering()
+│
+├── TokenCounterTests.cs
+│   ├── Should_Count_Tokens_Accurately()
+│   ├── Should_Handle_Code_Identifiers()
+│   ├── Should_Handle_Unicode()
+│   ├── Should_Handle_Whitespace()
+│   ├── Should_Handle_Empty_String()
+│   ├── Should_Match_Model_Tokenizer()
+│   └── Should_Cache_Token_Counts()
 │
 ├── BudgetManagerTests.cs
-│   ├── Should_Count_Tokens()
-│   ├── Should_Enforce_Limit()
-│   └── Should_Reserve_Space()
+│   ├── Should_Enforce_Total_Budget()
+│   ├── Should_Reserve_Response_Space()
+│   ├── Should_Reserve_System_Prompt_Space()
+│   ├── Should_Calculate_Available_Budget()
+│   ├── Should_Track_Allocated_Tokens()
+│   ├── Should_Handle_Zero_Budget()
+│   ├── Should_Handle_Negative_Reserve()
+│   ├── Should_Allocate_By_Category()
+│   └── Should_Report_Remaining_Budget()
 │
 ├── DeduplicatorTests.cs
-│   ├── Should_Remove_Duplicates()
-│   └── Should_Handle_Overlap()
+│   ├── Should_Detect_Exact_Duplicate_Chunks()
+│   ├── Should_Detect_Overlapping_Chunks()
+│   ├── Should_Keep_Highest_Ranked_Duplicate()
+│   ├── Should_Merge_Overlapping_Same_File()
+│   ├── Should_Handle_No_Duplicates()
+│   ├── Should_Handle_All_Duplicates()
+│   ├── Should_Handle_Partial_Overlap()
+│   ├── Should_Preserve_Order_After_Dedup()
+│   └── Should_Handle_Different_Sources_Same_Content()
 │
-└── FormatterTests.cs
-    ├── Should_Add_Headers()
-    └── Should_Format_Consistently()
+├── SelectorTests.cs
+│   ├── Should_Select_Top_Ranked_Chunks()
+│   ├── Should_Fill_To_Budget()
+│   ├── Should_Not_Exceed_Budget()
+│   ├── Should_Handle_Chunk_Larger_Than_Remaining()
+│   ├── Should_Balance_Multiple_Sources()
+│   ├── Should_Handle_Empty_Candidates()
+│   ├── Should_Handle_Single_Candidate()
+│   └── Should_Handle_All_Candidates_Fit()
+│
+├── FormatterTests.cs
+│   ├── Should_Add_File_Path_Header()
+│   ├── Should_Add_Line_Number_Range()
+│   ├── Should_Add_Language_Hint()
+│   ├── Should_Add_Separator_Between_Chunks()
+│   ├── Should_Format_Code_Blocks()
+│   ├── Should_Handle_Multiple_Chunks_Same_File()
+│   ├── Should_Handle_Multiple_Files()
+│   ├── Should_Escape_Special_Characters()
+│   └── Should_Produce_Consistent_Format()
+│
+└── ContextPackerTests.cs
+    ├── Should_Orchestrate_Full_Pipeline()
+    ├── Should_Handle_Empty_Sources()
+    ├── Should_Handle_Single_Source()
+    ├── Should_Handle_Multiple_Sources()
+    ├── Should_Return_Token_Count()
+    ├── Should_Return_Included_Chunks()
+    ├── Should_Support_Cancellation()
+    └── Should_Handle_Configuration_Changes()
 ```
 
 ### Integration Tests
@@ -372,7 +439,18 @@ Tests/Unit/Context/
 ```
 Tests/Integration/Context/
 ├── ContextPackerIntegrationTests.cs
-│   └── Should_Pack_Real_Context()
+│   ├── Should_Pack_Real_Search_Results()
+│   ├── Should_Pack_Open_Files()
+│   ├── Should_Pack_Tool_Results()
+│   ├── Should_Pack_Mixed_Sources()
+│   ├── Should_Handle_Large_Codebase()
+│   ├── Should_Handle_Many_Small_Files()
+│   └── Should_Handle_Few_Large_Files()
+│
+└── TokenizerIntegrationTests.cs
+    ├── Should_Match_GPT4_Tokenizer()
+    ├── Should_Match_Claude_Tokenizer()
+    └── Should_Handle_Edge_Cases()
 ```
 
 ### E2E Tests
@@ -380,7 +458,11 @@ Tests/Integration/Context/
 ```
 Tests/E2E/Context/
 ├── ContextE2ETests.cs
-│   └── Should_Work_With_Agent()
+│   ├── Should_Provide_Context_To_Planner()
+│   ├── Should_Provide_Context_To_Executor()
+│   ├── Should_Update_Context_Between_Turns()
+│   ├── Should_Show_Context_Debug_Command()
+│   └── Should_Respect_Config_Settings()
 ```
 
 ### Performance Benchmarks

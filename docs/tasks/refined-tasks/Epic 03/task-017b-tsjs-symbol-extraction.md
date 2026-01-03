@@ -373,21 +373,80 @@ acode symbols extract src/ --stats
 Tests/Unit/Symbols/TypeScript/
 ├── TypeScriptExtractorTests.cs
 │   ├── Should_Extract_Class()
+│   ├── Should_Extract_Abstract_Class()
+│   ├── Should_Extract_Class_With_Generics()
 │   ├── Should_Extract_Interface()
+│   ├── Should_Extract_Type_Alias()
+│   ├── Should_Extract_Enum()
 │   ├── Should_Extract_Function()
-│   ├── Should_Extract_Variable()
-│   ├── Should_Extract_Export()
-│   └── Should_Handle_Malformed()
+│   ├── Should_Extract_Arrow_Function()
+│   ├── Should_Extract_Async_Function()
+│   ├── Should_Extract_Generator_Function()
+│   ├── Should_Extract_Class_Method()
+│   ├── Should_Extract_Static_Method()
+│   ├── Should_Extract_Property()
+│   ├── Should_Extract_Readonly_Property()
+│   ├── Should_Extract_Constructor()
+│   ├── Should_Extract_Getter_Setter()
+│   ├── Should_Extract_Named_Export()
+│   ├── Should_Extract_Default_Export()
+│   ├── Should_Extract_Re_Export()
+│   ├── Should_Extract_Variable_Const()
+│   ├── Should_Extract_Variable_Let()
+│   ├── Should_Extract_Decorator()
+│   ├── Should_Extract_Visibility()
+│   ├── Should_Extract_Return_Type()
+│   ├── Should_Extract_Parameter_Types()
+│   ├── Should_Extract_Location()
+│   ├── Should_Handle_Malformed_File()
+│   └── Should_Handle_Partial_Results()
+│
+├── JavaScriptExtractorTests.cs
+│   ├── Should_Extract_Function()
+│   ├── Should_Extract_Arrow_Function()
+│   ├── Should_Extract_Class()
+│   ├── Should_Extract_Object_Method()
+│   ├── Should_Extract_CommonJS_Export()
+│   ├── Should_Extract_ES_Module_Export()
+│   ├── Should_Handle_No_Types()
+│   └── Should_Infer_From_JSDoc()
 │
 ├── JSDocExtractorTests.cs
 │   ├── Should_Extract_Description()
 │   ├── Should_Extract_Params()
-│   └── Should_Extract_Returns()
+│   ├── Should_Extract_Returns()
+│   ├── Should_Extract_Typedef()
+│   ├── Should_Extract_Type()
+│   ├── Should_Extract_Throws()
+│   ├── Should_Extract_Example()
+│   ├── Should_Handle_Missing_Docs()
+│   ├── Should_Handle_Malformed_JSDoc()
+│   └── Should_Handle_Multi_Line()
 │
-└── NodeBridgeTests.cs
-    ├── Should_Start_Process()
-    ├── Should_Exchange_Messages()
-    └── Should_Handle_Errors()
+├── NodeBridgeTests.cs
+│   ├── Should_Start_Process()
+│   ├── Should_Find_Node_Executable()
+│   ├── Should_Exchange_JSON_Messages()
+│   ├── Should_Handle_Large_Messages()
+│   ├── Should_Handle_Process_Crash()
+│   ├── Should_Handle_Timeout()
+│   ├── Should_Restart_On_Failure()
+│   ├── Should_Shutdown_Gracefully()
+│   └── Should_Handle_Concurrent_Requests()
+│
+├── TSConfigParserTests.cs
+│   ├── Should_Parse_TsConfig()
+│   ├── Should_Resolve_Extends()
+│   ├── Should_Handle_Missing_TsConfig()
+│   └── Should_Apply_Compiler_Options()
+│
+└── TypeScriptParserTests.cs
+    ├── Should_Parse_TS_File()
+    ├── Should_Parse_JS_File()
+    ├── Should_Parse_TSX_File()
+    ├── Should_Parse_JSX_File()
+    ├── Should_Handle_Syntax_Errors()
+    └── Should_Handle_Different_Targets()
 ```
 
 ### Integration Tests
@@ -396,7 +455,18 @@ Tests/Unit/Symbols/TypeScript/
 Tests/Integration/Symbols/TypeScript/
 ├── TypeScriptExtractorIntegrationTests.cs
 │   ├── Should_Extract_Real_TS_File()
-│   └── Should_Extract_Real_JS_File()
+│   ├── Should_Extract_Real_JS_File()
+│   ├── Should_Extract_Real_TSX_File()
+│   ├── Should_Extract_React_Components()
+│   ├── Should_Handle_Large_File()
+│   ├── Should_Handle_Many_Files()
+│   ├── Should_Handle_Node_Modules()
+│   └── Should_Handle_Monorepo()
+│
+└── NodeBridgeIntegrationTests.cs
+    ├── Should_Start_Bridge_Process()
+    ├── Should_Handle_Long_Running()
+    └── Should_Survive_Process_Restart()
 ```
 
 ### E2E Tests
@@ -404,7 +474,10 @@ Tests/Integration/Symbols/TypeScript/
 ```
 Tests/E2E/Symbols/TypeScript/
 ├── TypeScriptSymbolE2ETests.cs
-│   └── Should_Index_TypeScript_Project()
+│   ├── Should_Index_TypeScript_Project()
+│   ├── Should_Index_JavaScript_Project()
+│   ├── Should_Search_TS_Symbols()
+│   └── Should_Extract_Via_CLI()
 ```
 
 ### Performance Benchmarks

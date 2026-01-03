@@ -351,21 +351,71 @@ When rate limited:
 ```
 Tests/Unit/Tools/Search/
 ├── SearchTextToolTests.cs
-│   ├── Should_Search_Content()
-│   ├── Should_Filter_Type()
-│   └── Should_Return_Snippets()
+│   ├── Should_Search_Single_Word()
+│   ├── Should_Search_Multiple_Words()
+│   ├── Should_Search_Phrase()
+│   ├── Should_Filter_By_File_Type()
+│   ├── Should_Filter_By_Directory()
+│   ├── Should_Limit_Max_Results()
+│   ├── Should_Return_Snippets()
+│   ├── Should_Return_Line_Numbers()
+│   ├── Should_Return_Relevance_Score()
+│   ├── Should_Handle_No_Results()
+│   ├── Should_Handle_Empty_Query()
+│   ├── Should_Handle_Invalid_Query()
+│   └── Should_Validate_Input_Parameters()
 │
 ├── SearchFilesToolTests.cs
-│   ├── Should_Match_Pattern()
-│   └── Should_Filter_Directory()
+│   ├── Should_Match_Exact_Filename()
+│   ├── Should_Match_Wildcard_Pattern()
+│   ├── Should_Match_Extension_Pattern()
+│   ├── Should_Filter_By_Directory()
+│   ├── Should_Support_Recursive()
+│   ├── Should_Support_Non_Recursive()
+│   ├── Should_Limit_Max_Results()
+│   ├── Should_Return_File_Paths()
+│   ├── Should_Return_File_Metadata()
+│   ├── Should_Handle_No_Matches()
+│   └── Should_Validate_Input_Parameters()
 │
 ├── GrepToolTests.cs
-│   ├── Should_Match_Regex()
-│   └── Should_Handle_Case()
+│   ├── Should_Match_Literal_String()
+│   ├── Should_Match_Regex_Pattern()
+│   ├── Should_Handle_Case_Insensitive()
+│   ├── Should_Handle_Case_Sensitive()
+│   ├── Should_Filter_By_File_Pattern()
+│   ├── Should_Filter_By_Directory()
+│   ├── Should_Return_Line_Content()
+│   ├── Should_Return_Line_Numbers()
+│   ├── Should_Return_Context_Lines()
+│   ├── Should_Handle_No_Matches()
+│   ├── Should_Handle_Invalid_Regex()
+│   └── Should_Validate_Input_Parameters()
 │
-└── RateLimitingTests.cs
-    ├── Should_Enforce_Limit()
-    └── Should_Notify()
+├── RateLimitingTests.cs
+│   ├── Should_Allow_Under_Limit()
+│   ├── Should_Block_Over_Limit()
+│   ├── Should_Reset_After_Window()
+│   ├── Should_Return_Retry_After()
+│   ├── Should_Track_Per_Tool()
+│   ├── Should_Load_Config_Limits()
+│   └── Should_Handle_Concurrent_Requests()
+│
+├── SearchResultFormatterTests.cs
+│   ├── Should_Format_Single_Result()
+│   ├── Should_Format_Multiple_Results()
+│   ├── Should_Include_Snippet()
+│   ├── Should_Include_Line_Number()
+│   ├── Should_Include_Path()
+│   ├── Should_Truncate_Long_Snippets()
+│   └── Should_Handle_Empty_Results()
+│
+└── SearchInputValidationTests.cs
+    ├── Should_Require_Query()
+    ├── Should_Validate_Max_Results()
+    ├── Should_Validate_File_Type()
+    ├── Should_Validate_Path_Pattern()
+    └── Should_Sanitize_Input()
 ```
 
 ### Integration Tests
@@ -373,7 +423,16 @@ Tests/Unit/Tools/Search/
 ```
 Tests/Integration/Tools/Search/
 ├── SearchToolIntegrationTests.cs
-│   └── Should_Work_With_Index()
+│   ├── Should_Work_With_Real_Index()
+│   ├── Should_Return_Correct_Results()
+│   ├── Should_Handle_Large_Index()
+│   ├── Should_Handle_Concurrent_Searches()
+│   └── Should_Update_After_Index_Change()
+│
+└── SearchToolRegistrationTests.cs
+    ├── Should_Register_All_Search_Tools()
+    ├── Should_Appear_In_Tool_List()
+    └── Should_Have_Correct_Schema()
 ```
 
 ### E2E Tests
@@ -381,7 +440,10 @@ Tests/Integration/Tools/Search/
 ```
 Tests/E2E/Tools/Search/
 ├── SearchToolE2ETests.cs
-│   └── Should_Work_In_Agent()
+│   ├── Should_Work_In_Agent_Loop()
+│   ├── Should_Provide_Context_For_Planning()
+│   ├── Should_Handle_Agent_Follow_Up()
+│   └── Should_Log_Tool_Usage()
 ```
 
 ### Performance Benchmarks

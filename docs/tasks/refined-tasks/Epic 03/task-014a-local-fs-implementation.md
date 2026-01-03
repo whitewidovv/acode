@@ -336,23 +336,100 @@ Writes are atomic by default:
 Tests/Unit/FileSystem/Local/
 ├── LocalFileReadTests.cs
 │   ├── Should_Read_Small_File()
+│   ├── Should_Read_Empty_File()
+│   ├── Should_Read_File_With_Unicode()
+│   ├── Should_Read_File_With_BOM()
 │   ├── Should_Stream_Large_File()
-│   ├── Should_Detect_Encoding()
-│   └── Should_Handle_Binary()
+│   ├── Should_Stream_Very_Large_File()
+│   ├── Should_Detect_UTF8_Encoding()
+│   ├── Should_Detect_UTF16_Encoding()
+│   ├── Should_Detect_Binary_File()
+│   ├── Should_Apply_Explicit_Encoding()
+│   ├── Should_Handle_Read_Only_File()
+│   ├── Should_Handle_Concurrent_Reads()
+│   ├── Should_Support_Cancellation()
+│   ├── Should_Throw_For_Missing_File()
+│   └── Should_Throw_For_Access_Denied()
 │
 ├── LocalFileWriteTests.cs
+│   ├── Should_Write_Small_File()
+│   ├── Should_Write_Large_File()
+│   ├── Should_Write_Empty_File()
+│   ├── Should_Write_Unicode_Content()
 │   ├── Should_Write_Atomically()
-│   ├── Should_Create_Parent_Dirs()
-│   └── Should_Handle_Lock_Conflict()
+│   ├── Should_Use_Temp_File()
+│   ├── Should_Cleanup_Temp_On_Failure()
+│   ├── Should_Create_Parent_Directories()
+│   ├── Should_Create_Deep_Parent_Directories()
+│   ├── Should_Overwrite_Existing_File()
+│   ├── Should_Handle_Lock_Conflict()
+│   ├── Should_Retry_On_Lock_Conflict()
+│   ├── Should_Timeout_On_Locked_File()
+│   ├── Should_Preserve_Original_On_Failure()
+│   └── Should_Support_Cancellation()
+│
+├── LocalLineOperationsTests.cs
+│   ├── Should_Read_Lines()
+│   ├── Should_Read_Lines_Empty_File()
+│   ├── Should_Read_Lines_Single_Line()
+│   ├── Should_Read_Lines_No_Trailing_Newline()
+│   ├── Should_Read_Lines_Mixed_Line_Endings()
+│   ├── Should_Write_Lines()
+│   ├── Should_Write_Lines_Empty_Array()
+│   └── Should_Write_Lines_With_Platform_Newline()
+│
+├── LocalBinaryOperationsTests.cs
+│   ├── Should_Read_Bytes()
+│   ├── Should_Read_Bytes_Empty_File()
+│   ├── Should_Write_Bytes()
+│   └── Should_Write_Bytes_Empty_Array()
 │
 ├── LocalEnumerationTests.cs
+│   ├── Should_Enumerate_Files()
+│   ├── Should_Enumerate_Empty_Directory()
 │   ├── Should_Enumerate_Lazily()
-│   ├── Should_Filter_Files()
-│   └── Should_Handle_Recursive()
+│   ├── Should_Enumerate_Recursively()
+│   ├── Should_Enumerate_NonRecursively()
+│   ├── Should_Filter_By_Pattern()
+│   ├── Should_Filter_By_Extension()
+│   ├── Should_Include_Hidden_Files()
+│   ├── Should_Exclude_Hidden_Files()
+│   ├── Should_Enumerate_Directories()
+│   ├── Should_Handle_Deep_Hierarchy()
+│   └── Should_Support_Cancellation()
+│
+├── LocalMetadataTests.cs
+│   ├── Should_Check_File_Exists()
+│   ├── Should_Check_Directory_Exists()
+│   ├── Should_Return_False_For_Missing()
+│   ├── Should_Get_File_Size()
+│   ├── Should_Get_Last_Modified()
+│   ├── Should_Get_Created_Date()
+│   ├── Should_Get_IsDirectory_Flag()
+│   └── Should_Throw_For_Missing_Metadata()
+│
+├── LocalDeleteTests.cs
+│   ├── Should_Delete_File()
+│   ├── Should_Delete_Missing_File_NoError()
+│   ├── Should_Delete_Empty_Directory()
+│   ├── Should_Delete_Directory_Recursive()
+│   ├── Should_Delete_Non_Empty_Directory()
+│   └── Should_Throw_For_Locked_File()
+│
+├── LocalPathHandlingTests.cs
+│   ├── Should_Normalize_Forward_Slashes()
+│   ├── Should_Normalize_Back_Slashes()
+│   ├── Should_Handle_Trailing_Slashes()
+│   ├── Should_Combine_With_Root()
+│   └── Should_Handle_Case_Sensitivity()
 │
 └── LocalSecurityTests.cs
-    ├── Should_Block_Traversal()
-    └── Should_Enforce_Root()
+    ├── Should_Block_Parent_Traversal()
+    ├── Should_Block_Hidden_Traversal()
+    ├── Should_Block_Absolute_Path()
+    ├── Should_Enforce_Root_Boundary()
+    ├── Should_Reject_Null_Bytes()
+    └── Should_Reject_Invalid_Characters()
 ```
 
 ### Integration Tests
@@ -361,7 +438,17 @@ Tests/Unit/FileSystem/Local/
 Tests/Integration/FileSystem/Local/
 ├── LocalFSIntegrationTests.cs
 │   ├── Should_Handle_Deep_Hierarchy()
-│   └── Should_Handle_Large_Directory()
+│   ├── Should_Handle_Large_Directory()
+│   ├── Should_Handle_Many_Small_Files()
+│   ├── Should_Handle_Concurrent_Operations()
+│   ├── Should_Handle_Unicode_Filenames()
+│   ├── Should_Handle_Long_Paths()
+│   └── Should_Handle_Special_Characters()
+│
+└── LocalAtomicWriteIntegrationTests.cs
+    ├── Should_Survive_Process_Crash()
+    ├── Should_Handle_Disk_Full()
+    └── Should_Handle_Power_Failure()
 ```
 
 ### E2E Tests
@@ -369,7 +456,10 @@ Tests/Integration/FileSystem/Local/
 ```
 Tests/E2E/FileSystem/
 ├── LocalFSE2ETests.cs
-│   └── Should_Work_With_Agent()
+│   ├── Should_Read_File_Via_Agent_Tool()
+│   ├── Should_Write_File_Via_Agent_Tool()
+│   ├── Should_List_Directory_Via_Agent_Tool()
+│   └── Should_Handle_Real_Codebase()
 ```
 
 ### Performance Benchmarks

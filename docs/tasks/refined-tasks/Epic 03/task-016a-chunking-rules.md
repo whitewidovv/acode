@@ -307,23 +307,86 @@ Tests/Unit/Context/Chunking/
 ├── StructuralChunkerTests.cs
 │   ├── Should_Chunk_By_Class()
 │   ├── Should_Chunk_By_Method()
-│   └── Should_Handle_Nested()
+│   ├── Should_Chunk_By_Function()
+│   ├── Should_Handle_Nested_Classes()
+│   ├── Should_Handle_Nested_Methods()
+│   ├── Should_Preserve_Imports()
+│   ├── Should_Preserve_Namespace()
+│   ├── Should_Respect_Max_Tokens()
+│   ├── Should_Respect_Min_Tokens()
+│   ├── Should_Split_Large_Methods()
+│   ├── Should_Combine_Small_Methods()
+│   └── Should_Track_Hierarchy()
 │
 ├── CSharpChunkerTests.cs
-│   ├── Should_Parse_With_Roslyn()
-│   └── Should_Chunk_Methods()
+│   ├── Should_Parse_Class()
+│   ├── Should_Parse_Interface()
+│   ├── Should_Parse_Record()
+│   ├── Should_Parse_Struct()
+│   ├── Should_Parse_Method()
+│   ├── Should_Parse_Property()
+│   ├── Should_Parse_Constructor()
+│   ├── Should_Parse_Lambda()
+│   ├── Should_Parse_Local_Function()
+│   ├── Should_Handle_Expression_Body()
+│   ├── Should_Handle_Partial_Class()
+│   ├── Should_Handle_Generics()
+│   ├── Should_Handle_Attributes()
+│   └── Should_Handle_Documentation()
 │
 ├── TypeScriptChunkerTests.cs
-│   ├── Should_Parse_TypeScript()
-│   └── Should_Chunk_Functions()
+│   ├── Should_Parse_Function()
+│   ├── Should_Parse_Arrow_Function()
+│   ├── Should_Parse_Class()
+│   ├── Should_Parse_Interface()
+│   ├── Should_Parse_Type_Alias()
+│   ├── Should_Parse_Enum()
+│   ├── Should_Parse_Module()
+│   ├── Should_Handle_Export_Default()
+│   ├── Should_Handle_Named_Export()
+│   └── Should_Handle_Decorators()
+│
+├── JavaScriptChunkerTests.cs
+│   ├── Should_Parse_Function()
+│   ├── Should_Parse_Arrow_Function()
+│   ├── Should_Parse_Class()
+│   ├── Should_Parse_Object_Method()
+│   ├── Should_Handle_CommonJS()
+│   └── Should_Handle_ES_Modules()
 │
 ├── LineBasedChunkerTests.cs
-│   ├── Should_Chunk_By_Lines()
-│   └── Should_Add_Overlap()
+│   ├── Should_Chunk_By_Line_Count()
+│   ├── Should_Add_Overlap()
+│   ├── Should_Handle_Small_File()
+│   ├── Should_Handle_Empty_File()
+│   ├── Should_Handle_Single_Line()
+│   ├── Should_Respect_Token_Limit()
+│   ├── Should_Handle_Long_Lines()
+│   └── Should_Preserve_Line_Numbers()
 │
-└── TokenChunkerTests.cs
-    ├── Should_Estimate_Tokens()
-    └── Should_Enforce_Limits()
+├── TokenEstimatorTests.cs
+│   ├── Should_Estimate_English_Text()
+│   ├── Should_Estimate_Code()
+│   ├── Should_Handle_Identifiers()
+│   ├── Should_Handle_Unicode()
+│   ├── Should_Handle_Whitespace()
+│   ├── Should_Match_Model_Tokenizer()
+│   └── Should_Cache_Estimates()
+│
+├── ChunkMetadataTests.cs
+│   ├── Should_Track_Source_File()
+│   ├── Should_Track_Line_Range()
+│   ├── Should_Track_Token_Count()
+│   ├── Should_Track_Chunk_Type()
+│   └── Should_Track_Hierarchy()
+│
+└── ChunkerFactoryTests.cs
+    ├── Should_Select_CSharp_Chunker()
+    ├── Should_Select_TypeScript_Chunker()
+    ├── Should_Select_JavaScript_Chunker()
+    ├── Should_Fallback_To_LineBasedlm()
+    ├── Should_Handle_Unknown_Extension()
+    └── Should_Load_Config()
 ```
 
 ### Integration Tests
@@ -331,7 +394,16 @@ Tests/Unit/Context/Chunking/
 ```
 Tests/Integration/Context/Chunking/
 ├── ChunkingIntegrationTests.cs
-│   └── Should_Chunk_Real_Files()
+│   ├── Should_Chunk_Real_CSharp_File()
+│   ├── Should_Chunk_Real_TypeScript_File()
+│   ├── Should_Chunk_Real_JavaScript_File()
+│   ├── Should_Chunk_Large_File()
+│   ├── Should_Handle_Parse_Errors_Gracefully()
+│   └── Should_Chunk_Mixed_Content()
+│
+└── TokenEstimatorIntegrationTests.cs
+    ├── Should_Match_GPT4_Tokenizer()
+    └── Should_Match_Claude_Tokenizer()
 ```
 
 ### E2E Tests
@@ -339,7 +411,9 @@ Tests/Integration/Context/Chunking/
 ```
 Tests/E2E/Context/Chunking/
 ├── ChunkingE2ETests.cs
-│   └── Should_Chunk_For_Context()
+│   ├── Should_Chunk_For_Context_Packer()
+│   ├── Should_Work_With_Real_Codebase()
+│   └── Should_Respect_Config_Settings()
 ```
 
 ### Performance Benchmarks

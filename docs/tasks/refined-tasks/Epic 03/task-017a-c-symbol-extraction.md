@@ -370,22 +370,78 @@ acode symbols extract src/ --stats
 Tests/Unit/Symbols/CSharp/
 ├── CSharpExtractorTests.cs
 │   ├── Should_Extract_Class()
+│   ├── Should_Extract_Abstract_Class()
+│   ├── Should_Extract_Static_Class()
+│   ├── Should_Extract_Sealed_Class()
+│   ├── Should_Extract_Partial_Class()
+│   ├── Should_Extract_Generic_Class()
 │   ├── Should_Extract_Interface()
+│   ├── Should_Extract_Struct()
+│   ├── Should_Extract_Record()
+│   ├── Should_Extract_Enum()
+│   ├── Should_Extract_Delegate()
 │   ├── Should_Extract_Method()
+│   ├── Should_Extract_Async_Method()
+│   ├── Should_Extract_Static_Method()
+│   ├── Should_Extract_Extension_Method()
 │   ├── Should_Extract_Property()
-│   ├── Should_Extract_Visibility()
-│   ├── Should_Extract_Signature()
-│   └── Should_Handle_Malformed()
+│   ├── Should_Extract_Auto_Property()
+│   ├── Should_Extract_Expression_Property()
+│   ├── Should_Extract_Field()
+│   ├── Should_Extract_Const_Field()
+│   ├── Should_Extract_Constructor()
+│   ├── Should_Extract_Static_Constructor()
+│   ├── Should_Extract_Event()
+│   ├── Should_Extract_Indexer()
+│   ├── Should_Extract_Operator()
+│   ├── Should_Extract_Visibility_Public()
+│   ├── Should_Extract_Visibility_Private()
+│   ├── Should_Extract_Visibility_Protected()
+│   ├── Should_Extract_Visibility_Internal()
+│   ├── Should_Extract_Method_Signature()
+│   ├── Should_Extract_Generic_Constraints()
+│   ├── Should_Extract_Inheritance()
+│   ├── Should_Extract_Interface_Implementation()
+│   ├── Should_Extract_Attributes()
+│   ├── Should_Extract_Location()
+│   ├── Should_Handle_Malformed_File()
+│   └── Should_Handle_Partial_Results()
 │
 ├── RoslynParserTests.cs
-│   ├── Should_Parse_File()
+│   ├── Should_Parse_Single_File()
+│   ├── Should_Parse_Multiple_Files()
 │   ├── Should_Get_Syntax_Tree()
-│   └── Should_Handle_Errors()
+│   ├── Should_Handle_Syntax_Errors()
+│   ├── Should_Handle_Different_LangVersions()
+│   ├── Should_Handle_Preprocessor_Directives()
+│   ├── Should_Handle_Nullable_Context()
+│   └── Should_Cache_Compilation()
 │
-└── XmlDocExtractorTests.cs
-    ├── Should_Extract_Summary()
-    ├── Should_Extract_Params()
-    └── Should_Strip_Tags()
+├── XmlDocExtractorTests.cs
+│   ├── Should_Extract_Summary()
+│   ├── Should_Extract_Params()
+│   ├── Should_Extract_Returns()
+│   ├── Should_Extract_Remarks()
+│   ├── Should_Extract_Exception()
+│   ├── Should_Extract_Example()
+│   ├── Should_Extract_See_Refs()
+│   ├── Should_Handle_Missing_Docs()
+│   ├── Should_Handle_Malformed_Xml()
+│   └── Should_Strip_Tags()
+│
+├── SignatureFormatterTests.cs
+│   ├── Should_Format_Method_Signature()
+│   ├── Should_Format_Generic_Method()
+│   ├── Should_Format_Overloaded_Method()
+│   ├── Should_Format_Property_Signature()
+│   └── Should_Format_Indexer_Signature()
+│
+└── SymbolVisitorTests.cs
+    ├── Should_Visit_All_Classes()
+    ├── Should_Visit_Nested_Classes()
+    ├── Should_Visit_All_Methods()
+    ├── Should_Maintain_Containment()
+    └── Should_Handle_Deep_Nesting()
 ```
 
 ### Integration Tests
@@ -394,7 +450,15 @@ Tests/Unit/Symbols/CSharp/
 Tests/Integration/Symbols/CSharp/
 ├── CSharpExtractorIntegrationTests.cs
 │   ├── Should_Extract_Real_File()
-│   └── Should_Extract_Project()
+│   ├── Should_Extract_Real_Project()
+│   ├── Should_Handle_Large_File()
+│   ├── Should_Handle_Many_Files()
+│   ├── Should_Handle_Generated_Code()
+│   └── Should_Extract_NuGet_Types()
+│
+└── CSharpSemanticIntegrationTests.cs
+    ├── Should_Resolve_Type_References()
+    └── Should_Handle_Missing_References()
 ```
 
 ### E2E Tests
@@ -402,7 +466,9 @@ Tests/Integration/Symbols/CSharp/
 ```
 Tests/E2E/Symbols/CSharp/
 ├── CSharpSymbolE2ETests.cs
-│   └── Should_Index_Csharp_Project()
+│   ├── Should_Index_CSharp_Project()
+│   ├── Should_Search_CSharp_Symbols()
+│   └── Should_Extract_Via_CLI()
 ```
 
 ### Performance Benchmarks

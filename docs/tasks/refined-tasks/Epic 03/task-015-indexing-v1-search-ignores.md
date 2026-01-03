@@ -358,32 +358,121 @@ Rebuilding index...
 ```
 Tests/Unit/Index/
 ├── IndexBuilderTests.cs
-│   ├── Should_Index_Text_Files()
-│   ├── Should_Skip_Ignored()
-│   └── Should_Persist()
+│   ├── Should_Index_Text_File()
+│   ├── Should_Index_Multiple_Files()
+│   ├── Should_Skip_Binary_Files()
+│   ├── Should_Skip_Ignored_Files()
+│   ├── Should_Track_File_Metadata()
+│   ├── Should_Store_Line_Numbers()
+│   ├── Should_Tokenize_Content()
+│   ├── Should_Handle_Empty_File()
+│   ├── Should_Handle_Large_File()
+│   ├── Should_Handle_Unicode_Content()
+│   ├── Should_Persist_Index_To_Disk()
+│   ├── Should_Load_Index_From_Disk()
+│   └── Should_Handle_Corrupted_Index_File()
 │
-├── SearchTests.cs
-│   ├── Should_Find_Word()
-│   ├── Should_Find_Phrase()
-│   └── Should_Rank_Results()
+├── SearchEngineTests.cs
+│   ├── Should_Find_Single_Word()
+│   ├── Should_Find_Multiple_Words_AND()
+│   ├── Should_Find_Multiple_Words_OR()
+│   ├── Should_Find_Exact_Phrase()
+│   ├── Should_Find_With_Wildcard_Suffix()
+│   ├── Should_Find_With_Wildcard_Prefix()
+│   ├── Should_Exclude_With_Minus()
+│   ├── Should_Handle_Case_Insensitive()
+│   ├── Should_Handle_Case_Sensitive()
+│   ├── Should_Return_Line_Numbers()
+│   ├── Should_Return_Snippets()
+│   ├── Should_Return_Relevance_Score()
+│   ├── Should_Rank_By_Relevance()
+│   ├── Should_Support_Pagination()
+│   ├── Should_Handle_No_Results()
+│   ├── Should_Handle_Empty_Query()
+│   └── Should_Handle_Invalid_Query()
+│
+├── SearchQueryParserTests.cs
+│   ├── Should_Parse_Single_Word()
+│   ├── Should_Parse_Multiple_Words()
+│   ├── Should_Parse_Quoted_Phrase()
+│   ├── Should_Parse_Wildcard()
+│   ├── Should_Parse_AND_Operator()
+│   ├── Should_Parse_OR_Operator()
+│   ├── Should_Parse_Exclusion()
+│   ├── Should_Parse_Combined_Operators()
+│   ├── Should_Handle_Special_Characters()
+│   └── Should_Handle_Unbalanced_Quotes()
 │
 ├── IgnoreRulesTests.cs
-│   ├── Should_Parse_Gitignore()
-│   ├── Should_Match_Patterns()
-│   └── Should_Handle_Negation()
+│   ├── Should_Parse_Gitignore_File()
+│   ├── Should_Parse_Empty_Gitignore()
+│   ├── Should_Parse_Comment_Lines()
+│   ├── Should_Match_Exact_Filename()
+│   ├── Should_Match_Glob_Pattern()
+│   ├── Should_Match_Directory_Pattern()
+│   ├── Should_Match_Double_Star()
+│   ├── Should_Handle_Negation_Pattern()
+│   ├── Should_Handle_Escaped_Characters()
+│   ├── Should_Apply_Order_Priority()
+│   ├── Should_Merge_Multiple_Ignore_Files()
+│   ├── Should_Apply_Custom_Ignores()
+│   └── Should_Handle_Trailing_Spaces()
 │
-└── IncrementalUpdateTests.cs
-    ├── Should_Detect_Changes()
-    └── Should_Update_Efficiently()
+├── IncrementalUpdaterTests.cs
+│   ├── Should_Detect_Modified_File()
+│   ├── Should_Detect_New_File()
+│   ├── Should_Detect_Deleted_File()
+│   ├── Should_Detect_Renamed_File()
+│   ├── Should_Update_Only_Changed()
+│   ├── Should_Remove_Deleted_From_Index()
+│   ├── Should_Add_New_To_Index()
+│   ├── Should_Handle_Concurrent_Changes()
+│   └── Should_Track_Last_Update_Timestamp()
+│
+├── FilterTests.cs
+│   ├── Should_Filter_By_Extension()
+│   ├── Should_Filter_By_Directory()
+│   ├── Should_Filter_By_Size()
+│   ├── Should_Filter_By_Date()
+│   ├── Should_Combine_Filters()
+│   └── Should_Handle_No_Filters()
+│
+└── TokenizerTests.cs
+    ├── Should_Tokenize_Code_Identifiers()
+    ├── Should_Tokenize_CamelCase()
+    ├── Should_Tokenize_Snake_Case()
+    ├── Should_Handle_Numbers()
+    ├── Should_Handle_Punctuation()
+    └── Should_Normalize_Tokens()
 ```
 
 ### Integration Tests
 
 ```
 Tests/Integration/Index/
-├── IndexIntegrationTests.cs
-│   ├── Should_Build_Large_Index()
-│   └── Should_Search_Real_Repo()
+├── IndexBuildIntegrationTests.cs
+│   ├── Should_Build_Index_For_Small_Repo()
+│   ├── Should_Build_Index_For_Large_Repo()
+│   ├── Should_Respect_Gitignore()
+│   ├── Should_Handle_Nested_Gitignores()
+│   └── Should_Handle_Symlinks()
+│
+├── SearchIntegrationTests.cs
+│   ├── Should_Search_Real_Codebase()
+│   ├── Should_Return_Correct_Line_Numbers()
+│   ├── Should_Handle_Concurrent_Searches()
+│   └── Should_Search_During_Update()
+│
+├── IncrementalIntegrationTests.cs
+│   ├── Should_Update_After_File_Edit()
+│   ├── Should_Update_After_File_Create()
+│   ├── Should_Update_After_File_Delete()
+│   └── Should_Handle_Many_Simultaneous_Changes()
+│
+└── PersistenceIntegrationTests.cs
+    ├── Should_Survive_Restart()
+    ├── Should_Recover_From_Corruption()
+    └── Should_Handle_Disk_Full()
 ```
 
 ### E2E Tests
@@ -391,7 +480,13 @@ Tests/Integration/Index/
 ```
 Tests/E2E/Index/
 ├── IndexE2ETests.cs
-│   └── Should_Work_With_Agent()
+│   ├── Should_Build_Index_Via_CLI()
+│   ├── Should_Search_Via_CLI()
+│   ├── Should_Update_Index_Via_CLI()
+│   ├── Should_Rebuild_Index_Via_CLI()
+│   ├── Should_Show_Index_Status_Via_CLI()
+│   ├── Should_Work_With_Agent_Search_Tool()
+│   └── Should_Provide_Context_To_Agent()
 ```
 
 ### Performance Benchmarks
