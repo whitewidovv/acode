@@ -231,3 +231,529 @@ This task covers the bundle format definition and CLI commands for export/import
 - NFR-030: Import MUST NOT execute any content from bundle
 
 ---
+
+## User Manual Documentation
+
+### Quick Start
+
+```bash
+# Export last 10 runs
+acode runs export --last 10
+
+# Export specific runs
+acode runs export --run abc123 --run def456
+
+# Import a bundle
+acode runs import team-debug-2026-01-03.acode-bundle
+```
+
+### Bundle Format Structure
+
+The `.acode-bundle` file is a ZIP archive with this structure:
+
+```
+bundle.acode-bundle/
+├── manifest.json           # Bundle metadata and file hashes
+├── provenance.json         # Git repo and code version info
+├── outbox-summary.json     # Sync status at export time
+├── runs/
+│   ├── run-001.json        # Run metadata (redacted)
+│   ├── run-002.json
+│   └── ...
+└── artifacts/
+    ├── run-001/
+    │   ├── stdout.txt
+    │   ├── stderr.txt
+    │   └── test-results.json
+    └── run-002/
+        └── ...
+```
+
+### Export Command Reference
+
+```bash
+acode runs export [options]
+
+Options:
+  --output, -o PATH     Output file path
+  --run ID              Export specific run (repeatable)
+  --since DATE          Export runs after this date
+  --until DATE          Export runs before this date
+  --last N              Export N most recent runs
+  --all                 Export all runs (requires confirmation)
+  --no-artifacts        Exclude artifact files
+  --no-redact           Skip redaction (WARNING: exposes secrets)
+  --sign                Sign bundle with configured key
+  --format FORMAT       Output format: bundle (default)
+```
+
+**Examples:**
+
+```bash
+# Export runs from the last week
+acode runs export --since 7d --output weekly-runs.acode-bundle
+
+# Export without artifacts (metadata only)
+acode runs export --last 50 --no-artifacts
+
+# Export and sign for verification
+acode runs export --last 10 --sign
+```
+
+### Import Command Reference
+
+```bash
+acode runs import <file> [options]
+
+Options:
+  --dry-run             Preview import without changes
+  --merge               Add to existing data (default)
+  --replace             Replace existing runs with same ID
+  --skip-existing       Skip runs that already exist
+  --force               Skip confirmation prompts
+  --verify              Verify signature (if signed)
+  --no-verify           Skip signature verification
+```
+
+**Examples:**
+
+```bash
+# Preview what would be imported
+acode runs import bundle.acode-bundle --dry-run
+
+# Import and replace conflicts
+acode runs import bundle.acode-bundle --replace
+
+# Import with signature verification
+acode runs import bundle.acode-bundle --verify
+```
+
+### Configuration
+
+Configuration in `.agent/config.yml`:
+
+```yaml
+export:
+  defaultRedaction: true
+  redactPatterns:
+    - PASSWORD
+    - SECRET
+    - KEY
+    - TOKEN
+    - API_KEY
+  maxBundleSize: 10GB
+  signatureKeyPath: ~/.acode/signing-key.pem
+
+import:
+  requireSignature: false
+  maxDecompressedSize: 10GB
+  defaultMergeStrategy: merge  # merge, replace, skip
+```
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Export/import failed |
+| 2 | Invalid arguments |
+| 3 | Validation failed (hash mismatch, bad signature) |
+| 4 | Version incompatibility |
+
+### Best Practices
+
+1. **Always use redaction** - Never export with `--no-redact` unless absolutely necessary
+2. **Sign bundles** - Use `--sign` for bundles shared externally
+3. **Verify before import** - Use `--dry-run` to preview imports
+4. **Keep bundles small** - Export specific runs rather than `--all`
+5. **Store bundles securely** - Bundles may contain sensitive metadata
+
+### Troubleshooting
+
+**Q: "Incompatible bundle version"**
+
+The bundle was created with a newer version of acode. Update your acode installation:
+```bash
+acode update
+```
+
+**Q: "Hash mismatch detected"**
+
+The bundle is corrupted or was modified. Request a fresh export from the source.
+
+**Q: "Signature verification failed"**
+
+The signature is invalid. Ensure you have the correct public key configured.
+
+**Q: Export is very slow**
+
+Large artifacts take time. Use `--no-artifacts` for metadata-only export.
+
+---
+
+## Acceptance Criteria / Definition of Done
+
+### Functionality
+
+- [ ] AC-001: `acode runs export` creates valid ZIP archive
+- [ ] AC-002: Bundle has `.acode-bundle` extension
+- [ ] AC-003: Bundle contains `manifest.json` at root
+- [ ] AC-004: Manifest includes format version
+- [ ] AC-005: Manifest includes creation timestamp
+- [ ] AC-006: Manifest includes content hashes for all files
+- [ ] AC-007: Bundle contains `runs/` directory with run JSON files
+- [ ] AC-008: Bundle contains `artifacts/` directory structure
+- [ ] AC-009: Bundle contains `provenance.json`
+- [ ] AC-010: Provenance includes commit SHA
+- [ ] AC-011: Bundle contains `outbox-summary.json`
+- [ ] AC-012: `--run ID` exports specific run
+- [ ] AC-013: `--since DATE` filters by date
+- [ ] AC-014: `--last N` exports N recent runs
+- [ ] AC-015: `--no-artifacts` excludes artifact files
+- [ ] AC-016: `acode runs import` loads bundle data
+- [ ] AC-017: Import validates format version
+- [ ] AC-018: Import verifies content hashes
+- [ ] AC-019: Import rejects corrupted bundles
+- [ ] AC-020: `--dry-run` previews without changes
+- [ ] AC-021: `--merge` adds to existing data
+- [ ] AC-022: `--replace` overwrites existing runs
+- [ ] AC-023: `--skip-existing` skips conflicts
+
+### Safety/Policy
+
+- [ ] AC-024: Redaction masks PASSWORD patterns by default
+- [ ] AC-025: Redaction masks SECRET patterns by default
+- [ ] AC-026: Redaction masks KEY patterns by default
+- [ ] AC-027: Redaction masks TOKEN patterns by default
+- [ ] AC-028: `--no-redact` requires explicit flag
+- [ ] AC-029: `--no-redact` displays warning
+- [ ] AC-030: Path traversal in ZIP is blocked
+- [ ] AC-031: Symlinks in bundle are not followed
+- [ ] AC-032: ZIP bomb detection prevents attacks
+- [ ] AC-033: Signature verification works with `--verify`
+- [ ] AC-034: Invalid signature blocks import
+
+### CLI/UX
+
+- [ ] AC-035: Commands provide `--help` documentation
+- [ ] AC-036: Invalid options produce clear error messages
+- [ ] AC-037: Progress is shown for large operations
+- [ ] AC-038: Exit codes follow documented conventions
+- [ ] AC-039: Confirmation prompt for `--all` export
+- [ ] AC-040: Confirmation prompt for collision resolution
+
+### Logging/Audit
+
+- [ ] AC-041: Export logs bundle creation details
+- [ ] AC-042: Import logs run count imported
+- [ ] AC-043: Validation failures are logged with details
+- [ ] AC-044: Redaction patterns applied are logged
+
+### Performance
+
+- [ ] AC-045: Export 100 runs completes in <30 seconds
+- [ ] AC-046: Import 100 runs completes in <30 seconds
+- [ ] AC-047: Memory stays under 100MB for normal bundles
+- [ ] AC-048: 1GB artifact export completes in <2 minutes
+
+### Tests
+
+- [ ] AC-049: Unit tests achieve 90% coverage
+- [ ] AC-050: Integration tests cover round-trip export/import
+- [ ] AC-051: E2E tests verify CLI behavior
+
+---
+
+## Testing Requirements
+
+### Unit Tests
+
+- [ ] UT-001: Test manifest JSON generation
+- [ ] UT-002: Test content hash computation
+- [ ] UT-003: Test redaction pattern matching
+- [ ] UT-004: Test redaction replacement
+- [ ] UT-005: Test date filter parsing
+- [ ] UT-006: Test run ID selection
+- [ ] UT-007: Test provenance field extraction
+- [ ] UT-008: Test outbox summary generation
+- [ ] UT-009: Test format version comparison
+- [ ] UT-010: Test hash verification logic
+- [ ] UT-011: Test path traversal detection
+- [ ] UT-012: Test symlink detection
+- [ ] UT-013: Test ZIP bomb detection
+- [ ] UT-014: Test signature generation
+- [ ] UT-015: Test signature verification
+
+### Integration Tests
+
+- [ ] IT-001: Test export creates valid ZIP
+- [ ] IT-002: Test import reads exported bundle
+- [ ] IT-003: Test round-trip preserves data
+- [ ] IT-004: Test redaction in exported data
+- [ ] IT-005: Test artifact inclusion
+- [ ] IT-006: Test artifact exclusion with `--no-artifacts`
+- [ ] IT-007: Test merge strategy
+- [ ] IT-008: Test replace strategy
+- [ ] IT-009: Test skip-existing strategy
+- [ ] IT-010: Test dry-run mode
+
+### End-to-End Tests
+
+- [ ] E2E-001: Export runs, import on fresh DB, verify data
+- [ ] E2E-002: Export with redaction, verify secrets masked
+- [ ] E2E-003: Export signed, import with verify
+- [ ] E2E-004: Import corrupted bundle, verify rejection
+- [ ] E2E-005: Import incompatible version, verify error
+- [ ] E2E-006: Export/import large bundle with artifacts
+- [ ] E2E-007: Test conflict resolution prompts
+- [ ] E2E-008: Test progress display for large exports
+
+### Performance/Benchmarks
+
+- [ ] PB-001: Export 100 runs in <30 seconds
+- [ ] PB-002: Import 100 runs in <30 seconds
+- [ ] PB-003: Export 1GB artifacts in <2 minutes
+- [ ] PB-004: Memory usage under 100MB for 500MB bundle
+- [ ] PB-005: Hash computation at >100MB/s
+
+### Regression
+
+- [ ] RG-001: Verify Task 021 RunRecord compatibility
+- [ ] RG-002: Verify Task 021.a artifact paths
+- [ ] RG-003: Verify Task 021.b redaction patterns
+- [ ] RG-004: Verify Task 039 session data inclusion
+- [ ] RG-005: Verify Task 038 outbox summary
+
+---
+
+## User Verification Steps
+
+1. **Verify export creates bundle:**
+   ```bash
+   acode runs export --last 5
+   ```
+   Verify: File with `.acode-bundle` extension created
+
+2. **Verify bundle is valid ZIP:**
+   ```bash
+   unzip -l acode-export-*.acode-bundle
+   ```
+   Verify: Lists manifest.json, runs/, artifacts/
+
+3. **Verify manifest contains hashes:**
+   ```bash
+   unzip -p acode-export-*.acode-bundle manifest.json | jq '.files'
+   ```
+   Verify: Each file has sha256 hash
+
+4. **Verify redaction applied:**
+   ```bash
+   unzip -p acode-export-*.acode-bundle runs/*.json | grep -i password
+   ```
+   Verify: Values show `[REDACTED]`
+
+5. **Verify import dry-run:**
+   ```bash
+   acode runs import bundle.acode-bundle --dry-run
+   ```
+   Verify: Shows what would be imported without changes
+
+6. **Verify import adds runs:**
+   ```bash
+   acode runs import bundle.acode-bundle
+   acode runs list
+   ```
+   Verify: Imported runs appear in list
+
+7. **Verify hash validation:**
+   ```bash
+   # Corrupt the bundle
+   acode runs import corrupted.acode-bundle
+   ```
+   Verify: Error "Hash mismatch detected"
+
+8. **Verify version check:**
+   ```bash
+   # Bundle with future version
+   acode runs import future-version.acode-bundle
+   ```
+   Verify: Error "Incompatible bundle version"
+
+9. **Verify no-artifacts option:**
+   ```bash
+   acode runs export --last 5 --no-artifacts
+   unzip -l *.acode-bundle
+   ```
+   Verify: No files in artifacts/ directory
+
+10. **Verify provenance data:**
+    ```bash
+    unzip -p bundle.acode-bundle provenance.json | jq
+    ```
+    Verify: Contains commitSha, worktreeId, timestamp
+
+11. **Verify outbox summary:**
+    ```bash
+    unzip -p bundle.acode-bundle outbox-summary.json | jq
+    ```
+    Verify: Contains pending, acknowledged, failed counts
+
+12. **Verify signed export:**
+    ```bash
+    acode runs export --last 5 --sign
+    ```
+    Verify: Bundle includes signature file
+
+---
+
+## Implementation Prompt
+
+### File Structure
+
+```
+src/
+├── Acode.Domain/
+│   └── Export/
+│       ├── BundleManifest.cs
+│       ├── BundleVersion.cs
+│       ├── Provenance.cs
+│       └── OutboxSummary.cs
+├── Acode.Application/
+│   └── Export/
+│       ├── Commands/
+│       │   ├── ExportBundleCommand.cs
+│       │   └── ImportBundleCommand.cs
+│       └── Services/
+│           ├── IBundleExporter.cs
+│           ├── IBundleImporter.cs
+│           └── IRedactionService.cs
+├── Acode.Infrastructure/
+│   └── Export/
+│       ├── ZipBundleExporter.cs
+│       ├── ZipBundleImporter.cs
+│       ├── RedactionService.cs
+│       └── HashCalculator.cs
+└── Acode.Cli/
+    └── Commands/
+        └── Runs/
+            ├── RunsExportCommand.cs
+            └── RunsImportCommand.cs
+```
+
+### Core Interfaces
+
+```csharp
+public interface IBundleExporter
+{
+    Task<ExportResult> ExportAsync(ExportOptions options);
+}
+
+public interface IBundleImporter
+{
+    Task<ImportPreview> PreviewAsync(string bundlePath);
+    Task<ImportResult> ImportAsync(string bundlePath, ImportOptions options);
+}
+
+public interface IRedactionService
+{
+    string RedactValue(string key, string value);
+    Dictionary<string, string> RedactEnvironment(Dictionary<string, string> env);
+    bool IsRedactionPattern(string pattern);
+}
+
+public record ExportOptions(
+    IReadOnlyList<RunId>? RunIds,
+    DateTimeOffset? Since,
+    DateTimeOffset? Until,
+    int? LastN,
+    bool IncludeArtifacts,
+    bool ApplyRedaction,
+    bool Sign,
+    string OutputPath);
+
+public record ImportOptions(
+    MergeStrategy Strategy,
+    bool VerifySignature,
+    bool Force);
+
+public enum MergeStrategy { Merge, Replace, SkipExisting }
+
+public record BundleManifest(
+    string Version,
+    DateTimeOffset CreatedAt,
+    string ToolVersion,
+    int RunCount,
+    long TotalArtifactBytes,
+    IReadOnlyDictionary<string, string> FileHashes);
+
+public record Provenance(
+    string? RemoteUrl,
+    string? CommitSha,
+    string? WorktreeId,
+    DateTimeOffset Timestamp);
+
+public record OutboxSummary(
+    int PendingCount,
+    int AcknowledgedCount,
+    int FailedCount);
+```
+
+### Manifest Schema
+
+```json
+{
+  "version": "1.0.0",
+  "createdAt": "2026-01-03T12:00:00Z",
+  "toolVersion": "0.5.0",
+  "runCount": 10,
+  "totalArtifactBytes": 1048576,
+  "files": {
+    "runs/run-001.json": "sha256:abc123...",
+    "artifacts/run-001/stdout.txt": "sha256:def456..."
+  }
+}
+```
+
+### Error Codes
+
+| Code | Name | Description |
+|------|------|-------------|
+| EXPORT_001 | OutputPathExists | Output file already exists |
+| EXPORT_002 | NoRunsSelected | No runs match selection criteria |
+| EXPORT_003 | ArtifactMissing | Referenced artifact not found |
+| EXPORT_004 | SigningFailed | Unable to sign bundle |
+| IMPORT_001 | InvalidFormat | Bundle format unrecognized |
+| IMPORT_002 | VersionMismatch | Incompatible bundle version |
+| IMPORT_003 | HashMismatch | Content hash verification failed |
+| IMPORT_004 | SignatureInvalid | Signature verification failed |
+| IMPORT_005 | PathTraversal | Malicious path detected |
+
+### Validation Checklist Before Merge
+
+- [ ] Export creates valid ZIP archive
+- [ ] Manifest includes all required fields
+- [ ] Content hashes match file contents
+- [ ] Redaction patterns are applied
+- [ ] Path traversal is blocked on import
+- [ ] ZIP bomb detection works
+- [ ] Signature generation and verification work
+- [ ] Round-trip preserves all data
+- [ ] Performance benchmarks pass
+- [ ] Memory profiling completed
+
+### Rollout Plan
+
+1. Implement BundleManifest and domain models
+2. Implement RedactionService
+3. Implement ZipBundleExporter
+4. Implement ZipBundleImporter
+5. Add CLI commands
+6. Integration tests for round-trip
+7. E2E tests for CLI workflow
+8. Performance testing with large bundles
+9. Documentation updates
+10. Release as part of CLI bundle
+
+---
+
+**End of Task 021.c Specification**

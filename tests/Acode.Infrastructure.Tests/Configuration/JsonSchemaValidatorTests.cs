@@ -94,7 +94,7 @@ invalid: yaml: syntax:
         result.Errors[0].Severity.Should().Be(ValidationSeverity.Error);
     }
 
-    [Fact(Skip = "Schema validation failing on full config - needs schema/test alignment")]
+    [Fact]
     public async Task ValidateYaml_WithFullValidConfig_ShouldReturnSuccess()
     {
         // Arrange
@@ -233,7 +233,7 @@ project:
         result.ErrorsOnly.Should().AllSatisfy(e => e.Severity.Should().Be(ValidationSeverity.Error));
     }
 
-    [Fact(Skip = "Schema validation failing on command formats - needs schema/test alignment")]
+    [Fact]
     public async Task ValidateYaml_WithValidCommandFormats_ShouldAcceptAll()
     {
         // Arrange

@@ -15,31 +15,31 @@
       "examples": ["1.0.0", "1.1.0", "2.0.0"]
     },
     "project": {
-      "$ref": "#/$defs/project"
+      "$ref": "#/definitions/project"
     },
     "mode": {
-      "$ref": "#/$defs/mode"
+      "$ref": "#/definitions/mode"
     },
     "model": {
-      "$ref": "#/$defs/model"
+      "$ref": "#/definitions/model"
     },
     "commands": {
-      "$ref": "#/$defs/commands"
+      "$ref": "#/definitions/commands"
     },
     "paths": {
-      "$ref": "#/$defs/paths"
+      "$ref": "#/definitions/paths"
     },
     "ignore": {
-      "$ref": "#/$defs/ignore"
+      "$ref": "#/definitions/ignore"
     },
     "network": {
-      "$ref": "#/$defs/network"
+      "$ref": "#/definitions/network"
     },
     "storage": {
-      "$ref": "#/$defs/storage"
+      "$ref": "#/definitions/storage"
     }
   },
-  "$defs": {
+  "definitions": {
     "project": {
       "type": "object",
       "description": "Project metadata and identification",
@@ -117,7 +117,7 @@
           "examples": ["http://localhost:11434", "http://127.0.0.1:1234"]
         },
         "parameters": {
-          "$ref": "#/$defs/model_parameters"
+          "$ref": "#/definitions/model_parameters"
         },
         "timeout_seconds": {
           "type": "integer",
@@ -164,27 +164,27 @@
       "description": "Command groups for project lifecycle operations",
       "properties": {
         "setup": {
-          "$ref": "#/$defs/command",
+          "$ref": "#/definitions/command",
           "description": "Initialize development environment (install dependencies)"
         },
         "build": {
-          "$ref": "#/$defs/command",
+          "$ref": "#/definitions/command",
           "description": "Compile or bundle the project"
         },
         "test": {
-          "$ref": "#/$defs/command",
+          "$ref": "#/definitions/command",
           "description": "Run test suite"
         },
         "lint": {
-          "$ref": "#/$defs/command",
+          "$ref": "#/definitions/command",
           "description": "Check code quality and style (read-only)"
         },
         "format": {
-          "$ref": "#/$defs/command",
+          "$ref": "#/definitions/command",
           "description": "Auto-format source code (modifies files)"
         },
         "start": {
-          "$ref": "#/$defs/command",
+          "$ref": "#/definitions/command",
           "description": "Run the application"
         }
       },
@@ -205,14 +205,14 @@
                 "type": "string"
               },
               {
-                "$ref": "#/$defs/command_object"
+                "$ref": "#/definitions/command_object"
               }
             ]
           },
           "description": "Array of commands executed in sequence"
         },
         {
-          "$ref": "#/$defs/command_object"
+          "$ref": "#/definitions/command_object"
         }
       ]
     },

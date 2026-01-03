@@ -1,4 +1,5 @@
 using Acode.Application.Configuration;
+using Newtonsoft.Json;
 using NJsonSchema;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -11,7 +12,6 @@ namespace Acode.Infrastructure.Configuration;
 public sealed class JsonSchemaValidator
 {
     private readonly JsonSchema _schema;
-    private readonly ISerializer _yamlToJsonSerializer;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="JsonSchemaValidator"/> class.
@@ -20,12 +20,6 @@ public sealed class JsonSchemaValidator
     private JsonSchemaValidator(JsonSchema schema)
     {
         _schema = schema;
-
-        // Serializer to convert YAML to JSON for validation
-        _yamlToJsonSerializer = new SerializerBuilder()
-            .WithNamingConvention(UnderscoredNamingConvention.Instance)
-            .JsonCompatible()
-            .Build();
     }
 
     /// <summary>
@@ -43,8 +37,8 @@ public sealed class JsonSchemaValidator
             throw new FileNotFoundException($"Schema file not found: {schemaPath}", schemaPath);
         }
 
-        var schemaJson = await File.ReadAllTextAsync(schemaPath, cancellationToken).ConfigureAwait(false);
-        var schema = await JsonSchema.FromJsonAsync(schemaJson, cancellationToken).ConfigureAwait(false);
+        // Load schema from file - this handles $ref resolution better than FromJsonAsync
+        var schema = await JsonSchema.FromFileAsync(schemaPath, cancellationToken).ConfigureAwait(false);
 
         return new JsonSchemaValidator(schema);
     }
@@ -80,9 +74,10 @@ public sealed class JsonSchemaValidator
     {
         try
         {
-            // Convert YAML to JSON-compatible object
+            // Convert YAML to JSON-compatible object with type inference
             var deserializer = new DeserializerBuilder()
                 .WithNamingConvention(UnderscoredNamingConvention.Instance)
+                .WithAttemptingUnquotedStringTypeDeserialization()
                 .Build();
 
             object? yamlObject;
@@ -91,8 +86,8 @@ public sealed class JsonSchemaValidator
                 yamlObject = deserializer.Deserialize(reader);
             }
 
-            // Serialize to JSON
-            var json = _yamlToJsonSerializer.Serialize(yamlObject);
+            // Serialize to JSON using Newtonsoft.Json (preserves types better)
+            var json = JsonConvert.SerializeObject(yamlObject, Formatting.None);
 
             // Validate against schema
             var schemaErrors = _schema.Validate(json);
