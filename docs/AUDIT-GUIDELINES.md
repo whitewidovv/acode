@@ -161,6 +161,79 @@ This document defines **mandatory** audit procedures to verify task completion. 
   - XML doc `<see cref="Foo"/>` tags resolve
   - No undefined types in comments
 
+### 9. Deferral Criteria (STRICT)
+
+**Background:** In Task 002, items were deferred without valid justification, leading to incomplete work. This section defines when deferral is acceptable.
+
+**Acceptable Reasons for Deferral:**
+
+- [ ] **Dependency on future task**
+  - ✅ VALID: "CLI command implementation deferred to Task 002.c (explicitly depends on Task 002.c)"
+  - ❌ INVALID: "CLI commands deferred because we haven't implemented them yet" (if task spec says to implement)
+- [ ] **Circular dependency blocker**
+  - ✅ VALID: "Cannot implement Task X completely because it requires Task Y which requires Task X"
+  - Must document the cycle and propose resolution
+- [ ] **External blocker**
+  - ✅ VALID: "E2E tests failing due to WSL path issue (documented bug, unit tests pass)"
+  - ❌ INVALID: "Tests deferred because I didn't have time"
+- [ ] **Explicitly marked as future work in task spec**
+  - ✅ VALID: Task spec says "Phase 2 implementation"
+  - ❌ INVALID: Assuming something is "future work" without spec saying so
+
+**NEVER Acceptable to Defer:**
+
+- ❌ **Items explicitly in task Functional Requirements (FR-XXX-YYY)**
+  - If FR says implement, you must implement
+  - If you disagree with FR, raise issue BEFORE claiming task complete
+- ❌ **Items explicitly in Acceptance Criteria**
+  - AC exists to define "done"
+  - Cannot be "done" without meeting all AC
+- ❌ **Tests for implemented code**
+  - TDD is mandatory - no exceptions
+  - If code exists, tests must exist
+- ❌ **"Nice to have" features that are actually in spec**
+  - Enhanced error messages (FR-002b-40, FR-002b-41) are NOT nice-to-have if they're in FR list
+  - UX improvements specified in task are NOT optional
+- ❌ **Documentation specified in task**
+  - If task says "User Manual (150-300 lines)", that's required
+  - README updates for user-visible features are required
+
+**Deferral Documentation Requirements:**
+
+If deferring ANY item:
+1. Create `docs/TASK-XXX-DEFERRED.md` file
+2. List EVERY deferred item with:
+   - FR number or AC number
+   - Reason for deferral (must match acceptable reasons above)
+   - Blocking issue (link to GitHub issue if external blocker)
+   - Proposed completion timeline
+3. Update task spec to mark deferred items
+4. Audit MUST explicitly approve each deferral
+
+**Example Valid Deferral:**
+
+```markdown
+## Deferred Items for Task 002
+
+### FR-002b-90: Performance benchmarks
+
+- **Reason**: Requires benchmark infrastructure from Task 011
+- **Blocker**: Task 011 not yet started
+- **Proposed**: Complete in Task 011 as part of benchmark suite
+- **Audit Approval**: ✅ Valid dependency, documented
+```
+
+**Example Invalid Deferral:**
+
+```markdown
+## Deferred Items for Task 002
+
+### FR-002b-40: Enhanced error messages
+
+- **Reason**: Not worth doing right now
+- **Audit Result**: ❌ REJECTED - FR-002b-40 is in spec, no valid blocker
+```
+
 ---
 
 ## Audit Evidence Requirements

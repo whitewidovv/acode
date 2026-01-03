@@ -58,9 +58,10 @@ dotnet run --project src/Acode.Cli
 
 | Document | Description |
 |----------|-------------|
-| [REPO_STRUCTURE](docs/REPO_STRUCTURE.md) | Project folder layout and architecture |
-| [CONFIG](docs/CONFIG.md) | Configuration reference and examples |
+| [USER-MANUAL-CONFIG](docs/USER-MANUAL-CONFIG.md) | Configuration guide, CLI commands, troubleshooting |
 | [OPERATING_MODES](docs/OPERATING_MODES.md) | Operating mode definitions and constraints |
+| [REPO_STRUCTURE](docs/REPO_STRUCTURE.md) | Project folder layout and architecture |
+| [Task Specifications](docs/tasks/refined-tasks/) | Detailed task specifications by epic |
 | [CONTRIBUTING](CONTRIBUTING.md) | How to contribute to the project |
 
 ## Operating Modes
@@ -86,10 +87,16 @@ See [OPERATING_MODES.md](docs/OPERATING_MODES.md) for detailed information about
 This project is in active development. The foundational repository structure, documentation, and tooling are being established. Core functionality for model providers, CLI commands, and agent orchestration will be implemented in subsequent epics.
 
 **What Works Now**:
-- ✅ Clean Architecture solution structure
-- ✅ Build and test infrastructure
-- ✅ Documentation framework
-- ✅ Code formatting and analysis tools
+- ✅ Clean Architecture solution structure (.NET 8.0, Clean Architecture)
+- ✅ Build and test infrastructure (xUnit, FluentAssertions, StyleCop)
+- ✅ Repository contract system (`.agent/config.yml` with JSON Schema validation)
+- ✅ Configuration loader with YAML 1.2 support (YamlDotNet)
+- ✅ Semantic validation with 50+ validation rules
+- ✅ YAML security features (file size, nesting depth, key count limits)
+- ✅ Enhanced error messages with line numbers and suggestions
+- ✅ CLI commands: `acode config validate`, `acode config show`
+- ✅ 216+ passing tests (unit + integration)
+- ✅ Code formatting and analysis tools (StyleCop, analyzers)
 
 **Coming Soon** (see [docs/tasks/task-list.md](docs/tasks/task-list.md)):
 - Model runtime and inference (Epic 1)
