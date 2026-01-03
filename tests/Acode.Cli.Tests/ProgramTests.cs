@@ -18,7 +18,9 @@ public class ProgramTests
         Console.SetOut(consoleOutput);
 
         // Act
+#pragma warning disable CS0618 // Obsolete warning expected for placeholder Main method
         var exitCode = Program.Main(args);
+#pragma warning restore CS0618
 
         // Assert
         exitCode.Should().Be(0, "the program should return success exit code when no errors occur");
@@ -35,7 +37,9 @@ public class ProgramTests
         Console.SetOut(consoleOutput);
 
         // Act
+#pragma warning disable CS0618 // Obsolete warning expected for placeholder Main method
         Program.Main(args);
+#pragma warning restore CS0618
         var output = consoleOutput.ToString();
 
         // Assert
@@ -54,7 +58,9 @@ public class ProgramTests
         Console.SetOut(consoleOutput);
 
         // Act
+#pragma warning disable CS0618 // Obsolete warning expected for placeholder Main method
         var exitCode = Program.Main(args);
+#pragma warning restore CS0618
 
         // Assert
         exitCode.Should().Be(0, "the program should ignore arguments and return success (placeholder behavior)");
