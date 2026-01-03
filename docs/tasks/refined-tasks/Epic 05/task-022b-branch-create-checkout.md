@@ -309,31 +309,567 @@ acode git checkout feature/branch
 
 ## Implementation Prompt
 
-### Core Methods
+### File Structure
+
+```
+src/
+├── Acode.Domain/
+│   └── Git/
+│       └── GitBranch.cs
+├── Acode.Application/
+│   └── Git/
+│       ├── Options/
+│       │   ├── CreateBranchOptions.cs
+│       │   ├── CheckoutOptions.cs
+│       │   └── ListBranchesOptions.cs
+│       └── Exceptions/
+│           ├── BranchExistsException.cs
+│           ├── BranchNotFoundException.cs
+│           └── UncommittedChangesException.cs
+├── Acode.Infrastructure/
+│   └── Git/
+│       ├── BranchNameValidator.cs
+│       ├── BranchParser.cs
+│       └── GitService.Branch.cs
+└── Acode.Cli/
+    └── Commands/
+        └── Git/
+            ├── GitBranchCreateCommand.cs
+            ├── GitBranchListCommand.cs
+            ├── GitBranchDeleteCommand.cs
+            └── GitCheckoutCommand.cs
+```
+
+### Domain Models
 
 ```csharp
-public interface IGitService
+// GitBranch.cs - already defined in task-022
+// Extended with additional properties
+
+namespace Acode.Domain.Git;
+
+public sealed record GitBranch
 {
-    Task<GitBranch> CreateBranchAsync(string workingDir, string name, 
-        CreateBranchOptions? options = null, CancellationToken ct = default);
-    
-    Task CheckoutAsync(string workingDir, string branch, 
-        CheckoutOptions? options = null, CancellationToken ct = default);
-    
-    Task<IReadOnlyList<GitBranch>> ListBranchesAsync(string workingDir, 
-        ListBranchesOptions? options = null, CancellationToken ct = default);
-    
-    Task DeleteBranchAsync(string workingDir, string name, 
-        bool force = false, CancellationToken ct = default);
+    public required string Name { get; init; }
+    public required string FullName { get; init; }
+    public required string Sha { get; init; }
+    public required bool IsCurrent { get; init; }
+    public required bool IsRemote { get; init; }
+    public string? Upstream { get; init; }
+    public int? AheadBy { get; init; }
+    public int? BehindBy { get; init; }
+    public DateTimeOffset? LastCommitDate { get; init; }
+    public string? LastCommitSubject { get; init; }
 }
 ```
 
-### Validation Checklist
+### Options Classes
 
-- [ ] Branch name validation complete
-- [ ] Checkout state checking works
-- [ ] Error messages are user-friendly
-- [ ] All CLI commands implemented
+```csharp
+// CreateBranchOptions.cs
+namespace Acode.Application.Git.Options;
+
+public sealed record CreateBranchOptions
+{
+    public string? StartPoint { get; init; }
+    public bool Checkout { get; init; }
+    public bool Force { get; init; }
+}
+
+// CheckoutOptions.cs
+public sealed record CheckoutOptions
+{
+    public bool Force { get; init; }
+    public bool Quiet { get; init; }
+    public bool CreateBranch { get; init; }
+}
+
+// ListBranchesOptions.cs
+public sealed record ListBranchesOptions
+{
+    public bool IncludeRemote { get; init; }
+    public bool All { get; init; }
+    public string? Pattern { get; init; }
+    public BranchSortField SortBy { get; init; } = BranchSortField.Name;
+    public bool Descending { get; init; }
+}
+
+public enum BranchSortField
+{
+    Name,
+    CommitterDate,
+    AuthorDate
+}
+```
+
+### Branch Name Validator
+
+```csharp
+// BranchNameValidator.cs
+namespace Acode.Infrastructure.Git;
+
+public sealed class BranchNameValidator
+{
+    private static readonly char[] InvalidChars = { ' ', '~', '^', ':', '\\', '?', '*', '[' };
+    
+    public ValidationResult Validate(string name)
+    {
+        var errors = new List<string>();
+        
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            errors.Add("Branch name cannot be empty");
+            return new ValidationResult(false, errors);
+        }
+        
+        if (name.Length > 255)
+        {
+            errors.Add("Branch name exceeds 255 characters");
+        }
+        
+        if (name.StartsWith("-"))
+        {
+            errors.Add("Branch name cannot start with '-'");
+        }
+        
+        if (name.StartsWith("."))
+        {
+            errors.Add("Branch name cannot start with '.'");
+        }
+        
+        if (name.EndsWith("."))
+        {
+            errors.Add("Branch name cannot end with '.'");
+        }
+        
+        if (name.EndsWith(".lock"))
+        {
+            errors.Add("Branch name cannot end with '.lock'");
+        }
+        
+        if (name.Contains(".."))
+        {
+            errors.Add("Branch name cannot contain '..'");
+        }
+        
+        if (name.Contains("@{"))
+        {
+            errors.Add("Branch name cannot contain '@{'");
+        }
+        
+        foreach (var c in InvalidChars)
+        {
+            if (name.Contains(c))
+            {
+                errors.Add($"Branch name cannot contain '{c}'");
+                break;
+            }
+        }
+        
+        if (name.Any(c => char.IsControl(c)))
+        {
+            errors.Add("Branch name cannot contain control characters");
+        }
+        
+        return new ValidationResult(errors.Count == 0, errors);
+    }
+}
+
+public sealed record ValidationResult(bool IsValid, IReadOnlyList<string> Errors);
+```
+
+### Service Implementation
+
+```csharp
+// GitService.Branch.cs
+namespace Acode.Infrastructure.Git;
+
+public partial class GitService
+{
+    private readonly BranchNameValidator _branchValidator = new();
+    private readonly BranchParser _branchParser = new();
+    
+    public async Task<GitBranch> CreateBranchAsync(
+        string workingDir, 
+        string name, 
+        CreateBranchOptions? options = null, 
+        CancellationToken ct = default)
+    {
+        options ??= new CreateBranchOptions();
+        
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        // Validate branch name
+        var validation = _branchValidator.Validate(name);
+        if (!validation.IsValid)
+        {
+            throw new InvalidBranchNameException(name, validation.Errors);
+        }
+        
+        // Check if branch exists (unless force)
+        if (!options.Force)
+        {
+            var exists = await BranchExistsAsync(workingDir, name, ct);
+            if (exists)
+            {
+                throw new BranchExistsException(name);
+            }
+        }
+        
+        // Build command
+        var args = new List<string> { "branch" };
+        
+        if (options.Force)
+        {
+            args.Add("--force");
+        }
+        
+        args.Add(name);
+        
+        if (options.StartPoint is not null)
+        {
+            args.Add(options.StartPoint);
+        }
+        
+        await ExecuteGitAsync(workingDir, args, ct);
+        
+        _logger.LogInformation("Created branch {Branch} in {Dir}", name, workingDir);
+        
+        // Checkout if requested
+        if (options.Checkout)
+        {
+            await CheckoutAsync(workingDir, name, null, ct);
+        }
+        
+        // Return branch info
+        var sha = await GetBranchShaAsync(workingDir, name, ct);
+        return new GitBranch
+        {
+            Name = name,
+            FullName = $"refs/heads/{name}",
+            Sha = sha,
+            IsCurrent = options.Checkout,
+            IsRemote = false
+        };
+    }
+    
+    public async Task CheckoutAsync(
+        string workingDir, 
+        string branchOrCommit, 
+        CheckoutOptions? options = null,
+        CancellationToken ct = default)
+    {
+        options ??= new CheckoutOptions();
+        
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        // Check for uncommitted changes (unless force)
+        if (!options.Force)
+        {
+            var status = await GetStatusAsync(workingDir, ct);
+            if (!status.IsClean && status.StagedFiles.Count + status.UnstagedFiles.Count > 0)
+            {
+                throw new UncommittedChangesException(
+                    workingDir, 
+                    status.StagedFiles.Count + status.UnstagedFiles.Count);
+            }
+        }
+        
+        var args = new List<string> { "checkout" };
+        
+        if (options.Force)
+        {
+            args.Add("--force");
+        }
+        
+        if (options.Quiet)
+        {
+            args.Add("--quiet");
+        }
+        
+        if (options.CreateBranch)
+        {
+            args.Add("-b");
+        }
+        
+        args.Add(branchOrCommit);
+        
+        try
+        {
+            await ExecuteGitAsync(workingDir, args, ct);
+            _logger.LogInformation("Checked out {Branch} in {Dir}", branchOrCommit, workingDir);
+        }
+        catch (GitException ex) when (ex.StdErr?.Contains("did not match") == true)
+        {
+            throw new BranchNotFoundException(branchOrCommit, workingDir, ex.StdErr);
+        }
+    }
+    
+    public async Task<IReadOnlyList<GitBranch>> ListBranchesAsync(
+        string workingDir, 
+        ListBranchesOptions? options = null,
+        CancellationToken ct = default)
+    {
+        options ??= new ListBranchesOptions();
+        
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var args = new List<string> 
+        { 
+            "branch", 
+            "--format=%(HEAD)|%(refname:short)|%(objectname:short)|%(upstream:short)|%(upstream:track)|%(committerdate:iso-strict)|%(subject)"
+        };
+        
+        if (options.All)
+        {
+            args.Add("--all");
+        }
+        else if (options.IncludeRemote)
+        {
+            args.Add("--remotes");
+        }
+        
+        var sortField = options.SortBy switch
+        {
+            BranchSortField.CommitterDate => "committerdate",
+            BranchSortField.AuthorDate => "authordate",
+            _ => "refname"
+        };
+        
+        args.Add($"--sort={(options.Descending ? "-" : "")}{sortField}");
+        
+        if (options.Pattern is not null)
+        {
+            args.Add(options.Pattern);
+        }
+        
+        var result = await ExecuteGitAsync(workingDir, args, ct);
+        return _branchParser.ParseList(result.StdOut);
+    }
+    
+    public async Task DeleteBranchAsync(
+        string workingDir, 
+        string name, 
+        bool force = false,
+        CancellationToken ct = default)
+    {
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        // Check if it's the current branch
+        var current = await GetCurrentBranchAsync(workingDir, ct);
+        if (current == name)
+        {
+            throw new GitException(
+                $"Cannot delete current branch '{name}'. Switch to another branch first.",
+                1, null, workingDir, "GIT_022B_001");
+        }
+        
+        var args = new List<string> { "branch", force ? "-D" : "-d", name };
+        
+        try
+        {
+            await ExecuteGitAsync(workingDir, args, ct);
+            _logger.LogInformation("Deleted branch {Branch}", name);
+        }
+        catch (GitException ex) when (ex.StdErr?.Contains("not fully merged") == true)
+        {
+            throw new GitException(
+                $"Branch '{name}' is not fully merged. Use --force to delete anyway.",
+                ex.ExitCode, ex.StdErr, workingDir, "GIT_022B_002");
+        }
+    }
+    
+    private async Task<bool> BranchExistsAsync(string workingDir, string name, CancellationToken ct)
+    {
+        var result = await ExecuteGitAsync(
+            workingDir, 
+            new[] { "rev-parse", "--verify", $"refs/heads/{name}" },
+            ct,
+            throwOnError: false);
+        
+        return result.ExitCode == 0;
+    }
+    
+    private async Task<string> GetBranchShaAsync(string workingDir, string name, CancellationToken ct)
+    {
+        var result = await ExecuteGitAsync(
+            workingDir,
+            new[] { "rev-parse", $"refs/heads/{name}" },
+            ct);
+        
+        return result.StdOut.Trim();
+    }
+}
+
+// BranchParser.cs
+namespace Acode.Infrastructure.Git;
+
+public sealed class BranchParser
+{
+    public IReadOnlyList<GitBranch> ParseList(string output)
+    {
+        var branches = new List<GitBranch>();
+        
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.Split('|');
+            if (parts.Length < 7) continue;
+            
+            var isCurrent = parts[0] == "*";
+            var name = parts[1];
+            var sha = parts[2];
+            var upstream = string.IsNullOrEmpty(parts[3]) ? null : parts[3];
+            var trackInfo = parts[4];
+            var dateStr = parts[5];
+            var subject = parts[6];
+            
+            int? ahead = null, behind = null;
+            if (!string.IsNullOrEmpty(trackInfo))
+            {
+                var match = Regex.Match(trackInfo, @"ahead (\d+)");
+                if (match.Success) ahead = int.Parse(match.Groups[1].Value);
+                
+                match = Regex.Match(trackInfo, @"behind (\d+)");
+                if (match.Success) behind = int.Parse(match.Groups[1].Value);
+            }
+            
+            branches.Add(new GitBranch
+            {
+                Name = name.StartsWith("origin/") ? name[7..] : name,
+                FullName = name.Contains('/') ? $"refs/remotes/{name}" : $"refs/heads/{name}",
+                Sha = sha,
+                IsCurrent = isCurrent,
+                IsRemote = name.Contains('/'),
+                Upstream = upstream,
+                AheadBy = ahead,
+                BehindBy = behind,
+                LastCommitDate = string.IsNullOrEmpty(dateStr) ? null : DateTimeOffset.Parse(dateStr),
+                LastCommitSubject = subject
+            });
+        }
+        
+        return branches;
+    }
+}
+```
+
+### CLI Commands
+
+```csharp
+// GitBranchCreateCommand.cs
+namespace Acode.Cli.Commands.Git;
+
+[Command("git branch create", Description = "Create a new branch")]
+public class GitBranchCreateCommand
+{
+    [Argument(0, Description = "Branch name")]
+    public string Name { get; set; } = "";
+    
+    [Option("--start-point", Description = "Start branch from this ref")]
+    public string? StartPoint { get; set; }
+    
+    [Option("--checkout", Description = "Switch to new branch")]
+    public bool Checkout { get; set; }
+    
+    [Option("--force", Description = "Reset branch if exists")]
+    public bool Force { get; set; }
+    
+    public async Task<int> ExecuteAsync(
+        IGitService git,
+        IConsole console,
+        CancellationToken ct)
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        
+        var branch = await git.CreateBranchAsync(cwd, Name, new CreateBranchOptions
+        {
+            StartPoint = StartPoint,
+            Checkout = Checkout,
+            Force = Force
+        }, ct);
+        
+        console.WriteLine($"✓ Created branch '{branch.Name}' at {branch.Sha[..7]}");
+        
+        if (Checkout)
+        {
+            console.WriteLine($"  Switched to '{branch.Name}'");
+        }
+        
+        return 0;
+    }
+}
+
+// GitCheckoutCommand.cs
+[Command("git checkout", Description = "Switch branches")]
+public class GitCheckoutCommand
+{
+    [Argument(0, Description = "Branch name or commit")]
+    public string Target { get; set; } = "";
+    
+    [Option("--force", Description = "Discard local changes")]
+    public bool Force { get; set; }
+    
+    [Option("-b", Description = "Create and checkout new branch")]
+    public bool CreateBranch { get; set; }
+    
+    public async Task<int> ExecuteAsync(
+        IGitService git,
+        IConsole console,
+        CancellationToken ct)
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        
+        await git.CheckoutAsync(cwd, Target, new CheckoutOptions
+        {
+            Force = Force,
+            CreateBranch = CreateBranch
+        }, ct);
+        
+        console.WriteLine($"✓ Switched to '{Target}'");
+        return 0;
+    }
+}
+```
+
+### Error Codes
+
+| Code | Name | Description | Recovery |
+|------|------|-------------|----------|
+| GIT-022B-001 | DeleteCurrentBranch | Cannot delete current branch | Checkout different branch first |
+| GIT-022B-002 | BranchNotMerged | Branch not fully merged | Use --force or merge first |
+| GIT-022B-003 | InvalidBranchName | Branch name invalid | Use valid name |
+| GIT-022B-004 | BranchExists | Branch already exists | Use different name or --force |
+| GIT-022B-005 | BranchNotFound | Branch does not exist | Check branch name |
+| GIT-022B-006 | UncommittedChanges | Uncommitted changes block checkout | Commit/stash or use --force |
+
+### Implementation Checklist
+
+- [ ] Implement BranchNameValidator with all rules
+- [ ] Implement BranchParser for list output
+- [ ] Add CreateBranchAsync to GitService
+- [ ] Add CheckoutAsync with dirty tree check
+- [ ] Add ListBranchesAsync with formatting
+- [ ] Add DeleteBranchAsync with safety checks
+- [ ] Implement CLI branch create command
+- [ ] Implement CLI checkout command
+- [ ] Implement CLI branch list command
+- [ ] Implement CLI branch delete command
+- [ ] Add unit tests for validator
+- [ ] Add integration tests with real repos
+- [ ] Run performance benchmarks
+
+### Rollout Plan
+
+| Phase | Action | Validation |
+|-------|--------|------------|
+| 1 | Implement BranchNameValidator | Validation tests pass |
+| 2 | Implement BranchParser | Parser tests pass |
+| 3 | Add CreateBranchAsync | Create tests pass |
+| 4 | Add CheckoutAsync | Checkout tests pass |
+| 5 | Add ListBranchesAsync | List tests pass |
+| 6 | Add DeleteBranchAsync | Delete tests pass |
+| 7 | Add CLI commands | E2E tests pass |
+| 8 | Performance testing | Benchmarks pass |
 
 ---
 

@@ -283,52 +283,952 @@ Resources: CPU 45%, Memory 1.2GB
 
 ## Implementation Prompt
 
-### Interface
+### File Structure
+
+```
+src/
+├── Acode.Core/
+│   └── Domain/
+│       └── Workers/
+│           ├── WorkerInfo.cs             # Worker state
+│           ├── PoolStatus.cs             # Pool metrics
+│           ├── ResourceLimits.cs         # Resource constraints
+│           └── WorkerExceptions.cs       # Worker exceptions
+│
+├── Acode.Application/
+│   └── Services/
+│       └── Workers/
+│           ├── IWorkerPool.cs            # Pool interface
+│           ├── WorkerPool.cs             # Pool manager
+│           ├── IWorker.cs                # Worker interface
+│           ├── Worker.cs                 # Base worker
+│           ├── ITaskExecutor.cs          # Execution interface
+│           ├── TaskExecutor.cs           # Task runner
+│           ├── WorkerSupervisor.cs       # Lifecycle manager
+│           └── ResourceMonitor.cs        # Resource tracking
+│
+├── Acode.Infrastructure/
+│   └── Workers/
+│       ├── LocalProcessWorker.cs         # Process isolation
+│       └── DockerContainerWorker.cs      # Docker isolation
+│
+└── Acode.Cli/
+    └── Commands/
+        └── Worker/
+            ├── WorkerStartCommand.cs
+            ├── WorkerStopCommand.cs
+            ├── WorkerStatusCommand.cs
+            ├── WorkerScaleCommand.cs
+            └── WorkerListCommand.cs
+
+tests/
+├── Acode.Application.Tests/
+│   └── Services/
+│       └── Workers/
+│           ├── WorkerPoolTests.cs
+│           ├── WorkerSupervisorTests.cs
+│           └── ResourceMonitorTests.cs
+│
+└── Acode.Integration.Tests/
+    └── Workers/
+        └── ParallelExecutionTests.cs
+```
+
+### Domain Models
 
 ```csharp
-public interface IWorkerPool
+// Acode.Core/Domain/Workers/WorkerInfo.cs
+namespace Acode.Core.Domain.Workers;
+
+/// <summary>
+/// Unique worker identifier.
+/// </summary>
+public readonly record struct WorkerId(string Value)
 {
-    Task StartAsync(WorkerPoolOptions options, 
-        CancellationToken ct = default);
-        
-    Task StopAsync(bool force = false, 
-        CancellationToken ct = default);
-        
-    Task ScaleAsync(int targetCount, 
-        CancellationToken ct = default);
-        
-    Task<IReadOnlyList<WorkerInfo>> GetWorkersAsync(
-        CancellationToken ct = default);
-        
-    Task<PoolStatus> GetStatusAsync(
-        CancellationToken ct = default);
+    public static WorkerId NewId() => new(Ulid.NewUlid().ToString());
+    public override string ToString() => Value;
 }
 
-public record WorkerPoolOptions(
-    int WorkerCount,
-    WorkerMode Mode,
-    TimeSpan PollInterval,
-    TimeSpan DrainTimeout,
-    ResourceLimits Limits);
+/// <summary>
+/// Current state of a worker.
+/// </summary>
+public enum WorkerStatus
+{
+    /// <summary>Worker is starting up.</summary>
+    Starting,
+    
+    /// <summary>Worker is waiting for tasks.</summary>
+    Idle,
+    
+    /// <summary>Worker is executing a task.</summary>
+    Busy,
+    
+    /// <summary>Worker is shutting down.</summary>
+    Stopping,
+    
+    /// <summary>Worker has stopped.</summary>
+    Stopped,
+    
+    /// <summary>Worker crashed or failed.</summary>
+    Failed
+}
 
-public enum WorkerMode { Process, Docker }
+/// <summary>
+/// Information about a worker.
+/// </summary>
+public sealed record WorkerInfo
+{
+    /// <summary>Unique worker identifier.</summary>
+    public required WorkerId Id { get; init; }
+    
+    /// <summary>Current status.</summary>
+    public required WorkerStatus Status { get; init; }
+    
+    /// <summary>Task being executed (if Busy).</summary>
+    public TaskId? CurrentTaskId { get; init; }
+    
+    /// <summary>When the worker started.</summary>
+    public required DateTimeOffset StartedAt { get; init; }
+    
+    /// <summary>Last heartbeat time.</summary>
+    public DateTimeOffset? LastHeartbeat { get; init; }
+    
+    /// <summary>Number of tasks completed.</summary>
+    public int TasksCompleted { get; init; }
+    
+    /// <summary>Number of tasks failed.</summary>
+    public int TasksFailed { get; init; }
+    
+    /// <summary>Isolation mode.</summary>
+    public required WorkerMode Mode { get; init; }
+    
+    /// <summary>Current resource usage.</summary>
+    public ResourceUsage? Resources { get; init; }
+}
 
-public record WorkerInfo(
-    string Id,
-    WorkerStatus Status,
-    string? CurrentTaskId,
-    DateTimeOffset StartedAt,
-    DateTimeOffset? LastHeartbeat);
+/// <summary>
+/// Worker isolation mode.
+/// </summary>
+public enum WorkerMode
+{
+    /// <summary>Execute in local process.</summary>
+    Process,
+    
+    /// <summary>Execute in Docker container.</summary>
+    Docker
+}
 
-public enum WorkerStatus { Starting, Idle, Busy, Stopping }
+// Acode.Core/Domain/Workers/PoolStatus.cs
+namespace Acode.Core.Domain.Workers;
 
-public record PoolStatus(
-    int ActiveCount,
-    int IdleCount,
-    int BusyCount,
-    int PendingTasks,
-    ResourceUsage Resources);
+/// <summary>
+/// Overall pool status and metrics.
+/// </summary>
+public sealed record PoolStatus
+{
+    /// <summary>Whether the pool is running.</summary>
+    public required bool IsRunning { get; init; }
+    
+    /// <summary>Total active workers.</summary>
+    public required int ActiveCount { get; init; }
+    
+    /// <summary>Workers waiting for tasks.</summary>
+    public required int IdleCount { get; init; }
+    
+    /// <summary>Workers executing tasks.</summary>
+    public required int BusyCount { get; init; }
+    
+    /// <summary>Workers starting or stopping.</summary>
+    public required int TransitioningCount { get; init; }
+    
+    /// <summary>Tasks waiting in queue.</summary>
+    public required int PendingTasks { get; init; }
+    
+    /// <summary>Tasks currently running.</summary>
+    public required int RunningTasks { get; init; }
+    
+    /// <summary>Aggregate resource usage.</summary>
+    public required ResourceUsage Resources { get; init; }
+    
+    /// <summary>Pool uptime.</summary>
+    public TimeSpan Uptime { get; init; }
+}
+
+/// <summary>
+/// Resource usage snapshot.
+/// </summary>
+public sealed record ResourceUsage
+{
+    public double CpuPercent { get; init; }
+    public long MemoryBytes { get; init; }
+    public long DiskBytes { get; init; }
+    
+    public string MemoryFormatted => FormatBytes(MemoryBytes);
+    public string DiskFormatted => FormatBytes(DiskBytes);
+    
+    private static string FormatBytes(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB" };
+        int order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {sizes[order]}";
+    }
+}
+
+// Acode.Core/Domain/Workers/ResourceLimits.cs
+namespace Acode.Core.Domain.Workers;
+
+/// <summary>
+/// Resource limits for workers.
+/// </summary>
+public sealed record ResourceLimits
+{
+    /// <summary>Maximum CPU percentage per worker.</summary>
+    public int CpuPercent { get; init; } = 25;
+    
+    /// <summary>Maximum memory in MB.</summary>
+    public int MemoryMb { get; init; } = 512;
+    
+    /// <summary>Maximum disk in MB.</summary>
+    public int DiskMb { get; init; } = 1024;
+    
+    /// <summary>Action when limit exceeded.</summary>
+    public OverLimitAction Action { get; init; } = OverLimitAction.Warn;
+    
+    public static ResourceLimits Default => new();
+}
+
+public enum OverLimitAction
+{
+    Warn,
+    Throttle,
+    Kill
+}
+
+// Acode.Core/Domain/Workers/WorkerExceptions.cs
+namespace Acode.Core.Domain.Workers;
+
+public abstract class WorkerException : Exception
+{
+    protected WorkerException(string message) : base(message) { }
+    protected WorkerException(string message, Exception inner) : base(message, inner) { }
+}
+
+public sealed class WorkerNotFoundException : WorkerException
+{
+    public WorkerId WorkerId { get; }
+    public WorkerNotFoundException(WorkerId id) : base($"Worker not found: {id}") 
+    {
+        WorkerId = id;
+    }
+}
+
+public sealed class PoolNotRunningException : WorkerException
+{
+    public PoolNotRunningException() : base("Worker pool is not running") { }
+}
+
+public sealed class WorkerStartFailedException : WorkerException
+{
+    public WorkerStartFailedException(string reason) : base($"Worker failed to start: {reason}") { }
+    public WorkerStartFailedException(string reason, Exception inner) : base($"Worker failed to start: {reason}", inner) { }
+}
 ```
+
+### Worker Pool Options
+
+```csharp
+// Acode.Application/Services/Workers/WorkerPoolOptions.cs
+namespace Acode.Application.Services.Workers;
+
+/// <summary>
+/// Configuration for the worker pool.
+/// </summary>
+public sealed record WorkerPoolOptions
+{
+    /// <summary>Number of workers to start.</summary>
+    public int WorkerCount { get; init; } = Environment.ProcessorCount;
+    
+    /// <summary>Worker isolation mode.</summary>
+    public WorkerMode Mode { get; init; } = WorkerMode.Process;
+    
+    /// <summary>Task poll interval.</summary>
+    public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(1);
+    
+    /// <summary>Maximum idle backoff.</summary>
+    public TimeSpan MaxIdleBackoff { get; init; } = TimeSpan.FromSeconds(30);
+    
+    /// <summary>Graceful shutdown timeout.</summary>
+    public TimeSpan DrainTimeout { get; init; } = TimeSpan.FromMinutes(1);
+    
+    /// <summary>Resource limits per worker.</summary>
+    public ResourceLimits Limits { get; init; } = ResourceLimits.Default;
+    
+    /// <summary>Heartbeat interval.</summary>
+    public TimeSpan HeartbeatInterval { get; init; } = TimeSpan.FromSeconds(10);
+    
+    /// <summary>Maximum workers allowed.</summary>
+    public int MaxWorkers { get; init; } = 32;
+    
+    /// <summary>Minimum workers.</summary>
+    public int MinWorkers { get; init; } = 1;
+}
+```
+
+### Worker Pool Interface
+
+```csharp
+// Acode.Application/Services/Workers/IWorkerPool.cs
+namespace Acode.Application.Services.Workers;
+
+/// <summary>
+/// Manages a pool of workers for parallel task execution.
+/// </summary>
+public interface IWorkerPool
+{
+    /// <summary>
+    /// Starts the worker pool.
+    /// </summary>
+    Task StartAsync(WorkerPoolOptions options, CancellationToken ct = default);
+    
+    /// <summary>
+    /// Stops all workers.
+    /// </summary>
+    /// <param name="force">If true, kill immediately without draining.</param>
+    Task StopAsync(bool force = false, CancellationToken ct = default);
+    
+    /// <summary>
+    /// Adjusts the number of workers.
+    /// </summary>
+    Task ScaleAsync(int targetCount, CancellationToken ct = default);
+    
+    /// <summary>
+    /// Gets information about all workers.
+    /// </summary>
+    Task<IReadOnlyList<WorkerInfo>> GetWorkersAsync(CancellationToken ct = default);
+    
+    /// <summary>
+    /// Gets overall pool status.
+    /// </summary>
+    Task<PoolStatus> GetStatusAsync(CancellationToken ct = default);
+    
+    /// <summary>
+    /// Whether the pool is currently running.
+    /// </summary>
+    bool IsRunning { get; }
+}
+```
+
+### Worker Interface
+
+```csharp
+// Acode.Application/Services/Workers/IWorker.cs
+namespace Acode.Application.Services.Workers;
+
+/// <summary>
+/// A worker that executes tasks.
+/// </summary>
+public interface IWorker : IAsyncDisposable
+{
+    /// <summary>Worker identifier.</summary>
+    WorkerId Id { get; }
+    
+    /// <summary>Current status.</summary>
+    WorkerStatus Status { get; }
+    
+    /// <summary>Current task being executed.</summary>
+    TaskId? CurrentTaskId { get; }
+    
+    /// <summary>Starts the worker loop.</summary>
+    Task StartAsync(CancellationToken ct = default);
+    
+    /// <summary>Signals the worker to stop.</summary>
+    Task StopAsync(bool force = false, CancellationToken ct = default);
+    
+    /// <summary>Gets worker information.</summary>
+    WorkerInfo GetInfo();
+}
+```
+
+### Worker Pool Implementation
+
+```csharp
+// Acode.Application/Services/Workers/WorkerPool.cs
+namespace Acode.Application.Services.Workers;
+
+public sealed class WorkerPool : IWorkerPool
+{
+    private readonly IWorkerFactory _workerFactory;
+    private readonly ITaskQueue _queue;
+    private readonly ILogger<WorkerPool> _logger;
+    
+    private readonly ConcurrentDictionary<WorkerId, IWorker> _workers = new();
+    private readonly SemaphoreSlim _scaleLock = new(1, 1);
+    
+    private WorkerPoolOptions? _options;
+    private CancellationTokenSource? _poolCts;
+    private DateTimeOffset _startedAt;
+    
+    public bool IsRunning => _poolCts != null && !_poolCts.IsCancellationRequested;
+    
+    public WorkerPool(
+        IWorkerFactory workerFactory,
+        ITaskQueue queue,
+        ILogger<WorkerPool> logger)
+    {
+        _workerFactory = workerFactory;
+        _queue = queue;
+        _logger = logger;
+    }
+    
+    public async Task StartAsync(WorkerPoolOptions options, CancellationToken ct = default)
+    {
+        if (IsRunning)
+            throw new InvalidOperationException("Pool is already running");
+        
+        _options = options;
+        _poolCts = new CancellationTokenSource();
+        _startedAt = DateTimeOffset.UtcNow;
+        
+        _logger.LogInformation(
+            "Starting worker pool with {Count} workers in {Mode} mode",
+            options.WorkerCount, options.Mode);
+        
+        // Start workers in parallel
+        var tasks = Enumerable.Range(0, options.WorkerCount)
+            .Select(_ => StartWorkerAsync(ct))
+            .ToList();
+        
+        await Task.WhenAll(tasks);
+        
+        _logger.LogInformation("Worker pool started with {Count} workers", _workers.Count);
+    }
+    
+    public async Task StopAsync(bool force = false, CancellationToken ct = default)
+    {
+        if (!IsRunning)
+            return;
+        
+        _logger.LogInformation(
+            "Stopping worker pool ({Mode})",
+            force ? "force" : "graceful");
+        
+        _poolCts!.Cancel();
+        
+        // Stop all workers
+        var stopTasks = _workers.Values
+            .Select(w => StopWorkerAsync(w, force, ct))
+            .ToList();
+        
+        if (!force && _options != null)
+        {
+            using var drainCts = new CancellationTokenSource(_options.DrainTimeout);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, drainCts.Token);
+            
+            try
+            {
+                await Task.WhenAll(stopTasks);
+            }
+            catch (OperationCanceledException) when (drainCts.IsCancellationRequested)
+            {
+                _logger.LogWarning("Drain timeout exceeded, forcing stop");
+                await ForceStopAllAsync();
+            }
+        }
+        else
+        {
+            await Task.WhenAll(stopTasks);
+        }
+        
+        _workers.Clear();
+        _poolCts?.Dispose();
+        _poolCts = null;
+        
+        _logger.LogInformation("Worker pool stopped");
+    }
+    
+    public async Task ScaleAsync(int targetCount, CancellationToken ct = default)
+    {
+        if (!IsRunning)
+            throw new PoolNotRunningException();
+        
+        await _scaleLock.WaitAsync(ct);
+        try
+        {
+            var currentCount = _workers.Count;
+            
+            targetCount = Math.Clamp(targetCount, _options!.MinWorkers, _options.MaxWorkers);
+            
+            _logger.LogInformation("Scaling workers: {Current} → {Target}", currentCount, targetCount);
+            
+            if (targetCount > currentCount)
+            {
+                // Scale up
+                var toAdd = targetCount - currentCount;
+                var tasks = Enumerable.Range(0, toAdd)
+                    .Select(_ => StartWorkerAsync(ct))
+                    .ToList();
+                await Task.WhenAll(tasks);
+            }
+            else if (targetCount < currentCount)
+            {
+                // Scale down - stop idle workers first
+                var toRemove = currentCount - targetCount;
+                var workersToStop = _workers.Values
+                    .Where(w => w.Status == WorkerStatus.Idle)
+                    .Take(toRemove)
+                    .ToList();
+                
+                // If not enough idle, wait for busy to complete
+                if (workersToStop.Count < toRemove)
+                {
+                    var remaining = toRemove - workersToStop.Count;
+                    workersToStop.AddRange(
+                        _workers.Values
+                            .Where(w => w.Status == WorkerStatus.Busy)
+                            .Take(remaining));
+                }
+                
+                foreach (var worker in workersToStop)
+                {
+                    await StopWorkerAsync(worker, force: false, ct);
+                    _workers.TryRemove(worker.Id, out _);
+                }
+            }
+            
+            _logger.LogInformation("Scaling complete: {Count} workers active", _workers.Count);
+        }
+        finally
+        {
+            _scaleLock.Release();
+        }
+    }
+    
+    public Task<IReadOnlyList<WorkerInfo>> GetWorkersAsync(CancellationToken ct = default)
+    {
+        var infos = _workers.Values.Select(w => w.GetInfo()).ToList();
+        return Task.FromResult<IReadOnlyList<WorkerInfo>>(infos);
+    }
+    
+    public async Task<PoolStatus> GetStatusAsync(CancellationToken ct = default)
+    {
+        var workers = _workers.Values.Select(w => w.GetInfo()).ToList();
+        var queueCounts = await _queue.CountAsync(ct);
+        
+        return new PoolStatus
+        {
+            IsRunning = IsRunning,
+            ActiveCount = workers.Count(w => w.Status != WorkerStatus.Stopped && w.Status != WorkerStatus.Failed),
+            IdleCount = workers.Count(w => w.Status == WorkerStatus.Idle),
+            BusyCount = workers.Count(w => w.Status == WorkerStatus.Busy),
+            TransitioningCount = workers.Count(w => w.Status == WorkerStatus.Starting || w.Status == WorkerStatus.Stopping),
+            PendingTasks = queueCounts.Pending,
+            RunningTasks = queueCounts.Running,
+            Resources = AggregateResources(workers),
+            Uptime = IsRunning ? DateTimeOffset.UtcNow - _startedAt : TimeSpan.Zero
+        };
+    }
+    
+    private async Task StartWorkerAsync(CancellationToken ct)
+    {
+        var worker = _workerFactory.Create(_options!.Mode);
+        _workers[worker.Id] = worker;
+        
+        try
+        {
+            await worker.StartAsync(ct);
+            _logger.LogDebug("Worker {WorkerId} started", worker.Id);
+        }
+        catch (Exception ex)
+        {
+            _workers.TryRemove(worker.Id, out _);
+            _logger.LogError(ex, "Failed to start worker {WorkerId}", worker.Id);
+            throw new WorkerStartFailedException("Startup failed", ex);
+        }
+    }
+    
+    private async Task StopWorkerAsync(IWorker worker, bool force, CancellationToken ct)
+    {
+        try
+        {
+            await worker.StopAsync(force, ct);
+            await worker.DisposeAsync();
+            _logger.LogDebug("Worker {WorkerId} stopped", worker.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error stopping worker {WorkerId}", worker.Id);
+        }
+    }
+    
+    private async Task ForceStopAllAsync()
+    {
+        foreach (var worker in _workers.Values)
+        {
+            try
+            {
+                await worker.StopAsync(force: true);
+                await worker.DisposeAsync();
+            }
+            catch { /* ignore */ }
+        }
+    }
+    
+    private static ResourceUsage AggregateResources(IReadOnlyList<WorkerInfo> workers)
+    {
+        return new ResourceUsage
+        {
+            CpuPercent = workers.Sum(w => w.Resources?.CpuPercent ?? 0),
+            MemoryBytes = workers.Sum(w => w.Resources?.MemoryBytes ?? 0),
+            DiskBytes = workers.Sum(w => w.Resources?.DiskBytes ?? 0)
+        };
+    }
+}
+```
+
+### Worker Implementation
+
+```csharp
+// Acode.Application/Services/Workers/Worker.cs
+namespace Acode.Application.Services.Workers;
+
+public class Worker : IWorker
+{
+    private readonly ITaskQueue _queue;
+    private readonly ITaskExecutor _executor;
+    private readonly WorkerPoolOptions _options;
+    private readonly ILogger _logger;
+    
+    private CancellationTokenSource? _workerCts;
+    private Task? _workerLoop;
+    private int _tasksCompleted;
+    private int _tasksFailed;
+    private DateTimeOffset _startedAt;
+    private ResourceUsage? _resources;
+    
+    public WorkerId Id { get; } = WorkerId.NewId();
+    public WorkerStatus Status { get; private set; } = WorkerStatus.Starting;
+    public TaskId? CurrentTaskId { get; private set; }
+    
+    public Worker(
+        ITaskQueue queue,
+        ITaskExecutor executor,
+        WorkerPoolOptions options,
+        ILogger<Worker> logger)
+    {
+        _queue = queue;
+        _executor = executor;
+        _options = options;
+        _logger = logger;
+    }
+    
+    public async Task StartAsync(CancellationToken ct = default)
+    {
+        _workerCts = new CancellationTokenSource();
+        _startedAt = DateTimeOffset.UtcNow;
+        Status = WorkerStatus.Idle;
+        
+        _workerLoop = RunLoopAsync(_workerCts.Token);
+        
+        _logger.LogInformation("Worker {WorkerId} started", Id);
+    }
+    
+    public async Task StopAsync(bool force = false, CancellationToken ct = default)
+    {
+        Status = WorkerStatus.Stopping;
+        _workerCts?.Cancel();
+        
+        if (_workerLoop != null)
+        {
+            if (force)
+            {
+                // Don't wait for graceful completion
+                return;
+            }
+            
+            try
+            {
+                await _workerLoop;
+            }
+            catch (OperationCanceledException) { }
+        }
+        
+        Status = WorkerStatus.Stopped;
+        _logger.LogInformation("Worker {WorkerId} stopped", Id);
+    }
+    
+    public WorkerInfo GetInfo() => new()
+    {
+        Id = Id,
+        Status = Status,
+        CurrentTaskId = CurrentTaskId,
+        StartedAt = _startedAt,
+        LastHeartbeat = DateTimeOffset.UtcNow,
+        TasksCompleted = _tasksCompleted,
+        TasksFailed = _tasksFailed,
+        Mode = _options.Mode,
+        Resources = _resources
+    };
+    
+    public async ValueTask DisposeAsync()
+    {
+        _workerCts?.Cancel();
+        _workerCts?.Dispose();
+        
+        if (_workerLoop != null)
+        {
+            try { await _workerLoop; } catch { }
+        }
+    }
+    
+    private async Task RunLoopAsync(CancellationToken ct)
+    {
+        var backoff = _options.PollInterval;
+        var heartbeatTimer = new PeriodicTimer(_options.HeartbeatInterval);
+        
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                // Try to claim a task
+                var task = await _queue.DequeueAsync(Id.Value, ct);
+                
+                if (task == null)
+                {
+                    // No task available, back off
+                    Status = WorkerStatus.Idle;
+                    await Task.Delay(backoff, ct);
+                    
+                    // Exponential backoff
+                    backoff = TimeSpan.FromMilliseconds(
+                        Math.Min(backoff.TotalMilliseconds * 1.5, _options.MaxIdleBackoff.TotalMilliseconds));
+                    
+                    continue;
+                }
+                
+                // Reset backoff
+                backoff = _options.PollInterval;
+                
+                // Execute task
+                Status = WorkerStatus.Busy;
+                CurrentTaskId = task.Id;
+                
+                try
+                {
+                    // Start heartbeat in background
+                    using var heartbeatCts = new CancellationTokenSource();
+                    _ = HeartbeatLoopAsync(task.Id, heartbeatCts.Token);
+                    
+                    var result = await _executor.ExecuteAsync(task, ct);
+                    
+                    heartbeatCts.Cancel();
+                    
+                    if (result.Success)
+                    {
+                        await _queue.CompleteAsync(task.Id, result, ct);
+                        Interlocked.Increment(ref _tasksCompleted);
+                    }
+                    else
+                    {
+                        await _queue.FailAsync(task.Id, result.Output ?? "Unknown error", ct);
+                        Interlocked.Increment(ref _tasksFailed);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Task {TaskId} execution failed", task.Id);
+                    await _queue.FailAsync(task.Id, ex.Message, ct);
+                    Interlocked.Increment(ref _tasksFailed);
+                }
+                finally
+                {
+                    CurrentTaskId = null;
+                    Status = WorkerStatus.Idle;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Worker {WorkerId} loop error", Id);
+                await Task.Delay(TimeSpan.FromSeconds(5), ct);
+            }
+        }
+    }
+    
+    private async Task HeartbeatLoopAsync(TaskId taskId, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(_options.HeartbeatInterval, ct);
+                await _queue.HeartbeatAsync(Id.Value, taskId, ct);
+            }
+            catch (OperationCanceledException) { break; }
+            catch { /* ignore heartbeat errors */ }
+        }
+    }
+}
+```
+
+### CLI Commands
+
+```csharp
+// Acode.Cli/Commands/Worker/WorkerStartCommand.cs
+namespace Acode.Cli.Commands.Worker;
+
+[Command("worker start", Description = "Start the worker pool")]
+public sealed class WorkerStartCommand : ICommand
+{
+    [CommandOption("--count|c", Description = "Number of workers")]
+    public int? Count { get; init; }
+    
+    [CommandOption("--mode|m", Description = "Isolation mode (process, docker)")]
+    public string Mode { get; init; } = "process";
+    
+    public async ValueTask ExecuteAsync(IConsole console)
+    {
+        var pool = GetPool(); // DI
+        
+        var options = new WorkerPoolOptions
+        {
+            WorkerCount = Count ?? Environment.ProcessorCount,
+            Mode = Mode.ToLowerInvariant() switch
+            {
+                "docker" => WorkerMode.Docker,
+                _ => WorkerMode.Process
+            }
+        };
+        
+        console.Output.WriteLine($"Starting worker pool with {options.WorkerCount} workers...");
+        
+        await pool.StartAsync(options);
+        
+        console.Output.WriteLine($"✓ Worker pool started");
+        console.Output.WriteLine($"  Workers: {options.WorkerCount}");
+        console.Output.WriteLine($"  Mode: {options.Mode}");
+    }
+}
+
+// Acode.Cli/Commands/Worker/WorkerStatusCommand.cs
+namespace Acode.Cli.Commands.Worker;
+
+[Command("worker status", Description = "Show worker pool status")]
+public sealed class WorkerStatusCommand : ICommand
+{
+    [CommandOption("--json", Description = "Output as JSON")]
+    public bool Json { get; init; }
+    
+    public async ValueTask ExecuteAsync(IConsole console)
+    {
+        var pool = GetPool();
+        
+        var status = await pool.GetStatusAsync();
+        
+        if (Json)
+        {
+            console.Output.WriteLine(JsonSerializer.Serialize(status));
+            return;
+        }
+        
+        console.Output.WriteLine("Worker Pool Status");
+        console.Output.WriteLine("==================");
+        console.Output.WriteLine($"  Running: {(status.IsRunning ? "yes" : "no")}");
+        console.Output.WriteLine($"  Active:  {status.ActiveCount}");
+        console.Output.WriteLine($"    Idle:  {status.IdleCount}");
+        console.Output.WriteLine($"    Busy:  {status.BusyCount}");
+        console.Output.WriteLine();
+        console.Output.WriteLine($"  Queue:");
+        console.Output.WriteLine($"    Pending: {status.PendingTasks}");
+        console.Output.WriteLine($"    Running: {status.RunningTasks}");
+        console.Output.WriteLine();
+        console.Output.WriteLine($"  Resources:");
+        console.Output.WriteLine($"    CPU:    {status.Resources.CpuPercent:F1}%");
+        console.Output.WriteLine($"    Memory: {status.Resources.MemoryFormatted}");
+    }
+}
+```
+
+### Error Codes
+
+| Code | Meaning |
+|------|---------|
+| WORKER-001 | Worker not found |
+| WORKER-002 | Pool not running |
+| WORKER-003 | Worker start failed |
+| WORKER-004 | Worker timeout |
+| WORKER-005 | Resource limit exceeded |
+| WORKER-006 | Docker unavailable |
+
+### Implementation Checklist
+
+- [ ] Create `WorkerId` value object
+- [ ] Create `WorkerStatus` enum
+- [ ] Create `WorkerInfo` record
+- [ ] Create `WorkerMode` enum
+- [ ] Create `PoolStatus` record
+- [ ] Create `ResourceUsage` and `ResourceLimits` records
+- [ ] Create worker exception types
+- [ ] Create `WorkerPoolOptions` record
+- [ ] Define `IWorkerPool` interface
+- [ ] Define `IWorker` interface
+- [ ] Implement `WorkerPool` with ConcurrentDictionary
+- [ ] Implement `StartAsync` with parallel worker creation
+- [ ] Implement `StopAsync` with graceful drain
+- [ ] Implement `ScaleAsync` with idle-first stopping
+- [ ] Implement `Worker` base class
+- [ ] Add poll loop with exponential backoff
+- [ ] Add heartbeat loop
+- [ ] Add task execution and result handling
+- [ ] Create `IWorkerFactory` interface
+- [ ] Implement `LocalProcessWorker` (subtask 027a)
+- [ ] Implement `DockerContainerWorker` (subtask 027b)
+- [ ] Create CLI start command
+- [ ] Create CLI stop command
+- [ ] Create CLI status command
+- [ ] Create CLI scale command
+- [ ] Create CLI list command
+- [ ] Register in DI
+- [ ] Write unit tests for pool
+- [ ] Write integration tests for parallel execution
+
+### Rollout Plan
+
+1. **Phase 1: Domain Models** (Day 1)
+   - Create all records and enums
+   - Create exception types
+   - Unit test models
+
+2. **Phase 2: Worker Pool** (Day 2)
+   - Implement pool interface
+   - Add start/stop logic
+   - Add scaling logic
+
+3. **Phase 3: Worker** (Day 2-3)
+   - Implement worker loop
+   - Add task claiming
+   - Add heartbeat
+
+4. **Phase 4: Process Worker** (Day 3)
+   - Implement local process isolation
+   - Add resource monitoring
+
+5. **Phase 5: CLI** (Day 3)
+   - All worker commands
+   - Manual testing
+
+6. **Phase 6: Integration** (Day 4)
+   - Integration tests
+   - Parallel execution tests
+   - Documentation
 
 ---
 

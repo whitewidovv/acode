@@ -831,43 +831,648 @@ acode runs optimize
 
 ---
 
+## Testing Requirements
+
+### Unit Tests
+
+#### RunRecordTests
+- RunRecord_Constructor_SetsAllRequiredProperties
+- RunRecord_Constructor_GeneratesUniqueId
+- RunRecord_Duration_CalculatedFromStartAndEndTime
+- RunRecord_ArtifactIds_DefaultsToEmptyList
+- RunRecord_Tags_DefaultsToEmptyDictionary
+- RunRecord_Serialize_ProducesValidJson
+- RunRecord_Deserialize_ReconstructsRecord
+- RunRecord_Immutable_PropertiesCannotBeModified
+- RunRecord_Equals_ComparesById
+- RunRecord_GetHashCode_ConsistentWithEquals
+
+#### ArtifactTests
+- Artifact_Constructor_SetsAllRequiredProperties
+- Artifact_Constructor_GeneratesUniqueId
+- Artifact_Hash_ComputedFromContent
+- Artifact_MimeType_InferredFromFileName
+- Artifact_Size_MatchesContentLength
+- Artifact_IsTruncated_TrueWhenContentCut
+- Artifact_IsCompressed_TrueWhenGzipped
+- Artifact_Serialize_ProducesValidJson
+- Artifact_Deserialize_ReconstructsArtifact
+- Artifact_SensitiveFlag_DefaultsFalse
+
+#### RunStoreTests
+- RunStore_CreateAsync_PersistsRecord
+- RunStore_CreateAsync_ReturnsCreatedRecord
+- RunStore_CreateAsync_ValidatesRequiredFields
+- RunStore_CreateAsync_RejectsDuplicateId
+- RunStore_GetByIdAsync_ReturnsExistingRecord
+- RunStore_GetByIdAsync_ReturnsNullForMissing
+- RunStore_ListAsync_ReturnsAllRecords
+- RunStore_ListAsync_AppliesStatusFilter
+- RunStore_ListAsync_AppliesTimeRangeFilter
+- RunStore_ListAsync_AppliesCommandPatternFilter
+- RunStore_ListAsync_AppliesSessionFilter
+- RunStore_ListAsync_AppliesTagsFilter
+- RunStore_ListAsync_AppliesPagination
+- RunStore_ListAsync_AppliesSorting
+- RunStore_ListAsync_ReturnsTotalCount
+- RunStore_ListAsync_ReturnsEmptyForNoMatches
+- RunStore_DeleteAsync_RemovesRecord
+- RunStore_DeleteAsync_ReturnsFalseForMissing
+- RunStore_CountAsync_ReturnsCorrectCount
+- RunStore_ExistsAsync_ReturnsTrueForExisting
+- RunStore_ExistsAsync_ReturnsFalseForMissing
+- RunStore_GetLatestAsync_ReturnsNewestRun
+- RunStore_GetBySessionAsync_ReturnsSessionRuns
+- RunStore_GetFailedAsync_ReturnsOnlyFailures
+- RunStore_DeleteOlderThanAsync_RemovesOldRecords
+
+#### ArtifactStoreTests
+- ArtifactStore_SaveAsync_WritesFile
+- ArtifactStore_SaveAsync_ComputesHash
+- ArtifactStore_SaveAsync_CompressesText
+- ArtifactStore_SaveAsync_TruncatesOversized
+- ArtifactStore_SaveAsync_CreatesDirectory
+- ArtifactStore_SaveAsync_HandlesSpecialCharacters
+- ArtifactStore_GetByIdAsync_ReturnsExisting
+- ArtifactStore_GetByIdAsync_ReturnsNullForMissing
+- ArtifactStore_GetByRunIdAsync_ReturnsRunArtifacts
+- ArtifactStore_GetContentStreamAsync_ReturnsStream
+- ArtifactStore_GetContentStreamAsync_Decompresses
+- ArtifactStore_GetContentStreamAsync_VerifiesHash
+- ArtifactStore_GetContentStreamAsync_ThrowsOnHashMismatch
+- ArtifactStore_DeleteAsync_RemovesFileAndRecord
+- ArtifactStore_DeleteAsync_ReturnsFalseForMissing
+- ArtifactStore_CleanupOrphans_RemovesOrphanedFiles
+
+#### ArtifactCollectorTests
+- Collector_Collect_CapturesStdout
+- Collector_Collect_CapturesStderr
+- Collector_Collect_CapturesLogFiles
+- Collector_Collect_CapturesTestResults
+- Collector_Collect_RespectsGitignore
+- Collector_Collect_RespectsExcludePatterns
+- Collector_Collect_RespectsIncludePatterns
+- Collector_Collect_LimitsArtifactSize
+- Collector_Collect_LimitsArtifactCount
+- Collector_Collect_HandlesFileAccessError
+- Collector_Collect_DeduplicatesIdenticalContent
+- Collector_Collect_PreservesTimestamps
+- Collector_Collect_TagsArtifactsBySource
+- Collector_Collect_CompletesWithinTimeout
+
+#### RetentionManagerTests
+- Retention_Execute_DeletesOldRuns
+- Retention_Execute_RespectsMaxAge
+- Retention_Execute_RespectsMaxCount
+- Retention_Execute_RespectsMaxSize
+- Retention_Execute_KeepsFailuresLonger
+- Retention_Execute_PreservesTaggedRuns
+- Retention_Execute_DeletesAssociatedArtifacts
+- Retention_Execute_LogsDeletions
+- Retention_Execute_ReportsStatistics
+- Retention_DryRun_DoesNotDelete
+- Retention_DryRun_ReportsWhatWouldDelete
+
+#### RunQueryTests
+- RunQuery_Validate_AcceptsValidQuery
+- RunQuery_Validate_RejectsNegativeSkip
+- RunQuery_Validate_RejectsZeroTake
+- RunQuery_Validate_RejectsInvalidSortField
+- RunQuery_TimeRange_FiltersByStartTime
+- RunQuery_TimeRange_FiltersByEndTime
+- RunQuery_CommandPattern_SupportsWildcard
+- RunQuery_CommandPattern_SupportsRegex
+- RunQuery_Tags_MatchesAnyTag
+- RunQuery_Combine_AndLogicForMultipleFilters
+
+### Integration Tests
+
+#### RunStoreIntegrationTests
+- RunStore_PersistsThroughRestart
+- RunStore_HandlesThousandsOfRecords
+- RunStore_ConcurrentWrites_NoDataLoss
+- RunStore_ConcurrentReadsWrites_NoCorruption
+- RunStore_QueryPerformance_Under500ms
+- RunStore_DatabaseMigration_PreservesData
+
+#### ArtifactStoreIntegrationTests
+- ArtifactStore_SavesAndRetrievesLargeFile
+- ArtifactStore_StreamsWithoutFullLoad
+- ArtifactStore_CompressionReducesSize
+- ArtifactStore_HandlesParallelWrites
+- ArtifactStore_OrphanCleanupWorks
+- ArtifactStore_DirectoryStructureCorrect
+
+#### EndToEndTests
+- E2E_CommandExecution_CreatesRunAndArtifacts
+- E2E_BuildExecution_CollectsOutputFiles
+- E2E_TestExecution_CollectsTrxFile
+- E2E_QueryByStatus_ReturnsCorrectRuns
+- E2E_DeleteRun_RemovesArtifacts
+- E2E_RetentionCleanup_EnforcesPolicy
+- E2E_ExportBundle_ContainsAllData
+- E2E_ImportBundle_RestoresRunData
+
+### Benchmark Tests
+
+| Benchmark | Target | Description |
+|-----------|--------|-------------|
+| RunRecord_Create | <50ms | Time to create and persist run record |
+| Artifact_Save_1MB | <100ms | Time to save 1MB artifact |
+| Artifact_Save_10MB | <500ms | Time to save 10MB artifact |
+| Query_10kRecords | <500ms | Query with 10,000 run records |
+| Query_Paginated | <100ms | Paginated query with large dataset |
+| Retention_Cleanup_1000 | <60s | Delete 1000 runs with artifacts |
+| Export_Bundle_100MB | <5s | Create 100MB export bundle |
+| Hash_Computation_1MB | <50ms | SHA256 hash of 1MB content |
+
+### Coverage Requirements
+
+| Component | Minimum Coverage |
+|-----------|-----------------|
+| RunRecord | 95% |
+| Artifact | 95% |
+| RunStore | 90% |
+| ArtifactStore | 90% |
+| ArtifactCollector | 85% |
+| RetentionManager | 90% |
+| RunQuery | 95% |
+| CLI Commands | 80% |
+
+---
+
+## User Verification Steps
+
+### Scenario 1: Verify Run Record Creation
+
+**Objective:** Confirm command execution creates run records
+
+**Steps:**
+1. Run a simple command: `acode exec -- echo "hello"`
+2. Run: `acode runs list`
+3. Observe the run appears in the list
+4. Run: `acode runs show <run-id>`
+5. Observe all run details
+
+**Expected Results:**
+- Run list shows the echo command
+- Run details show exit code 0, status Success
+- Duration is recorded
+- Session ID is present
+- No artifacts for simple echo (stdout may be captured)
+
+### Scenario 2: Verify Artifact Collection
+
+**Objective:** Confirm artifacts are captured from command output
+
+**Steps:**
+1. Navigate to a .NET test project
+2. Run: `acode exec -- dotnet test --logger trx`
+3. Run: `acode runs list`
+4. Run: `acode runs show <run-id>`
+5. Run: `acode runs artifacts <run-id>`
+6. Run: `acode runs artifact <artifact-id>` for stdout
+
+**Expected Results:**
+- Run record created with test command
+- Artifacts list shows stdout, stderr, and .trx file
+- Stdout artifact contains test output
+- .trx file artifact contains test results XML
+
+### Scenario 3: Verify Query Filtering
+
+**Objective:** Confirm queries filter correctly
+
+**Steps:**
+1. Run several commands (some succeed, some fail)
+2. Run: `acode runs list --status failed`
+3. Run: `acode runs list --status success`
+4. Run: `acode runs list --since "5 minutes ago"`
+5. Run: `acode runs list --command "dotnet*"`
+
+**Expected Results:**
+- Status filter shows only matching runs
+- Time filter shows only recent runs
+- Command filter shows only matching commands
+- Filters can be combined
+
+### Scenario 4: Verify Run Deletion
+
+**Objective:** Confirm runs and artifacts are deleted together
+
+**Steps:**
+1. Run a command that produces artifacts
+2. Note the run ID
+3. Run: `acode runs artifacts <run-id>` to confirm artifacts
+4. Run: `acode runs delete <run-id>`
+5. Run: `acode runs show <run-id>`
+6. Check filesystem for artifact directory
+
+**Expected Results:**
+- Delete confirms the operation
+- Show returns "Run not found"
+- Artifact directory is removed
+- Database records are cleaned up
+
+### Scenario 5: Verify Retention Cleanup
+
+**Objective:** Confirm retention policies are enforced
+
+**Steps:**
+1. Configure retention with short maxAge (e.g., 1 minute) for testing
+2. Run several commands
+3. Wait for retention period
+4. Run: `acode runs cleanup --dry-run`
+5. Observe what would be deleted
+6. Run: `acode runs cleanup`
+7. Run: `acode runs list`
+
+**Expected Results:**
+- Dry run shows runs that would be deleted
+- Cleanup actually deletes old runs
+- Runs list shows only recent runs
+- Cleanup reports statistics (N runs, M artifacts deleted)
+
+### Scenario 6: Verify Export Bundle
+
+**Objective:** Confirm runs can be exported and imported
+
+**Steps:**
+1. Run a command with artifacts
+2. Run: `acode runs export <run-id> --output ./test-bundle.zip`
+3. Examine the bundle contents
+4. Delete the original run: `acode runs delete <run-id>`
+5. Run: `acode runs import ./test-bundle.zip`
+6. Run: `acode runs show <run-id>`
+
+**Expected Results:**
+- Export creates a zip file
+- Bundle contains manifest.json and artifact files
+- Import restores the run record
+- Imported run shows correct details
+- Artifacts are accessible after import
+
+### Scenario 7: Verify Storage Statistics
+
+**Objective:** Confirm storage statistics are accurate
+
+**Steps:**
+1. Run: `acode runs stats`
+2. Note total runs and storage used
+3. Run a command with output
+4. Run: `acode runs stats` again
+5. Verify counts increased
+
+**Expected Results:**
+- Stats show total run count
+- Stats show success/failure percentages
+- Stats show total storage used
+- Stats show oldest and newest run dates
+- Stats update after new runs
+
+### Scenario 8: Verify Tagging
+
+**Objective:** Confirm runs can be tagged and filtered by tag
+
+**Steps:**
+1. Run a command and note the run ID
+2. Run: `acode runs tag <run-id> important`
+3. Run: `acode runs list --tag important`
+4. Configure retention to delete old runs
+5. Run cleanup
+6. Verify tagged run is preserved
+
+**Expected Results:**
+- Tag command succeeds
+- Tag filter shows only tagged runs
+- Retention preserves tagged runs
+- Untag command removes tag
+
+### Scenario 9: Verify Large Artifact Handling
+
+**Objective:** Confirm large artifacts are truncated appropriately
+
+**Steps:**
+1. Create a command that outputs large content (> 10MB)
+2. Run: `acode exec -- <large-output-command>`
+3. Run: `acode runs artifacts <run-id>`
+4. Check artifact size and truncation status
+5. Run: `acode runs artifact <artifact-id>`
+
+**Expected Results:**
+- Artifact is stored (not rejected)
+- Artifact size respects configured limit
+- IsTruncated flag is true
+- Content shows truncation message
+- Original size is recorded
+
+### Scenario 10: Verify Concurrent Run Handling
+
+**Objective:** Confirm multiple concurrent runs are tracked separately
+
+**Steps:**
+1. Open two terminal windows
+2. Start long-running commands in both (e.g., `sleep 10`)
+3. Run: `acode runs list` in a third terminal
+4. Observe both runs in progress
+5. Wait for completion
+6. Verify both runs have distinct records
+
+**Expected Results:**
+- Both runs appear in list
+- Each has unique ID
+- Start times may overlap
+- Artifacts are correctly associated with each run
+- No data corruption or mixing
+
+---
+
 ## Implementation Prompt
 
 ### File Structure
 
 ```
 src/AgenticCoder.Domain/Runs/
-├── RunRecord.cs
-├── IRunStore.cs
+├── RunRecord.cs                    # Immutable run record model
+├── RunResult.cs                    # Enum: Success, Failure, Timeout, Cancelled
+├── RunType.cs                      # Enum: Command, Build, Test, Generate
+├── ExecutionContext.cs             # Enum: Host, Docker, Remote
+├── Artifact.cs                     # Artifact model
+├── ArtifactType.cs                 # Enum: Stdout, Stderr, Log, TestResult, etc.
+├── IRunStore.cs                    # Run persistence interface
+├── IArtifactStore.cs               # Artifact persistence interface
+├── RunQuery.cs                     # Query parameters model
+├── PagedResult.cs                  # Paginated query result
 
 src/AgenticCoder.Infrastructure/Runs/
-├── RunStore.cs
-├── RunRepository.cs
+├── RunStore.cs                     # SQLite-backed run store
+├── ArtifactStore.cs                # Filesystem-backed artifact store
+├── ArtifactCollector.cs            # Collects artifacts from execution
+├── RetentionManager.cs             # Handles cleanup policies
+├── RunStoreConfiguration.cs        # Configuration model
+├── Database/
+│   ├── RunsDbContext.cs            # EF Core or Dapper context
+│   ├── Migrations/
+│   │   └── CreateRunsSchema.cs     # Initial schema migration
+│   └── RunRepository.cs            # Data access layer
+
+src/AgenticCoder.CLI/Commands/
+└── RunsCommand.cs                  # CLI subcommands for runs
+
+tests/AgenticCoder.Infrastructure.Tests/Runs/
+├── RunRecordTests.cs
+├── ArtifactTests.cs
+├── RunStoreTests.cs
+├── ArtifactStoreTests.cs
+├── ArtifactCollectorTests.cs
+├── RetentionManagerTests.cs
+└── Integration/
+    ├── RunStoreIntegrationTests.cs
+    └── ArtifactStoreIntegrationTests.cs
 ```
 
 ### RunRecord Model
 
 ```csharp
-public record RunRecord
+namespace AgenticCoder.Domain.Runs;
+
+/// <summary>
+/// Immutable record of a command execution.
+/// </summary>
+public sealed record RunRecord
 {
     public required Guid Id { get; init; }
     public required string Command { get; init; }
-    public required int ExitCode { get; init; }
-    public required bool Success { get; init; }
+    public required IReadOnlyList<string> Arguments { get; init; }
+    public required string WorkingDirectory { get; init; }
+    public required RunResult Result { get; init; }
+    public int? ExitCode { get; init; }
     public required DateTimeOffset StartTime { get; init; }
     public required DateTimeOffset EndTime { get; init; }
+    public TimeSpan Duration => EndTime - StartTime;
     public required string SessionId { get; init; }
-    public required string? TaskId { get; init; }
+    public string? TaskId { get; init; }
+    public Guid? ParentRunId { get; init; }
+    public required RunType Type { get; init; }
+    public required ExecutionContext Context { get; init; }
     public IReadOnlyList<Guid> ArtifactIds { get; init; } = [];
+    public string? ErrorMessage { get; init; }
+    public string? ErrorCode { get; init; }
+    public IReadOnlyDictionary<string, string> Tags { get; init; } = 
+        new Dictionary<string, string>();
 }
+
+public enum RunResult { Success, Failure, Timeout, Cancelled }
+public enum RunType { Command, Build, Test, Generate }
+public enum ExecutionContext { Host, Docker, Remote }
+```
+
+### IRunStore Interface
+
+```csharp
+namespace AgenticCoder.Domain.Runs;
+
+public interface IRunStore
+{
+    Task<RunRecord> CreateAsync(RunRecord record, CancellationToken ct = default);
+    Task<RunRecord?> GetByIdAsync(Guid id, CancellationToken ct = default);
+    Task<PagedResult<RunRecord>> ListAsync(RunQuery query, CancellationToken ct = default);
+    Task<bool> DeleteAsync(Guid id, CancellationToken ct = default);
+    Task<int> CountAsync(RunQuery? query = null, CancellationToken ct = default);
+    Task<bool> ExistsAsync(Guid id, CancellationToken ct = default);
+    Task<RunRecord?> GetLatestAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<RunRecord>> GetBySessionAsync(string sessionId, CancellationToken ct = default);
+    Task<int> DeleteOlderThanAsync(DateTimeOffset cutoff, CancellationToken ct = default);
+    Task<RunStatistics> GetStatisticsAsync(CancellationToken ct = default);
+}
+```
+
+### RunQuery Model
+
+```csharp
+namespace AgenticCoder.Domain.Runs;
+
+public sealed record RunQuery
+{
+    public DateTimeOffset? Since { get; init; }
+    public DateTimeOffset? Until { get; init; }
+    public RunResult? Status { get; init; }
+    public int? ExitCode { get; init; }
+    public string? CommandPattern { get; init; }
+    public bool CommandPatternIsRegex { get; init; }
+    public string? SessionId { get; init; }
+    public string? TaskId { get; init; }
+    public RunType? Type { get; init; }
+    public ExecutionContext? Context { get; init; }
+    public IReadOnlyList<string>? Tags { get; init; }
+    public TimeSpan? MinDuration { get; init; }
+    public TimeSpan? MaxDuration { get; init; }
+    public bool? HasArtifacts { get; init; }
+    public int Skip { get; init; } = 0;
+    public int Take { get; init; } = 20;
+    public string SortBy { get; init; } = "StartTime";
+    public bool SortDescending { get; init; } = true;
+}
+```
+
+### Artifact Model
+
+```csharp
+namespace AgenticCoder.Domain.Runs;
+
+public sealed record Artifact
+{
+    public required Guid Id { get; init; }
+    public required Guid RunId { get; init; }
+    public required ArtifactType Type { get; init; }
+    public required string RelativePath { get; init; }
+    public required string FileName { get; init; }
+    public required long Size { get; init; }
+    public required string Hash { get; init; }  // SHA256
+    public required string MimeType { get; init; }
+    public required DateTimeOffset CreatedAt { get; init; }
+    public string? Description { get; init; }
+    public bool IsTruncated { get; init; }
+    public string? TruncationReason { get; init; }
+    public bool IsCompressed { get; init; }
+    public bool IsSensitive { get; init; }
+    public IReadOnlyDictionary<string, string> Metadata { get; init; } = 
+        new Dictionary<string, string>();
+}
+
+public enum ArtifactType { Stdout, Stderr, Log, TestResult, Coverage, Output, Diff, Other }
 ```
 
 ### Error Codes
 
-| Code | Meaning |
-|------|---------|
-| ACODE-RUN-001 | Run not found |
-| ACODE-RUN-002 | Artifact not found |
+| Code | Meaning | User Message |
+|------|---------|--------------|
+| ACODE-RUN-001 | Run not found | "Run {0} not found. Use 'acode runs list' to see available runs." |
+| ACODE-RUN-002 | Artifact not found | "Artifact {0} not found. It may have been deleted or corrupted." |
+| ACODE-RUN-003 | Query timeout | "Query timed out. Try narrowing your filter criteria." |
+| ACODE-RUN-004 | Storage limit exceeded | "Storage limit exceeded. Run 'acode runs cleanup' to free space." |
+| ACODE-RUN-005 | Database error | "Database error occurred. Check logs for details." |
+| ACODE-RUN-006 | Artifact write failed | "Failed to write artifact. Check disk space and permissions." |
+| ACODE-RUN-007 | Hash mismatch | "Artifact corrupted: hash mismatch. Original data may be lost." |
+| ACODE-RUN-008 | Export failed | "Failed to create export bundle: {0}" |
+| ACODE-RUN-009 | Import failed | "Failed to import bundle: {0}" |
+| ACODE-RUN-010 | Retention failed | "Retention cleanup failed: {0}" |
+
+### CLI Implementation Pattern
+
+```csharp
+namespace AgenticCoder.CLI.Commands;
+
+[Command("runs", Description = "Inspect command execution history")]
+public sealed class RunsCommand
+{
+    [Command("list", Description = "List execution runs")]
+    public async Task<int> ListAsync(
+        [Option("status", Description = "Filter by status")] RunResult? status,
+        [Option("since", Description = "Show runs since (e.g., '1 hour ago')")] string? since,
+        [Option("until", Description = "Show runs until")] string? until,
+        [Option("session", Description = "Filter by session ID")] string? session,
+        [Option("command", Description = "Filter by command pattern")] string? command,
+        [Option("type", Description = "Filter by run type")] RunType? type,
+        [Option("tag", Description = "Filter by tag")] string? tag,
+        [Option("limit", Description = "Max results")] int limit = 20,
+        [Option("json", Description = "Output as JSON")] bool json,
+        IRunStore runStore)
+    {
+        var query = new RunQuery
+        {
+            Status = status,
+            Since = ParseTime(since),
+            Until = ParseTime(until),
+            SessionId = session,
+            CommandPattern = command,
+            Type = type,
+            Tags = tag != null ? new[] { tag } : null,
+            Take = limit,
+            SortDescending = true
+        };
+        
+        var result = await runStore.ListAsync(query);
+        
+        if (json)
+        {
+            Console.WriteLine(JsonSerializer.Serialize(result, JsonOptions.Pretty));
+        }
+        else
+        {
+            PrintRunTable(result.Items);
+            Console.WriteLine($"\nShowing {result.Items.Count} of {result.TotalCount} runs");
+        }
+        
+        return 0;
+    }
+    
+    [Command("show", Description = "Show run details")]
+    public async Task<int> ShowAsync(
+        [Argument] Guid runId,
+        [Option("preview", Description = "Preview artifact content")] bool preview,
+        IRunStore runStore,
+        IArtifactStore artifactStore)
+    {
+        var run = await runStore.GetByIdAsync(runId);
+        if (run == null)
+        {
+            Console.Error.WriteLine($"Run {runId} not found");
+            return 1;
+        }
+        
+        PrintRunDetails(run);
+        
+        var artifacts = await artifactStore.GetByRunIdAsync(runId);
+        PrintArtifactList(artifacts, preview);
+        
+        return 0;
+    }
+}
+```
+
+### Implementation Checklist
+
+| Step | Task | Verification |
+|------|------|--------------|
+| 1 | Create RunRecord and related enums in Domain | Models compile, tests pass |
+| 2 | Create Artifact model in Domain | Model compiles, tests pass |
+| 3 | Create IRunStore interface in Domain | Interface compiles |
+| 4 | Create IArtifactStore interface in Domain | Interface compiles |
+| 5 | Create RunQuery and PagedResult in Domain | Models compile |
+| 6 | Create database schema and migrations | Migration applies |
+| 7 | Implement RunStore with SQLite | Unit tests pass |
+| 8 | Implement ArtifactStore with filesystem | Unit tests pass |
+| 9 | Implement ArtifactCollector | Collection works |
+| 10 | Implement RetentionManager | Cleanup works |
+| 11 | Add CLI commands | All commands functional |
+| 12 | Integrate with CommandRunner | Runs auto-recorded |
+| 13 | Write integration tests | All scenarios pass |
+| 14 | Write benchmarks | Performance meets targets |
+| 15 | Document in user manual | Documentation complete |
+
+### Rollout Plan
+
+| Phase | Action | Success Criteria |
+|-------|--------|------------------|
+| 1 | Implement Domain models | Models compile, unit tests pass |
+| 2 | Implement RunStore | CRUD operations work |
+| 3 | Implement ArtifactStore | File save/load works |
+| 4 | Implement ArtifactCollector | Artifacts captured from runs |
+| 5 | Implement CLI commands | List/show/delete work |
+| 6 | Implement RetentionManager | Cleanup enforces policy |
+| 7 | Implement Export/Import | Bundles create and import |
+| 8 | Integration testing | All E2E tests pass |
+| 9 | Documentation | User manual complete |
+| 10 | Release | Feature available in CLI |
+
+### Dependencies
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| Microsoft.Data.Sqlite | 8.0.* | SQLite database access |
+| System.IO.Compression | Built-in | Artifact compression |
+| System.Text.Json | Built-in | JSON serialization |
 
 ---
 

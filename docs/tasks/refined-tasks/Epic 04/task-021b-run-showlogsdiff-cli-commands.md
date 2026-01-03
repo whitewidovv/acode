@@ -10,36 +10,68 @@
 
 ## Description
 
-Task 021.b implements CLI commands for inspecting past execution runs. Users MUST be able to view run history, read logs, and compare outputs. These commands provide visibility into execution behavior.
+### Overview
 
-The `acode runs show` command MUST display run metadata. This includes start time, end time, exit code, command executed, and artifact paths. The Workspace DB (Task 011) MUST be the primary data source. Filesystem artifacts provide fallback when DB records are incomplete.
-
-The `acode runs logs` command MUST stream stdout and stderr from artifact files. Users MUST be able to filter by stream (stdout only, stderr only, or both). Large logs MUST support pagination or tail modes.
-
-The `acode runs diff` command MUST compare two runs. This enables detecting behavioral changes. Output differences MUST highlight additions and removals. Exit code differences MUST be clearly indicated.
-
-All commands MUST respect Task 001 operating modes. In airgapped mode, commands MUST NOT attempt network operations. The commands MUST NOT require external services.
-
-Integration with Task 021.a ensures artifact paths are predictable. The `.acode/artifacts/{run-id}/` structure MUST be assumed. Missing artifacts MUST produce clear error messages.
-
-The CLI MUST provide machine-readable output via `--format json`. This enables scripting and automation. The default MUST be human-readable text.
-
-Performance MUST be acceptable for repos with thousands of runs. Queries MUST use indexed fields. Log streaming MUST NOT load entire files into memory.
+Task 021.b implements CLI commands for inspecting past execution runs. Users MUST be able to view run history, read logs, and compare outputs. These commands provide visibility into execution behavior and enable debugging, auditing, and root cause analysis.
 
 ### Business Value
 
-Run inspection enables debugging and auditing. When builds fail, users need access to previous outputs. Diff capabilities reveal what changed between successful and failing runs. This accelerates root cause analysis.
+1. **Debugging Acceleration**: Quick access to previous outputs speeds root cause analysis
+2. **Audit Trail Access**: Compliance teams can review execution history on demand
+3. **Regression Detection**: Diff capability reveals what changed between runs
+4. **Scripting Enablement**: JSON output enables automation and CI integration
+5. **Operational Visibility**: Teams gain insight into execution patterns and failures
+6. **Historical Analysis**: Trend identification across multiple runs
 
-### Scope Boundaries
+### Core Commands
 
-This task covers the CLI commands for run inspection. It does NOT cover the underlying storage (Task 021) or artifact structure (Task 021.a). Export functionality is covered by Task 021.c.
+| Command | Purpose |
+|---------|---------|
+| `acode runs list` | List all runs with summary info |
+| `acode runs show {id}` | Display detailed run metadata |
+| `acode runs logs {id}` | Stream stdout/stderr from run |
+| `acode runs diff {id1} {id2}` | Compare two runs |
+
+### Scope
+
+This task covers:
+1. **List Command**: Filtering, sorting, pagination of run history
+2. **Show Command**: Detailed metadata display with environment redaction
+3. **Logs Command**: Streaming log access with tail/head support
+4. **Diff Command**: Unified diff output with color support
+5. **Output Formats**: Human-readable text, JSON, YAML
+6. **Performance**: Efficient queries and streaming for large datasets
+
+### Integration Points
+
+| Component | Integration Type | Data Flow |
+|-----------|------------------|-----------|
+| Workspace DB (Task 011) | Run Metadata | DB → RunRepository |
+| Artifact Storage (Task 021.a) | Log Files | Files → ArtifactReader |
+| Operating Modes (Task 001) | Mode Constraints | ModeService → Commands |
+| CLI Framework (Task 050) | Command Registration | Commands → CLI |
 
 ### Failure Modes
 
-- Run ID not found in DB → Return exit code 1 with clear message
-- Artifacts missing on disk → Return partial data with warning
-- Invalid date filters → Return exit code 2 with usage help
-- DB corruption → Suggest rebuild command
+| Failure Mode | Detection | Recovery |
+|--------------|-----------|----------|
+| Run ID not found | DB query returns null | Exit 1, clear message |
+| Artifacts missing | File not found | Partial data with warning |
+| Invalid filters | Validation failure | Exit 2, usage help |
+| DB corruption | Query exception | Suggest rebuild command |
+| Large log OOM | Memory monitoring | Use streaming reader |
+
+### Scope Boundaries
+
+- ✅ IN SCOPE: CLI commands for run inspection
+- ❌ OUT OF SCOPE: Run storage (Task 021), artifact structure (Task 021.a), export (Task 021.c)
+
+### Operating Mode Compliance
+
+All commands MUST respect Task 001 operating modes:
+- Air-gapped mode: No network operations
+- Commands work entirely offline
+- No external service dependencies
 
 ---
 
@@ -606,7 +638,10 @@ src/
 ├── Acode.Domain/
 │   └── Runs/
 │       ├── RunId.cs
-│       └── RunSummary.cs
+│       ├── RunSummary.cs
+│       ├── RunDetails.cs
+│       ├── RunStatus.cs
+│       └── IRunRepository.cs
 ├── Acode.Application/
 │   └── Runs/
 │       └── Queries/
@@ -617,7 +652,9 @@ src/
 ├── Acode.Infrastructure/
 │   └── Runs/
 │       ├── RunRepository.cs
-│       └── ArtifactReader.cs
+│       ├── ArtifactReader.cs
+│       ├── EnvironmentRedactor.cs
+│       └── UnifiedDiffGenerator.cs
 └── Acode.Cli/
     └── Commands/
         └── Runs/
@@ -627,70 +664,635 @@ src/
             └── RunsDiffCommand.cs
 ```
 
-### Core Interfaces
+### Domain Models
 
 ```csharp
+// RunId.cs
+namespace Acode.Domain.Runs;
+
+public readonly record struct RunId
+{
+    public string Value { get; }
+    
+    public RunId(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        Value = value;
+    }
+    
+    public static implicit operator string(RunId id) => id.Value;
+    public override string ToString() => Value;
+    
+    public bool MatchesPartial(string partial) =>
+        Value.StartsWith(partial, StringComparison.OrdinalIgnoreCase);
+}
+
+// RunSummary.cs
+namespace Acode.Domain.Runs;
+
+public sealed record RunSummary
+{
+    public required RunId Id { get; init; }
+    public required DateTimeOffset StartTime { get; init; }
+    public required int ExitCode { get; init; }
+    public required string CommandPreview { get; init; }
+    public required RunStatus Status { get; init; }
+    public TimeSpan? Duration { get; init; }
+}
+
+// RunDetails.cs
+namespace Acode.Domain.Runs;
+
+public sealed record RunDetails
+{
+    public required RunId Id { get; init; }
+    public required string TaskName { get; init; }
+    public required DateTimeOffset StartTime { get; init; }
+    public required DateTimeOffset EndTime { get; init; }
+    public required TimeSpan Duration { get; init; }
+    public required int ExitCode { get; init; }
+    public required RunStatus Status { get; init; }
+    public required string Command { get; init; }
+    public required string WorkingDirectory { get; init; }
+    public required string OperatingMode { get; init; }
+    public string? ContainerId { get; init; }
+    public IReadOnlyDictionary<string, string> Environment { get; init; } = 
+        new Dictionary<string, string>();
+    public IReadOnlyList<ArtifactInfo> Artifacts { get; init; } = 
+        Array.Empty<ArtifactInfo>();
+}
+
+public sealed record ArtifactInfo
+{
+    public required string FileName { get; init; }
+    public required string Path { get; init; }
+    public required bool Exists { get; init; }
+    public long? SizeBytes { get; init; }
+}
+
+// RunStatus.cs
+namespace Acode.Domain.Runs;
+
+public enum RunStatus
+{
+    Running,
+    Success,
+    Failure,
+    Cancelled,
+    TimedOut
+}
+
+// IRunRepository.cs
+namespace Acode.Domain.Runs;
+
 public interface IRunRepository
 {
-    Task<IReadOnlyList<RunSummary>> ListAsync(RunListFilter filter);
-    Task<RunDetails?> GetAsync(RunId id);
-    Task<RunDetails?> GetByPartialIdAsync(string partialId);
+    Task<IReadOnlyList<RunSummary>> ListAsync(
+        RunListFilter filter,
+        CancellationToken cancellationToken = default);
+    
+    Task<RunDetails?> GetAsync(
+        RunId id,
+        CancellationToken cancellationToken = default);
+    
+    Task<IReadOnlyList<RunDetails>> GetByPartialIdAsync(
+        string partialId,
+        CancellationToken cancellationToken = default);
+    
+    Task<int> CountAsync(CancellationToken cancellationToken = default);
 }
 
-public interface IArtifactReader
+// RunListFilter.cs
+namespace Acode.Domain.Runs;
+
+public sealed record RunListFilter
 {
-    Task<Stream?> OpenStdoutAsync(RunId id);
-    Task<Stream?> OpenStderrAsync(RunId id);
-    Task<bool> ExistsAsync(RunId id, string artifactName);
+    public int Limit { get; init; } = 20;
+    public DateTimeOffset? Since { get; init; }
+    public DateTimeOffset? Until { get; init; }
+    public RunStatus? Status { get; init; }
+    public string? CommandPattern { get; init; }
+    public SortOrder Order { get; init; } = SortOrder.Descending;
 }
 
-public record RunListFilter(
-    int? Limit,
-    DateTimeOffset? Since,
-    DateTimeOffset? Until,
-    int? ExitCode,
-    string? CommandPattern);
-
-public record RunSummary(
-    RunId Id,
-    DateTimeOffset StartTime,
-    int ExitCode,
-    string CommandPreview);
-
-public record RunDetails(
-    RunId Id,
-    DateTimeOffset StartTime,
-    DateTimeOffset EndTime,
-    TimeSpan Duration,
-    int ExitCode,
-    string Command,
-    string WorkingDirectory,
-    IReadOnlyDictionary<string, string> Environment,
-    IReadOnlyList<string> ArtifactPaths);
+public enum SortOrder
+{
+    Ascending,
+    Descending
+}
 ```
 
-### Validation Checklist Before Merge
+### Infrastructure Implementation
 
-- [ ] All commands have `--help` output
-- [ ] Exit codes match documentation
-- [ ] Redaction patterns are configurable
-- [ ] Performance benchmarks pass
-- [ ] No stack traces on user errors
-- [ ] JSON output is valid and parseable
-- [ ] Partial ID matching tested
-- [ ] Large file streaming tested
-- [ ] Memory profiling completed
+```csharp
+// RunRepository.cs
+namespace Acode.Infrastructure.Runs;
+
+public sealed class RunRepository : IRunRepository
+{
+    private readonly IWorkspaceDb _db;
+    private readonly ILogger<RunRepository> _logger;
+    
+    public RunRepository(IWorkspaceDb db, ILogger<RunRepository> logger)
+    {
+        _db = db;
+        _logger = logger;
+    }
+    
+    public async Task<IReadOnlyList<RunSummary>> ListAsync(
+        RunListFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        var query = @"
+            SELECT run_id, start_time, exit_code, command, status, duration_ms
+            FROM runs
+            WHERE (@since IS NULL OR start_time >= @since)
+              AND (@until IS NULL OR start_time <= @until)
+              AND (@status IS NULL OR status = @status)
+              AND (@pattern IS NULL OR command LIKE @pattern)
+            ORDER BY start_time DESC
+            LIMIT @limit";
+        
+        var parameters = new
+        {
+            since = filter.Since?.ToString("O"),
+            until = filter.Until?.ToString("O"),
+            status = filter.Status?.ToString(),
+            pattern = filter.CommandPattern != null ? $"%{filter.CommandPattern}%" : null,
+            limit = filter.Limit
+        };
+        
+        var results = await _db.QueryAsync<RunRow>(query, parameters, cancellationToken);
+        
+        return results.Select(r => new RunSummary
+        {
+            Id = new RunId(r.RunId),
+            StartTime = DateTimeOffset.Parse(r.StartTime),
+            ExitCode = r.ExitCode,
+            CommandPreview = TruncateCommand(r.Command, 60),
+            Status = Enum.Parse<RunStatus>(r.Status),
+            Duration = r.DurationMs.HasValue 
+                ? TimeSpan.FromMilliseconds(r.DurationMs.Value) 
+                : null
+        }).ToList();
+    }
+    
+    public async Task<IReadOnlyList<RunDetails>> GetByPartialIdAsync(
+        string partialId,
+        CancellationToken cancellationToken = default)
+    {
+        var query = @"
+            SELECT * FROM runs
+            WHERE run_id LIKE @pattern
+            ORDER BY start_time DESC
+            LIMIT 10";
+        
+        var results = await _db.QueryAsync<RunRow>(
+            query, 
+            new { pattern = $"{partialId}%" }, 
+            cancellationToken);
+        
+        return results.Select(MapToDetails).ToList();
+    }
+    
+    private static string TruncateCommand(string command, int maxLength)
+    {
+        if (command.Length <= maxLength) return command;
+        return command[..(maxLength - 3)] + "...";
+    }
+}
+
+// ArtifactReader.cs
+namespace Acode.Infrastructure.Runs;
+
+public sealed class ArtifactReader : IArtifactReader
+{
+    private readonly IArtifactPathResolver _pathResolver;
+    private readonly IFileSystem _fileSystem;
+    
+    public async IAsyncEnumerable<string> StreamLinesAsync(
+        RunId runId,
+        string filename,
+        int? tail = null,
+        int? head = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var path = _pathResolver.GetArtifactPath(runId.Value, filename);
+        
+        if (!_fileSystem.File.Exists(path))
+        {
+            yield break;
+        }
+        
+        // Check for binary content
+        if (await IsBinaryAsync(path, cancellationToken))
+        {
+            throw new BinaryContentException($"File {filename} contains binary content");
+        }
+        
+        if (tail.HasValue)
+        {
+            await foreach (var line in TailLinesAsync(path, tail.Value, cancellationToken))
+            {
+                yield return line;
+            }
+        }
+        else if (head.HasValue)
+        {
+            var count = 0;
+            await foreach (var line in ReadLinesAsync(path, cancellationToken))
+            {
+                if (count++ >= head.Value) break;
+                yield return line;
+            }
+        }
+        else
+        {
+            await foreach (var line in ReadLinesAsync(path, cancellationToken))
+            {
+                yield return line;
+            }
+        }
+    }
+    
+    private async Task<bool> IsBinaryAsync(string path, CancellationToken ct)
+    {
+        var buffer = new byte[8192];
+        await using var stream = _fileSystem.File.OpenRead(path);
+        var bytesRead = await stream.ReadAsync(buffer, ct);
+        
+        return buffer.Take(bytesRead).Any(b => b == 0);
+    }
+    
+    private async IAsyncEnumerable<string> TailLinesAsync(
+        string path,
+        int lineCount,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        var lines = new Queue<string>(lineCount);
+        
+        await foreach (var line in ReadLinesAsync(path, ct))
+        {
+            lines.Enqueue(line);
+            if (lines.Count > lineCount)
+            {
+                lines.Dequeue();
+            }
+        }
+        
+        foreach (var line in lines)
+        {
+            yield return line;
+        }
+    }
+    
+    private async IAsyncEnumerable<string> ReadLinesAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await using var stream = _fileSystem.File.OpenRead(path);
+        using var reader = new StreamReader(stream, Encoding.UTF8, 
+            detectEncodingFromByteOrderMarks: true, 
+            bufferSize: 65536, 
+            leaveOpen: true);
+        
+        while (!reader.EndOfStream && !ct.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(ct);
+            if (line is not null)
+            {
+                yield return line;
+            }
+        }
+    }
+}
+
+// EnvironmentRedactor.cs
+namespace Acode.Infrastructure.Runs;
+
+public sealed class EnvironmentRedactor : IEnvironmentRedactor
+{
+    private readonly IReadOnlyList<string> _patterns;
+    private const string RedactedValue = "********";
+    
+    public EnvironmentRedactor(IOptions<RedactionConfig> config)
+    {
+        _patterns = config.Value.Patterns ?? new[]
+        {
+            "PASSWORD", "SECRET", "KEY", "TOKEN", "API_KEY",
+            "APIKEY", "CREDENTIAL", "PRIVATE", "AUTH"
+        };
+    }
+    
+    public IReadOnlyDictionary<string, string> Redact(
+        IReadOnlyDictionary<string, string> environment)
+    {
+        var redacted = new Dictionary<string, string>(environment.Count);
+        
+        foreach (var (key, value) in environment)
+        {
+            var shouldRedact = _patterns.Any(p => 
+                key.Contains(p, StringComparison.OrdinalIgnoreCase) ||
+                value.Contains(p, StringComparison.OrdinalIgnoreCase));
+            
+            redacted[key] = shouldRedact ? RedactedValue : value;
+        }
+        
+        return redacted;
+    }
+}
+
+// UnifiedDiffGenerator.cs
+namespace Acode.Infrastructure.Runs;
+
+public sealed class UnifiedDiffGenerator : IDiffGenerator
+{
+    public async IAsyncEnumerable<DiffLine> GenerateAsync(
+        IAsyncEnumerable<string> linesA,
+        IAsyncEnumerable<string> linesB,
+        int contextLines = 3,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var listA = await linesA.ToListAsync(ct);
+        var listB = await linesB.ToListAsync(ct);
+        
+        var diff = new MyersDiff<string>(listA, listB);
+        
+        foreach (var hunk in diff.GetHunks(contextLines))
+        {
+            yield return new DiffLine(DiffLineType.HunkHeader, hunk.Header);
+            
+            foreach (var line in hunk.Lines)
+            {
+                yield return line;
+            }
+        }
+    }
+}
+
+public sealed record DiffLine(DiffLineType Type, string Content);
+
+public enum DiffLineType
+{
+    Context,
+    Added,
+    Removed,
+    HunkHeader
+}
+```
+
+### CLI Commands
+
+```csharp
+// RunsListCommand.cs
+namespace Acode.Cli.Commands.Runs;
+
+[Command("runs list", Description = "List execution runs")]
+public class RunsListCommand
+{
+    [Option("--limit", Description = "Maximum runs to display")]
+    public int Limit { get; set; } = 20;
+    
+    [Option("--since", Description = "Filter runs after date (ISO 8601 or relative)")]
+    public string? Since { get; set; }
+    
+    [Option("--status", Description = "Filter by status (success, failed)")]
+    public string? Status { get; set; }
+    
+    [Option("--format", Description = "Output format (table, json)")]
+    public string Format { get; set; } = "table";
+    
+    public async Task<int> ExecuteAsync(
+        IRunRepository repository,
+        IConsole console,
+        CancellationToken ct)
+    {
+        var filter = new RunListFilter
+        {
+            Limit = Limit,
+            Since = ParseDate(Since),
+            Status = ParseStatus(Status)
+        };
+        
+        var runs = await repository.ListAsync(filter, ct);
+        
+        if (Format == "json")
+        {
+            console.WriteLine(JsonSerializer.Serialize(runs, JsonOptions.Pretty));
+        }
+        else
+        {
+            RenderTable(console, runs);
+        }
+        
+        return 0;
+    }
+    
+    private void RenderTable(IConsole console, IReadOnlyList<RunSummary> runs)
+    {
+        console.WriteLine("RUN ID            STARTED              STATUS   EXIT  COMMAND");
+        console.WriteLine(new string('-', 80));
+        
+        foreach (var run in runs)
+        {
+            var status = run.Status == RunStatus.Success ? "✓" : "✗";
+            console.WriteLine(
+                $"{run.Id.Value,-17} {run.StartTime:yyyy-MM-dd HH:mm}  {status,-8} {run.ExitCode,4}  {run.CommandPreview}");
+        }
+        
+        if (runs.Count == 0)
+        {
+            console.WriteLine("No runs found.");
+        }
+    }
+}
+
+// RunsLogsCommand.cs
+namespace Acode.Cli.Commands.Runs;
+
+[Command("runs logs", Description = "Display run output logs")]
+public class RunsLogsCommand
+{
+    [Argument(0, Description = "Run ID")]
+    public string RunId { get; set; } = "";
+    
+    [Option("--stdout", Description = "Show only stdout")]
+    public bool StdoutOnly { get; set; }
+    
+    [Option("--stderr", Description = "Show only stderr")]
+    public bool StderrOnly { get; set; }
+    
+    [Option("--tail", Description = "Show last N lines")]
+    public int? Tail { get; set; }
+    
+    [Option("--no-prefix", Description = "Omit stream prefixes")]
+    public bool NoPrefix { get; set; }
+    
+    public async Task<int> ExecuteAsync(
+        IRunRepository repository,
+        IArtifactReader artifactReader,
+        IConsole console,
+        CancellationToken ct)
+    {
+        var run = await ResolveRunAsync(repository, RunId, ct);
+        if (run is null)
+        {
+            console.Error.WriteLine($"Run not found: {RunId}");
+            return 1;
+        }
+        
+        var streams = GetStreamsToShow();
+        
+        foreach (var (stream, prefix) in streams)
+        {
+            var filename = stream == "stdout" ? "stdout.txt" : "stderr.txt";
+            
+            await foreach (var line in artifactReader.StreamLinesAsync(
+                run.Id, filename, Tail, null, ct))
+            {
+                var output = NoPrefix ? line : $"[{prefix}] {line}";
+                console.WriteLine(output);
+            }
+        }
+        
+        return 0;
+    }
+    
+    private IEnumerable<(string stream, string prefix)> GetStreamsToShow()
+    {
+        if (StdoutOnly) return new[] { ("stdout", "stdout") };
+        if (StderrOnly) return new[] { ("stderr", "stderr") };
+        return new[] { ("stdout", "stdout"), ("stderr", "stderr") };
+    }
+}
+
+// RunsDiffCommand.cs
+namespace Acode.Cli.Commands.Runs;
+
+[Command("runs diff", Description = "Compare two runs")]
+public class RunsDiffCommand
+{
+    [Argument(0, Description = "First run ID")]
+    public string RunId1 { get; set; } = "";
+    
+    [Argument(1, Description = "Second run ID")]
+    public string RunId2 { get; set; } = "";
+    
+    [Option("--context", Description = "Context lines")]
+    public int Context { get; set; } = 3;
+    
+    [Option("--color")]
+    public bool Color { get; set; } = true;
+    
+    public async Task<int> ExecuteAsync(
+        IRunRepository repository,
+        IArtifactReader artifactReader,
+        IDiffGenerator diffGenerator,
+        IConsole console,
+        CancellationToken ct)
+    {
+        var run1 = await ResolveRunAsync(repository, RunId1, ct);
+        var run2 = await ResolveRunAsync(repository, RunId2, ct);
+        
+        if (run1 is null || run2 is null)
+        {
+            console.Error.WriteLine("One or both runs not found");
+            return 2;
+        }
+        
+        // Exit code comparison
+        console.WriteLine($"Exit Code: {run1.ExitCode} → {run2.ExitCode}");
+        console.WriteLine($"Duration:  {run1.Duration} → {run2.Duration}");
+        console.WriteLine();
+        
+        // Stdout diff
+        console.WriteLine("=== stdout ===");
+        var stdout1 = artifactReader.StreamLinesAsync(run1.Id, "stdout.txt", ct: ct);
+        var stdout2 = artifactReader.StreamLinesAsync(run2.Id, "stdout.txt", ct: ct);
+        
+        var hasDiff = false;
+        await foreach (var line in diffGenerator.GenerateAsync(stdout1, stdout2, Context, ct))
+        {
+            hasDiff = true;
+            console.WriteLine(FormatDiffLine(line, Color));
+        }
+        
+        return hasDiff || run1.ExitCode != run2.ExitCode ? 1 : 0;
+    }
+    
+    private string FormatDiffLine(DiffLine line, bool color)
+    {
+        var prefix = line.Type switch
+        {
+            DiffLineType.Added => "+",
+            DiffLineType.Removed => "-",
+            DiffLineType.HunkHeader => "@@",
+            _ => " "
+        };
+        
+        var text = $"{prefix}{line.Content}";
+        
+        if (!color) return text;
+        
+        return line.Type switch
+        {
+            DiffLineType.Added => $"\u001b[32m{text}\u001b[0m",
+            DiffLineType.Removed => $"\u001b[31m{text}\u001b[0m",
+            DiffLineType.HunkHeader => $"\u001b[36m{text}\u001b[0m",
+            _ => text
+        };
+    }
+}
+```
+
+### Error Codes
+
+| Code | Meaning | Recovery |
+|------|---------|----------|
+| 0 | Success / Runs identical (diff) | N/A |
+| 1 | Run not found / Runs differ (diff) | Check run ID, list runs |
+| 2 | Invalid arguments / Missing artifacts | Check command syntax |
+| 3 | Database error | Check DB integrity |
+| ACODE-RUN-001 | Run ID not found | Verify run ID with `runs list` |
+| ACODE-RUN-002 | Partial ID ambiguous | Use more characters |
+| ACODE-RUN-003 | Artifact file missing | Run may not have captured output |
+| ACODE-RUN-004 | Binary content detected | Use external tool for binary |
+| ACODE-RUN-005 | Database connection failed | Check workspace DB |
+
+### Implementation Checklist
+
+- [ ] Create domain models for RunId, RunSummary, RunDetails
+- [ ] Implement IRunRepository interface
+- [ ] Implement RunRepository with SQLite queries
+- [ ] Implement IArtifactReader for streaming logs
+- [ ] Implement EnvironmentRedactor with configurable patterns
+- [ ] Implement UnifiedDiffGenerator for diff output
+- [ ] Create RunsListCommand with filtering options
+- [ ] Create RunsShowCommand with format options
+- [ ] Create RunsLogsCommand with tail/head support
+- [ ] Create RunsDiffCommand with color output
+- [ ] Add --help for all commands
+- [ ] Add unit tests for repository queries
+- [ ] Add unit tests for date parsing
+- [ ] Add unit tests for redaction
+- [ ] Add integration tests for DB queries
+- [ ] Add E2E tests for CLI commands
+- [ ] Performance test with 10000 runs
+- [ ] Document all commands in user manual
 
 ### Rollout Plan
 
-1. Implement RunRepository queries
-2. Implement ArtifactReader streaming
-3. Implement CLI commands one at a time
-4. Add integration tests with real DB
-5. Add E2E tests for full workflows
-6. Performance testing with large datasets
-7. Documentation updates
-8. Release as part of CLI bundle
+| Phase | Action | Validation |
+|-------|--------|------------|
+| 1 | Implement domain models | Unit tests pass |
+| 2 | Implement RunRepository | Query tests pass |
+| 3 | Implement ArtifactReader | Streaming tests pass |
+| 4 | Implement runs list command | List E2E tests pass |
+| 5 | Implement runs show command | Show E2E tests pass |
+| 6 | Implement runs logs command | Logs E2E tests pass |
+| 7 | Implement runs diff command | Diff E2E tests pass |
+| 8 | Performance testing | <100ms for 10000 runs |
+| 9 | Documentation and release | User manual complete |
 
 ---
 
