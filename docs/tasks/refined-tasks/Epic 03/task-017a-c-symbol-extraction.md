@@ -10,27 +10,64 @@
 
 ## Description
 
-Task 017.a implements C# symbol extraction using Roslyn. Roslyn is the .NET compiler platform. It provides complete syntactic and semantic analysis of C# code.
+### Business Value
 
-C# is the primary language for this project. Most agent code is C#. C# symbol extraction is critical for code intelligence. Without it, the agent cannot understand C# codebases.
+C# symbol extraction is the foundational capability that enables the agent to understand .NET codebases. Without the ability to parse and extract symbols from C# source files, the agent cannot navigate class hierarchies, find method signatures, or understand the structure of the code it is asked to modify. This task implements production-grade C# parsing using Roslyn, the official .NET compiler platform.
 
-Roslyn provides two analysis layers. Syntax analysis parses code structure without compilation. Semantic analysis provides type information and bindings. Both are needed for complete extraction.
+The extracted symbols feed directly into the Symbol Index (Task 017), which powers code intelligence features across the entire agent. When a user asks the agent to modify a method, the symbol extractor identifies that method's location, signature, visibility, and documentation. When the agent needs to understand class relationships, the extractor provides inheritance and interface implementation data. The quality of symbol extraction directly impacts the agent's ability to make correct, contextually-aware code changes.
 
-Syntax analysis is fast. It parses a single file independently. No project context needed. Useful for basic symbol identification.
+Roslyn provides two analysis layers that this task leverages. Syntax analysis offers fast, standalone parsing without project context—ideal for quick symbol identification during interactive sessions. Semantic analysis provides richer type resolution, overload identification, and inheritance information at the cost of requiring compilation context. The extractor supports both modes, allowing the system to trade accuracy for speed based on operational requirements.
 
-Semantic analysis is richer. It resolves types, finds overloads, identifies inheritance. Requires compilation context. More expensive but more accurate.
+### Scope
 
-The extractor supports both modes. Quick mode uses syntax only. Full mode uses semantic analysis. Configuration controls the mode.
+This task delivers the following components:
 
-Symbol extraction handles all C# constructs. Classes, interfaces, structs, enums. Methods, properties, fields, events. Constructors, finalizers, operators. Delegates, lambdas (named only).
+1. **RoslynParser** - Wrapper around Roslyn APIs for syntax tree and semantic model access with proper workspace management
+2. **SymbolVisitor** - CSharpSyntaxWalker implementation that visits all declaration nodes and extracts symbol information
+3. **XmlDocExtractor** - Parser for C# XML documentation comments (summary, param, returns, remarks, example sections)
+4. **SignatureFormatter** - Generates human-readable method and property signatures from Roslyn symbols
+5. **CSharpSymbolExtractor** - ISymbolExtractor implementation that orchestrates parsing and extraction for .cs files
 
-The extractor captures symbol metadata. Name and fully qualified name. Location (file, line, column). Visibility (public, private, protected, internal). Signature for methods. Documentation comments.
+### Integration Points
 
-XML documentation is extracted. Summary, param, returns, example sections. Documentation aids context packing. The agent can explain what code does.
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Symbol Index (Task 017) | Consumer | Receives extracted symbols for indexing and querying |
+| Dependency Mapper (Task 017.c) | Consumer | Uses extracted symbols to build dependency relationships |
+| Context Packer | Consumer | Retrieves symbol metadata when packing code context for prompts |
+| Configuration System | Configuration | Reads extraction settings (semantic mode, include private, exclude patterns) |
+| File System Abstraction | Dependency | Reads C# source files for parsing |
+| Logging Infrastructure | Dependency | Reports extraction progress, errors, and metrics |
 
-Roslyn handles C# versions automatically. Syntax varies between versions. The extractor adapts to the code being parsed. No version configuration needed.
+### Failure Modes
 
-Error handling is robust. Malformed code is common during editing. The extractor extracts what it can. Parse errors are logged but don't block extraction.
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Roslyn parse failure | File symbols not extracted | Graceful degradation—log error, continue with other files, return partial results |
+| Semantic model unavailable | Reduced type resolution accuracy | Fall back to syntax-only mode automatically |
+| Out of memory on large files | Process crash or hang | File size limits (500KB default), streaming for very large files |
+| Invalid C# syntax | Partial AST available | Extract from valid portions of the syntax tree |
+| Missing project references | Unresolved type names | Use syntax analysis for names, mark types as unresolved |
+| Concurrent file access | Read failures | Retry with exponential backoff, skip if unavailable |
+
+### Assumptions
+
+1. Roslyn is available as a NuGet dependency (Microsoft.CodeAnalysis.CSharp)
+2. Source files use UTF-8 encoding (with BOM detection for legacy files)
+3. C# language version is auto-detected from the source file syntax
+4. Semantic analysis requires a compilable project context (csproj or solution)
+5. Private members are extracted by default but can be filtered via configuration
+6. Generated files (*.Designer.cs, obj/, bin/) are excluded by default
+7. XML documentation follows standard C# documentation comment format
+8. Symbol IDs are generated as deterministic hashes for consistent indexing
+
+### Security Considerations
+
+1. **No Code Execution** - Roslyn parsing MUST NOT compile or execute any code from source files
+2. **Path Validation** - All file paths MUST be validated to prevent directory traversal attacks
+3. **Content Limits** - Maximum file size and symbol count limits prevent DoS via crafted files
+4. **Sandboxed Parsing** - Roslyn workspace is read-only; no modifications to source files
+5. **Memory Bounds** - Semantic model caching is bounded to prevent memory exhaustion
 
 ---
 
@@ -72,114 +109,158 @@ The following items are explicitly excluded from Task 017.a:
 
 ## Functional Requirements
 
-### Roslyn Integration
+### Roslyn Integration (FR-017a-01 to FR-017a-06)
 
-- FR-001: Create Roslyn workspace
-- FR-002: Parse single file
-- FR-003: Parse project
-- FR-004: Get syntax tree
-- FR-005: Get semantic model
-- FR-006: Handle parse errors
+| ID | Requirement |
+|----|-------------|
+| FR-017a-01 | System MUST create Roslyn AdhocWorkspace for file parsing |
+| FR-017a-02 | System MUST parse single C# files independently |
+| FR-017a-03 | System MUST support parsing files within project context |
+| FR-017a-04 | System MUST expose syntax tree for each parsed file |
+| FR-017a-05 | System MUST provide semantic model when project context is available |
+| FR-017a-06 | System MUST handle parse errors gracefully and continue extraction |
 
-### Symbol Discovery
+### Symbol Discovery (FR-017a-07 to FR-017a-19)
 
-- FR-007: Extract namespace declarations
-- FR-008: Extract class declarations
-- FR-009: Extract interface declarations
-- FR-010: Extract struct declarations
-- FR-011: Extract enum declarations
-- FR-012: Extract record declarations
-- FR-013: Extract method declarations
-- FR-014: Extract property declarations
-- FR-015: Extract field declarations
-- FR-016: Extract event declarations
-- FR-017: Extract constructor declarations
-- FR-018: Extract delegate declarations
-- FR-019: Extract indexer declarations
+| ID | Requirement |
+|----|-------------|
+| FR-017a-07 | System MUST extract namespace declarations |
+| FR-017a-08 | System MUST extract class declarations (including nested classes) |
+| FR-017a-09 | System MUST extract interface declarations |
+| FR-017a-10 | System MUST extract struct declarations |
+| FR-017a-11 | System MUST extract enum declarations with members |
+| FR-017a-12 | System MUST extract record declarations |
+| FR-017a-13 | System MUST extract method declarations with signatures |
+| FR-017a-14 | System MUST extract property declarations with types |
+| FR-017a-15 | System MUST extract field declarations with types |
+| FR-017a-16 | System MUST extract event declarations |
+| FR-017a-17 | System MUST extract constructor declarations |
+| FR-017a-18 | System MUST extract delegate declarations |
+| FR-017a-19 | System MUST extract indexer declarations |
 
-### Symbol Metadata
+### Symbol Metadata (FR-017a-20 to FR-017a-30)
 
-- FR-020: Extract symbol name
-- FR-021: Extract fully qualified name
-- FR-022: Extract symbol kind
-- FR-023: Extract visibility modifier
-- FR-024: Extract static modifier
-- FR-025: Extract abstract modifier
-- FR-026: Extract sealed modifier
-- FR-027: Extract virtual modifier
-- FR-028: Extract override modifier
-- FR-029: Extract async modifier
-- FR-030: Extract generic parameters
+| ID | Requirement |
+|----|-------------|
+| FR-017a-20 | Extractor MUST capture symbol name |
+| FR-017a-21 | Extractor MUST capture fully qualified name |
+| FR-017a-22 | Extractor MUST capture symbol kind (class, method, property, etc.) |
+| FR-017a-23 | Extractor MUST capture visibility modifier (public, private, protected, internal) |
+| FR-017a-24 | Extractor MUST capture static modifier |
+| FR-017a-25 | Extractor MUST capture abstract modifier |
+| FR-017a-26 | Extractor MUST capture sealed modifier |
+| FR-017a-27 | Extractor MUST capture virtual modifier |
+| FR-017a-28 | Extractor MUST capture override modifier |
+| FR-017a-29 | Extractor MUST capture async modifier |
+| FR-017a-30 | Extractor MUST capture generic type parameters and constraints |
 
-### Location Extraction
+### Location Extraction (FR-017a-31 to FR-017a-37)
 
-- FR-031: Extract file path
-- FR-032: Extract start line
-- FR-033: Extract start column
-- FR-034: Extract end line
-- FR-035: Extract end column
-- FR-036: Extract span offset
-- FR-037: Extract span length
+| ID | Requirement |
+|----|-------------|
+| FR-017a-31 | System MUST extract absolute file path |
+| FR-017a-32 | System MUST extract 1-based start line number |
+| FR-017a-33 | System MUST extract 1-based start column number |
+| FR-017a-34 | System MUST extract 1-based end line number |
+| FR-017a-35 | System MUST extract 1-based end column number |
+| FR-017a-36 | System MUST extract character span offset |
+| FR-017a-37 | System MUST extract character span length |
 
-### Signature Extraction
+### Signature Extraction (FR-017a-38 to FR-017a-44)
 
-- FR-038: Extract method parameters
-- FR-039: Extract parameter types
-- FR-040: Extract parameter names
-- FR-041: Extract return type
-- FR-042: Extract property type
-- FR-043: Extract field type
-- FR-044: Format signature string
+| ID | Requirement |
+|----|-------------|
+| FR-017a-38 | Extractor MUST capture method parameters |
+| FR-017a-39 | Extractor MUST capture parameter types (with nullability) |
+| FR-017a-40 | Extractor MUST capture parameter names |
+| FR-017a-41 | Extractor MUST capture method return type |
+| FR-017a-42 | Extractor MUST capture property type |
+| FR-017a-43 | Extractor MUST capture field type |
+| FR-017a-44 | Extractor MUST format human-readable signature strings |
 
-### Documentation Extraction
+### Documentation Extraction (FR-017a-45 to FR-017a-50)
 
-- FR-045: Extract XML summary
-- FR-046: Extract XML param
-- FR-047: Extract XML returns
-- FR-048: Extract XML remarks
-- FR-049: Extract XML example
-- FR-050: Strip XML tags for plain text
+| ID | Requirement |
+|----|-------------|
+| FR-017a-45 | Extractor MUST extract XML summary documentation |
+| FR-017a-46 | Extractor MUST extract XML param documentation |
+| FR-017a-47 | Extractor MUST extract XML returns documentation |
+| FR-017a-48 | Extractor MUST extract XML remarks documentation |
+| FR-017a-49 | Extractor MUST extract XML example documentation |
+| FR-017a-50 | Extractor MUST provide plain text option (XML tags stripped) |
 
-### Containment
+### Containment Hierarchy (FR-017a-51 to FR-017a-54)
 
-- FR-051: Track parent symbol
-- FR-052: Track containing namespace
-- FR-053: Track containing type
-- FR-054: Build containment hierarchy
+| ID | Requirement |
+|----|-------------|
+| FR-017a-51 | Extractor MUST track parent symbol for nested declarations |
+| FR-017a-52 | Extractor MUST track containing namespace |
+| FR-017a-53 | Extractor MUST track containing type for members |
+| FR-017a-54 | Extractor MUST build complete containment hierarchy tree |
 
-### Extractor Interface
+### Extractor Interface (FR-017a-55 to FR-017a-60)
 
-- FR-055: Implement ISymbolExtractor
-- FR-056: Register for .cs extension
-- FR-057: Return extracted symbols
-- FR-058: Report extraction errors
-- FR-059: Support cancellation
-- FR-060: Support progress reporting
+| ID | Requirement |
+|----|-------------|
+| FR-017a-55 | CSharpSymbolExtractor MUST implement ISymbolExtractor interface |
+| FR-017a-56 | Extractor MUST register for .cs file extension |
+| FR-017a-57 | ExtractAsync MUST return ExtractionResult with all discovered symbols |
+| FR-017a-58 | Extractor MUST report extraction errors in result object |
+| FR-017a-59 | ExtractAsync MUST support CancellationToken |
+| FR-017a-60 | Extractor MUST support progress reporting via IProgress<T> |
 
 ---
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-017a-01 to NFR-017a-06)
 
-- NFR-001: Parse < 50ms per file
-- NFR-002: Extract < 100ms per file
-- NFR-003: Handle files up to 500KB
-- NFR-004: Memory < 100MB for 1000 files
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017a-01 | Performance | Syntax parsing MUST complete in < 50ms per file (median) |
+| NFR-017a-02 | Performance | Symbol extraction MUST complete in < 100ms per file (median) |
+| NFR-017a-03 | Performance | System MUST handle files up to 500KB without degradation |
+| NFR-017a-04 | Performance | Memory usage MUST remain < 100MB when processing 1000 files |
+| NFR-017a-05 | Performance | Semantic model creation MUST be cached per compilation |
+| NFR-017a-06 | Performance | Parallel file processing MUST be supported for batch extraction |
 
-### Reliability
+### Reliability (NFR-017a-07 to NFR-017a-12)
 
-- NFR-005: Handle malformed code
-- NFR-006: Partial results on error
-- NFR-007: No crashes on bad input
-- NFR-008: Graceful degradation
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017a-07 | Reliability | System MUST handle malformed C# code without crashing |
+| NFR-017a-08 | Reliability | Partial results MUST be returned when errors occur |
+| NFR-017a-09 | Reliability | Invalid input MUST NOT cause unhandled exceptions |
+| NFR-017a-10 | Reliability | Cancellation MUST be honored within 100ms |
+| NFR-017a-11 | Reliability | File system errors MUST be logged and skipped gracefully |
+| NFR-017a-12 | Reliability | Roslyn exceptions MUST be caught and wrapped in domain exceptions |
 
-### Accuracy
+### Security (NFR-017a-13 to NFR-017a-16)
 
-- NFR-009: All declared symbols found
-- NFR-010: Correct locations
-- NFR-011: Correct visibility
-- NFR-012: Valid signatures
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017a-13 | Security | Source file content MUST NOT be logged at INFO level |
+| NFR-017a-14 | Security | File paths MUST be validated against directory traversal |
+| NFR-017a-15 | Security | No code execution MUST occur during parsing |
+| NFR-017a-16 | Security | Exception messages MUST NOT contain file content |
+
+### Maintainability (NFR-017a-17 to NFR-017a-20)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017a-17 | Maintainability | All public APIs MUST have XML documentation |
+| NFR-017a-18 | Maintainability | Unit test coverage MUST exceed 80% |
+| NFR-017a-19 | Maintainability | Roslyn version updates MUST NOT require interface changes |
+| NFR-017a-20 | Maintainability | Symbol visitor MUST be extensible for new C# syntax |
+
+### Observability (NFR-017a-21 to NFR-017a-24)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-017a-21 | Observability | Extraction duration MUST be logged per file |
+| NFR-017a-22 | Observability | Symbol count MUST be logged per file |
+| NFR-017a-23 | Observability | Parse errors MUST be logged with file path and position |
+| NFR-017a-24 | Observability | Memory pressure warnings MUST be logged at threshold |
 
 ---
 

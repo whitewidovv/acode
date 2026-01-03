@@ -10,23 +10,74 @@
 
 ## Description
 
-Task 016.a defines the chunking rules for the Context Packer. Chunking breaks files into meaningful pieces. Good chunks preserve context while fitting token budgets.
+### Business Value
 
-Files vary in size. Some are small enough to include whole. Others are thousands of lines. Chunking handles both cases appropriately.
+Chunking is the foundation of effective context assembly for Large Language Models. When the agent needs to understand code, it cannot simply include entire files—many files exceed token limits, and including irrelevant sections wastes valuable context space. Task 016.a delivers the chunking intelligence that transforms raw files into meaningful, appropriately-sized pieces that LLMs can process effectively.
 
-Structural chunking respects code boundaries. Chunk at class boundaries. Chunk at function boundaries. Don't split a function in half.
+The quality of chunks directly impacts agent performance. Poorly chunked code splits functions in half, separates method signatures from their bodies, or breaks up related logic. These fragmented chunks confuse the LLM and degrade response quality. Well-designed chunking respects code structure, preserves semantic units, and maintains enough context for the LLM to understand each piece independently.
 
-Line-based chunking is the fallback. When structure isn't clear, chunk by line count. Overlap ensures context at boundaries.
+Language-specific chunking provides significant advantages over naive approaches. By parsing C# with Roslyn and TypeScript with the compiler API, the chunker understands actual code structure rather than just counting lines. This structural awareness enables intelligent decisions—keeping a small method together rather than splitting it, or separating unrelated classes into distinct chunks. The result is higher-quality context that improves agent accuracy.
 
-Token-aware chunking considers LLM limits. Estimate tokens per chunk. Ensure chunks fit within max limits. Avoid oversized chunks.
+### Scope
 
-Language-specific chunking uses parsing. C# uses Roslyn. TypeScript uses the compiler API. Generic files use line-based.
+This task defines the complete chunking subsystem for the Context Packer:
 
-Chunk quality matters for LLM understanding. A chunk should be self-contained when possible. It should have enough context to be understandable.
+1. **Structural Chunking Engine:** The core system that respects code boundaries (classes, methods, functions) when dividing files into chunks.
 
-Overlap between chunks helps with boundary cases. When searching finds a match at chunk boundary, overlap ensures context is available.
+2. **Language-Specific Parsers:** Dedicated parsers for C#, TypeScript, and JavaScript that understand each language's structure and produce optimal chunks.
 
-Chunk metadata enables later processing. Track source file. Track line ranges. Track token estimates. Track chunk type.
+3. **Line-Based Fallback:** A universal fallback chunker for unsupported file types that chunks by line count with configurable overlap.
+
+4. **Token Estimation:** Accurate token counting to ensure chunks fit within LLM token limits.
+
+5. **Chunk Metadata System:** Tracking of source file, line ranges, token estimates, chunk type, and structural hierarchy for each chunk.
+
+### Integration Points
+
+| Component | Integration Type | Description |
+|-----------|------------------|-------------|
+| Task 016 (Context Packer) | Parent System | Chunker is invoked by Context Packer to break files into pieces |
+| Task 016.b (Ranking) | Downstream | Chunks are passed to ranking system for prioritization |
+| Task 016.c (Budgeting) | Downstream | Token estimates used for budget allocation |
+| Task 014 (RepoFS) | File Access | Reads file content via RepoFS abstraction |
+| Task 002 (Config) | Configuration | Chunk settings loaded from `.agent/config.yml` |
+| Task 015 (Indexing) | Index Storage | Chunks may be cached in index for performance |
+
+### Failure Modes
+
+| Failure | Impact | Mitigation |
+|---------|--------|------------|
+| Parse error in source code | Cannot use structural chunking | Automatic fallback to line-based chunking |
+| File too large for memory | Out of memory exception | Progressive chunking with streaming, memory limits |
+| Unsupported file type | No structural parser available | Graceful fallback to line-based chunking |
+| Token estimation inaccuracy | Chunks exceed budget | Conservative estimation with safety margin |
+| Malformed unicode content | Parsing/encoding errors | Robust encoding detection, UTF-8 fallback |
+| Circular includes or dependencies | Infinite loop risk | Detection and termination safeguards |
+| Empty or trivial files | Wasted processing | Skip files below minimum size threshold |
+| Binary file misidentified as text | Garbled chunks | Binary detection before chunking |
+
+### Assumptions
+
+1. Source files are predominantly text with UTF-8 encoding
+2. C# files are syntactically valid or recoverable by Roslyn
+3. TypeScript/JavaScript files are parseable by the TypeScript compiler
+4. Files are reasonably sized (< 10MB) and fit in memory for parsing
+5. The target LLM tokenizer is known for accurate token estimation
+6. Chunk configuration values are validated at startup
+7. Line-based chunking is an acceptable fallback for any file type
+8. Overlap configuration is reasonable (not exceeding chunk size)
+
+### Security Considerations
+
+1. **Input Validation:** All file content must be validated before parsing to prevent parser exploits or resource exhaustion attacks.
+
+2. **Memory Limits:** Chunking must enforce memory limits to prevent denial-of-service via extremely large files.
+
+3. **Path Sanitization:** File paths in chunk metadata must be sanitized to prevent information leakage.
+
+4. **No Code Execution:** Parsing must never execute code from the files being chunked.
+
+5. **Resource Cleanup:** Parser resources must be properly disposed to prevent resource leaks.
 
 ---
 
@@ -66,93 +117,117 @@ The following items are explicitly excluded from Task 016.a:
 
 ## Functional Requirements
 
-### Structural Chunking
+### Structural Chunking (FR-016a-01 to FR-016a-05)
 
-- FR-001: Detect class boundaries
-- FR-002: Detect method boundaries
-- FR-003: Detect function boundaries
-- FR-004: Detect block boundaries
-- FR-005: Preserve structure
+| ID | Requirement |
+|----|-------------|
+| FR-016a-01 | System MUST detect class boundaries in source files |
+| FR-016a-02 | System MUST detect method boundaries in source files |
+| FR-016a-03 | System MUST detect function boundaries in source files |
+| FR-016a-04 | System MUST detect block boundaries (if, for, while) |
+| FR-016a-05 | System MUST preserve structural integrity when chunking |
 
-### C# Chunking
+### C# Chunking (FR-016a-06 to FR-016a-10)
 
-- FR-006: Parse with Roslyn
-- FR-007: Chunk by namespace
-- FR-008: Chunk by class
-- FR-009: Chunk by method
-- FR-010: Handle nested types
+| ID | Requirement |
+|----|-------------|
+| FR-016a-06 | System MUST parse C# files using Roslyn |
+| FR-016a-07 | System MUST chunk C# files by namespace when configured |
+| FR-016a-08 | System MUST chunk C# files by class when configured |
+| FR-016a-09 | System MUST chunk C# files by method when configured |
+| FR-016a-10 | System MUST handle nested types in C# files |
 
-### TypeScript/JavaScript Chunking
+### TypeScript/JavaScript Chunking (FR-016a-11 to FR-016a-15)
 
-- FR-011: Parse with TypeScript
-- FR-012: Chunk by module
-- FR-013: Chunk by class
-- FR-014: Chunk by function
-- FR-015: Handle exports
+| ID | Requirement |
+|----|-------------|
+| FR-016a-11 | System MUST parse TypeScript files using TypeScript compiler API |
+| FR-016a-12 | System MUST chunk TypeScript files by module |
+| FR-016a-13 | System MUST chunk TypeScript/JavaScript files by class |
+| FR-016a-14 | System MUST chunk TypeScript/JavaScript files by function |
+| FR-016a-15 | System MUST handle export statements in chunking |
 
-### Line-Based Chunking
+### Line-Based Chunking (FR-016a-16 to FR-016a-20)
 
-- FR-016: Chunk by line count
-- FR-017: Configurable line count
-- FR-018: Overlap support
-- FR-019: Configurable overlap
-- FR-020: Respect line boundaries
+| ID | Requirement |
+|----|-------------|
+| FR-016a-16 | System MUST provide line-based chunking as fallback |
+| FR-016a-17 | Line count per chunk MUST be configurable |
+| FR-016a-18 | System MUST support overlap between adjacent chunks |
+| FR-016a-19 | Overlap line count MUST be configurable |
+| FR-016a-20 | System MUST respect line boundaries (no mid-line splits) |
 
-### Token-Based Chunking
+### Token-Based Chunking (FR-016a-21 to FR-016a-24)
 
-- FR-021: Estimate token count
-- FR-022: Enforce max tokens
-- FR-023: Enforce min tokens
-- FR-024: Balance chunk sizes
+| ID | Requirement |
+|----|-------------|
+| FR-016a-21 | System MUST estimate token count for each chunk |
+| FR-016a-22 | System MUST enforce maximum token limit per chunk |
+| FR-016a-23 | System MUST enforce minimum token limit per chunk |
+| FR-016a-24 | System MUST balance chunk sizes within configured limits |
 
-### Strategy Selection
+### Strategy Selection (FR-016a-25 to FR-016a-28)
 
-- FR-025: Detect file type
-- FR-026: Select appropriate strategy
-- FR-027: Fall back to line-based
-- FR-028: Configurable per type
+| ID | Requirement |
+|----|-------------|
+| FR-016a-25 | System MUST detect file type from extension and content |
+| FR-016a-26 | System MUST select appropriate chunking strategy for file type |
+| FR-016a-27 | System MUST fall back to line-based when parsing fails |
+| FR-016a-28 | Chunking strategy MUST be configurable per file type |
 
-### Chunk Metadata
+### Chunk Metadata (FR-016a-29 to FR-016a-33)
 
-- FR-029: Track source file
-- FR-030: Track line range
-- FR-031: Track token estimate
-- FR-032: Track chunk type
-- FR-033: Track hierarchy level
+| ID | Requirement |
+|----|-------------|
+| FR-016a-29 | Each chunk MUST include source file path |
+| FR-016a-30 | Each chunk MUST include start and end line numbers |
+| FR-016a-31 | Each chunk MUST include token count estimate |
+| FR-016a-32 | Each chunk MUST include chunk type (structural, line-based) |
+| FR-016a-33 | Each chunk MUST include hierarchy path (namespace, class, method) |
 
-### Overlap Handling
+### Overlap Handling (FR-016a-34 to FR-016a-36)
 
-- FR-034: Configurable overlap
-- FR-035: Context preservation
-- FR-036: Dedup-friendly
+| ID | Requirement |
+|----|-------------|
+| FR-016a-34 | Overlap line count MUST be configurable |
+| FR-016a-35 | Overlap MUST preserve context at chunk boundaries |
+| FR-016a-36 | Overlap MUST be compatible with deduplication (Task 016.c) |
 
-### Large File Handling
+### Large File Handling (FR-016a-37 to FR-016a-39)
 
-- FR-037: Handle large files
-- FR-038: Progressive chunking
-- FR-039: Memory efficiency
+| ID | Requirement |
+|----|-------------|
+| FR-016a-37 | System MUST handle files larger than memory limits |
+| FR-016a-38 | System MUST use progressive/streaming chunking for large files |
+| FR-016a-39 | System MUST minimize memory usage during chunking |
 
 ---
 
 ## Non-Functional Requirements
 
-### Performance
+### Performance (NFR-016a-01 to NFR-016a-03)
 
-- NFR-001: Chunk 10KB file < 50ms
-- NFR-002: Chunk 100KB file < 200ms
-- NFR-003: Memory < 2x file size
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-016a-01 | Performance | System MUST chunk 10KB file in less than 50ms |
+| NFR-016a-02 | Performance | System MUST chunk 100KB file in less than 200ms |
+| NFR-016a-03 | Performance | Memory usage MUST NOT exceed 2x file size during chunking |
 
-### Quality
+### Quality (NFR-016a-04 to NFR-016a-06)
 
-- NFR-004: Meaningful chunks
-- NFR-005: Consistent sizing
-- NFR-006: Good boundaries
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-016a-04 | Quality | Chunks MUST be semantically meaningful for LLM consumption |
+| NFR-016a-05 | Quality | Chunk sizes MUST be consistent within configured tolerances |
+| NFR-016a-06 | Quality | Chunk boundaries MUST align with logical code boundaries |
 
-### Reliability
+### Reliability (NFR-016a-07 to NFR-016a-09)
 
-- NFR-007: Handle malformed files
-- NFR-008: Graceful fallback
-- NFR-009: No data loss
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-016a-07 | Reliability | System MUST handle malformed or syntactically invalid files |
+| NFR-016a-08 | Reliability | System MUST gracefully fall back to line-based on parse errors |
+| NFR-016a-09 | Reliability | No file content MUST be lost during chunking operations |
 
 ---
 
