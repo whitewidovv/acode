@@ -260,73 +260,444 @@ Estimated Session Total: $4.68 (at 4h max)
 
 ## Implementation Prompt
 
-### Interface
+### Part 1: File Structure and Domain Models
 
-```csharp
-public interface IEc2CostTracker
-{
-    Task<decimal> GetCurrentSessionCostAsync(string sessionId);
-    Task<decimal> GetDailyCostAsync(DateTime date);
-    Task<decimal> GetMonthlyCostAsync(int year, int month);
-    Task<CostEstimate> EstimateSessionCostAsync(string sessionId, TimeSpan maxRuntime);
-    Task<bool> CheckBudgetAsync(CostCheckRequest request);
-    Task RecordInstanceUsageAsync(InstanceUsageRecord usage);
-}
-
-public record CostCheckRequest(
-    string InstanceType,
-    string Region,
-    bool IsSpot,
-    TimeSpan EstimatedDuration,
-    decimal? OverrideHourlyRate = null);
-
-public record CostEstimate(
-    decimal EstimatedCost,
-    decimal HourlyRate,
-    TimeSpan Duration,
-    bool ExceedsBudget,
-    decimal? BudgetRemaining);
-
-public record InstanceUsageRecord(
-    string InstanceId,
-    string InstanceType,
-    string Region,
-    bool IsSpot,
-    DateTime StartTime,
-    DateTime? EndTime,
-    decimal HourlyRate);
+**Target Directory Structure:**
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Ec2/
+│           └── Cost/
+│               ├── BudgetPeriod.cs
+│               ├── BudgetViolation.cs
+│               ├── CostEstimate.cs
+│               └── Events/
+│                   ├── CostThresholdReachedEvent.cs
+│                   ├── BudgetExceededEvent.cs
+│                   └── InstanceCostRecordedEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Ec2/
+│           └── Cost/
+│               ├── IEc2CostTracker.cs
+│               ├── IEc2BudgetChecker.cs
+│               ├── IEc2CostAlertService.cs
+│               ├── CostCheckRequest.cs
+│               └── InstanceUsageRecord.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Ec2/
+            └── Cost/
+                ├── Ec2CostTracker.cs
+                ├── Ec2BudgetChecker.cs
+                ├── Ec2CostAlertService.cs
+                ├── Ec2PricingTable.cs
+                └── CostHistoryRepository.cs
 ```
 
-### Budget Checker
+**Domain Models:**
 
 ```csharp
-public class Ec2BudgetChecker
-{
-    public async Task<BudgetCheckResult> CheckAsync(
-        CostCheckRequest request,
-        CancellationToken ct);
-        
-    public async Task EnforceLimitsAsync(
-        string sessionId,
-        CancellationToken ct);
-}
-
-public record BudgetCheckResult(
-    bool Allowed,
-    BudgetViolation? Violation,
-    decimal CurrentSpend,
-    decimal BudgetLimit,
-    string Message);
-
-public record BudgetViolation(
-    BudgetPeriod Period,
-    decimal CurrentSpend,
-    decimal Limit,
-    decimal Overage);
+// src/Acode.Domain/Compute/Ec2/Cost/BudgetPeriod.cs
+namespace Acode.Domain.Compute.Ec2.Cost;
 
 public enum BudgetPeriod { Session, Daily, Monthly }
+
+// src/Acode.Domain/Compute/Ec2/Cost/BudgetViolation.cs
+namespace Acode.Domain.Compute.Ec2.Cost;
+
+public sealed record BudgetViolation
+{
+    public required BudgetPeriod Period { get; init; }
+    public required decimal CurrentSpend { get; init; }
+    public required decimal Limit { get; init; }
+    public decimal Overage => CurrentSpend - Limit;
+    public double PercentOver => Limit > 0 ? (double)Overage / (double)Limit * 100 : 0;
+}
+
+// src/Acode.Domain/Compute/Ec2/Cost/CostEstimate.cs
+namespace Acode.Domain.Compute.Ec2.Cost;
+
+public sealed record CostEstimate
+{
+    public required decimal EstimatedCost { get; init; }
+    public required decimal HourlyRate { get; init; }
+    public required TimeSpan Duration { get; init; }
+    public bool ExceedsBudget { get; init; }
+    public decimal? BudgetRemaining { get; init; }
+    public decimal? TotalBudget { get; init; }
+}
+
+// src/Acode.Domain/Compute/Ec2/Cost/Events/CostThresholdReachedEvent.cs
+namespace Acode.Domain.Compute.Ec2.Cost.Events;
+
+public sealed record CostThresholdReachedEvent(
+    string SessionId,
+    int ThresholdPercent,
+    decimal CurrentCost,
+    decimal BudgetLimit,
+    BudgetPeriod Period,
+    DateTimeOffset ReachedAt);
+
+// src/Acode.Domain/Compute/Ec2/Cost/Events/BudgetExceededEvent.cs
+namespace Acode.Domain.Compute.Ec2.Cost.Events;
+
+public sealed record BudgetExceededEvent(
+    string SessionId,
+    BudgetViolation Violation,
+    bool WillTerminate,
+    DateTimeOffset ExceededAt);
+
+// src/Acode.Domain/Compute/Ec2/Cost/Events/InstanceCostRecordedEvent.cs
+namespace Acode.Domain.Compute.Ec2.Cost.Events;
+
+public sealed record InstanceCostRecordedEvent(
+    string InstanceId,
+    string InstanceType,
+    TimeSpan Runtime,
+    decimal Cost,
+    DateTimeOffset RecordedAt);
 ```
 
----
+**End of Task 031.c Specification - Part 1/3**
+
+### Part 2: Application Interfaces
+
+```csharp
+// src/Acode.Application/Compute/Ec2/Cost/CostCheckRequest.cs
+namespace Acode.Application.Compute.Ec2.Cost;
+
+public sealed record CostCheckRequest
+{
+    public required string InstanceType { get; init; }
+    public required string Region { get; init; }
+    public bool IsSpot { get; init; }
+    public required TimeSpan EstimatedDuration { get; init; }
+    public decimal? OverrideHourlyRate { get; init; }
+}
+
+// src/Acode.Application/Compute/Ec2/Cost/InstanceUsageRecord.cs
+namespace Acode.Application.Compute.Ec2.Cost;
+
+public sealed record InstanceUsageRecord
+{
+    public required string InstanceId { get; init; }
+    public required string InstanceType { get; init; }
+    public required string Region { get; init; }
+    public bool IsSpot { get; init; }
+    public required DateTimeOffset StartTime { get; init; }
+    public DateTimeOffset? EndTime { get; init; }
+    public required decimal HourlyRate { get; init; }
+    public string? SessionId { get; init; }
+    
+    public TimeSpan Runtime => (EndTime ?? DateTimeOffset.UtcNow) - StartTime;
+    public decimal Cost => Math.Ceiling((decimal)Runtime.TotalHours) * HourlyRate;
+}
+
+// src/Acode.Application/Compute/Ec2/Cost/IEc2CostTracker.cs
+namespace Acode.Application.Compute.Ec2.Cost;
+
+public interface IEc2CostTracker
+{
+    Task<decimal> GetCurrentSessionCostAsync(
+        string sessionId,
+        CancellationToken ct = default);
+    
+    Task<decimal> GetDailyCostAsync(
+        DateOnly date,
+        CancellationToken ct = default);
+    
+    Task<decimal> GetMonthlyCostAsync(
+        int year,
+        int month,
+        CancellationToken ct = default);
+    
+    Task<CostEstimate> EstimateSessionCostAsync(
+        string sessionId,
+        TimeSpan maxRuntime,
+        CancellationToken ct = default);
+    
+    Task RecordInstanceUsageAsync(
+        InstanceUsageRecord usage,
+        CancellationToken ct = default);
+    
+    Task<decimal> GetHourlyRateAsync(
+        string instanceType,
+        string region,
+        bool isSpot,
+        CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Ec2/Cost/IEc2BudgetChecker.cs
+namespace Acode.Application.Compute.Ec2.Cost;
+
+public interface IEc2BudgetChecker
+{
+    Task<BudgetCheckResult> CheckAsync(
+        CostCheckRequest request,
+        CancellationToken ct = default);
+    
+    Task<bool> EnforceLimitsAsync(
+        string sessionId,
+        CancellationToken ct = default);
+    
+    Task<BudgetStatus> GetBudgetStatusAsync(
+        CancellationToken ct = default);
+}
+
+public sealed record BudgetCheckResult
+{
+    public bool Allowed { get; init; }
+    public BudgetViolation? Violation { get; init; }
+    public decimal CurrentSpend { get; init; }
+    public decimal? BudgetLimit { get; init; }
+    public string? Message { get; init; }
+}
+
+public sealed record BudgetStatus
+{
+    public decimal SessionSpend { get; init; }
+    public decimal? SessionLimit { get; init; }
+    public decimal DailySpend { get; init; }
+    public decimal? DailyLimit { get; init; }
+    public decimal MonthlySpend { get; init; }
+    public decimal? MonthlyLimit { get; init; }
+}
+
+// src/Acode.Application/Compute/Ec2/Cost/IEc2CostAlertService.cs
+namespace Acode.Application.Compute.Ec2.Cost;
+
+public interface IEc2CostAlertService
+{
+    void SetThresholds(IReadOnlyList<int> thresholdPercents);
+    Task CheckAndAlertAsync(string sessionId, CancellationToken ct = default);
+    Task SendWebhookAlertAsync(CostThresholdReachedEvent alert, CancellationToken ct = default);
+    IReadOnlyList<CostThresholdReachedEvent> GetAlertHistory(string? sessionId = null);
+}
+```
+
+**End of Task 031.c Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation and Checklist
+
+```csharp
+// src/Acode.Infrastructure/Compute/Ec2/Cost/Ec2CostTracker.cs
+namespace Acode.Infrastructure.Compute.Ec2.Cost;
+
+public sealed class Ec2CostTracker : IEc2CostTracker
+{
+    private readonly IEc2PricingTable _pricing;
+    private readonly ICostHistoryRepository _history;
+    private readonly IEventPublisher _events;
+    private readonly ILogger<Ec2CostTracker> _logger;
+    
+    public async Task<decimal> GetHourlyRateAsync(
+        string instanceType,
+        string region,
+        bool isSpot,
+        CancellationToken ct = default)
+    {
+        return await _pricing.GetHourlyRateAsync(instanceType, region, isSpot, ct);
+    }
+    
+    public async Task<decimal> GetCurrentSessionCostAsync(
+        string sessionId,
+        CancellationToken ct = default)
+    {
+        var records = await _history.GetBySessionAsync(sessionId, ct);
+        return records.Sum(r => r.Cost);
+    }
+    
+    public async Task<decimal> GetDailyCostAsync(
+        DateOnly date,
+        CancellationToken ct = default)
+    {
+        var records = await _history.GetByDateAsync(date, ct);
+        return records.Sum(r => r.Cost);
+    }
+    
+    public async Task<CostEstimate> EstimateSessionCostAsync(
+        string sessionId,
+        TimeSpan maxRuntime,
+        CancellationToken ct = default)
+    {
+        var records = await _history.GetBySessionAsync(sessionId, ct);
+        var running = records.Where(r => r.EndTime == null).ToList();
+        
+        var estimatedCost = running.Sum(r =>
+        {
+            var remainingTime = maxRuntime - r.Runtime;
+            return r.Cost + (remainingTime.TotalHours > 0 
+                ? (decimal)Math.Ceiling(remainingTime.TotalHours) * r.HourlyRate 
+                : 0);
+        });
+        
+        var avgRate = running.Average(r => r.HourlyRate);
+        
+        return new CostEstimate
+        {
+            EstimatedCost = estimatedCost,
+            HourlyRate = avgRate,
+            Duration = maxRuntime
+        };
+    }
+    
+    public async Task RecordInstanceUsageAsync(
+        InstanceUsageRecord usage,
+        CancellationToken ct = default)
+    {
+        await _history.SaveAsync(usage, ct);
+        
+        await _events.PublishAsync(new InstanceCostRecordedEvent(
+            usage.InstanceId,
+            usage.InstanceType,
+            usage.Runtime,
+            usage.Cost,
+            DateTimeOffset.UtcNow));
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Ec2/Cost/Ec2BudgetChecker.cs
+namespace Acode.Infrastructure.Compute.Ec2.Cost;
+
+public sealed class Ec2BudgetChecker : IEc2BudgetChecker
+{
+    private readonly IEc2CostTracker _costTracker;
+    private readonly IEc2InstanceManager _instanceManager;
+    private readonly IEventPublisher _events;
+    private readonly BudgetConfiguration _config;
+    
+    public async Task<BudgetCheckResult> CheckAsync(
+        CostCheckRequest request,
+        CancellationToken ct = default)
+    {
+        var hourlyRate = request.OverrideHourlyRate 
+            ?? await _costTracker.GetHourlyRateAsync(
+                request.InstanceType, request.Region, request.IsSpot, ct);
+        
+        var estimatedCost = (decimal)Math.Ceiling(request.EstimatedDuration.TotalHours) * hourlyRate;
+        
+        // Check all budget periods
+        foreach (var (period, limit) in GetBudgetLimits())
+        {
+            var currentSpend = await GetCurrentSpendAsync(period, ct);
+            
+            if (currentSpend + estimatedCost > limit)
+            {
+                var violation = new BudgetViolation
+                {
+                    Period = period,
+                    CurrentSpend = currentSpend + estimatedCost,
+                    Limit = limit
+                };
+                
+                return new BudgetCheckResult
+                {
+                    Allowed = _config.LimitType == BudgetLimitType.Soft,
+                    Violation = violation,
+                    CurrentSpend = currentSpend,
+                    BudgetLimit = limit,
+                    Message = $"Would exceed {period} budget by ${violation.Overage:F2}"
+                };
+            }
+        }
+        
+        return new BudgetCheckResult { Allowed = true, Message = "Within budget" };
+    }
+    
+    public async Task<bool> EnforceLimitsAsync(
+        string sessionId,
+        CancellationToken ct = default)
+    {
+        if (_config.LimitType != BudgetLimitType.Hard)
+            return false;
+        
+        var status = await GetBudgetStatusAsync(ct);
+        
+        if ((status.DailyLimit.HasValue && status.DailySpend > status.DailyLimit) ||
+            (status.MonthlyLimit.HasValue && status.MonthlySpend > status.MonthlyLimit))
+        {
+            await _events.PublishAsync(new BudgetExceededEvent(
+                sessionId,
+                new BudgetViolation
+                {
+                    Period = BudgetPeriod.Daily,
+                    CurrentSpend = status.DailySpend,
+                    Limit = status.DailyLimit ?? 0
+                },
+                WillTerminate: true,
+                DateTimeOffset.UtcNow));
+            
+            return true; // Signal to terminate running instances
+        }
+        
+        return false;
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Ec2/Cost/Ec2PricingTable.cs
+namespace Acode.Infrastructure.Compute.Ec2.Cost;
+
+public sealed class Ec2PricingTable : IEc2PricingTable
+{
+    private static readonly Dictionary<string, decimal> OnDemandPrices = new()
+    {
+        ["t3.micro"] = 0.0104m,
+        ["t3.small"] = 0.0208m,
+        ["t3.medium"] = 0.0416m,
+        ["t3.large"] = 0.0832m,
+        ["c5.large"] = 0.085m,
+        ["c5.xlarge"] = 0.17m,
+        ["r5.large"] = 0.126m,
+        ["g4dn.xlarge"] = 0.526m
+    };
+    
+    public Task<decimal> GetHourlyRateAsync(
+        string instanceType,
+        string region,
+        bool isSpot,
+        CancellationToken ct = default)
+    {
+        if (OnDemandPrices.TryGetValue(instanceType, out var rate))
+        {
+            return Task.FromResult(isSpot ? rate * 0.3m : rate); // ~70% spot discount
+        }
+        
+        return Task.FromResult(0.10m); // Default fallback
+    }
+}
+```
+
+### Implementation Checklist
+
+| # | Requirement | Test | Impl |
+|---|-------------|------|------|
+| 1 | Hourly rate lookup by instance type | ⬜ | ⬜ |
+| 2 | Running cost calculation (hours × rate) | ⬜ | ⬜ |
+| 3 | Partial hours rounded up | ⬜ | ⬜ |
+| 4 | Session cost tracking | ⬜ | ⬜ |
+| 5 | Daily cost aggregation | ⬜ | ⬜ |
+| 6 | Monthly cost aggregation | ⬜ | ⬜ |
+| 7 | Budget check before launch | ⬜ | ⬜ |
+| 8 | Soft limit alerts but allows | ⬜ | ⬜ |
+| 9 | Hard limit blocks/terminates | ⬜ | ⬜ |
+| 10 | Alert thresholds (50%, 80%, 100%) | ⬜ | ⬜ |
+| 11 | Webhook alerts optional | ⬜ | ⬜ |
+| 12 | Cost history persisted | ⬜ | ⬜ |
+| 13 | CLI shows current costs | ⬜ | ⬜ |
+| 14 | CostThresholdReachedEvent published | ⬜ | ⬜ |
+| 15 | BudgetExceededEvent published | ⬜ | ⬜ |
+
+### Rollout Plan
+
+1. **Tests first**: Unit tests for cost calculation, budget checking
+2. **Domain models**: Events, BudgetPeriod, BudgetViolation, CostEstimate
+3. **Application interfaces**: IEc2CostTracker, IEc2BudgetChecker, IEc2CostAlertService
+4. **Infrastructure impl**: Ec2CostTracker, Ec2BudgetChecker, Ec2PricingTable
+5. **Persistence**: CostHistoryRepository for usage records
+6. **Alerts**: Ec2CostAlertService with webhook support
+7. **CLI integration**: Cost show/history/export commands
+8. **DI registration**: Register tracker as singleton, checker as scoped
 
 **End of Task 031.c Specification**

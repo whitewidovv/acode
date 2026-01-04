@@ -255,69 +255,300 @@ acode target ec2 terminate <session-id> --force
 
 ## Implementation Prompt
 
-### Manager
+### Part 1: File Structure and Domain Models
+
+**Target Directory Structure:**
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Ec2/
+│           └── Management/
+│               ├── InternalInstanceState.cs
+│               ├── Ec2HealthStatus.cs
+│               ├── ScheduledEvent.cs
+│               └── Events/
+│                   ├── InstanceStateChangedEvent.cs
+│                   ├── InstanceHealthChangedEvent.cs
+│                   └── InstanceTerminatedEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Ec2/
+│           └── Management/
+│               ├── IEc2InstanceManager.cs
+│               ├── IEc2StatePoller.cs
+│               ├── IEc2HealthMonitor.cs
+│               └── TerminateOptions.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Ec2/
+            └── Management/
+                ├── Ec2InstanceManager.cs
+                ├── Ec2StatePoller.cs
+                ├── Ec2HealthMonitor.cs
+                └── Ec2CleanupService.cs
+```
+
+**Domain Models:**
 
 ```csharp
-public class Ec2InstanceManager
+// src/Acode.Domain/Compute/Ec2/Management/InternalInstanceState.cs
+namespace Acode.Domain.Compute.Ec2.Management;
+
+public enum InternalInstanceState
 {
-    private readonly IAmazonEC2 _ec2Client;
-    
-    public async Task<Ec2InstanceState> GetStateAsync(
+    Unknown,
+    Preparing,    // pending
+    Ready,        // running
+    Suspended,    // stopped
+    Terminating,  // stopping, shutting-down
+    Terminated    // terminated
+}
+
+// src/Acode.Domain/Compute/Ec2/Management/Ec2HealthStatus.cs
+namespace Acode.Domain.Compute.Ec2.Management;
+
+public sealed record Ec2HealthStatus
+{
+    public required HealthState State { get; init; }
+    public required string SystemStatus { get; init; }
+    public required string InstanceStatus { get; init; }
+    public bool SshReachable { get; init; }
+    public IReadOnlyList<ScheduledEvent> ScheduledEvents { get; init; } = [];
+    public DateTimeOffset CheckedAt { get; init; } = DateTimeOffset.UtcNow;
+}
+
+public enum HealthState { Healthy, Impaired, Unknown }
+
+// src/Acode.Domain/Compute/Ec2/Management/ScheduledEvent.cs
+namespace Acode.Domain.Compute.Ec2.Management;
+
+public sealed record ScheduledEvent
+{
+    public required string EventType { get; init; }
+    public required string Description { get; init; }
+    public required DateTimeOffset NotBefore { get; init; }
+    public DateTimeOffset? NotAfter { get; init; }
+}
+
+// src/Acode.Domain/Compute/Ec2/Management/Events/InstanceStateChangedEvent.cs
+namespace Acode.Domain.Compute.Ec2.Management.Events;
+
+public sealed record InstanceStateChangedEvent(
+    string InstanceId,
+    InternalInstanceState PreviousState,
+    InternalInstanceState NewState,
+    DateTimeOffset ChangedAt);
+
+// src/Acode.Domain/Compute/Ec2/Management/Events/InstanceTerminatedEvent.cs
+namespace Acode.Domain.Compute.Ec2.Management.Events;
+
+public sealed record InstanceTerminatedEvent(
+    string InstanceId,
+    TimeSpan TotalRuntime,
+    bool WasForced,
+    bool CleanupComplete,
+    DateTimeOffset TerminatedAt);
+```
+
+**End of Task 031.b Specification - Part 1/3**
+
+### Part 2: Application Interfaces
+
+```csharp
+// src/Acode.Application/Compute/Ec2/Management/IEc2InstanceManager.cs
+namespace Acode.Application.Compute.Ec2.Management;
+
+public interface IEc2InstanceManager
+{
+    Task<Ec2InstanceInfo?> GetInstanceAsync(
         string instanceId,
-        CancellationToken ct);
+        CancellationToken ct = default);
     
-    public async Task StopAsync(
+    Task<InternalInstanceState> GetStateAsync(
+        string instanceId,
+        CancellationToken ct = default);
+    
+    Task StopAsync(
         string instanceId,
         bool force = false,
         CancellationToken ct = default);
     
-    public async Task StartAsync(
+    Task StartAsync(
         string instanceId,
         CancellationToken ct = default);
+    
+    Task RebootAsync(
+        string instanceId,
+        CancellationToken ct = default);
+    
+    Task TerminateAsync(
+        string instanceId,
+        TerminateOptions? options = null,
+        CancellationToken ct = default);
+    
+    Task<IReadOnlyList<Ec2InstanceInfo>> ListAcodeInstancesAsync(
+        string region,
+        CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Ec2/Management/TerminateOptions.cs
+namespace Acode.Application.Compute.Ec2.Management;
+
+public sealed record TerminateOptions
+{
+    public bool Force { get; init; } = false;
+    public bool CleanupSecurityGroup { get; init; } = true;
+    public bool CleanupKeyPair { get; init; } = true;
+    public bool ReleaseElasticIp { get; init; } = true;
+    public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(2);
+}
+
+// src/Acode.Application/Compute/Ec2/Management/IEc2StatePoller.cs
+namespace Acode.Application.Compute.Ec2.Management;
+
+public interface IEc2StatePoller : IDisposable
+{
+    event Action<string, InternalInstanceState>? StateChanged;
+    
+    void StartPolling(string instanceId, TimeSpan interval);
+    void StopPolling(string instanceId);
+    void StopAll();
+    
+    InternalInstanceState? GetLastKnownState(string instanceId);
+}
+
+// src/Acode.Application/Compute/Ec2/Management/IEc2HealthMonitor.cs
+namespace Acode.Application.Compute.Ec2.Management;
+
+public interface IEc2HealthMonitor
+{
+    Task<Ec2HealthStatus> CheckHealthAsync(
+        string instanceId,
+        CancellationToken ct = default);
+    
+    void StartMonitoring(
+        string instanceId,
+        TimeSpan interval,
+        Action<Ec2HealthStatus>? onHealthChange = null);
+    
+    void StopMonitoring(string instanceId);
+    
+    Ec2HealthStatus? GetLastKnownHealth(string instanceId);
+}
+```
+
+**End of Task 031.b Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation and Checklist
+
+```csharp
+// src/Acode.Infrastructure/Compute/Ec2/Management/Ec2InstanceManager.cs
+namespace Acode.Infrastructure.Compute.Ec2.Management;
+
+public sealed class Ec2InstanceManager : IEc2InstanceManager
+{
+    private readonly IAmazonEC2 _ec2Client;
+    private readonly IEventPublisher _events;
+    
+    public async Task<InternalInstanceState> GetStateAsync(
+        string instanceId,
+        CancellationToken ct = default)
+    {
+        var response = await _ec2Client.DescribeInstancesAsync(
+            new DescribeInstancesRequest { InstanceIds = [instanceId] }, ct);
+        
+        var instance = response.Reservations.SelectMany(r => r.Instances).FirstOrDefault();
+        return MapState(instance?.State.Name);
+    }
     
     public async Task TerminateAsync(
         string instanceId,
-        TerminateOptions options = null,
-        CancellationToken ct = default);
+        TerminateOptions? options = null,
+        CancellationToken ct = default)
+    {
+        options ??= new TerminateOptions();
+        
+        var currentState = await GetStateAsync(instanceId, ct);
+        if (currentState == InternalInstanceState.Terminated) return;
+        
+        await _ec2Client.TerminateInstancesAsync(
+            new TerminateInstancesRequest { InstanceIds = [instanceId] }, ct);
+        
+        await WaitForStateAsync(instanceId, InternalInstanceState.Terminated, options.Timeout, ct);
+        
+        await _events.PublishAsync(new InstanceTerminatedEvent(
+            instanceId, TimeSpan.Zero, options.Force, true, DateTimeOffset.UtcNow));
+    }
     
-    public async Task<Ec2HealthStatus> CheckHealthAsync(
-        string instanceId,
-        CancellationToken ct);
+    private static InternalInstanceState MapState(InstanceStateName? awsState) => awsState?.Value switch
+    {
+        "pending" => InternalInstanceState.Preparing,
+        "running" => InternalInstanceState.Ready,
+        "stopping" or "shutting-down" => InternalInstanceState.Terminating,
+        "stopped" => InternalInstanceState.Suspended,
+        "terminated" => InternalInstanceState.Terminated,
+        _ => InternalInstanceState.Unknown
+    };
 }
 
-public record TerminateOptions(
-    bool Force = false,
-    bool CleanupSecurityGroup = true,
-    bool CleanupKeyPair = true,
-    bool ReleaseElasticIp = true);
+// src/Acode.Infrastructure/Compute/Ec2/Management/Ec2StatePoller.cs
+namespace Acode.Infrastructure.Compute.Ec2.Management;
 
-public record Ec2HealthStatus(
-    HealthState State,
-    InstanceStatusSummary SystemStatus,
-    InstanceStatusSummary InstanceStatus,
-    IReadOnlyList<ScheduledEvent> ScheduledEvents);
-
-public record ScheduledEvent(
-    string EventType,
-    string Description,
-    DateTime NotBefore,
-    DateTime? NotAfter);
-```
-
-### State Poller
-
-```csharp
-public class Ec2StatePoller : IDisposable
+public sealed class Ec2StatePoller : IEc2StatePoller
 {
-    private readonly Timer _timer;
+    private readonly IEc2InstanceManager _manager;
+    private readonly ConcurrentDictionary<string, Timer> _polling = new();
     
-    public event Action<string, Ec2InstanceState> StateChanged;
+    public event Action<string, InternalInstanceState>? StateChanged;
     
-    public void StartPolling(string instanceId);
-    public void StopPolling(string instanceId);
+    public void StartPolling(string instanceId, TimeSpan interval)
+    {
+        var timer = new Timer(async _ =>
+        {
+            var state = await _manager.GetStateAsync(instanceId);
+            StateChanged?.Invoke(instanceId, state);
+            if (state == InternalInstanceState.Terminated) StopPolling(instanceId);
+        }, null, TimeSpan.Zero, interval);
+        
+        _polling[instanceId] = timer;
+    }
+    
+    public void StopPolling(string instanceId)
+    {
+        if (_polling.TryRemove(instanceId, out var timer)) timer.Dispose();
+    }
+    
+    public void Dispose()
+    {
+        foreach (var timer in _polling.Values) timer.Dispose();
+        _polling.Clear();
+    }
 }
 ```
 
----
+### Implementation Checklist
+
+| # | Requirement | Test | Impl |
+|---|-------------|------|------|
+| 1 | State mapping from AWS to internal | ⬜ | ⬜ |
+| 2 | State polling at configurable interval | ⬜ | ⬜ |
+| 3 | StateChanged event fires on transitions | ⬜ | ⬜ |
+| 4 | Polling stops on terminal state | ⬜ | ⬜ |
+| 5 | Stop instance waits for stopped state | ⬜ | ⬜ |
+| 6 | Start instance waits for running | ⬜ | ⬜ |
+| 7 | Terminate is idempotent | ⬜ | ⬜ |
+| 8 | Cleanup resources on terminate | ⬜ | ⬜ |
+| 9 | InstanceTerminatedEvent published | ⬜ | ⬜ |
+| 10 | Health monitoring works | ⬜ | ⬜ |
+
+### Rollout Plan
+
+1. **Tests first**: Unit tests for state mapping, polling logic
+2. **Domain models**: Events, InternalInstanceState, Ec2HealthStatus
+3. **Application interfaces**: IEc2InstanceManager, IEc2StatePoller, IEc2HealthMonitor
+4. **Infrastructure impl**: Ec2InstanceManager, Ec2StatePoller
+5. **Integration tests**: Real stop/start/terminate operations
+6. **DI registration**: Register manager as scoped, poller as singleton
 
 **End of Task 031.b Specification**

@@ -235,47 +235,49 @@ task:
 
 ## Implementation Prompt
 
-### Interface
+### Part 1: File Structure and Domain Models
+
+**Target Directory Structure:**
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Placement/
+│           ├── PlacementReason.cs
+│           ├── TargetScore.cs
+│           ├── GpuRequirement.cs
+│           └── Events/
+│               ├── PlacementStartedEvent.cs
+│               ├── PlacementCompletedEvent.cs
+│               └── PlacementFailedEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Placement/
+│           ├── IPlacementEngine.cs
+│           ├── IPlacementStrategy.cs
+│           ├── TaskRequirements.cs
+│           ├── PlacementResult.cs
+│           └── PlacementOptions.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Placement/
+            ├── PlacementEngine.cs
+            ├── Strategies/
+            │   ├── AutoStrategy.cs
+            │   ├── LocalFirstStrategy.cs
+            │   ├── CloudFirstStrategy.cs
+            │   ├── CostOptimizedStrategy.cs
+            │   └── PerformanceStrategy.cs
+            └── Matching/
+                ├── RequirementMatcher.cs
+                └── CapabilityComparer.cs
+```
+
+**Domain Models:**
 
 ```csharp
-public interface IPlacementEngine
-{
-    Task<PlacementResult> PlaceAsync(
-        TaskRequirements requirements,
-        IReadOnlyList<IComputeTarget> targets,
-        PlacementOptions options = null,
-        CancellationToken ct = default);
-}
-
-public record TaskRequirements(
-    int? MinCpu = null,
-    int? MinMemoryGb = null,
-    int? MinDiskGb = null,
-    GpuRequirement? Gpu = null,
-    IReadOnlyList<string> RequiredTools = null,
-    string RequiredOs = null,
-    string RequiredArch = null,
-    TimeSpan? MaxRuntime = null,
-    decimal? MaxCost = null,
-    IReadOnlyDictionary<string, string> CustomRequirements = null);
-
-public record GpuRequirement(
-    bool Required,
-    string Type = null,
-    int? MinVramGb = null,
-    int? MinCount = null);
-
-public record PlacementResult(
-    bool Success,
-    IComputeTarget SelectedTarget,
-    PlacementReason Reason,
-    IReadOnlyList<TargetScore> AllScores);
-
-public record TargetScore(
-    IComputeTarget Target,
-    double Score,
-    IReadOnlyList<string> Matches,
-    IReadOnlyList<string> Mismatches);
+// src/Acode.Domain/Compute/Placement/PlacementReason.cs
+namespace Acode.Domain.Compute.Placement;
 
 public enum PlacementReason
 {
@@ -284,20 +286,299 @@ public enum PlacementReason
     CostOptimal,
     LocalPreferred,
     CapabilityMatch,
+    ModeRestricted,
     NoValidTarget
 }
+
+// src/Acode.Domain/Compute/Placement/TargetScore.cs
+namespace Acode.Domain.Compute.Placement;
+
+public sealed record TargetScore
+{
+    public required string TargetId { get; init; }
+    public required string TargetType { get; init; }
+    public required double Score { get; init; }
+    public IReadOnlyList<string> Matches { get; init; } = [];
+    public IReadOnlyList<string> Mismatches { get; init; } = [];
+    public bool IsEligible => Mismatches.Count == 0;
+}
+
+// src/Acode.Domain/Compute/Placement/GpuRequirement.cs
+namespace Acode.Domain.Compute.Placement;
+
+public sealed record GpuRequirement
+{
+    public bool Required { get; init; }
+    public string? Type { get; init; } // nvidia, amd
+    public int? MinVramGb { get; init; }
+    public int? MinCount { get; init; } = 1;
+}
+
+// src/Acode.Domain/Compute/Placement/Events/PlacementCompletedEvent.cs
+namespace Acode.Domain.Compute.Placement.Events;
+
+public sealed record PlacementCompletedEvent(
+    string RequestId,
+    string SelectedTargetId,
+    string SelectedTargetType,
+    PlacementReason Reason,
+    double Score,
+    int CandidatesEvaluated,
+    TimeSpan Duration,
+    DateTimeOffset CompletedAt);
+
+// src/Acode.Domain/Compute/Placement/Events/PlacementFailedEvent.cs
+namespace Acode.Domain.Compute.Placement.Events;
+
+public sealed record PlacementFailedEvent(
+    string RequestId,
+    string FailureReason,
+    int CandidatesEvaluated,
+    IReadOnlyList<string> RequirementsNotMet,
+    DateTimeOffset FailedAt);
 ```
 
-### Strategy Interface
+**End of Task 032 Specification - Part 1/3**
+
+### Part 2: Application Interfaces
 
 ```csharp
+// src/Acode.Application/Compute/Placement/TaskRequirements.cs
+namespace Acode.Application.Compute.Placement;
+
+public sealed record TaskRequirements
+{
+    public int? MinCpu { get; init; }
+    public int? MinMemoryGb { get; init; }
+    public int? MinDiskGb { get; init; }
+    public GpuRequirement? Gpu { get; init; }
+    public IReadOnlyList<string> RequiredTools { get; init; } = [];
+    public string? RequiredOs { get; init; }
+    public string? RequiredArch { get; init; }
+    public TimeSpan? MaxRuntime { get; init; }
+    public decimal? MaxCost { get; init; }
+    public IReadOnlyDictionary<string, string> CustomRequirements { get; init; } = new Dictionary<string, string>();
+    public bool AllowCloud { get; init; } = true;
+}
+
+// src/Acode.Application/Compute/Placement/PlacementResult.cs
+namespace Acode.Application.Compute.Placement;
+
+public sealed record PlacementResult
+{
+    public bool Success { get; init; }
+    public IComputeTarget? SelectedTarget { get; init; }
+    public PlacementReason Reason { get; init; }
+    public IReadOnlyList<TargetScore> AllScores { get; init; } = [];
+    public string? FailureMessage { get; init; }
+    public TimeSpan DecisionDuration { get; init; }
+}
+
+// src/Acode.Application/Compute/Placement/PlacementOptions.cs
+namespace Acode.Application.Compute.Placement;
+
+public sealed record PlacementOptions
+{
+    public string Strategy { get; init; } = "auto";
+    public bool FallbackEnabled { get; init; } = true;
+    public bool IncludeLocalTarget { get; init; } = true;
+    public bool IncludeCloudTargets { get; init; } = true;
+    public int MaxCandidates { get; init; } = 10;
+    public TimeSpan DecisionTimeout { get; init; } = TimeSpan.FromMilliseconds(100);
+}
+
+// src/Acode.Application/Compute/Placement/IPlacementEngine.cs
+namespace Acode.Application.Compute.Placement;
+
+public interface IPlacementEngine
+{
+    Task<PlacementResult> PlaceAsync(
+        TaskRequirements requirements,
+        IReadOnlyList<IComputeTarget> targets,
+        PlacementOptions? options = null,
+        CancellationToken ct = default);
+    
+    Task<IReadOnlyList<TargetScore>> EvaluateAllAsync(
+        TaskRequirements requirements,
+        IReadOnlyList<IComputeTarget> targets,
+        CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Placement/IPlacementStrategy.cs
+namespace Acode.Application.Compute.Placement;
+
 public interface IPlacementStrategy
 {
     string Name { get; }
+    
     Task<double> ScoreAsync(
         IComputeTarget target,
         TaskRequirements requirements,
         TargetCapabilities capabilities,
+        CancellationToken ct = default);
+    
+    bool CanHandle(TaskRequirements requirements);
+}
+
+// src/Acode.Application/Compute/Placement/TargetCapabilities.cs
+namespace Acode.Application.Compute.Placement;
+
+public sealed record TargetCapabilities
+{
+    public required string TargetId { get; init; }
+    public int CpuCount { get; init; }
+    public int MemoryGb { get; init; }
+    public int DiskGb { get; init; }
+    public bool HasGpu { get; init; }
+    public string? GpuType { get; init; }
+    public int? GpuVramGb { get; init; }
+    public int GpuCount { get; init; }
+    public string Os { get; init; } = "linux";
+    public string Arch { get; init; } = "x64";
+    public IReadOnlyList<string> AvailableTools { get; init; } = [];
+    public decimal? HourlyRate { get; init; }
+    public bool IsLocal { get; init; }
+    public DateTimeOffset DiscoveredAt { get; init; }
+}
+```
+
+**End of Task 032 Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation + Checklist
+
+```csharp
+// src/Acode.Infrastructure/Compute/Placement/PlacementEngine.cs
+namespace Acode.Infrastructure.Compute.Placement;
+
+public sealed class PlacementEngine : IPlacementEngine
+{
+    private readonly IReadOnlyList<IPlacementStrategy> _strategies;
+    private readonly ICapabilityDiscovery _discovery;
+    private readonly IEventPublisher _events;
+    private readonly ILogger<PlacementEngine> _logger;
+    
+    public PlacementEngine(
+        IEnumerable<IPlacementStrategy> strategies,
+        ICapabilityDiscovery discovery,
+        IEventPublisher events,
+        ILogger<PlacementEngine> logger)
+    {
+        _strategies = strategies.ToList();
+        _discovery = discovery;
+        _events = events;
+        _logger = logger;
+    }
+    
+    public async Task<PlacementResult> PlaceAsync(
+        TaskRequirements requirements,
+        IReadOnlyList<IComputeTarget> targets,
+        PlacementOptions? options = null,
+        CancellationToken ct = default)
+    {
+        options ??= new PlacementOptions();
+        var sw = Stopwatch.StartNew();
+        
+        var strategy = SelectStrategy(options.Strategy, requirements);
+        var scores = await EvaluateWithStrategyAsync(
+            strategy, requirements, targets, ct);
+        
+        var best = scores
+            .Where(s => s.Score > 0)
+            .OrderByDescending(s => s.Score)
+            .FirstOrDefault();
+        
+        var result = best != null
+            ? new PlacementResult
+            {
+                Success = true,
+                SelectedTarget = best.Target,
+                Reason = PlacementReason.StrategyMatch,
+                AllScores = scores,
+                DecisionDuration = sw.Elapsed
+            }
+            : new PlacementResult
+            {
+                Success = false,
+                Reason = PlacementReason.NoViableTarget,
+                AllScores = scores,
+                FailureMessage = "No target met minimum requirements",
+                DecisionDuration = sw.Elapsed
+            };
+        
+        await PublishEventAsync(result, requirements, ct);
+        return result;
+    }
+    
+    private IPlacementStrategy SelectStrategy(string name, TaskRequirements req)
+    {
+        return _strategies.FirstOrDefault(s => 
+            s.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && s.CanHandle(req))
+            ?? _strategies.First(s => s.Name == "auto");
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Placement/Strategies/AutoStrategy.cs
+namespace Acode.Infrastructure.Compute.Placement.Strategies;
+
+public sealed class AutoStrategy : IPlacementStrategy
+{
+    public string Name => "auto";
+    
+    public Task<double> ScoreAsync(
+        IComputeTarget target,
+        TaskRequirements requirements,
+        TargetCapabilities capabilities,
+        CancellationToken ct)
+    {
+        if (!MeetsMinimums(requirements, capabilities))
+            return Task.FromResult(0.0);
+        
+        var score = capabilities.IsLocal ? 0.8 : 0.5; // Prefer local
+        score += CalculateResourceScore(requirements, capabilities);
+        return Task.FromResult(Math.Min(score, 1.0));
+    }
+    
+    public bool CanHandle(TaskRequirements requirements) => true;
+    
+    private static bool MeetsMinimums(TaskRequirements req, TargetCapabilities cap)
+    {
+        if (req.MinCpu.HasValue && cap.CpuCount < req.MinCpu) return false;
+        if (req.MinMemoryGb.HasValue && cap.MemoryGb < req.MinMemoryGb) return false;
+        if (req.Gpu != null && !cap.HasGpu) return false;
+        return true;
+    }
+}
+
+// Additional strategies: LocalFirstStrategy, CloudFirstStrategy, CostOptimizedStrategy, PerformanceStrategy
+// Follow same pattern with different scoring weights
+```
+
+### Implementation Checklist
+
+| Step | Action | Verification |
+|------|--------|--------------|
+| 1 | Create Domain models (PlacementReason, TargetScore, GpuRequirement) | Unit tests pass |
+| 2 | Add events (PlacementCompletedEvent, PlacementFailedEvent) | Event serialization verified |
+| 3 | Define TaskRequirements, PlacementResult, PlacementOptions | Records compile |
+| 4 | Create IPlacementEngine, IPlacementStrategy interfaces | Interface contracts documented |
+| 5 | Implement PlacementEngine | Integration tests with mock targets pass |
+| 6 | Implement AutoStrategy | Default scoring verified |
+| 7 | Implement LocalFirstStrategy | Local targets scored higher |
+| 8 | Implement CloudFirstStrategy | Cloud targets scored higher |
+| 9 | Implement CostOptimizedStrategy | Cheapest viable selected |
+| 10 | Implement PerformanceStrategy | Highest-spec selected |
+| 11 | Register strategies in DI | All 5 strategies resolved |
+| 12 | Add mode compliance checks | local-only rejects cloud |
+
+### Rollout Plan
+
+1. **Phase 1**: Implement domain models and interfaces
+2. **Phase 2**: Build PlacementEngine with AutoStrategy only
+3. **Phase 3**: Add remaining 4 strategies
+4. **Phase 4**: Integration tests with local + SSH targets
+5. **Phase 5**: Performance benchmark (<5ms decision time)
+
+**End of Task 032 Specification**
         CancellationToken ct);
 }
 ```

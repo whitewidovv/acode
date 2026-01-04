@@ -250,68 +250,355 @@ ec2Target:
 
 ## Implementation Prompt
 
-### Provisioner
+### Part 1: File Structure and Domain Models
+
+**Target Directory Structure:**
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Ec2/
+│           └── Provisioning/
+│               ├── ProvisionPhase.cs
+│               ├── ProvisionProgress.cs
+│               ├── SpotRequestStatus.cs
+│               └── Events/
+│                   ├── ProvisionStartedEvent.cs
+│                   ├── ProvisionPhaseChangedEvent.cs
+│                   ├── SpotFallbackEvent.cs
+│                   └── ProvisionCompletedEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Ec2/
+│           └── Provisioning/
+│               ├── Ec2ProvisionRequest.cs
+│               ├── IEc2Provisioner.cs
+│               ├── IEc2KeyPairManager.cs
+│               ├── IEc2AmiResolver.cs
+│               └── ISshReadinessChecker.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Ec2/
+            └── Provisioning/
+                ├── Ec2Provisioner.cs
+                ├── Ec2KeyPairManager.cs
+                ├── Ec2AmiResolver.cs
+                ├── SshReadinessChecker.cs
+                ├── SpotInstanceHandler.cs
+                └── ConsoleOutputParser.cs
+```
+
+**Domain Models:**
 
 ```csharp
-public class Ec2Provisioner
-{
-    private readonly IAmazonEC2 _ec2Client;
-    
-    public async Task<Ec2InstanceInfo> ProvisionAsync(
-        Ec2ProvisionRequest request,
-        IProgress<ProvisionProgress> progress = null,
-        CancellationToken ct = default);
-        
-    public async Task<bool> WaitForReadyAsync(
-        string instanceId,
-        TimeSpan timeout,
-        CancellationToken ct = default);
-}
-
-public record Ec2ProvisionRequest(
-    string AmiId,
-    string InstanceType,
-    string SubnetId,
-    IReadOnlyList<string> SecurityGroupIds,
-    string KeyName,
-    int EbsSizeGb = 20,
-    string UserData = null,
-    bool UseSpot = false,
-    decimal? SpotMaxPrice = null,
-    IReadOnlyDictionary<string, string> Tags = null);
-
-public record ProvisionProgress(
-    ProvisionPhase Phase,
-    string Message,
-    int PercentComplete);
+// src/Acode.Domain/Compute/Ec2/Provisioning/ProvisionPhase.cs
+namespace Acode.Domain.Compute.Ec2.Provisioning;
 
 public enum ProvisionPhase
 {
     Validating,
     PreparingKeyPair,
+    RequestingSpot,
     Launching,
     WaitingForRunning,
     WaitingForSsh,
-    Ready
+    Ready,
+    Failed
 }
+
+// src/Acode.Domain/Compute/Ec2/Provisioning/ProvisionProgress.cs
+namespace Acode.Domain.Compute.Ec2.Provisioning;
+
+public sealed record ProvisionProgress
+{
+    public required ProvisionPhase Phase { get; init; }
+    public required string Message { get; init; }
+    public int PercentComplete { get; init; }
+    public string? InstanceId { get; init; }
+    public TimeSpan Elapsed { get; init; }
+}
+
+// src/Acode.Domain/Compute/Ec2/Provisioning/SpotRequestStatus.cs
+namespace Acode.Domain.Compute.Ec2.Provisioning;
+
+public sealed record SpotRequestStatus
+{
+    public required string RequestId { get; init; }
+    public required string State { get; init; }
+    public string? InstanceId { get; init; }
+    public string? StatusCode { get; init; }
+    public string? StatusMessage { get; init; }
+    public decimal? SpotPrice { get; init; }
+    public bool IsFulfilled => State == "active" && InstanceId != null;
+}
+
+// src/Acode.Domain/Compute/Ec2/Provisioning/Events/ProvisionStartedEvent.cs
+namespace Acode.Domain.Compute.Ec2.Provisioning.Events;
+
+public sealed record ProvisionStartedEvent(
+    string SessionId,
+    string InstanceType,
+    string Region,
+    bool UseSpot,
+    DateTimeOffset StartedAt);
+
+// src/Acode.Domain/Compute/Ec2/Provisioning/Events/SpotFallbackEvent.cs
+namespace Acode.Domain.Compute.Ec2.Provisioning.Events;
+
+public sealed record SpotFallbackEvent(
+    string SessionId,
+    string SpotRequestId,
+    string FailureReason,
+    DateTimeOffset FallbackAt);
+
+// src/Acode.Domain/Compute/Ec2/Provisioning/Events/ProvisionCompletedEvent.cs
+namespace Acode.Domain.Compute.Ec2.Provisioning.Events;
+
+public sealed record ProvisionCompletedEvent(
+    string SessionId,
+    string InstanceId,
+    string PublicIp,
+    TimeSpan TotalDuration,
+    bool WasSpot,
+    DateTimeOffset CompletedAt);
 ```
 
-### Key Pair Manager
+**End of Task 031.a Specification - Part 1/3**
+
+### Part 2: Application Interfaces
 
 ```csharp
-public class Ec2KeyPairManager
+// src/Acode.Application/Compute/Ec2/Provisioning/Ec2ProvisionRequest.cs
+namespace Acode.Application.Compute.Ec2.Provisioning;
+
+public sealed record Ec2ProvisionRequest
 {
-    public async Task<string> EnsureKeyPairAsync(
+    public required string AmiId { get; init; }
+    public required string InstanceType { get; init; }
+    public required string SubnetId { get; init; }
+    public required IReadOnlyList<string> SecurityGroupIds { get; init; }
+    public required string KeyName { get; init; }
+    public int EbsSizeGb { get; init; } = 20;
+    public string? UserData { get; init; }
+    public bool UseSpot { get; init; } = false;
+    public decimal? SpotMaxPrice { get; init; }
+    public bool SpotFallbackToOnDemand { get; init; } = true;
+    public TimeSpan SpotRequestTimeout { get; init; } = TimeSpan.FromMinutes(5);
+    public IReadOnlyDictionary<string, string> Tags { get; init; } = new Dictionary<string, string>();
+    public bool EnforceImdsV2 { get; init; } = true;
+    public string? IamInstanceProfileArn { get; init; }
+}
+
+// src/Acode.Application/Compute/Ec2/Provisioning/IEc2Provisioner.cs
+namespace Acode.Application.Compute.Ec2.Provisioning;
+
+public interface IEc2Provisioner
+{
+    Task<Ec2InstanceInfo> ProvisionAsync(
+        Ec2ProvisionRequest request,
+        IProgress<ProvisionProgress>? progress = null,
+        CancellationToken ct = default);
+    
+    Task<bool> WaitForReadyAsync(
+        string instanceId,
+        string host,
+        TimeSpan timeout,
+        CancellationToken ct = default);
+    
+    Task CleanupFailedProvisionAsync(
+        string? instanceId,
+        string? keyPairName,
+        CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Ec2/Provisioning/IEc2KeyPairManager.cs
+namespace Acode.Application.Compute.Ec2.Provisioning;
+
+public interface IEc2KeyPairManager
+{
+    Task<KeyPairInfo> EnsureKeyPairAsync(
         string keyName,
         string privateKeyPath,
-        CancellationToken ct);
-        
-    public async Task DeleteKeyPairAsync(
+        CancellationToken ct = default);
+    
+    Task<KeyPairInfo> CreateTempKeyPairAsync(
+        string sessionId,
+        CancellationToken ct = default);
+    
+    Task DeleteKeyPairAsync(
         string keyName,
-        CancellationToken ct);
+        CancellationToken ct = default);
+    
+    Task<string> ImportKeyPairAsync(
+        string keyName,
+        string publicKeyMaterial,
+        CancellationToken ct = default);
+}
+
+public sealed record KeyPairInfo(
+    string KeyName,
+    string KeyFingerprint,
+    string PrivateKeyPath,
+    bool IsTemporary);
+
+// src/Acode.Application/Compute/Ec2/Provisioning/IEc2AmiResolver.cs
+namespace Acode.Application.Compute.Ec2.Provisioning;
+
+public interface IEc2AmiResolver
+{
+    Task<string> ResolveAmiAsync(
+        string? amiId,
+        string region,
+        CancellationToken ct = default);
+    
+    Task<string> GetLatestAmazonLinux2Async(
+        string region,
+        CancellationToken ct = default);
+    
+    Task<string> GetLatestUbuntuAsync(
+        string region,
+        string version = "22.04",
+        CancellationToken ct = default);
+    
+    Task<bool> ValidateAmiAsync(
+        string amiId,
+        string region,
+        CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Ec2/Provisioning/ISshReadinessChecker.cs
+namespace Acode.Application.Compute.Ec2.Provisioning;
+
+public interface ISshReadinessChecker
+{
+    Task<SshReadinessResult> CheckAsync(
+        string host,
+        int port,
+        TimeSpan timeout,
+        CancellationToken ct = default);
+    
+    Task<SshReadinessResult> WaitForReadyAsync(
+        string host,
+        int port,
+        int maxRetries,
+        TimeSpan retryInterval,
+        CancellationToken ct = default);
+    
+    Task<string?> GetHostFingerprintAsync(
+        string instanceId,
+        CancellationToken ct = default);
+}
+
+public sealed record SshReadinessResult(
+    bool IsReady,
+    int AttemptsUsed,
+    TimeSpan TotalWaitTime,
+    string? ErrorMessage);
+```
+
+**End of Task 031.a Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation and Checklist
+
+```csharp
+// src/Acode.Infrastructure/Compute/Ec2/Provisioning/Ec2Provisioner.cs
+namespace Acode.Infrastructure.Compute.Ec2.Provisioning;
+
+public sealed class Ec2Provisioner : IEc2Provisioner
+{
+    private readonly IAmazonEC2 _ec2Client;
+    private readonly IEc2KeyPairManager _keyPairManager;
+    private readonly ISshReadinessChecker _sshChecker;
+    private readonly IEventPublisher _events;
+    private readonly ILogger<Ec2Provisioner> _logger;
+    
+    public async Task<Ec2InstanceInfo> ProvisionAsync(
+        Ec2ProvisionRequest request,
+        IProgress<ProvisionProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var sessionId = Ulid.NewUlid().ToString();
+        
+        progress?.Report(new ProvisionProgress
+        {
+            Phase = ProvisionPhase.Launching,
+            Message = "Launching instance",
+            PercentComplete = 30
+        });
+        
+        var runRequest = BuildRunInstancesRequest(request, sessionId);
+        var response = await _ec2Client.RunInstancesAsync(runRequest, ct);
+        var instanceId = response.Reservation.Instances[0].InstanceId;
+        
+        progress?.Report(new ProvisionProgress
+        {
+            Phase = ProvisionPhase.WaitingForRunning,
+            Message = $"Waiting for {instanceId} to be running",
+            PercentComplete = 50,
+            InstanceId = instanceId
+        });
+        
+        await WaitForInstanceStateAsync(instanceId, "running", TimeSpan.FromMinutes(5), ct);
+        
+        var instance = await GetInstanceAsync(instanceId, ct);
+        var host = instance.PublicIpAddress ?? instance.PrivateIpAddress;
+        
+        await _sshChecker.WaitForReadyAsync(host, 22, 30, TimeSpan.FromSeconds(10), ct);
+        
+        return MapToInstanceInfo(instance, request.UseSpot);
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Ec2/Provisioning/Ec2KeyPairManager.cs
+namespace Acode.Infrastructure.Compute.Ec2.Provisioning;
+
+public sealed class Ec2KeyPairManager : IEc2KeyPairManager
+{
+    private readonly IAmazonEC2 _ec2Client;
+    
+    public async Task<KeyPairInfo> CreateTempKeyPairAsync(string sessionId, CancellationToken ct)
+    {
+        var keyName = $"acode-{sessionId}";
+        var response = await _ec2Client.CreateKeyPairAsync(
+            new CreateKeyPairRequest { KeyName = keyName }, ct);
+        
+        var tempPath = Path.Combine(Path.GetTempPath(), $"{keyName}.pem");
+        await File.WriteAllTextAsync(tempPath, response.KeyMaterial, ct);
+        
+        return new KeyPairInfo(keyName, response.KeyFingerprint, tempPath, IsTemporary: true);
+    }
+    
+    public async Task DeleteKeyPairAsync(string keyName, CancellationToken ct)
+    {
+        await _ec2Client.DeleteKeyPairAsync(new DeleteKeyPairRequest { KeyName = keyName }, ct);
+    }
 }
 ```
 
----
+### Implementation Checklist
+
+| # | Requirement | Test | Impl |
+|---|-------------|------|------|
+| 1 | RunInstances called with correct params | ⬜ | ⬜ |
+| 2 | Required tags applied (acode, session-id) | ⬜ | ⬜ |
+| 3 | EBS volume configured (gp3) | ⬜ | ⬜ |
+| 4 | IMDSv2 enforced | ⬜ | ⬜ |
+| 5 | UserData base64 encoded | ⬜ | ⬜ |
+| 6 | Spot request with fallback works | ⬜ | ⬜ |
+| 7 | Wait for running state | ⬜ | ⬜ |
+| 8 | SSH readiness check (30 retries) | ⬜ | ⬜ |
+| 9 | Public IP obtained | ⬜ | ⬜ |
+| 10 | Temp key pair created | ⬜ | ⬜ |
+| 11 | Failed provision cleaned up | ⬜ | ⬜ |
+| 12 | Progress events published | ⬜ | ⬜ |
+
+### Rollout Plan
+
+1. **Tests first**: Unit tests for request building, tag generation
+2. **Domain models**: Events, ProvisionPhase, ProvisionProgress
+3. **Application interfaces**: IEc2Provisioner, IEc2KeyPairManager, ISshReadinessChecker
+4. **Infrastructure impl**: Ec2Provisioner, Ec2KeyPairManager, SshReadinessChecker
+5. **Integration tests**: Real EC2 provisioning
+6. **DI registration**: Register provisioner as scoped
 
 **End of Task 031.a Specification**

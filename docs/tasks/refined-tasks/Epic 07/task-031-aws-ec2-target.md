@@ -265,38 +265,50 @@ acode target ec2 cleanup
 
 ## Implementation Prompt
 
-### Classes
+### Part 1: File Structure and Domain Models
+
+**Target Directory Structure:**
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Ec2/
+│           ├── Ec2InstanceState.cs
+│           ├── Ec2InstanceInfo.cs
+│           ├── Ec2PricingInfo.cs
+│           └── Events/
+│               ├── Ec2InstanceLaunchingEvent.cs
+│               ├── Ec2InstanceRunningEvent.cs
+│               ├── Ec2InstanceTerminatingEvent.cs
+│               ├── Ec2SpotInterruptionEvent.cs
+│               └── Ec2CostAlertEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Ec2/
+│           ├── Ec2Configuration.cs
+│           ├── IEc2InstanceProvisioner.cs
+│           ├── IEc2InstanceManager.cs
+│           ├── IEc2CostTracker.cs
+│           └── IEc2OrphanDetector.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Ec2/
+            ├── Ec2ComputeTarget.cs
+            ├── Ec2ComputeTargetFactory.cs
+            ├── Ec2InstanceProvisioner.cs
+            ├── Ec2InstanceManager.cs
+            ├── Ec2CostTracker.cs
+            ├── Ec2OrphanDetector.cs
+            ├── Ec2AmiResolver.cs
+            ├── Ec2SecurityGroupManager.cs
+            └── Ec2CredentialResolver.cs
+```
+
+**Domain Models:**
 
 ```csharp
-public class Ec2ComputeTarget : IComputeTarget
-{
-    private readonly IAmazonEC2 _ec2Client;
-    private readonly SshComputeTarget _sshTarget;
-    private readonly Ec2Configuration _config;
-    private string _instanceId;
-}
-
-public record Ec2Configuration(
-    string Region,
-    string InstanceType = "t3.medium",
-    string AmiId = null,  // null = latest Amazon Linux 2
-    string SubnetId = null,
-    IReadOnlyList<string> SecurityGroupIds = null,
-    string KeyPairName = null,
-    string InstanceProfileArn = null,
-    bool SpotEnabled = false,
-    decimal? SpotMaxPrice = null,
-    int EbsSizeGb = 20,
-    IReadOnlyDictionary<string, string> Tags = null);
-
-public record Ec2InstanceInfo(
-    string InstanceId,
-    string InstanceType,
-    string PublicIp,
-    string PrivateIp,
-    Ec2InstanceState State,
-    DateTime LaunchTime,
-    decimal HourlyRate);
+// src/Acode.Domain/Compute/Ec2/Ec2InstanceState.cs
+namespace Acode.Domain.Compute.Ec2;
 
 public enum Ec2InstanceState
 {
@@ -305,23 +317,606 @@ public enum Ec2InstanceState
     Stopping,
     Stopped,
     ShuttingDown,
-    Terminated
+    Terminated,
+    Unknown
 }
+
+// src/Acode.Domain/Compute/Ec2/Ec2InstanceInfo.cs
+namespace Acode.Domain.Compute.Ec2;
+
+public sealed record Ec2InstanceInfo
+{
+    public required string InstanceId { get; init; }
+    public required string InstanceType { get; init; }
+    public string? PublicIp { get; init; }
+    public string? PrivateIp { get; init; }
+    public required Ec2InstanceState State { get; init; }
+    public required DateTimeOffset LaunchTime { get; init; }
+    public string? AmiId { get; init; }
+    public string? SubnetId { get; init; }
+    public string? VpcId { get; init; }
+    public bool IsSpotInstance { get; init; }
+    public IReadOnlyDictionary<string, string> Tags { get; init; } = new Dictionary<string, string>();
+}
+
+// src/Acode.Domain/Compute/Ec2/Ec2PricingInfo.cs
+namespace Acode.Domain.Compute.Ec2;
+
+public sealed record Ec2PricingInfo
+{
+    public required string InstanceType { get; init; }
+    public required string Region { get; init; }
+    public decimal OnDemandHourlyRate { get; init; }
+    public decimal? SpotHourlyRate { get; init; }
+    public decimal EstimatedMonthlyCost => OnDemandHourlyRate * 24 * 30;
+}
+
+// src/Acode.Domain/Compute/Ec2/Events/Ec2InstanceLaunchingEvent.cs
+namespace Acode.Domain.Compute.Ec2.Events;
+
+public sealed record Ec2InstanceLaunchingEvent(
+    string InstanceId,
+    string InstanceType,
+    string Region,
+    bool IsSpot,
+    DateTimeOffset LaunchedAt);
+
+// src/Acode.Domain/Compute/Ec2/Events/Ec2InstanceRunningEvent.cs
+namespace Acode.Domain.Compute.Ec2.Events;
+
+public sealed record Ec2InstanceRunningEvent(
+    string InstanceId,
+    string PublicIp,
+    TimeSpan ProvisionDuration,
+    DateTimeOffset ReadyAt);
+
+// src/Acode.Domain/Compute/Ec2/Events/Ec2InstanceTerminatingEvent.cs
+namespace Acode.Domain.Compute.Ec2.Events;
+
+public sealed record Ec2InstanceTerminatingEvent(
+    string InstanceId,
+    TimeSpan RunDuration,
+    decimal EstimatedCost,
+    DateTimeOffset TerminatedAt);
+
+// src/Acode.Domain/Compute/Ec2/Events/Ec2SpotInterruptionEvent.cs
+namespace Acode.Domain.Compute.Ec2.Events;
+
+public sealed record Ec2SpotInterruptionEvent(
+    string InstanceId,
+    string InterruptionReason,
+    DateTimeOffset InterruptionTime,
+    bool WillFallbackToOnDemand);
+
+// src/Acode.Domain/Compute/Ec2/Events/Ec2CostAlertEvent.cs
+namespace Acode.Domain.Compute.Ec2.Events;
+
+public sealed record Ec2CostAlertEvent(
+    string InstanceId,
+    decimal CurrentCost,
+    decimal Threshold,
+    TimeSpan RunDuration,
+    DateTimeOffset AlertedAt);
 ```
 
-### Factory
+**End of Task 031 Specification - Part 1/4**
+
+### Part 2: Application Interfaces
 
 ```csharp
-public class Ec2ComputeTargetFactory : IComputeTargetFactory<Ec2Configuration>
+// src/Acode.Application/Compute/Ec2/Ec2Configuration.cs
+namespace Acode.Application.Compute.Ec2;
+
+public sealed record Ec2Configuration
 {
-    public string TargetType => "ec2";
-    
-    public Task<IComputeTarget> CreateAsync(
+    public required string Region { get; init; }
+    public string InstanceType { get; init; } = "t3.medium";
+    public string? AmiId { get; init; } // null = latest Amazon Linux 2
+    public string? SubnetId { get; init; }
+    public IReadOnlyList<string> SecurityGroupIds { get; init; } = [];
+    public string? KeyPairName { get; init; }
+    public string? InstanceProfileArn { get; init; }
+    public bool SpotEnabled { get; init; } = false;
+    public decimal? SpotMaxPrice { get; init; }
+    public bool SpotFallbackToOnDemand { get; init; } = true;
+    public int EbsSizeGb { get; init; } = 20;
+    public IReadOnlyDictionary<string, string> Tags { get; init; } = new Dictionary<string, string>();
+    public bool CreateTempSecurityGroup { get; init; } = false;
+    public bool AssociatePublicIp { get; init; } = true;
+    public string? UserData { get; init; }
+    public TimeSpan ProvisionTimeout { get; init; } = TimeSpan.FromMinutes(5);
+    public TimeSpan SshReadyTimeout { get; init; } = TimeSpan.FromMinutes(2);
+    public int SshRetryCount { get; init; } = 30;
+    public TimeSpan SshRetryInterval { get; init; } = TimeSpan.FromSeconds(10);
+}
+
+// src/Acode.Application/Compute/Ec2/IEc2InstanceProvisioner.cs
+namespace Acode.Application.Compute.Ec2;
+
+public interface IEc2InstanceProvisioner
+{
+    Task<Ec2InstanceInfo> ProvisionAsync(
         Ec2Configuration config,
-        CancellationToken ct);
+        CancellationToken ct = default);
+    
+    Task<string> ResolveAmiAsync(
+        string? amiId,
+        string region,
+        CancellationToken ct = default);
+    
+    Task<bool> WaitForRunningAsync(
+        string instanceId,
+        TimeSpan timeout,
+        CancellationToken ct = default);
+    
+    Task<bool> WaitForSshReadyAsync(
+        string instanceId,
+        string host,
+        int port,
+        TimeSpan timeout,
+        CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Ec2/IEc2InstanceManager.cs
+namespace Acode.Application.Compute.Ec2;
+
+public interface IEc2InstanceManager
+{
+    Task<Ec2InstanceInfo?> GetInstanceAsync(
+        string instanceId,
+        CancellationToken ct = default);
+    
+    Task<Ec2InstanceState> GetStateAsync(
+        string instanceId,
+        CancellationToken ct = default);
+    
+    Task StartAsync(string instanceId, CancellationToken ct = default);
+    Task StopAsync(string instanceId, CancellationToken ct = default);
+    Task TerminateAsync(string instanceId, CancellationToken ct = default);
+    
+    Task<IReadOnlyList<Ec2InstanceInfo>> ListAcodeInstancesAsync(
+        string region,
+        CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Ec2/IEc2CostTracker.cs
+namespace Acode.Application.Compute.Ec2;
+
+public interface IEc2CostTracker
+{
+    Task<Ec2PricingInfo> GetPricingAsync(
+        string instanceType,
+        string region,
+        CancellationToken ct = default);
+    
+    decimal CalculateRunningCost(
+        string instanceType,
+        TimeSpan runDuration,
+        bool isSpot);
+    
+    Task<decimal> GetAccumulatedCostAsync(
+        string instanceId,
+        CancellationToken ct = default);
+    
+    void SetCostAlertThreshold(string instanceId, decimal threshold);
+}
+
+// src/Acode.Application/Compute/Ec2/IEc2OrphanDetector.cs
+namespace Acode.Application.Compute.Ec2;
+
+public interface IEc2OrphanDetector
+{
+    Task<IReadOnlyList<Ec2InstanceInfo>> DetectOrphansAsync(
+        string region,
+        TimeSpan orphanThreshold,
+        CancellationToken ct = default);
+    
+    Task CleanupOrphansAsync(
+        IEnumerable<string> instanceIds,
+        CancellationToken ct = default);
+    
+    Task<int> CleanupAllOrphansAsync(
+        string region,
+        TimeSpan orphanThreshold,
+        bool dryRun = true,
+        CancellationToken ct = default);
 }
 ```
 
----
+**End of Task 031 Specification - Part 2/4**
+
+### Part 3: Infrastructure Implementation - EC2 Target and Factory
+
+```csharp
+// src/Acode.Infrastructure/Compute/Ec2/Ec2ComputeTarget.cs
+namespace Acode.Infrastructure.Compute.Ec2;
+
+public sealed class Ec2ComputeTarget : IComputeTarget, IAsyncDisposable
+{
+    private readonly IAmazonEC2 _ec2Client;
+    private readonly IEc2InstanceProvisioner _provisioner;
+    private readonly IEc2InstanceManager _instanceManager;
+    private readonly IEc2CostTracker _costTracker;
+    private readonly IModeValidator _modeValidator;
+    private readonly IEventPublisher _events;
+    private readonly ILogger<Ec2ComputeTarget> _logger;
+    
+    private readonly Ec2Configuration _config;
+    private SshComputeTarget? _sshTarget;
+    private Ec2InstanceInfo? _instance;
+    private DateTimeOffset? _provisionedAt;
+    
+    public string TargetId { get; } = Ulid.NewUlid().ToString();
+    public string TargetType => "ec2";
+    public ComputeTargetState State { get; private set; } = ComputeTargetState.NotProvisioned;
+    public bool IsReady => State == ComputeTargetState.Ready && _sshTarget?.IsReady == true;
+    
+    public Ec2ComputeTarget(
+        IAmazonEC2 ec2Client,
+        IEc2InstanceProvisioner provisioner,
+        IEc2InstanceManager instanceManager,
+        IEc2CostTracker costTracker,
+        IModeValidator modeValidator,
+        SshComputeTargetFactory sshFactory,
+        IEventPublisher events,
+        ILogger<Ec2ComputeTarget> logger,
+        Ec2Configuration config)
+    {
+        _ec2Client = ec2Client;
+        _provisioner = provisioner;
+        _instanceManager = instanceManager;
+        _costTracker = costTracker;
+        _modeValidator = modeValidator;
+        _events = events;
+        _logger = logger;
+        _config = config;
+    }
+    
+    public async Task<WorkspacePrepareResult> PrepareAsync(
+        WorkspaceContext context,
+        CancellationToken ct = default)
+    {
+        // Mode validation - EC2 blocked in local-only and airgapped
+        if (!_modeValidator.IsCloudAllowed())
+        {
+            throw new ModeViolationException(
+                $"EC2 targets blocked in {_modeValidator.CurrentMode} mode");
+        }
+        
+        State = ComputeTargetState.Provisioning;
+        var stopwatch = Stopwatch.StartNew();
+        
+        try
+        {
+            // Provision EC2 instance
+            _instance = await _provisioner.ProvisionAsync(_config, ct);
+            _provisionedAt = DateTimeOffset.UtcNow;
+            
+            await _events.PublishAsync(new Ec2InstanceLaunchingEvent(
+                _instance.InstanceId,
+                _instance.InstanceType,
+                _config.Region,
+                _instance.IsSpotInstance,
+                _provisionedAt.Value));
+            
+            // Wait for SSH ready
+            var host = _instance.PublicIp ?? _instance.PrivateIp 
+                ?? throw new InvalidOperationException("No IP address available");
+            
+            await _provisioner.WaitForSshReadyAsync(
+                _instance.InstanceId, host, 22, _config.SshReadyTimeout, ct);
+            
+            stopwatch.Stop();
+            
+            await _events.PublishAsync(new Ec2InstanceRunningEvent(
+                _instance.InstanceId, host, stopwatch.Elapsed, DateTimeOffset.UtcNow));
+            
+            // Create SSH target for execution
+            _sshTarget = await CreateSshTargetAsync(host, ct);
+            
+            // Delegate workspace preparation to SSH target
+            var result = await _sshTarget.PrepareAsync(context, ct);
+            
+            State = ComputeTargetState.Ready;
+            _logger.LogInformation(
+                "EC2 target {InstanceId} ready in {Duration}",
+                _instance.InstanceId, stopwatch.Elapsed);
+            
+            return result;
+        }
+        catch (Exception ex)
+        {
+            State = ComputeTargetState.Failed;
+            _logger.LogError(ex, "Failed to provision EC2 instance");
+            
+            // Cleanup on failure
+            if (_instance != null)
+            {
+                await TeardownAsync(ct);
+            }
+            
+            throw;
+        }
+    }
+    
+    public async Task<ExecuteResult> ExecuteAsync(
+        string command,
+        ExecuteOptions? options = null,
+        CancellationToken ct = default)
+    {
+        EnsureReady();
+        return await _sshTarget!.ExecuteAsync(command, options, ct);
+    }
+    
+    public async Task<TransferResult> UploadAsync(
+        string localPath,
+        string remotePath,
+        TransferOptions? options = null,
+        CancellationToken ct = default)
+    {
+        EnsureReady();
+        return await _sshTarget!.UploadAsync(localPath, remotePath, options, ct);
+    }
+    
+    public async Task<TransferResult> DownloadAsync(
+        string remotePath,
+        string localPath,
+        TransferOptions? options = null,
+        CancellationToken ct = default)
+    {
+        EnsureReady();
+        return await _sshTarget!.DownloadAsync(remotePath, localPath, options, ct);
+    }
+    
+    public async Task TeardownAsync(CancellationToken ct = default)
+    {
+        State = ComputeTargetState.TearingDown;
+        
+        try
+        {
+            // Cleanup SSH target first
+            if (_sshTarget != null)
+            {
+                await _sshTarget.TeardownAsync(ct);
+                await _sshTarget.DisposeAsync();
+                _sshTarget = null;
+            }
+            
+            // Terminate EC2 instance
+            if (_instance != null)
+            {
+                var runDuration = _provisionedAt.HasValue 
+                    ? DateTimeOffset.UtcNow - _provisionedAt.Value 
+                    : TimeSpan.Zero;
+                
+                var cost = _costTracker.CalculateRunningCost(
+                    _instance.InstanceType, runDuration, _instance.IsSpotInstance);
+                
+                await _instanceManager.TerminateAsync(_instance.InstanceId, ct);
+                
+                await _events.PublishAsync(new Ec2InstanceTerminatingEvent(
+                    _instance.InstanceId, runDuration, cost, DateTimeOffset.UtcNow));
+                
+                _logger.LogInformation(
+                    "EC2 instance {InstanceId} terminated after {Duration}, cost: ${Cost:F4}",
+                    _instance.InstanceId, runDuration, cost);
+                
+                _instance = null;
+            }
+            
+            State = ComputeTargetState.Terminated;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during EC2 teardown");
+            State = ComputeTargetState.Failed;
+            throw;
+        }
+    }
+    
+    private void EnsureReady()
+    {
+        if (!IsReady)
+            throw new InvalidOperationException("EC2 target not ready");
+    }
+    
+    public async ValueTask DisposeAsync()
+    {
+        if (State != ComputeTargetState.Terminated)
+        {
+            await TeardownAsync();
+        }
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Ec2/Ec2ComputeTargetFactory.cs
+namespace Acode.Infrastructure.Compute.Ec2;
+
+public sealed class Ec2ComputeTargetFactory : IComputeTargetFactory
+{
+    private readonly IServiceProvider _services;
+    private readonly IModeValidator _modeValidator;
+    
+    public string TargetType => "ec2";
+    
+    public async Task<IComputeTarget> CreateAsync(
+        ComputeTargetConfiguration config,
+        CancellationToken ct = default)
+    {
+        if (!_modeValidator.IsCloudAllowed())
+        {
+            throw new ModeViolationException(
+                $"Cannot create EC2 target in {_modeValidator.CurrentMode} mode");
+        }
+        
+        var ec2Config = ParseConfiguration(config);
+        var ec2Client = CreateEc2Client(ec2Config);
+        
+        return new Ec2ComputeTarget(
+            ec2Client,
+            _services.GetRequiredService<IEc2InstanceProvisioner>(),
+            _services.GetRequiredService<IEc2InstanceManager>(),
+            _services.GetRequiredService<IEc2CostTracker>(),
+            _modeValidator,
+            _services.GetRequiredService<SshComputeTargetFactory>(),
+            _services.GetRequiredService<IEventPublisher>(),
+            _services.GetRequiredService<ILogger<Ec2ComputeTarget>>(),
+            ec2Config);
+    }
+    
+    private IAmazonEC2 CreateEc2Client(Ec2Configuration config)
+    {
+        var awsConfig = new AmazonEC2Config
+        {
+            RegionEndpoint = RegionEndpoint.GetBySystemName(config.Region)
+        };
+        return new AmazonEC2Client(awsConfig);
+    }
+}
+```
+
+**End of Task 031 Specification - Part 3/4**
+
+### Part 4: Provisioner, Orphan Detection, and Implementation Checklist
+
+```csharp
+// src/Acode.Infrastructure/Compute/Ec2/Ec2InstanceProvisioner.cs
+namespace Acode.Infrastructure.Compute.Ec2;
+
+public sealed class Ec2InstanceProvisioner : IEc2InstanceProvisioner
+{
+    private readonly IAmazonEC2 _ec2Client;
+    private readonly IEc2AmiResolver _amiResolver;
+    private readonly ILogger<Ec2InstanceProvisioner> _logger;
+    
+    public async Task<Ec2InstanceInfo> ProvisionAsync(
+        Ec2Configuration config,
+        CancellationToken ct = default)
+    {
+        var amiId = await ResolveAmiAsync(config.AmiId, config.Region, ct);
+        
+        var request = new RunInstancesRequest
+        {
+            ImageId = amiId,
+            InstanceType = InstanceType.FindValue(config.InstanceType),
+            MinCount = 1,
+            MaxCount = 1,
+            SubnetId = config.SubnetId,
+            SecurityGroupIds = config.SecurityGroupIds?.ToList(),
+            KeyName = config.KeyPairName,
+            TagSpecifications =
+            [
+                new TagSpecification
+                {
+                    ResourceType = ResourceType.Instance,
+                    Tags = BuildTags(config.Tags)
+                }
+            ]
+        };
+        
+        var response = await _ec2Client.RunInstancesAsync(request, ct);
+        var instance = response.Reservation.Instances.First();
+        
+        await WaitForRunningAsync(instance.InstanceId, config.ProvisionTimeout, ct);
+        
+        return MapToInstanceInfo(instance, config.SpotEnabled);
+    }
+    
+    public async Task<bool> WaitForSshReadyAsync(
+        string instanceId,
+        string host,
+        int port,
+        TimeSpan timeout,
+        CancellationToken ct = default)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(timeout);
+        
+        for (var i = 0; i < 30 && !cts.Token.IsCancellationRequested; i++)
+        {
+            try
+            {
+                using var client = new TcpClient();
+                await client.ConnectAsync(host, port, cts.Token);
+                return true;
+            }
+            catch
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), cts.Token);
+            }
+        }
+        return false;
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Ec2/Ec2OrphanDetector.cs
+namespace Acode.Infrastructure.Compute.Ec2;
+
+public sealed class Ec2OrphanDetector : IEc2OrphanDetector
+{
+    private readonly IAmazonEC2 _ec2Client;
+    
+    public async Task<IReadOnlyList<Ec2InstanceInfo>> DetectOrphansAsync(
+        string region,
+        TimeSpan orphanThreshold,
+        CancellationToken ct = default)
+    {
+        var request = new DescribeInstancesRequest
+        {
+            Filters =
+            [
+                new Filter("tag:acode", ["true"]),
+                new Filter("instance-state-name", ["running", "pending"])
+            ]
+        };
+        
+        var response = await _ec2Client.DescribeInstancesAsync(request, ct);
+        var cutoff = DateTimeOffset.UtcNow - orphanThreshold;
+        
+        return response.Reservations
+            .SelectMany(r => r.Instances)
+            .Where(i => i.LaunchTime < cutoff.UtcDateTime)
+            .Select(MapToInstanceInfo)
+            .ToList();
+    }
+}
+```
+
+### Implementation Checklist
+
+| # | Requirement | Test | Impl |
+|---|-------------|------|------|
+| 1 | Ec2ComputeTarget implements IComputeTarget | ⬜ | ⬜ |
+| 2 | AWS credentials from env/profile/IAM | ⬜ | ⬜ |
+| 3 | Region configurable | ⬜ | ⬜ |
+| 4 | Instance type configurable (default t3.medium) | ⬜ | ⬜ |
+| 5 | AMI configurable (default Amazon Linux 2) | ⬜ | ⬜ |
+| 6 | PrepareAsync provisions instance | ⬜ | ⬜ |
+| 7 | Wait for running state | ⬜ | ⬜ |
+| 8 | Wait for SSH ready (30 retries, 10s interval) | ⬜ | ⬜ |
+| 9 | SSH target created for execution | ⬜ | ⬜ |
+| 10 | Spot instances supported | ⬜ | ⬜ |
+| 11 | Spot fallback to on-demand | ⬜ | ⬜ |
+| 12 | Mode validation blocks local-only/airgapped | ⬜ | ⬜ |
+| 13 | Tags applied (acode=true) | ⬜ | ⬜ |
+| 14 | TeardownAsync terminates instance | ⬜ | ⬜ |
+| 15 | Orphan detection finds old acode instances | ⬜ | ⬜ |
+| 16 | Orphan cleanup terminates safely | ⬜ | ⬜ |
+| 17 | Cost tracking accurate | ⬜ | ⬜ |
+| 18 | Events published for lifecycle | ⬜ | ⬜ |
+| 19 | Provisioning timeout enforced (5 min) | ⬜ | ⬜ |
+| 20 | Secrets not logged | ⬜ | ⬜ |
+
+### Rollout Plan
+
+1. **Tests first**: Unit tests for config parsing, mode validation, instance type validation
+2. **Domain models**: Events, Ec2InstanceInfo, Ec2PricingInfo, Ec2InstanceState
+3. **Application interfaces**: IEc2InstanceProvisioner, IEc2InstanceManager, IEc2CostTracker, IEc2OrphanDetector
+4. **Infrastructure impl**: Ec2ComputeTarget, Ec2ComputeTargetFactory, Ec2InstanceProvisioner
+5. **AWS SDK integration**: Ec2InstanceManager, Ec2AmiResolver, Ec2SecurityGroupManager
+6. **Cost tracking**: Ec2CostTracker with pricing API integration
+7. **Orphan detection**: Ec2OrphanDetector with safe cleanup
+8. **Integration tests**: Real EC2 provisioning (requires AWS creds)
+9. **DI registration**: Register factory, provisioner, manager as scoped
 
 **End of Task 031 Specification**
