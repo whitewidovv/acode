@@ -34,16 +34,24 @@ public class ConfigCommandTests
         _mockValidator.Validate(config)
             .Returns(validationResult);
 
-        using var consoleOutput = new StringWriter();
-        Console.SetOut(consoleOutput);
+        var originalOut = Console.Out;
+        try
+        {
+            using var consoleOutput = new StringWriter();
+            Console.SetOut(consoleOutput);
 
-        // Act
-        var exitCode = await command.ValidateAsync(".agent/config.yml").ConfigureAwait(true);
+            // Act
+            var exitCode = await command.ValidateAsync(".agent/config.yml").ConfigureAwait(true);
 
-        // Assert
-        exitCode.Should().Be(0, "validation should succeed for valid config");
-        consoleOutput.ToString().Should().Contain("✓", "success marker should be shown");
-        consoleOutput.ToString().Should().Contain("valid", "validation result should be shown");
+            // Assert
+            exitCode.Should().Be(0, "validation should succeed for valid config");
+            consoleOutput.ToString().Should().Contain("✓", "success marker should be shown");
+            consoleOutput.ToString().Should().Contain("valid", "validation result should be shown");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
     }
 
     [Fact]
@@ -72,15 +80,23 @@ public class ConfigCommandTests
         _mockValidator.Validate(config)
             .Returns(validationResult);
 
-        using var consoleOutput = new StringWriter();
-        Console.SetOut(consoleOutput);
+        var originalOut = Console.Out;
+        try
+        {
+            using var consoleOutput = new StringWriter();
+            Console.SetOut(consoleOutput);
 
-        // Act
-        var exitCode = await command.ValidateAsync(".agent/config.yml").ConfigureAwait(true);
+            // Act
+            var exitCode = await command.ValidateAsync(".agent/config.yml").ConfigureAwait(true);
 
-        // Assert
-        exitCode.Should().Be(1, "validation should return error code for invalid config");
-        consoleOutput.ToString().Should().Contain("Invalid mode", "error message should be shown");
+            // Assert
+            exitCode.Should().Be(1, "validation should return error code for invalid config");
+            consoleOutput.ToString().Should().Contain("Invalid mode", "error message should be shown");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
     }
 
     [Fact]
@@ -92,15 +108,23 @@ public class ConfigCommandTests
         _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new FileNotFoundException("Config file not found"));
 
-        using var consoleOutput = new StringWriter();
-        Console.SetOut(consoleOutput);
+        var originalOut = Console.Out;
+        try
+        {
+            using var consoleOutput = new StringWriter();
+            Console.SetOut(consoleOutput);
 
-        // Act
-        var exitCode = await command.ValidateAsync(".agent/config.yml").ConfigureAwait(true);
+            // Act
+            var exitCode = await command.ValidateAsync(".agent/config.yml").ConfigureAwait(true);
 
-        // Assert
-        exitCode.Should().Be(1, "file not found should return error code");
-        consoleOutput.ToString().Should().Contain("not found", "error message should be shown");
+            // Assert
+            exitCode.Should().Be(1, "file not found should return error code");
+            consoleOutput.ToString().Should().Contain("not found", "error message should be shown");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
     }
 
     [Fact]
@@ -117,17 +141,25 @@ public class ConfigCommandTests
         _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(config);
 
-        using var consoleOutput = new StringWriter();
-        Console.SetOut(consoleOutput);
+        var originalOut = Console.Out;
+        try
+        {
+            using var consoleOutput = new StringWriter();
+            Console.SetOut(consoleOutput);
 
-        // Act
-        var exitCode = await command.ShowAsync(".agent/config.yml", format: "yaml").ConfigureAwait(true);
+            // Act
+            var exitCode = await command.ShowAsync(".agent/config.yml", format: "yaml").ConfigureAwait(true);
 
-        // Assert
-        exitCode.Should().Be(0, "show should succeed for valid config");
-        var output = consoleOutput.ToString();
-        output.Should().Contain("1.0.0", "schema version should be shown");
-        output.Should().Contain("test-project", "project name should be shown");
+            // Assert
+            exitCode.Should().Be(0, "show should succeed for valid config");
+            var output = consoleOutput.ToString();
+            output.Should().Contain("1.0.0", "schema version should be shown");
+            output.Should().Contain("test-project", "project name should be shown");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
     }
 
     [Fact]
@@ -144,18 +176,26 @@ public class ConfigCommandTests
         _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(config);
 
-        using var consoleOutput = new StringWriter();
-        Console.SetOut(consoleOutput);
+        var originalOut = Console.Out;
+        try
+        {
+            using var consoleOutput = new StringWriter();
+            Console.SetOut(consoleOutput);
 
-        // Act
-        var exitCode = await command.ShowAsync(".agent/config.yml", format: "json").ConfigureAwait(true);
+            // Act
+            var exitCode = await command.ShowAsync(".agent/config.yml", format: "json").ConfigureAwait(true);
 
-        // Assert
-        exitCode.Should().Be(0, "show should succeed for JSON format");
-        var output = consoleOutput.ToString();
-        output.Should().Contain("{", "JSON should start with brace");
-        output.Should().Contain("\"schema_version\"", "JSON should contain snake_case keys");
-        output.Should().Contain("\"test-project\"", "JSON should contain project name");
+            // Assert
+            exitCode.Should().Be(0, "show should succeed for JSON format");
+            var output = consoleOutput.ToString();
+            output.Should().Contain("{", "JSON should start with brace");
+            output.Should().Contain("\"schema_version\"", "JSON should contain snake_case keys");
+            output.Should().Contain("\"test-project\"", "JSON should contain project name");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
     }
 
     [Fact]
@@ -167,14 +207,22 @@ public class ConfigCommandTests
         _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new FileNotFoundException("Config file not found"));
 
-        using var consoleOutput = new StringWriter();
-        Console.SetOut(consoleOutput);
+        var originalOut = Console.Out;
+        try
+        {
+            using var consoleOutput = new StringWriter();
+            Console.SetOut(consoleOutput);
 
-        // Act
-        var exitCode = await command.ShowAsync(".agent/config.yml").ConfigureAwait(true);
+            // Act
+            var exitCode = await command.ShowAsync(".agent/config.yml").ConfigureAwait(true);
 
-        // Assert
-        exitCode.Should().Be(1, "file not found should return error code");
-        consoleOutput.ToString().Should().Contain("not found", "error message should be shown");
+            // Assert
+            exitCode.Should().Be(1, "file not found should return error code");
+            consoleOutput.ToString().Should().Contain("not found", "error message should be shown");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
     }
 }
