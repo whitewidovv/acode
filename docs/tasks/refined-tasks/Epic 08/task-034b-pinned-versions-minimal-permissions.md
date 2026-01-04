@@ -236,57 +236,302 @@ ciSecurity:
 
 ## Implementation Prompt
 
-### Interface
+### Part 1: File Structure + Domain Models
+
+```
+src/
+├── Acode.Domain/
+│   └── CiCd/
+│       └── Security/
+│           ├── SecuritySeverity.cs
+│           └── Events/
+│               ├── ActionPinnedEvent.cs
+│               ├── SecurityIssueDetectedEvent.cs
+│               └── PermissionWarningEvent.cs
+├── Acode.Application/
+│   └── CiCd/
+│       └── Security/
+│           ├── IActionVersionResolver.cs
+│           ├── IPermissionAnalyzer.cs
+│           ├── IWorkflowSecurityScanner.cs
+│           ├── PinnedAction.cs
+│           ├── PermissionSet.cs
+│           ├── PermissionWarning.cs
+│           └── SecurityIssue.cs
+└── Acode.Infrastructure/
+    └── CiCd/
+        └── Security/
+            ├── ActionVersionResolver.cs
+            ├── ActionVersionCache.cs
+            ├── PermissionAnalyzer.cs
+            ├── WorkflowSecurityScanner.cs
+            └── Patterns/
+                ├── ScriptInjectionPattern.cs
+                └── DangerousPatternRegistry.cs
+```
 
 ```csharp
-public interface IActionVersionResolver
+// src/Acode.Domain/CiCd/Security/SecuritySeverity.cs
+namespace Acode.Domain.CiCd.Security;
+
+public enum SecuritySeverity
 {
-    Task<PinnedAction> ResolveAsync(
-        string actionRef,
-        CancellationToken ct);
+    Info,
+    Warning,
+    Error,
+    Critical
 }
 
-public record PinnedAction(
-    string Owner,
-    string Repo,
+// src/Acode.Domain/CiCd/Security/Events/ActionPinnedEvent.cs
+namespace Acode.Domain.CiCd.Security.Events;
+
+public sealed record ActionPinnedEvent(
+    string ActionRef,
     string Sha,
     string Tag,
-    string FullRef);  // owner/repo@sha
+    bool FromCache,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/CiCd/Security/Events/SecurityIssueDetectedEvent.cs
+namespace Acode.Domain.CiCd.Security.Events;
+
+public sealed record SecurityIssueDetectedEvent(
+    string Pattern,
+    SecuritySeverity Severity,
+    int Line,
+    string WorkflowName,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/CiCd/Security/Events/PermissionWarningEvent.cs
+namespace Acode.Domain.CiCd.Security.Events;
+
+public sealed record PermissionWarningEvent(
+    string Permission,
+    string Reason,
+    SecuritySeverity Severity,
+    DateTimeOffset Timestamp) : IDomainEvent;
+```
+
+**End of Task 034.b Specification - Part 1/3**
+
+### Part 2: Application Interfaces
+
+```csharp
+// src/Acode.Application/CiCd/Security/PinnedAction.cs
+namespace Acode.Application.CiCd.Security;
+
+public sealed record PinnedAction
+{
+    public required string Owner { get; init; }
+    public required string Repo { get; init; }
+    public required string Sha { get; init; }
+    public required string Tag { get; init; }
+    public string FullRef => $"{Owner}/{Repo}@{Sha}";
+    public string Comment => $"# {Tag}";
+}
+
+// src/Acode.Application/CiCd/Security/PermissionSet.cs
+namespace Acode.Application.CiCd.Security;
+
+public sealed record PermissionSet
+{
+    public IReadOnlyDictionary<string, string> Permissions { get; init; } = new Dictionary<string, string>();
+    public IReadOnlyList<string> Reasons { get; init; } = [];
+}
+
+// src/Acode.Application/CiCd/Security/PermissionWarning.cs
+namespace Acode.Application.CiCd.Security;
+
+public sealed record PermissionWarning
+{
+    public required string Permission { get; init; }
+    public required string Reason { get; init; }
+    public SecuritySeverity Severity { get; init; }
+}
+
+// src/Acode.Application/CiCd/Security/SecurityIssue.cs
+namespace Acode.Application.CiCd.Security;
+
+public sealed record SecurityIssue
+{
+    public required string Pattern { get; init; }
+    public required string Description { get; init; }
+    public SecuritySeverity Severity { get; init; }
+    public int Line { get; init; }
+    public string? Suggestion { get; init; }
+}
+
+// src/Acode.Application/CiCd/Security/IActionVersionResolver.cs
+namespace Acode.Application.CiCd.Security;
+
+public interface IActionVersionResolver
+{
+    Task<PinnedAction?> ResolveAsync(string actionRef, CancellationToken ct = default);
+    Task<PinnedAction?> GetCachedAsync(string actionRef);
+    Task InvalidateCacheAsync(string actionRef, CancellationToken ct = default);
+}
+
+// src/Acode.Application/CiCd/Security/IPermissionAnalyzer.cs
+namespace Acode.Application.CiCd.Security;
 
 public interface IPermissionAnalyzer
 {
     PermissionSet InferMinimal(CiWorkflow workflow);
     IReadOnlyList<PermissionWarning> Analyze(CiWorkflow workflow);
+    bool HasDangerousPermissions(CiWorkflow workflow);
 }
 
-public record PermissionSet(
-    IReadOnlyDictionary<string, string> Permissions,
-    IReadOnlyList<string> Reasons);
+// src/Acode.Application/CiCd/Security/IWorkflowSecurityScanner.cs
+namespace Acode.Application.CiCd.Security;
 
-public record PermissionWarning(
-    string Permission,
-    string Reason,
-    WarningSeverity Severity);
-```
-
-### Security Scanner
-
-```csharp
 public interface IWorkflowSecurityScanner
 {
     IReadOnlyList<SecurityIssue> Scan(string workflowContent);
+    bool HasCriticalIssues(string workflowContent);
 }
-
-public record SecurityIssue(
-    string Pattern,
-    string Description,
-    SecuritySeverity Severity,
-    int Line,
-    string Suggestion);
-
-public enum SecuritySeverity { Info, Warning, Error, Critical }
 ```
 
----
+**End of Task 034.b Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation + Checklist
+
+```csharp
+// src/Acode.Infrastructure/CiCd/Security/ActionVersionCache.cs
+namespace Acode.Infrastructure.CiCd.Security;
+
+public sealed class ActionVersionCache
+{
+    private readonly ConcurrentDictionary<string, CacheEntry> _cache = new();
+    private readonly TimeSpan _ttl = TimeSpan.FromHours(24);
+    
+    public PinnedAction? Get(string actionRef)
+    {
+        if (_cache.TryGetValue(actionRef, out var entry) && !entry.IsExpired(_ttl))
+            return entry.Action;
+        return null;
+    }
+    
+    public void Set(string actionRef, PinnedAction action)
+    {
+        _cache[actionRef] = new CacheEntry(action, DateTimeOffset.UtcNow);
+    }
+    
+    private sealed record CacheEntry(PinnedAction Action, DateTimeOffset CachedAt)
+    {
+        public bool IsExpired(TimeSpan ttl) => DateTimeOffset.UtcNow - CachedAt > ttl;
+    }
+}
+
+// src/Acode.Infrastructure/CiCd/Security/ActionVersionResolver.cs
+namespace Acode.Infrastructure.CiCd.Security;
+
+public sealed class ActionVersionResolver : IActionVersionResolver
+{
+    private readonly ActionVersionCache _cache;
+    private readonly HttpClient _http;
+    private readonly IEventPublisher _events;
+    
+    public async Task<PinnedAction?> ResolveAsync(string actionRef, CancellationToken ct)
+    {
+        var cached = _cache.Get(actionRef);
+        if (cached != null)
+        {
+            await _events.PublishAsync(new ActionPinnedEvent(actionRef, cached.Sha, cached.Tag, true, DateTimeOffset.UtcNow), ct);
+            return cached;
+        }
+        
+        var (owner, repo, tag) = ParseActionRef(actionRef);
+        var sha = await LookupShaAsync(owner, repo, tag, ct);
+        if (sha == null) return null;
+        
+        var pinned = new PinnedAction { Owner = owner, Repo = repo, Sha = sha, Tag = tag };
+        _cache.Set(actionRef, pinned);
+        
+        await _events.PublishAsync(new ActionPinnedEvent(actionRef, sha, tag, false, DateTimeOffset.UtcNow), ct);
+        return pinned;
+    }
+    
+    private async Task<string?> LookupShaAsync(string owner, string repo, string tag, CancellationToken ct)
+    {
+        var url = $"https://api.github.com/repos/{owner}/{repo}/git/ref/tags/{tag}";
+        var response = await _http.GetAsync(url, ct);
+        if (!response.IsSuccessStatusCode) return null;
+        
+        var json = await response.Content.ReadAsStringAsync(ct);
+        var match = Regex.Match(json, @"""sha"":\s*""([a-f0-9]{40})""");
+        return match.Success ? match.Groups[1].Value : null;
+    }
+}
+
+// src/Acode.Infrastructure/CiCd/Security/WorkflowSecurityScanner.cs
+namespace Acode.Infrastructure.CiCd.Security;
+
+public sealed class WorkflowSecurityScanner : IWorkflowSecurityScanner
+{
+    private static readonly (string Pattern, string Description, SecuritySeverity Severity, string Suggestion)[] DangerousPatterns =
+    [
+        (@"\$\{\{\s*github\.event\.(issue|pull_request)\.(title|body)", "Script injection risk", SecuritySeverity.Critical, "Use environment variable with proper escaping"),
+        (@"permissions:\s*write-all", "Over-privileged workflow", SecuritySeverity.Error, "Specify exact permissions needed"),
+        (@"pull_request_target:", "Fork attack risk", SecuritySeverity.Warning, "Be careful with checkout ref"),
+        (@"env:\s*\$\{\{.*secrets\.", "Potential secret exposure", SecuritySeverity.Warning, "Use secrets context directly in steps")
+    ];
+    
+    public IReadOnlyList<SecurityIssue> Scan(string workflowContent)
+    {
+        var issues = new List<SecurityIssue>();
+        var lines = workflowContent.Split('\n');
+        
+        for (var i = 0; i < lines.Length; i++)
+        {
+            foreach (var (pattern, desc, severity, suggestion) in DangerousPatterns)
+            {
+                if (Regex.IsMatch(lines[i], pattern, RegexOptions.IgnoreCase))
+                {
+                    issues.Add(new SecurityIssue
+                    {
+                        Pattern = pattern,
+                        Description = desc,
+                        Severity = severity,
+                        Line = i + 1,
+                        Suggestion = suggestion
+                    });
+                }
+            }
+        }
+        
+        return issues;
+    }
+    
+    public bool HasCriticalIssues(string content) =>
+        Scan(content).Any(i => i.Severity == SecuritySeverity.Critical);
+}
+```
+
+### Implementation Checklist
+
+| Step | Action | Verification |
+|------|--------|--------------|
+| 1 | Create SecuritySeverity enum | Enum compiles |
+| 2 | Add security events | Event serialization verified |
+| 3 | Define PinnedAction, PermissionSet, SecurityIssue records | Records compile |
+| 4 | Create IActionVersionResolver, IPermissionAnalyzer, IWorkflowSecurityScanner | Interfaces clear |
+| 5 | Implement ActionVersionCache with 24h TTL | Cache expiry works |
+| 6 | Implement ActionVersionResolver | GitHub API lookup works |
+| 7 | Parse action references | owner/repo@tag parsing |
+| 8 | SHA lookup via GitHub API | Full 40-char SHA returned |
+| 9 | Implement PermissionAnalyzer | Minimal permissions inferred |
+| 10 | Add dangerous permission detection | write-all blocked |
+| 11 | Implement WorkflowSecurityScanner | Pattern matching works |
+| 12 | Add script injection pattern | ${{ github.event.* }} detected |
+| 13 | Add permission warning generation | Warnings have suggestions |
+| 14 | Register in DI | All services resolved |
+
+### Rollout Plan
+
+1. **Phase 1**: Implement ActionVersionCache and resolver
+2. **Phase 2**: Add GitHub API integration for SHA lookup
+3. **Phase 3**: Build PermissionAnalyzer with minimal inference
+4. **Phase 4**: Implement WorkflowSecurityScanner with patterns
+5. **Phase 5**: Integration with template generator
 
 **End of Task 034.b Specification**

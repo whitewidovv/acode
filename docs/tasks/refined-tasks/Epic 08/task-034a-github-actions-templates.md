@@ -243,61 +243,259 @@ jobs:
 
 ## Implementation Prompt
 
-### Templates
+### Part 1: File Structure + Domain Models
 
-```csharp
-public class DotNetTemplateProvider : ICiStackProvider
-{
-    public string Stack => "dotnet";
-    
-    public async Task<CiWorkflow> GenerateAsync(
-        CiTemplateRequest request,
-        ProjectInfo project,
-        CancellationToken ct);
-}
-
-public class NodeJsTemplateProvider : ICiStackProvider
-{
-    public string Stack => "node";
-    
-    public async Task<CiWorkflow> GenerateAsync(
-        CiTemplateRequest request,
-        ProjectInfo project,
-        CancellationToken ct);
-}
-
-public record ProjectInfo(
-    string Stack,
-    string Version,
-    string ProjectPath,
-    string PackageManager,
-    IReadOnlyList<string> Projects,
-    IReadOnlyList<string> TestProjects);
+```
+src/
+├── Acode.Domain/
+│   └── CiCd/
+│       └── Templates/
+│           └── Stacks/
+│               ├── PackageManager.cs
+│               └── Events/
+│                   ├── ProjectDetectedEvent.cs
+│                   └── StackDetectionFailedEvent.cs
+├── Acode.Application/
+│   └── CiCd/
+│       └── Templates/
+│           └── Stacks/
+│               ├── ICiStackProvider.cs
+│               ├── IProjectDetector.cs
+│               ├── IStackDetector.cs
+│               └── ProjectInfo.cs
+└── Acode.Infrastructure/
+    └── CiCd/
+        └── Templates/
+            └── Stacks/
+                ├── DotNetTemplateProvider.cs
+                ├── NodeJsTemplateProvider.cs
+                ├── CompositeProjectDetector.cs
+                └── Detectors/
+                    ├── DotNetDetector.cs
+                    └── NodeJsDetector.cs
 ```
 
-### Detector
+```csharp
+// src/Acode.Domain/CiCd/Templates/Stacks/PackageManager.cs
+namespace Acode.Domain.CiCd.Templates.Stacks;
+
+public enum PackageManager
+{
+    NuGet,
+    Npm,
+    Yarn,
+    Pnpm
+}
+
+// src/Acode.Domain/CiCd/Templates/Stacks/Events/ProjectDetectedEvent.cs
+namespace Acode.Domain.CiCd.Templates.Stacks.Events;
+
+public sealed record ProjectDetectedEvent(
+    TechStack Stack,
+    string Version,
+    PackageManager PackageManager,
+    int ProjectCount,
+    int TestProjectCount,
+    DateTimeOffset Timestamp) : IDomainEvent;
+```
+
+**End of Task 034.a Specification - Part 1/3**
+
+### Part 2: Application Interfaces
 
 ```csharp
-public interface IProjectDetector
+// src/Acode.Application/CiCd/Templates/Stacks/ProjectInfo.cs
+namespace Acode.Application.CiCd.Templates.Stacks;
+
+public sealed record ProjectInfo
 {
-    Task<ProjectInfo> DetectAsync(
-        string path,
-        CancellationToken ct);
+    public required TechStack Stack { get; init; }
+    public required string Version { get; init; }
+    public required string ProjectPath { get; init; }
+    public PackageManager PackageManager { get; init; }
+    public IReadOnlyList<string> Projects { get; init; } = [];
+    public IReadOnlyList<string> TestProjects { get; init; } = [];
+    public bool IsMonorepo { get; init; } = false;
+    public string? SolutionFile { get; init; }
 }
 
-public class CompositeProjectDetector : IProjectDetector
-{
-    private readonly IEnumerable<IStackDetector> _detectors;
-}
+// src/Acode.Application/CiCd/Templates/Stacks/IStackDetector.cs
+namespace Acode.Application.CiCd.Templates.Stacks;
 
 public interface IStackDetector
 {
-    string Stack { get; }
+    TechStack Stack { get; }
     int Priority { get; }
-    Task<ProjectInfo> DetectAsync(string path, CancellationToken ct);
+    bool CanDetect(string path);
+    Task<ProjectInfo?> DetectAsync(string path, CancellationToken ct = default);
+}
+
+// src/Acode.Application/CiCd/Templates/Stacks/IProjectDetector.cs
+namespace Acode.Application.CiCd.Templates.Stacks;
+
+public interface IProjectDetector
+{
+    Task<ProjectInfo?> DetectAsync(string path, CancellationToken ct = default);
+    Task<IReadOnlyList<ProjectInfo>> DetectAllAsync(string path, CancellationToken ct = default);
+}
+
+// src/Acode.Application/CiCd/Templates/Stacks/ICiStackProvider.cs
+namespace Acode.Application.CiCd.Templates.Stacks;
+
+public interface ICiStackProvider
+{
+    TechStack Stack { get; }
+    
+    Task<CiWorkflow> GenerateAsync(
+        CiTemplateRequest request,
+        ProjectInfo project,
+        CancellationToken ct = default);
+    
+    IReadOnlyList<CiJob> GetDefaultJobs(ProjectInfo project);
 }
 ```
 
----
+**End of Task 034.a Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation + Checklist
+
+```csharp
+// src/Acode.Infrastructure/CiCd/Templates/Stacks/Detectors/DotNetDetector.cs
+namespace Acode.Infrastructure.CiCd.Templates.Stacks.Detectors;
+
+public sealed class DotNetDetector : IStackDetector
+{
+    public TechStack Stack => TechStack.DotNet;
+    public int Priority => 10;
+    
+    public bool CanDetect(string path) =>
+        Directory.EnumerateFiles(path, "*.csproj", SearchOption.AllDirectories).Any() ||
+        Directory.EnumerateFiles(path, "*.sln", SearchOption.TopDirectoryOnly).Any();
+    
+    public async Task<ProjectInfo?> DetectAsync(string path, CancellationToken ct)
+    {
+        var slnFiles = Directory.GetFiles(path, "*.sln", SearchOption.TopDirectoryOnly);
+        var csprojFiles = Directory.GetFiles(path, "*.csproj", SearchOption.AllDirectories);
+        
+        if (csprojFiles.Length == 0) return null;
+        
+        var version = await ParseTargetFrameworkAsync(csprojFiles[0], ct);
+        var testProjects = csprojFiles.Where(f => f.Contains(".Tests") || f.Contains(".Test")).ToList();
+        
+        return new ProjectInfo
+        {
+            Stack = TechStack.DotNet,
+            Version = version ?? "8.0",
+            ProjectPath = path,
+            PackageManager = PackageManager.NuGet,
+            Projects = csprojFiles.ToList(),
+            TestProjects = testProjects,
+            SolutionFile = slnFiles.FirstOrDefault()
+        };
+    }
+    
+    private static async Task<string?> ParseTargetFrameworkAsync(string csprojPath, CancellationToken ct)
+    {
+        var content = await File.ReadAllTextAsync(csprojPath, ct);
+        var match = Regex.Match(content, @"<TargetFramework>net(\d+\.\d+)</TargetFramework>");
+        return match.Success ? match.Groups[1].Value : null;
+    }
+}
+
+// src/Acode.Infrastructure/CiCd/Templates/Stacks/Detectors/NodeJsDetector.cs
+namespace Acode.Infrastructure.CiCd.Templates.Stacks.Detectors;
+
+public sealed class NodeJsDetector : IStackDetector
+{
+    public TechStack Stack => TechStack.Node;
+    public int Priority => 10;
+    
+    public bool CanDetect(string path) =>
+        File.Exists(Path.Combine(path, "package.json"));
+    
+    public async Task<ProjectInfo?> DetectAsync(string path, CancellationToken ct)
+    {
+        var packageJsonPath = Path.Combine(path, "package.json");
+        if (!File.Exists(packageJsonPath)) return null;
+        
+        var version = await ParseNodeVersionAsync(path, ct);
+        var packageManager = DetectPackageManager(path);
+        var hasTests = Directory.Exists(Path.Combine(path, "__tests__")) ||
+                       Directory.Exists(Path.Combine(path, "tests"));
+        
+        return new ProjectInfo
+        {
+            Stack = TechStack.Node,
+            Version = version ?? "20",
+            ProjectPath = path,
+            PackageManager = packageManager,
+            Projects = [packageJsonPath],
+            TestProjects = hasTests ? ["tests"] : [],
+            IsMonorepo = File.Exists(Path.Combine(path, "pnpm-workspace.yaml")) ||
+                        File.Exists(Path.Combine(path, "lerna.json"))
+        };
+    }
+    
+    private static PackageManager DetectPackageManager(string path)
+    {
+        if (File.Exists(Path.Combine(path, "pnpm-lock.yaml"))) return PackageManager.Pnpm;
+        if (File.Exists(Path.Combine(path, "yarn.lock"))) return PackageManager.Yarn;
+        return PackageManager.Npm;
+    }
+}
+
+// src/Acode.Infrastructure/CiCd/Templates/Stacks/DotNetTemplateProvider.cs
+namespace Acode.Infrastructure.CiCd.Templates.Stacks;
+
+public sealed class DotNetTemplateProvider : ICiStackProvider
+{
+    public TechStack Stack => TechStack.DotNet;
+    
+    public IReadOnlyList<CiJob> GetDefaultJobs(ProjectInfo project) =>
+    [
+        new CiJob
+        {
+            Id = "build",
+            Name = "Build and Test",
+            Runner = "ubuntu-latest",
+            Steps =
+            [
+                "uses: actions/checkout@v4",
+                $"uses: actions/setup-dotnet@v4\n        with:\n          dotnet-version: '{project.Version}.x'",
+                "run: dotnet restore",
+                "run: dotnet build --no-restore",
+                "run: dotnet test --no-build --verbosity normal"
+            ]
+        }
+    ];
+}
+```
+
+### Implementation Checklist
+
+| Step | Action | Verification |
+|------|--------|--------------|
+| 1 | Create PackageManager enum | Enum compiles |
+| 2 | Add detection events | Event serialization verified |
+| 3 | Define ProjectInfo record | Record compiles |
+| 4 | Create IStackDetector, IProjectDetector, ICiStackProvider | Interfaces clear |
+| 5 | Implement DotNetDetector | .csproj parsing works |
+| 6 | Parse TargetFramework | .NET version extracted |
+| 7 | Implement NodeJsDetector | package.json detection works |
+| 8 | Detect package manager from lockfile | npm/yarn/pnpm detected |
+| 9 | Implement DotNetTemplateProvider | .NET workflow renders |
+| 10 | Implement NodeJsTemplateProvider | Node workflow renders |
+| 11 | Implement CompositeProjectDetector | Multi-stack detection works |
+| 12 | Add test project detection | .Tests suffix, __tests__ folder |
+| 13 | Add monorepo detection | Workspaces detected |
+| 14 | Register detectors and providers in DI | All resolved |
+
+### Rollout Plan
+
+1. **Phase 1**: Implement DotNetDetector with .csproj parsing
+2. **Phase 2**: Implement NodeJsDetector with package manager detection
+3. **Phase 3**: Build DotNetTemplateProvider with full workflow
+4. **Phase 4**: Build NodeJsTemplateProvider with npm/yarn/pnpm support
+5. **Phase 5**: Add CompositeProjectDetector and multi-stack support
 
 **End of Task 034.a Specification**

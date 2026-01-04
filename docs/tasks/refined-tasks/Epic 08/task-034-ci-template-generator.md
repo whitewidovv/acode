@@ -321,14 +321,226 @@ public sealed record WorkflowValidationFailedEvent(
 
 **End of Task 034 Specification - Part 1/3**
 
+### Part 2: Application Interfaces
+
+```csharp
+// src/Acode.Application/CiCd/Templates/CiOptions.cs
+namespace Acode.Application.CiCd.Templates;
+
+public sealed record CiOptions
+{
+    public string? Name { get; init; }
+    public IReadOnlyList<string> Branches { get; init; } = ["main", "develop"];
+    public IReadOnlyList<string> PathFilters { get; init; } = [];
+    public bool IncludeMatrix { get; init; } = false;
+    public string Runner { get; init; } = "ubuntu-latest";
+    public bool PinVersions { get; init; } = true;
+    public bool MinimalPermissions { get; init; } = true;
+    public IReadOnlyDictionary<string, string> Variables { get; init; } = new Dictionary<string, string>();
+}
+
+// src/Acode.Application/CiCd/Templates/CiTemplateRequest.cs
+namespace Acode.Application.CiCd.Templates;
+
+public sealed record CiTemplateRequest
+{
+    public required CiPlatform Platform { get; init; }
+    public required TechStack Stack { get; init; }
+    public required string ProjectPath { get; init; }
+    public CiOptions? Options { get; init; }
+    public string? OutputPath { get; init; }
+    public bool DryRun { get; init; } = false;
+}
+
+// src/Acode.Application/CiCd/Templates/CiJob.cs
+namespace Acode.Application.CiCd.Templates;
+
+public sealed record CiJob
+{
+    public required string Id { get; init; }
+    public required string Name { get; init; }
+    public string Runner { get; init; } = "ubuntu-latest";
+    public IReadOnlyList<string> Steps { get; init; } = [];
+    public IReadOnlyList<string> Dependencies { get; init; } = [];
+    public IReadOnlyDictionary<string, IReadOnlyList<string>>? Matrix { get; init; }
+}
+
+// src/Acode.Application/CiCd/Templates/CiWorkflow.cs
+namespace Acode.Application.CiCd.Templates;
+
+public sealed record CiWorkflow
+{
+    public required string Name { get; init; }
+    public required string Filename { get; init; }
+    public required string Content { get; init; }
+    public IReadOnlyList<string> Triggers { get; init; } = ["push", "pull_request"];
+    public IReadOnlyList<CiJob> Jobs { get; init; } = [];
+    public IReadOnlyList<string> Permissions { get; init; } = ["contents: read"];
+}
+
+// src/Acode.Application/CiCd/Templates/ICiPlatformProvider.cs
+namespace Acode.Application.CiCd.Templates;
+
 public interface ICiPlatformProvider
 {
-    string Platform { get; }
-    IReadOnlyList<string> SupportedStacks { get; }
-    Task<string> RenderAsync(CiWorkflow workflow);
+    CiPlatform Platform { get; }
+    IReadOnlyList<TechStack> SupportedStacks { get; }
+    Task<string> RenderAsync(CiWorkflow workflow, CancellationToken ct = default);
+}
+
+// src/Acode.Application/CiCd/Templates/ICiPlatformRegistry.cs
+namespace Acode.Application.CiCd.Templates;
+
+public interface ICiPlatformRegistry
+{
+    void Register(ICiPlatformProvider provider);
+    ICiPlatformProvider? Get(CiPlatform platform);
+    IReadOnlyList<ICiPlatformProvider> GetAll();
+}
+
+// src/Acode.Application/CiCd/Templates/ICiTemplateGenerator.cs
+namespace Acode.Application.CiCd.Templates;
+
+public interface ICiTemplateGenerator
+{
+    Task<CiWorkflow> GenerateAsync(CiTemplateRequest request, CancellationToken ct = default);
+    IReadOnlyList<CiPlatform> SupportedPlatforms { get; }
+    IReadOnlyList<TechStack> SupportedStacks { get; }
+    Task<ValidationResult> ValidateAsync(CiWorkflow workflow, CancellationToken ct = default);
 }
 ```
 
----
+**End of Task 034 Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation + Checklist
+
+```csharp
+// src/Acode.Infrastructure/CiCd/Templates/YamlValidator.cs
+namespace Acode.Infrastructure.CiCd.Templates;
+
+public sealed class YamlValidator
+{
+    public ValidationResult Validate(string yamlContent, CiPlatform platform)
+    {
+        var errors = new List<string>();
+        
+        try
+        {
+            var yaml = new YamlStream();
+            yaml.Load(new StringReader(yamlContent));
+            
+            // Platform-specific validation
+            if (platform == CiPlatform.GitHubActions)
+                ValidateGitHubActionsSchema(yaml, errors);
+        }
+        catch (YamlException ex)
+        {
+            errors.Add($"YAML syntax error: {ex.Message}");
+        }
+        
+        return new ValidationResult { IsValid = errors.Count == 0, Errors = errors };
+    }
+}
+
+// src/Acode.Infrastructure/CiCd/Templates/Providers/GitHubActionsProvider.cs
+namespace Acode.Infrastructure.CiCd.Templates.Providers;
+
+public sealed class GitHubActionsProvider : ICiPlatformProvider
+{
+    public CiPlatform Platform => CiPlatform.GitHubActions;
+    public IReadOnlyList<TechStack> SupportedStacks => [TechStack.DotNet, TechStack.Node, TechStack.Python, TechStack.Go];
+    
+    public Task<string> RenderAsync(CiWorkflow workflow, CancellationToken ct)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"name: {workflow.Name}");
+        sb.AppendLine();
+        sb.AppendLine("on:");
+        foreach (var trigger in workflow.Triggers)
+            sb.AppendLine($"  {trigger}:");
+        sb.AppendLine();
+        sb.AppendLine("permissions:");
+        foreach (var perm in workflow.Permissions)
+            sb.AppendLine($"  {perm}");
+        sb.AppendLine();
+        sb.AppendLine("jobs:");
+        foreach (var job in workflow.Jobs)
+            RenderJob(sb, job);
+        
+        return Task.FromResult(sb.ToString());
+    }
+    
+    private static void RenderJob(StringBuilder sb, CiJob job)
+    {
+        sb.AppendLine($"  {job.Id}:");
+        sb.AppendLine($"    name: {job.Name}");
+        sb.AppendLine($"    runs-on: {job.Runner}");
+        if (job.Dependencies.Count > 0)
+            sb.AppendLine($"    needs: [{string.Join(", ", job.Dependencies)}]");
+        sb.AppendLine("    steps:");
+        foreach (var step in job.Steps)
+            sb.AppendLine($"      - {step}");
+    }
+}
+
+// src/Acode.Infrastructure/CiCd/Templates/CiTemplateGenerator.cs
+namespace Acode.Infrastructure.CiCd.Templates;
+
+public sealed class CiTemplateGenerator : ICiTemplateGenerator
+{
+    private readonly ICiPlatformRegistry _registry;
+    private readonly YamlValidator _validator;
+    private readonly IEventPublisher _events;
+    
+    public IReadOnlyList<CiPlatform> SupportedPlatforms => _registry.GetAll().Select(p => p.Platform).ToList();
+    public IReadOnlyList<TechStack> SupportedStacks => Enum.GetValues<TechStack>().ToList();
+    
+    public async Task<CiWorkflow> GenerateAsync(CiTemplateRequest request, CancellationToken ct)
+    {
+        var provider = _registry.Get(request.Platform) 
+            ?? throw new NotSupportedException($"Platform {request.Platform} not supported");
+        
+        var options = request.Options ?? new CiOptions();
+        var workflow = BuildWorkflow(request, options);
+        workflow = workflow with { Content = await provider.RenderAsync(workflow, ct) };
+        
+        var validation = await ValidateAsync(workflow, ct);
+        if (!validation.IsValid)
+            await _events.PublishAsync(new WorkflowValidationFailedEvent(workflow.Name, validation.Errors, DateTimeOffset.UtcNow), ct);
+        
+        if (!request.DryRun)
+            await _events.PublishAsync(new WorkflowGeneratedEvent(workflow.Name, request.Platform, request.Stack, request.OutputPath ?? ".github/workflows", DateTimeOffset.UtcNow), ct);
+        
+        return workflow;
+    }
+}
+```
+
+### Implementation Checklist
+
+| Step | Action | Verification |
+|------|--------|--------------|
+| 1 | Create domain enums (CiPlatform, TechStack) | Enums compile |
+| 2 | Add generation events | Event serialization verified |
+| 3 | Define all records (CiTemplateRequest, CiWorkflow, CiJob, CiOptions) | Records compile |
+| 4 | Create ICiTemplateGenerator, ICiPlatformProvider, ICiPlatformRegistry | Interface contracts clear |
+| 5 | Implement YamlValidator | YAML syntax validation works |
+| 6 | Implement GitHubActionsProvider | GitHub Actions YAML renders |
+| 7 | Add .NET stack template | dotnet build/test steps |
+| 8 | Add Node.js stack template | npm ci/test steps |
+| 9 | Implement CiTemplateGenerator | Full generation works |
+| 10 | Implement CiPlatformRegistry | Provider lookup works |
+| 11 | Add pinned versions | Action versions pinned (v4) |
+| 12 | Add minimal permissions | contents: read default |
+| 13 | Add dry-run support | Preview without write |
+| 14 | Register in DI | Generator resolved |
+
+### Rollout Plan
+
+1. **Phase 1**: Implement core interfaces and registry
+2. **Phase 2**: Build GitHubActionsProvider with basic rendering
+3. **Phase 3**: Add .NET and Node.js stack templates
+4. **Phase 4**: Implement YAML validation
+5. **Phase 5**: CLI integration and dry-run support
 
 **End of Task 034 Specification**
