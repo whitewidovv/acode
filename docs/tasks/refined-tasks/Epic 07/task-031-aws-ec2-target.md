@@ -4,45 +4,97 @@
 **Tier:** L – Cloud Integration  
 **Complexity:** 13 (Fibonacci points)  
 **Phase:** Phase 7 – Cloud Integration  
-**Dependencies:** Task 029 (Interface), Task 030 (SSH Target)  
+**Dependencies:** Task 029 (IComputeTarget Interface), Task 030 (SSH Target)  
 
 ---
 
 ## Description
 
-Task 031 implements the AWS EC2 compute target. Instances MUST be provisioned on demand. SSH MUST be used for execution. Instances MUST be terminated after use.
+### Overview
 
-EC2 enables elastic compute scaling. Burst workloads run on cloud instances. Cost is incurred only during use.
+Task 031 implements the AWS EC2 compute target, enabling the Agentic Coding Bot to dynamically provision and utilize cloud compute resources for workload execution. When burst mode is active and local resources are insufficient, the system MUST provision EC2 instances on-demand, execute commands via SSH (leveraging Task 030's SSH target), and MUST terminate instances after use to avoid ongoing costs. This provides elastic scaling that lets the agent handle computationally intensive tasks without being constrained by local hardware limitations.
 
-This task provides core EC2 integration. Subtasks cover provisioning, instance management, and cost controls.
+The EC2 target implements the `IComputeTarget` interface from Task 029, providing seamless interoperability with the placement engine. All execution is delegated to an underlying SSH target—EC2 provisioning handles the infrastructure lifecycle while SSH handles the actual command execution, file transfers, and workspace management. This separation of concerns enables clean architecture and reuse of existing SSH infrastructure.
 
 ### Business Value
 
-EC2 targets enable:
-- Elastic compute scaling
-- Pay-per-use model
-- Access to specialized instances
-- Geographic distribution
+1. **Elastic Compute Scaling**: Burst to cloud when local resources are saturated—handle peak workloads without over-provisioning permanent infrastructure
+2. **Pay-Per-Use Economics**: EC2 instances are billed by the second (minimum 60 seconds)—only pay for actual compute time used during task execution
+3. **Access to Specialized Hardware**: GPU instances (g4dn, p4d), high-memory instances (r5, x2i), and compute-optimized instances (c5, c6i) enable workloads impossible on typical development machines
+4. **Geographic Distribution**: Deploy compute close to dependent services (databases, APIs) to reduce latency for integration-heavy workloads
+5. **Isolation and Security**: Each task can run in a fresh, isolated instance—no state leakage between runs, reduced attack surface
+6. **Reproducibility**: AMI-based provisioning ensures consistent environments across runs, eliminating "works on my machine" issues
 
-### Scope Boundaries
+### Scope
 
-This task covers EC2 target implementation. SSH execution is in Task 030. Other cloud providers are future work.
+This task delivers:
+
+1. **Ec2ComputeTarget Class**: Full implementation of `IComputeTarget` for EC2-backed compute
+2. **Instance Provisioning**: Automated EC2 instance launch with configurable instance types, AMIs, VPCs, and security groups
+3. **SSH Integration**: Delegation to `SshComputeTarget` for actual command execution after instance is running
+4. **Lifecycle Management**: Full instance lifecycle from provisioning through teardown with proper resource cleanup
+5. **Cost Tracking**: Real-time cost accumulation based on instance type pricing and run duration
+6. **Spot Instance Support**: Optional use of spot instances for cost savings with automatic fallback to on-demand
+7. **Orphan Detection**: Detection and cleanup of abandoned EC2 instances tagged with acode markers
+8. **Mode Compliance**: Strict enforcement of operating mode—EC2 BLOCKED in local-only and airgapped modes
 
 ### Integration Points
 
-- Task 029: Implements IComputeTarget
-- Task 030: Uses SSH for execution
-- Task 033: Heuristics trigger EC2
+| Component | Integration Type | Purpose |
+|-----------|------------------|---------|
+| Task 029 (IComputeTarget) | Implements | EC2 target provides cloud compute implementation |
+| Task 030 (SSH Target) | Composes | SSH target handles actual command execution on provisioned instance |
+| Task 032 (Placement Engine) | Consumer | Placement engine selects EC2 when burst needed |
+| Task 033 (Burst Heuristics) | Trigger | Heuristics determine when to burst to EC2 |
+| Task 001 (Operating Modes) | Enforces | Mode validation before any AWS API calls |
+| Task 002a (Config) | Configuration | EC2 settings from agent-config.yml |
+| AWS SDK for .NET | Dependency | EC2 API operations via AWSSDK.EC2 |
+
+### Failure Modes
+
+| Failure | Detection | Recovery |
+|---------|-----------|----------|
+| AWS credentials missing | SDK credential resolution fails | Return clear error with credential setup instructions |
+| Insufficient IAM permissions | EC2 API returns UnauthorizedOperation | Return error listing required IAM permissions |
+| Instance launch fails | RunInstances returns error | Log error, no resources to cleanup, propagate exception |
+| Instance stuck in pending | State polling timeout (5 min) | Terminate instance, return error with instance ID for AWS console investigation |
+| SSH never becomes ready | Port 22 connection failures after 30 retries | Terminate instance, suggest checking security group and AMI SSH configuration |
+| Spot interruption | Spot termination notice received | Publish event, attempt graceful workload migration if time allows |
+| Instance terminated externally | API returns instance not found | Treat as already cleaned up, log warning |
+| Cost threshold exceeded | Accumulated cost > configured threshold | Publish alert event, optionally terminate to prevent overspend |
+| Network connectivity lost | SSH connection drops mid-execution | Return partial results, instance may need manual cleanup |
+| AMI not found | RunInstances returns InvalidAMIID.NotFound | Return error suggesting valid AMI IDs for region |
+
+### Assumptions
+
+1. AWS credentials are available via environment variables, ~/.aws/credentials, or IAM instance profile
+2. IAM permissions include ec2:RunInstances, ec2:DescribeInstances, ec2:TerminateInstances, ec2:DescribeImages
+3. Target VPC/subnet has internet connectivity for SSH access (or VPN/Direct Connect for private)
+4. Security group allows inbound SSH (port 22) from the agent's IP
+5. SSH key pair exists in AWS and private key is accessible locally
+6. AMI has SSH daemon running and accessible on port 22 after boot
+7. Agent has outbound internet connectivity to reach AWS API endpoints
+
+### Security Considerations
+
+1. **Credential Management**: AWS credentials MUST NOT be logged—use SDK credential chain, never inline secrets
+2. **Least Privilege IAM**: Document minimum required IAM permissions, encourage use of scoped IAM roles
+3. **Security Group Hygiene**: Encourage use of IP-restricted security groups, warn about 0.0.0.0/0 SSH rules
+4. **Key Pair Security**: SSH private key path is sensitive—never log, ensure file permissions are restrictive
+5. **Instance Isolation**: Each task gets fresh instance—no state persists, reduces lateral movement risk
+6. **Tag-Based Access Control**: All instances tagged with acode=true enables IAM policy scoping
+7. **Encryption**: Recommend EBS encryption at rest, SSH provides encryption in transit
+8. **Audit Trail**: All EC2 API calls are logged to CloudTrail—enables forensic analysis
 
 ### Mode Compliance
 
-| Mode | EC2 Behavior |
-|------|--------------|
-| local-only | BLOCKED |
-| airgapped | BLOCKED |
-| burst | ALLOWED |
+| Mode | EC2 Behavior | Rationale |
+|------|--------------|-----------|
+| local-only | **BLOCKED** | No cloud resources permitted—hard constraint |
+| airgapped | **BLOCKED** | No network calls to AWS APIs permitted |
+| burst | **ALLOWED** | Cloud resources explicitly permitted when local insufficient |
 
-MUST validate mode before provisioning. MUST NOT spend money in restricted modes.
+CRITICAL: Mode validation MUST occur before ANY AWS API call. A single API call to AWS in local-only mode is a constraint violation. The system MUST NOT spend money in restricted modes.
 
 ---
 
