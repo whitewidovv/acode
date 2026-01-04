@@ -30,19 +30,64 @@ This task covers SSH target implementation. EC2 is in Task 031. Core interface i
 
 ### Integration Points
 
-- Task 029: Implements IComputeTarget
-- Task 031: EC2 uses SSH internally
-- Task 027: Workers use SSH targets
+| Component | Integration Type | Description |
+|-----------|-----------------|-------------|
+| Task 029 IComputeTarget | Implements | SshComputeTarget implements IComputeTarget |
+| Task 031 EC2 Target | Composition | EC2 uses SSH internally for connection |
+| Task 027 Workers | Consumer | Workers dispatch tasks to SSH targets |
+| ISshConnectionPool | Component | Manages pooled SSH connections |
+| ISshClient | Abstraction | Wrapper around SSH.NET library |
+| SSH.NET | External Library | Underlying SSH implementation |
+| Known Hosts File | Configuration | Host key verification storage |
 
 ### Mode Compliance
 
-| Mode | SSH Behavior |
-|------|--------------|
-| local-only | BLOCKED |
-| airgapped | BLOCKED |
-| burst | ALLOWED |
+| Mode | SSH Behavior | Rationale |
+|------|--------------|-----------|
+| local-only | BLOCKED | No external connections allowed |
+| airgapped | BLOCKED | No network access |
+| burst | ALLOWED | Remote compute enabled |
 
 MUST validate mode before connecting.
+
+### Failure Modes
+
+| Failure Type | Detection | Recovery | User Impact |
+|--------------|-----------|----------|-------------|
+| Connection refused | Socket exception | Retry or fail with clear message | Check host/port/firewall |
+| Authentication failed | SSH exception | Report which auth method failed | Check credentials |
+| Host key mismatch | Verification failure | Require explicit user action | Update known_hosts |
+| Connection timeout | Timer expiration | Retry with backoff | Check network/firewall |
+| Connection dropped | Read/write failure | Automatic reconnection | Brief interruption |
+| Bastion unreachable | Connection failure | Fail with bastion-specific message | Check bastion config |
+| Channel exhausted | SSH exception | Wait and retry | Temporary delay |
+| Key file not found | File exception | Clear error with path | Fix key path |
+
+---
+
+## Assumptions
+
+1. **SSH Server Available**: Remote host runs SSH daemon on configured port
+2. **Network Reachability**: Host is reachable from client (or via bastion)
+3. **Valid Credentials**: User has valid authentication credentials configured
+4. **Shell Available**: Remote host has POSIX-compatible shell (bash/sh/zsh)
+5. **Disk Access**: User has write access to workspace directory on remote
+6. **Known Hosts**: Host key is in known_hosts or strict checking disabled
+7. **Mode Burst**: Agent is running in burst mode when SSH is used
+8. **Library Support**: SSH.NET or equivalent library available on all platforms
+
+---
+
+## Security Considerations
+
+1. **Host Key Verification**: Always verify host keys to prevent MITM attacks
+2. **Credential Storage**: Private keys stored with restricted permissions (0600)
+3. **Passphrase Protection**: Key passphrases never logged or stored in plaintext
+4. **Connection Encryption**: All traffic encrypted via SSH (AES-256 or better)
+5. **No Password Logging**: Password authentication credentials never in logs
+6. **Agent Forwarding**: SSH agent forwarding disabled by default
+7. **Bastion Security**: Bastion connections use separate credentials
+8. **Audit Trail**: All SSH connections logged with user, host, timestamp
 
 ---
 
@@ -71,84 +116,124 @@ MUST validate mode before connecting.
 
 ## Functional Requirements
 
-### FR-001 to FR-020: SSH Target
+### SSH Target Core (FR-030-01 to FR-030-20)
 
-- FR-001: `SshComputeTarget` MUST implement interface
-- FR-002: Connection info MUST be configurable
-- FR-003: Host MUST be required
-- FR-004: Port MUST default to 22
-- FR-005: Username MUST be required
-- FR-006: Authentication MUST be flexible
-- FR-007: Password auth MUST work
-- FR-008: Key auth MUST work
-- FR-009: Agent auth MUST work
-- FR-010: Key file path MUST be configurable
-- FR-011: Key passphrase MUST be supported
-- FR-012: Host key verification MUST exist
-- FR-013: Known hosts MUST be checked
-- FR-014: Strict host checking MUST be optional
-- FR-015: Connection timeout MUST be configurable
-- FR-016: Default timeout: 30 seconds
-- FR-017: Keep-alive MUST be enabled
-- FR-018: Keep-alive interval: 15 seconds
-- FR-019: Reconnection MUST be automatic
-- FR-020: Max reconnects MUST be configurable
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030-01 | `SshComputeTarget` MUST implement `IComputeTarget` interface | Must Have |
+| FR-030-02 | SSH connection info MUST be configurable via `SshTargetConfig` | Must Have |
+| FR-030-03 | Host (hostname or IP) MUST be required | Must Have |
+| FR-030-04 | Port MUST default to 22 if not specified | Must Have |
+| FR-030-05 | Username MUST be required | Must Have |
+| FR-030-06 | Authentication MUST support multiple methods | Must Have |
+| FR-030-07 | Password authentication MUST be supported | Should Have |
+| FR-030-08 | Private key authentication MUST be supported | Must Have |
+| FR-030-09 | SSH agent authentication MUST be supported | Should Have |
+| FR-030-10 | Key file path MUST be configurable | Must Have |
+| FR-030-11 | Key passphrase MUST be supported (via secret) | Must Have |
+| FR-030-12 | Host key verification MUST exist | Must Have |
+| FR-030-13 | Known hosts file MUST be checked by default | Must Have |
+| FR-030-14 | Strict host key checking MUST be configurable | Should Have |
+| FR-030-15 | Connection timeout MUST be configurable (default: 30s) | Must Have |
+| FR-030-16 | SSH keep-alive MUST be enabled by default | Should Have |
+| FR-030-17 | Keep-alive interval MUST be configurable (default: 15s) | Should Have |
+| FR-030-18 | Automatic reconnection on connection loss MUST be supported | Should Have |
+| FR-030-19 | Maximum reconnection attempts MUST be configurable | Should Have |
+| FR-030-20 | Mode MUST be validated before connection (burst only) | Must Have |
 
-### FR-021 to FR-040: Connection Management
+### Connection Management (FR-030-21 to FR-030-40)
 
-- FR-021: Connection pool MUST exist
-- FR-022: Pool size MUST be configurable
-- FR-023: Default pool: 4 connections
-- FR-024: Connection reuse MUST work
-- FR-025: Idle connections MUST timeout
-- FR-026: Idle timeout: 5 minutes
-- FR-027: Connection health check MUST exist
-- FR-028: Health check: every 30 seconds
-- FR-029: Failed connections MUST be replaced
-- FR-030: Bastion/jump host MUST be supported
-- FR-031: ProxyCommand equivalent MUST work
-- FR-032: Multi-hop MUST work
-- FR-033: Connection limits MUST be enforced
-- FR-034: Concurrent command limit MUST exist
-- FR-035: Default concurrent: 10
-- FR-036: Command queuing MUST work
-- FR-037: Priority queuing MUST be optional
-- FR-038: Connection state MUST be tracked
-- FR-039: Metrics MUST be emitted
-- FR-040: Diagnostics MUST be available
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030-21 | Connection pool MUST be implemented | Should Have |
+| FR-030-22 | Pool size MUST be configurable (default: 4) | Should Have |
+| FR-030-23 | Connections MUST be reused across operations | Should Have |
+| FR-030-24 | Idle connections MUST be closed after timeout | Should Have |
+| FR-030-25 | Idle timeout MUST be configurable (default: 5 min) | Should Have |
+| FR-030-26 | Connection health check MUST run periodically | Should Have |
+| FR-030-27 | Health check interval MUST be configurable (default: 30s) | Should Have |
+| FR-030-28 | Failed connections MUST be removed from pool | Must Have |
+| FR-030-29 | Bastion/jump host MUST be supported | Should Have |
+| FR-030-30 | Bastion requires separate auth configuration | Should Have |
+| FR-030-31 | ProxyCommand equivalent MUST be supported | Could Have |
+| FR-030-32 | Multi-hop SSH (chained bastions) MAY be supported | Could Have |
+| FR-030-33 | Connection limits MUST be enforced | Should Have |
+| FR-030-34 | Concurrent command limit MUST exist (default: 10) | Should Have |
+| FR-030-35 | Commands exceeding limit MUST queue | Should Have |
+| FR-030-36 | Priority queuing MAY be supported | Could Have |
+| FR-030-37 | Connection state MUST be tracked and queryable | Must Have |
+| FR-030-38 | Connection metrics MUST be emitted | Should Have |
+| FR-030-39 | Connection diagnostics MUST be available | Should Have |
+| FR-030-40 | Graceful connection shutdown MUST be supported | Must Have |
 
-### FR-041 to FR-055: Workspace Management
+### Workspace Management (FR-030-41 to FR-030-55)
 
-- FR-041: Remote workspace path MUST be configurable
-- FR-042: Default: /tmp/acode-{session-id}
-- FR-043: Workspace MUST be created on prepare
-- FR-044: Permissions MUST be set correctly
-- FR-045: Cleanup on teardown MUST work
-- FR-046: Multiple workspaces MUST be isolated
-- FR-047: Workspace quota MUST be checked
-- FR-048: Disk space MUST be verified
-- FR-049: Environment MUST be configurable
-- FR-050: PATH MUST be settable
-- FR-051: Working directory MUST be settable
-- FR-052: Shell MUST be detectable
-- FR-053: Common shells MUST be supported
-- FR-054: Shell: bash, sh, zsh
-- FR-055: Shell-specific escaping MUST work
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030-41 | Remote workspace path MUST be configurable | Must Have |
+| FR-030-42 | Default workspace: `/tmp/acode-{session-id}` | Should Have |
+| FR-030-43 | Workspace MUST be created during PrepareAsync | Must Have |
+| FR-030-44 | Workspace permissions MUST be set (0755) | Should Have |
+| FR-030-45 | Workspace cleanup on teardown MUST remove all files | Must Have |
+| FR-030-46 | Multiple concurrent workspaces MUST be isolated | Must Have |
+| FR-030-47 | Disk space quota SHOULD be checked before prepare | Could Have |
+| FR-030-48 | Available disk space MUST be verified | Should Have |
+| FR-030-49 | Remote environment variables MUST be configurable | Should Have |
+| FR-030-50 | PATH on remote MUST be settable | Should Have |
+| FR-030-51 | Working directory MUST default to workspace | Must Have |
+| FR-030-52 | Remote shell SHOULD be auto-detected | Should Have |
+| FR-030-53 | bash, sh, zsh MUST be supported | Must Have |
+| FR-030-54 | Shell-specific command escaping MUST work | Must Have |
+| FR-030-55 | Remote OS detection SHOULD occur on connect | Should Have |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Connection in <5 seconds
-- NFR-002: Command latency <100ms overhead
-- NFR-003: 100 concurrent sessions
-- NFR-004: Reconnect in <2 seconds
-- NFR-005: No connection leaks
-- NFR-006: Secure by default
-- NFR-007: Structured logging
-- NFR-008: Metrics on connections
-- NFR-009: Cross-platform client
-- NFR-010: Handle network interruption
+### Performance (NFR-030-01 to NFR-030-10)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030-01 | Initial connection time | <5 seconds | Must Have |
+| NFR-030-02 | Command execution overhead | <100ms latency | Should Have |
+| NFR-030-03 | Concurrent sessions | 100 per host | Should Have |
+| NFR-030-04 | Reconnection time | <2 seconds | Should Have |
+| NFR-030-05 | Connection pool acquisition | <10ms | Should Have |
+| NFR-030-06 | Keep-alive overhead | Negligible | Should Have |
+| NFR-030-07 | Memory per connection | <5MB | Should Have |
+| NFR-030-08 | File transfer throughput | >10MB/s on LAN | Should Have |
+| NFR-030-09 | Channel multiplexing | Multiple commands per connection | Should Have |
+| NFR-030-10 | Bastion hop latency | <500ms additional | Should Have |
+
+### Reliability (NFR-030-11 to NFR-030-20)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030-11 | No connection leaks | 0 leaked connections | Must Have |
+| NFR-030-12 | Network interruption handling | Auto-reconnect | Should Have |
+| NFR-030-13 | Connection health monitoring | Every 30 seconds | Should Have |
+| NFR-030-14 | Graceful degradation | Queue on pool exhaustion | Should Have |
+| NFR-030-15 | Timeout enforcement | All operations | Must Have |
+| NFR-030-16 | Thread safety | Full | Must Have |
+| NFR-030-17 | Error isolation | One failure doesn't affect others | Must Have |
+| NFR-030-18 | Resource cleanup on exception | 100% | Must Have |
+| NFR-030-19 | Cross-platform client | Windows, macOS, Linux | Must Have |
+| NFR-030-20 | Handle server reboot | Detect and reconnect | Should Have |
+
+### Security (NFR-030-21 to NFR-030-30)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030-21 | Encryption algorithm | AES-256-GCM preferred | Must Have |
+| NFR-030-22 | Key exchange | Diffie-Hellman Group 16+ | Should Have |
+| NFR-030-23 | Host key verification | Always by default | Must Have |
+| NFR-030-24 | Credential protection | Never logged | Must Have |
+| NFR-030-25 | Agent forwarding | Disabled by default | Must Have |
+| NFR-030-26 | TCP forwarding | Disabled by default | Should Have |
+| NFR-030-27 | Known hosts management | ~/.ssh/known_hosts | Should Have |
+| NFR-030-28 | Permission on key files | Warn if too open | Should Have |
+| NFR-030-29 | Connection audit logging | All connections logged | Must Have |
+| NFR-030-30 | Secure random generation | Cryptographically secure | Must Have |
 
 ---
 
@@ -202,34 +287,233 @@ acode target list
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: SSH connection works
-- [ ] AC-002: Key auth works
-- [ ] AC-003: Password auth works
-- [ ] AC-004: Agent auth works
-- [ ] AC-005: Bastion works
-- [ ] AC-006: Connection pool works
-- [ ] AC-007: Reconnection works
-- [ ] AC-008: Mode compliance enforced
-- [ ] AC-009: Workspace created
-- [ ] AC-010: Cleanup works
+### SSH Target Implementation (AC-030-01 to AC-030-15)
+
+- [ ] AC-030-01: `SshComputeTarget` class implements `IComputeTarget`
+- [ ] AC-030-02: `SshTargetConfig` defines all connection parameters
+- [ ] AC-030-03: Config validates host is required
+- [ ] AC-030-04: Config validates username is required
+- [ ] AC-030-05: Port defaults to 22
+- [ ] AC-030-06: Target registers with factory as provider
+- [ ] AC-030-07: Mode validation rejects in local-only/airgapped
+- [ ] AC-030-08: Mode validation allows in burst mode
+- [ ] AC-030-09: All IComputeTarget methods implemented
+- [ ] AC-030-10: State machine works correctly for SSH target
+- [ ] AC-030-11: Events emitted for connect/disconnect
+- [ ] AC-030-12: Metrics exposed for SSH connections
+- [ ] AC-030-13: Target ID includes "ssh" prefix
+- [ ] AC-030-14: Metadata includes host, username, connection state
+- [ ] AC-030-15: Target disposes all SSH resources
+
+### Authentication (AC-030-16 to AC-030-30)
+
+- [ ] AC-030-16: Private key authentication works
+- [ ] AC-030-17: Private key with passphrase works
+- [ ] AC-030-18: Password authentication works
+- [ ] AC-030-19: SSH agent authentication works
+- [ ] AC-030-20: Auth method auto-selected based on config
+- [ ] AC-030-21: Auth failure throws with method that failed
+- [ ] AC-030-22: Auth retry with fallback methods (configurable)
+- [ ] AC-030-23: Private key file not found throws with path
+- [ ] AC-030-24: Private key wrong format throws with format expected
+- [ ] AC-030-25: Host key verification enabled by default
+- [ ] AC-030-26: Known hosts file checked (~/.ssh/known_hosts)
+- [ ] AC-030-27: Unknown host throws with key fingerprint
+- [ ] AC-030-28: Strict checking disabled allows unknown hosts (logs warning)
+- [ ] AC-030-29: Host key mismatch throws security exception
+- [ ] AC-030-30: Agent auth falls back to key auth if agent unavailable
+
+### Connection Pool (AC-030-31 to AC-030-45)
+
+- [ ] AC-030-31: Connection pool created on first connect
+- [ ] AC-030-32: Pool size configurable (default 4)
+- [ ] AC-030-33: Connections reused across operations
+- [ ] AC-030-34: Pool acquisition returns healthy connection
+- [ ] AC-030-35: Pool releases connection after operation
+- [ ] AC-030-36: Idle connections closed after timeout
+- [ ] AC-030-37: Health check runs at configured interval
+- [ ] AC-030-38: Failed health check removes connection
+- [ ] AC-030-39: Pool replenishes after failed connection removed
+- [ ] AC-030-40: Pool exhaustion queues requests
+- [ ] AC-030-41: Pool size never exceeds configured max
+- [ ] AC-030-42: All connections closed on dispose
+- [ ] AC-030-43: Metrics: pool size, acquired, waiting
+- [ ] AC-030-44: Connection reuse logged at debug level
+- [ ] AC-030-45: Pool operations are thread-safe
+
+### Bastion Support (AC-030-46 to AC-030-55)
+
+- [ ] AC-030-46: Bastion host configurable in SshTargetConfig
+- [ ] AC-030-47: Bastion has separate auth configuration
+- [ ] AC-030-48: Connection tunnels through bastion to target
+- [ ] AC-030-49: Bastion failure throws with bastion-specific message
+- [ ] AC-030-50: Bastion connection pooled separately
+- [ ] AC-030-51: Multi-hop (chained bastions) works
+- [ ] AC-030-52: Bastion logged in connection events
+- [ ] AC-030-53: Bastion adds latency to metrics
+- [ ] AC-030-54: Bastion credentials never logged
+- [ ] AC-030-55: Bastion timeout configurable separately
+
+### Workspace and Environment (AC-030-56 to AC-030-65)
+
+- [ ] AC-030-56: Remote workspace created on PrepareAsync
+- [ ] AC-030-57: Workspace path configurable (default /tmp/acode-{id})
+- [ ] AC-030-58: Workspace permissions set to 0755
+- [ ] AC-030-59: Workspace removed on teardown
+- [ ] AC-030-60: Multiple workspaces isolated (different paths)
+- [ ] AC-030-61: Environment variables set on remote shell
+- [ ] AC-030-62: PATH extended with configured values
+- [ ] AC-030-63: Working directory set to workspace
+- [ ] AC-030-64: Shell auto-detected (bash/sh/zsh)
+- [ ] AC-030-65: Shell-specific escaping works correctly
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Connect to Remote Server via SSH Key
+
+**Persona:** Developer with SSH access to build server
+
+**Steps:**
+1. Configure SSH target in agent config with host, user, key
+2. Run `acode target test ssh://builder@build.example.com`
+3. Observe: "Connecting to build.example.com:22..."
+4. Observe: "Connected successfully (SSH key auth)"
+5. Run `acode target add` to add permanently
+
+**Verification:**
+- [ ] Connection established
+- [ ] Auth method logged correctly
+- [ ] Target added to configuration
+
+### Scenario 2: Execute Command on SSH Target
+
+**Persona:** Developer running remote build
+
+**Steps:**
+1. Create SSH target and prepare workspace
+2. Execute `dotnet build` on remote target
+3. Observe streaming output from remote
+4. Check exit code and duration
+
+**Verification:**
+- [ ] Command executes on remote
+- [ ] Output streams correctly
+- [ ] Exit code captured
+- [ ] Latency overhead <100ms
+
+### Scenario 3: Connection Through Bastion Host
+
+**Persona:** Developer in enterprise environment
+
+**Steps:**
+1. Configure bastion host in config
+2. Configure target host (not directly reachable)
+3. Connect to target via bastion
+4. Observe: "Connecting via bastion.example.com..."
+5. Observe: "Tunnel established, connecting to internal.example.com"
+
+**Verification:**
+- [ ] Bastion connection works
+- [ ] Target reachable via tunnel
+- [ ] Both hops logged
+
+### Scenario 4: Connection Pool Under Load
+
+**Persona:** System running parallel tasks
+
+**Steps:**
+1. Configure pool size of 4
+2. Launch 10 concurrent commands
+3. Observe: 4 execute immediately, 6 queue
+4. As commands complete, queued ones start
+5. All 10 complete successfully
+
+**Verification:**
+- [ ] Pool limit enforced
+- [ ] Queuing works
+- [ ] All commands complete
+- [ ] No connection leaks
+
+### Scenario 5: Host Key Verification Failure
+
+**Persona:** Developer connecting to new server
+
+**Steps:**
+1. Connect to server not in known_hosts
+2. Observe: "Host key verification failed"
+3. Error includes host key fingerprint
+4. Add to known_hosts manually
+5. Reconnect succeeds
+
+**Verification:**
+- [ ] Unknown host rejected by default
+- [ ] Fingerprint shown for verification
+- [ ] After adding, connection works
+
+### Scenario 6: Automatic Reconnection
+
+**Persona:** Developer with unstable network
+
+**Steps:**
+1. Establish SSH connection
+2. Simulate network interruption (brief)
+3. Observe: "Connection lost, reconnecting..."
+4. Network recovers
+5. Observe: "Reconnected successfully"
+6. Pending operation resumes
+
+**Verification:**
+- [ ] Disconnection detected quickly
+- [ ] Automatic reconnection attempted
+- [ ] Connection restored
+- [ ] Operation completes
 
 ---
 
 ## Testing Requirements
 
-### Unit Tests
+### Unit Tests (UT-030-01 to UT-030-20)
 
-- [ ] UT-001: Config parsing
-- [ ] UT-002: Auth method selection
-- [ ] UT-003: Mode validation
-- [ ] UT-004: Connection pooling logic
+- [ ] UT-030-01: SshTargetConfig validates host required
+- [ ] UT-030-02: SshTargetConfig validates username required
+- [ ] UT-030-03: SshTargetConfig defaults port to 22
+- [ ] UT-030-04: Auth method selection based on config
+- [ ] UT-030-05: Private key auth configured correctly
+- [ ] UT-030-06: Password auth configured correctly
+- [ ] UT-030-07: Agent auth configured correctly
+- [ ] UT-030-08: Mode validation rejects local-only
+- [ ] UT-030-09: Mode validation allows burst
+- [ ] UT-030-10: Connection pool respects size limit
+- [ ] UT-030-11: Pool returns healthy connections
+- [ ] UT-030-12: Pool removes failed connections
+- [ ] UT-030-13: Idle timeout closes connections
+- [ ] UT-030-14: Health check detects dead connections
+- [ ] UT-030-15: Bastion tunnel configuration
+- [ ] UT-030-16: Shell escaping for bash
+- [ ] UT-030-17: Shell escaping for sh
+- [ ] UT-030-18: Workspace path generation
+- [ ] UT-030-19: Events emitted correctly
+- [ ] UT-030-20: Metrics recorded correctly
 
-### Integration Tests
+### Integration Tests (IT-030-01 to IT-030-15)
 
-- [ ] IT-001: Real SSH connection
-- [ ] IT-002: Command execution
-- [ ] IT-003: File transfer
-- [ ] IT-004: Bastion hop
+- [ ] IT-030-01: Real SSH connection to test server
+- [ ] IT-030-02: Key authentication end-to-end
+- [ ] IT-030-03: Password authentication (if test server supports)
+- [ ] IT-030-04: Command execution over SSH
+- [ ] IT-030-05: File transfer over SFTP
+- [ ] IT-030-06: Bastion hop connection
+- [ ] IT-030-07: Connection pool under concurrent load
+- [ ] IT-030-08: Reconnection after disconnect
+- [ ] IT-030-09: Workspace creation and cleanup
+- [ ] IT-030-10: Host key verification
+- [ ] IT-030-11: Full target lifecycle
+- [ ] IT-030-12: Multiple concurrent SSH targets
+- [ ] IT-030-13: Cross-platform client (run on Windows/macOS/Linux)
+- [ ] IT-030-14: No connection leaks after 100 operations
+- [ ] IT-030-15: Long-running session stability
 
 ---
 

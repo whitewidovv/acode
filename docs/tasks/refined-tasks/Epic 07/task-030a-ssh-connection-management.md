@@ -30,16 +30,51 @@ This task covers connection lifecycle. Command execution is in 030.b. File trans
 
 ### Integration Points
 
-- Task 030: Part of SSH target
-- Task 030.b: Uses connections
-- Task 030.c: Uses SFTP connections
+| Component | Integration Type | Description |
+|-----------|-----------------|-------------|
+| Task 030 SSH Target | Parent | Provides SshComputeTarget using these connections |
+| Task 030.b Command Execution | Consumer | Uses connections for command execution |
+| Task 030.c File Transfer | Consumer | Uses SFTP connections for file transfer |
+| ISshConnectionPool | Interface | Main contract for connection pooling |
+| ISshClient | Dependency | Underlying SSH client wrapper |
+| IConnectionHealthChecker | Component | Monitors connection health |
 
 ### Failure Modes
 
-- Connection lost → Auto-reconnect
-- All connections failed → Error
-- Pool exhausted → Queue or error
-- Auth expired → Re-authenticate
+| Failure Type | Detection | Recovery | User Impact |
+|--------------|-----------|----------|-------------|
+| Connection lost | Read/write exception | Auto-reconnect (3 attempts) | Brief pause |
+| All connections failed | Pool empty | Error with diagnostic info | Operation fails |
+| Pool exhausted | No available connections | Queue with timeout | Delayed execution |
+| Auth expired | Auth exception | Re-authenticate | Brief reconnect |
+| Network timeout | Timeout exception | Retry with backoff | Delayed execution |
+| Host unreachable | Socket exception | Fail with clear message | Check network |
+
+---
+
+## Assumptions
+
+1. **Stable Network**: Network is generally stable (brief interruptions acceptable)
+2. **SSH Server Responsive**: Remote SSH server responds to keep-alives
+3. **Thread Pool Available**: .NET thread pool available for async operations
+4. **Reasonable Concurrency**: Max 100 concurrent commands per pool
+5. **Memory Available**: Sufficient memory for connection buffers (~5MB/connection)
+6. **Credentials Valid**: Credentials remain valid for session duration
+7. **Host Reachable**: Host remains reachable (same IP/DNS)
+8. **Pool per Target**: Each SSH target has its own connection pool
+
+---
+
+## Security Considerations
+
+1. **Connection Reuse Security**: Reused connections don't leak data between commands
+2. **Credential Caching**: Credentials cached securely for reconnection
+3. **No Plaintext Logging**: Connection strings never contain passwords in logs
+4. **Health Check Safety**: Health checks don't expose sensitive info
+5. **Idle Timeout Security**: Idle connections closed to limit exposure
+6. **Pool Isolation**: Pools isolated between targets (no cross-target reuse)
+7. **Reconnection Auth**: Reconnection uses same secure auth as initial
+8. **Audit Trail**: All connection events logged for security audit
 
 ---
 
@@ -68,89 +103,164 @@ This task covers connection lifecycle. Command execution is in 030.b. File trans
 
 ## Functional Requirements
 
-### FR-001 to FR-020: Connection Pool
+### Connection Pool Management
 
-- FR-001: `SshConnectionPool` MUST exist
-- FR-002: Pool MUST be configurable
-- FR-003: Min connections MUST be settable
-- FR-004: Max connections MUST be settable
-- FR-005: Default min: 1
-- FR-006: Default max: 4
-- FR-007: Connections created on demand
-- FR-008: Pool MUST implement IDisposable
-- FR-009: Dispose MUST close all connections
-- FR-010: Acquire MUST return connection
-- FR-011: Acquire MUST wait if exhausted
-- FR-012: Acquire timeout MUST be configurable
-- FR-013: Default acquire timeout: 30s
-- FR-014: Release MUST return connection
-- FR-015: Released connection MUST be reusable
-- FR-016: Failed connection MUST be removed
-- FR-017: New connection MUST be created
-- FR-018: Pool stats MUST be available
-- FR-019: Stats: active, idle, total
-- FR-020: Stats: waiter count
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030A-01 | `SshConnectionPool` class MUST be implemented in `AgenticCodingBot.Infrastructure.Compute.Ssh` namespace | P0 |
+| FR-030A-02 | Pool MUST implement `ISshConnectionPool` interface with `AcquireAsync`, `ReleaseAsync`, `GetStatusAsync` methods | P0 |
+| FR-030A-03 | Pool MUST be configurable via `SshPoolConfiguration` record | P0 |
+| FR-030A-04 | Minimum connection count MUST be configurable with validation (≥0, ≤max) | P0 |
+| FR-030A-05 | Maximum connection count MUST be configurable with validation (≥1, ≤100) | P0 |
+| FR-030A-06 | Default minimum connections MUST be 1 | P1 |
+| FR-030A-07 | Default maximum connections MUST be 4 | P1 |
+| FR-030A-08 | Connections MUST be created on-demand (lazy initialization) | P0 |
+| FR-030A-09 | Pool MUST pre-warm to minimum connections on first acquire | P1 |
+| FR-030A-10 | Pool MUST implement `IAsyncDisposable` for proper cleanup | P0 |
+| FR-030A-11 | Dispose MUST close all connections with configurable grace period | P0 |
+| FR-030A-12 | Dispose MUST cancel pending waiters with `OperationCanceledException` | P0 |
+| FR-030A-13 | `AcquireAsync` MUST return `IPooledSshConnection` wrapper | P0 |
+| FR-030A-14 | Acquire MUST wait with timeout if pool exhausted | P0 |
+| FR-030A-15 | Acquire timeout MUST be configurable (default 30s) | P0 |
+| FR-030A-16 | Acquire MUST throw `SshPoolExhaustedException` on timeout | P0 |
+| FR-030A-17 | `ReleaseAsync` MUST return connection to pool for reuse | P0 |
+| FR-030A-18 | Released connection MUST be health-checked before reuse | P1 |
+| FR-030A-19 | Failed connection on release MUST be disposed, not reused | P0 |
+| FR-030A-20 | Pool MUST create replacement connection when one fails | P0 |
 
-### FR-021 to FR-040: Keep-Alive
+### Pool Statistics and Monitoring
 
-- FR-021: Keep-alive MUST be enabled
-- FR-022: Interval MUST be configurable
-- FR-023: Default interval: 15 seconds
-- FR-024: Keep-alive uses SSH keepalive
-- FR-025: Missed keep-alives MUST detect
-- FR-026: Max missed MUST be configurable
-- FR-027: Default max missed: 3
-- FR-028: Connection marked dead after max
-- FR-029: Dead connections MUST reconnect
-- FR-030: Reconnect MUST preserve state
-- FR-031: Workspace path MUST persist
-- FR-032: Environment MUST persist
-- FR-033: Background timer MUST run
-- FR-034: Timer MUST stop on dispose
-- FR-035: Timer MUST not block
-- FR-036: Keep-alive MUST log failures
-- FR-037: Metrics MUST track keep-alives
-- FR-038: Metrics MUST track failures
-- FR-039: Metrics MUST track reconnects
-- FR-040: Reconnect backoff MUST exist
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030A-21 | `GetStatusAsync` MUST return `SshPoolStatus` with comprehensive stats | P0 |
+| FR-030A-22 | Status MUST include active connection count | P0 |
+| FR-030A-23 | Status MUST include idle connection count | P0 |
+| FR-030A-24 | Status MUST include total connection count | P0 |
+| FR-030A-25 | Status MUST include waiting request count | P1 |
+| FR-030A-26 | Status MUST include total acquires since start | P2 |
+| FR-030A-27 | Status MUST include total releases since start | P2 |
+| FR-030A-28 | Status MUST include connection failure count | P1 |
+| FR-030A-29 | Status MUST include reconnection attempt count | P1 |
+| FR-030A-30 | Pool MUST expose `IObservable<SshPoolEvent>` for event streaming | P2 |
 
-### FR-041 to FR-060: Health Checks
+### Keep-Alive Management
 
-- FR-041: Health check MUST be available
-- FR-042: Check MUST be periodic
-- FR-043: Check interval MUST be configurable
-- FR-044: Default check: every 60 seconds
-- FR-045: Check MUST run test command
-- FR-046: Test command: `echo ok`
-- FR-047: Timeout MUST apply
-- FR-048: Check timeout: 5 seconds
-- FR-049: Failed check MUST mark unhealthy
-- FR-050: Unhealthy MUST reconnect
-- FR-051: Multiple failures MUST escalate
-- FR-052: Escalation MUST alert
-- FR-053: Health status MUST be queryable
-- FR-054: Status: healthy, unhealthy, unknown
-- FR-055: Status MUST include last check
-- FR-056: Status MUST include failures count
-- FR-057: Forced health check MUST work
-- FR-058: Check MUST not block pool
-- FR-059: Check MUST use separate connection
-- FR-060: Logging MUST include health status
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030A-31 | Keep-alive MUST be enabled by default on all pooled connections | P0 |
+| FR-030A-32 | Keep-alive interval MUST be configurable (default 15 seconds) | P0 |
+| FR-030A-33 | Keep-alive MUST use SSH protocol-level `SSH_MSG_IGNORE` packets | P1 |
+| FR-030A-34 | Keep-alive MUST track missed responses per connection | P0 |
+| FR-030A-35 | Maximum missed keep-alives MUST be configurable (default 3) | P0 |
+| FR-030A-36 | Connection MUST be marked dead after max missed threshold | P0 |
+| FR-030A-37 | Dead connections MUST trigger automatic reconnection | P0 |
+| FR-030A-38 | Reconnection MUST preserve workspace path state | P0 |
+| FR-030A-39 | Reconnection MUST preserve environment variable state | P1 |
+| FR-030A-40 | Background keep-alive timer MUST use `PeriodicTimer` | P1 |
+| FR-030A-41 | Timer MUST stop automatically on pool dispose | P0 |
+| FR-030A-42 | Timer callback MUST be non-blocking (fire-and-forget) | P0 |
+| FR-030A-43 | Keep-alive failures MUST be logged at Warning level | P1 |
+| FR-030A-44 | Metrics MUST track keep-alive success/failure counts | P1 |
+| FR-030A-45 | Reconnect MUST use exponential backoff (100ms → 30s) | P0 |
+
+### Health Check System
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030A-46 | Health check MUST be available via `CheckHealthAsync()` method | P0 |
+| FR-030A-47 | Periodic health check MUST run on configurable interval (default 60s) | P1 |
+| FR-030A-48 | Health check MUST execute `echo ok` test command | P0 |
+| FR-030A-49 | Health check MUST have configurable timeout (default 5s) | P0 |
+| FR-030A-50 | Failed health check MUST mark connection as unhealthy | P0 |
+| FR-030A-51 | Unhealthy connection MUST trigger reconnection attempt | P0 |
+| FR-030A-52 | Multiple consecutive failures (3+) MUST trigger escalation event | P1 |
+| FR-030A-53 | Escalation MUST emit `ConnectionEscalated` event for alerting | P1 |
+| FR-030A-54 | Health status MUST be queryable via `GetHealthAsync()` method | P0 |
+| FR-030A-55 | Status MUST return enum: `Healthy`, `Unhealthy`, `Degraded`, `Unknown` | P0 |
+| FR-030A-56 | Status MUST include last successful check timestamp | P1 |
+| FR-030A-57 | Status MUST include consecutive failure count | P1 |
+| FR-030A-58 | Forced health check MUST be triggerable via `ForceHealthCheckAsync()` | P2 |
+| FR-030A-59 | Health check MUST NOT block pool acquire operations | P0 |
+| FR-030A-60 | Health check MUST use dedicated connection slot (not from pool) | P1 |
+
+### Connection Lifecycle Events
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030A-61 | Pool MUST emit `ConnectionCreated` event on new connection | P1 |
+| FR-030A-62 | Pool MUST emit `ConnectionAcquired` event on acquire | P1 |
+| FR-030A-63 | Pool MUST emit `ConnectionReleased` event on release | P1 |
+| FR-030A-64 | Pool MUST emit `ConnectionFailed` event on connection error | P0 |
+| FR-030A-65 | Pool MUST emit `ConnectionReconnected` event on successful reconnect | P1 |
+| FR-030A-66 | Pool MUST emit `PoolExhausted` event when max reached | P1 |
+| FR-030A-67 | Pool MUST emit `PoolDrained` event on graceful shutdown | P1 |
+| FR-030A-68 | All events MUST include correlation ID for tracing | P0 |
+| FR-030A-69 | Events MUST be non-blocking (fire-and-forget with queue) | P0 |
+| FR-030A-70 | Event handlers MUST be exception-isolated | P0 |
+
+### Graceful Shutdown
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030A-71 | Pool MUST support `DrainAsync()` for graceful shutdown | P0 |
+| FR-030A-72 | Drain MUST stop accepting new acquire requests | P0 |
+| FR-030A-73 | Drain MUST wait for active connections to release | P0 |
+| FR-030A-74 | Drain MUST have configurable timeout (default 30s) | P0 |
+| FR-030A-75 | Drain timeout MUST force-close remaining connections | P0 |
+| FR-030A-76 | Pool state MUST transition: Ready → Draining → Drained | P1 |
+| FR-030A-77 | Acquire during drain MUST throw `SshPoolDrainingException` | P0 |
+| FR-030A-78 | Drain progress MUST be observable (remaining count) | P2 |
+| FR-030A-79 | Drain MUST log progress at Info level | P1 |
+| FR-030A-80 | Double-drain MUST be idempotent (no error) | P1 |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Pool acquire in <10ms
-- NFR-002: Reconnect in <5 seconds
-- NFR-003: Keep-alive <1KB network
-- NFR-004: Health check <100ms
-- NFR-005: 100 concurrent acquires
-- NFR-006: No connection leaks
-- NFR-007: Thread-safe
-- NFR-008: Structured logging
-- NFR-009: Metrics on pool state
-- NFR-010: Graceful degradation
+### Performance Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030A-01 | Pool acquire latency from idle connection | <10ms p99 | P0 |
+| NFR-030A-02 | Pool acquire latency when creating new connection | <2s p99 | P0 |
+| NFR-030A-03 | Connection reconnection time | <5s | P0 |
+| NFR-030A-04 | Keep-alive packet size | <1KB | P1 |
+| NFR-030A-05 | Health check execution time | <100ms | P0 |
+| NFR-030A-06 | Pool status query time | <1ms | P1 |
+| NFR-030A-07 | Concurrent acquire throughput | 100 req/s | P1 |
+| NFR-030A-08 | Memory per pooled connection | <50KB | P2 |
+| NFR-030A-09 | Background timer CPU usage | <0.1% | P2 |
+| NFR-030A-10 | Drain completion time with active connections | <configurable timeout | P0 |
+
+### Reliability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030A-11 | Connection leak prevention | Zero leaks in 24h test | P0 |
+| NFR-030A-12 | Reconnection success rate after network blip | >99% | P0 |
+| NFR-030A-13 | Keep-alive false positive rate | <0.1% | P1 |
+| NFR-030A-14 | Pool availability under partial failures | Degraded but operational | P0 |
+| NFR-030A-15 | Graceful degradation when all connections fail | Emit event, no crash | P0 |
+| NFR-030A-16 | Thread safety under concurrent access | Zero race conditions | P0 |
+| NFR-030A-17 | Exception isolation in event handlers | 100% isolated | P0 |
+| NFR-030A-18 | State consistency after reconnection | Identical to pre-failure | P0 |
+| NFR-030A-19 | Double-dispose safety | Idempotent, no error | P0 |
+| NFR-030A-20 | Waiter queue FIFO ordering | Guaranteed fair ordering | P1 |
+
+### Observability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030A-21 | Structured logging with correlation IDs | All operations | P0 |
+| NFR-030A-22 | Metrics for pool state (active, idle, waiters) | Real-time via `IMetrics` | P0 |
+| NFR-030A-23 | Metrics for connection lifecycle events | Per-event counters | P1 |
+| NFR-030A-24 | Health status exposure via interface | Queryable at any time | P0 |
+| NFR-030A-25 | Event streaming for external consumers | Via `IObservable` | P2 |
+| NFR-030A-26 | Log level configurability | Per-category | P1 |
+| NFR-030A-27 | Distributed tracing context propagation | `Activity` support | P1 |
+| NFR-030A-28 | Connection duration histograms | Buckets: 1s, 10s, 60s, 5m | P2 |
+| NFR-030A-29 | Alerting threshold for pool exhaustion | Configurable | P1 |
+| NFR-030A-30 | Diagnostic dump capability | Full pool state on demand | P2 |
 
 ---
 
@@ -196,16 +306,204 @@ Console.WriteLine($"Health: {status.OverallHealth}");
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: Pool creates connections
-- [ ] AC-002: Pool limits enforced
-- [ ] AC-003: Acquire/release works
-- [ ] AC-004: Keep-alive works
-- [ ] AC-005: Reconnection works
-- [ ] AC-006: Health check works
-- [ ] AC-007: Dead connection replaced
-- [ ] AC-008: Stats available
-- [ ] AC-009: Thread-safe verified
-- [ ] AC-010: No leaks in tests
+### Pool Creation and Configuration
+- [ ] AC-001: `SshConnectionPool` class exists in correct namespace
+- [ ] AC-002: Pool implements `ISshConnectionPool` interface
+- [ ] AC-003: Pool implements `IAsyncDisposable` for cleanup
+- [ ] AC-004: `SshPoolConfiguration` record validates min/max constraints
+- [ ] AC-005: Default min connections is 1
+- [ ] AC-006: Default max connections is 4
+- [ ] AC-007: Invalid configuration throws `ArgumentException` with details
+- [ ] AC-008: Pool can be created with DI container registration
+
+### Connection Acquire/Release
+- [ ] AC-009: `AcquireAsync` returns `IPooledSshConnection` when available
+- [ ] AC-010: `AcquireAsync` waits when pool exhausted
+- [ ] AC-011: `AcquireAsync` throws `SshPoolExhaustedException` on timeout
+- [ ] AC-012: Acquire timeout is configurable (default 30s)
+- [ ] AC-013: `ReleaseAsync` returns connection to pool
+- [ ] AC-014: Released connection is reusable for next acquire
+- [ ] AC-015: Failed connection on release is disposed, not reused
+- [ ] AC-016: Pool creates replacement when connection fails
+- [ ] AC-017: Concurrent acquires are handled fairly (FIFO)
+- [ ] AC-018: 100 concurrent acquires complete without deadlock
+
+### Connection Lifecycle Events
+- [ ] AC-019: `ConnectionCreated` event fires on new connection
+- [ ] AC-020: `ConnectionAcquired` event fires on every acquire
+- [ ] AC-021: `ConnectionReleased` event fires on every release
+- [ ] AC-022: `ConnectionFailed` event fires on connection error
+- [ ] AC-023: `ConnectionReconnected` event fires on successful reconnect
+- [ ] AC-024: `PoolExhausted` event fires when max reached
+- [ ] AC-025: All events include correlation ID
+- [ ] AC-026: Event handler exceptions don't crash pool
+
+### Keep-Alive Management
+- [ ] AC-027: Keep-alive is enabled by default
+- [ ] AC-028: Keep-alive interval is configurable (default 15s)
+- [ ] AC-029: Keep-alive uses SSH protocol packets
+- [ ] AC-030: Missed keep-alives are tracked per connection
+- [ ] AC-031: Connection marked dead after 3 missed (configurable)
+- [ ] AC-032: Dead connection triggers automatic reconnection
+- [ ] AC-033: Keep-alive timer stops on pool dispose
+- [ ] AC-034: Keep-alive failures logged at Warning level
+- [ ] AC-035: Keep-alive metrics track success/failure counts
+
+### Reconnection Behavior
+- [ ] AC-036: Dead connections reconnect automatically
+- [ ] AC-037: Reconnection preserves workspace path
+- [ ] AC-038: Reconnection preserves environment variables
+- [ ] AC-039: Reconnection uses exponential backoff (100ms → 30s)
+- [ ] AC-040: Max reconnection attempts is configurable
+- [ ] AC-041: Failed reconnection emits escalation event
+- [ ] AC-042: Reconnection success rate >99% after network blip
+
+### Health Check System
+- [ ] AC-043: `CheckHealthAsync` method exists and works
+- [ ] AC-044: Periodic health check runs on configured interval (default 60s)
+- [ ] AC-045: Health check executes `echo ok` test command
+- [ ] AC-046: Health check timeout is 5s (configurable)
+- [ ] AC-047: Failed health check marks connection unhealthy
+- [ ] AC-048: Unhealthy connection triggers reconnection
+- [ ] AC-049: 3+ consecutive failures trigger escalation
+- [ ] AC-050: `GetHealthAsync` returns current health status
+- [ ] AC-051: Health status includes last check timestamp
+- [ ] AC-052: Health status includes failure count
+- [ ] AC-053: `ForceHealthCheckAsync` triggers immediate check
+- [ ] AC-054: Health check doesn't block pool acquire
+
+### Pool Statistics
+- [ ] AC-055: `GetStatusAsync` returns comprehensive stats
+- [ ] AC-056: Stats include active connection count
+- [ ] AC-057: Stats include idle connection count
+- [ ] AC-058: Stats include total connection count
+- [ ] AC-059: Stats include waiting request count
+- [ ] AC-060: Stats include total acquires since start
+- [ ] AC-061: Stats query completes in <1ms
+
+### Graceful Shutdown
+- [ ] AC-062: `DrainAsync` stops new acquire requests
+- [ ] AC-063: Drain waits for active connections to release
+- [ ] AC-064: Drain timeout is configurable (default 30s)
+- [ ] AC-065: Drain timeout force-closes remaining connections
+- [ ] AC-066: Pool state transitions: Ready → Draining → Drained
+- [ ] AC-067: Acquire during drain throws `SshPoolDrainingException`
+- [ ] AC-068: Drain progress is logged at Info level
+- [ ] AC-069: Double-drain is idempotent (no error)
+
+### Thread Safety and Reliability
+- [ ] AC-070: Pool is thread-safe under concurrent access
+- [ ] AC-071: Zero race conditions in 1000-iteration stress test
+- [ ] AC-072: Zero connection leaks in 24h stability test
+- [ ] AC-073: Event handlers are exception-isolated
+- [ ] AC-074: Double-dispose is safe and idempotent
+- [ ] AC-075: Pool degrades gracefully when all connections fail
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Developer Tests Connection Pool Under Load
+**Persona:** Platform Engineer validating pool behavior  
+**Preconditions:** SSH target configured, pool created with max 4 connections  
+**Steps:**
+1. Start 10 concurrent command executions
+2. Observe pool exhaustion behavior
+3. Verify commands queue and complete in order
+4. Check pool statistics during load
+
+**Verification Checklist:**
+- [ ] First 4 commands start immediately
+- [ ] Remaining 6 commands wait in queue
+- [ ] `PoolExhausted` event fires when max reached
+- [ ] All 10 commands complete successfully
+- [ ] Pool stats show 4 active, 6 waiting during peak
+- [ ] No connection leaks after completion
+
+### Scenario 2: Operations Team Monitors Pool Health
+**Persona:** SRE monitoring production deployment  
+**Preconditions:** Pool running with health checks enabled  
+**Steps:**
+1. Query pool health status
+2. Simulate network blip (disconnect/reconnect)
+3. Observe keep-alive failure detection
+4. Verify automatic reconnection
+
+**Verification Checklist:**
+- [ ] `GetHealthAsync` returns `Healthy` initially
+- [ ] Keep-alive failures logged at Warning level
+- [ ] Connection marked dead after 3 missed keep-alives
+- [ ] Reconnection attempt logged at Info level
+- [ ] `ConnectionReconnected` event fires on success
+- [ ] Health returns to `Healthy` after reconnect
+
+### Scenario 3: Developer Gracefully Shuts Down Pool
+**Persona:** Developer stopping application  
+**Preconditions:** Pool with 2 active connections executing commands  
+**Steps:**
+1. Call `DrainAsync` during active operations
+2. Observe drain behavior
+3. Verify new acquire requests rejected
+4. Wait for drain completion
+
+**Verification Checklist:**
+- [ ] Pool state transitions to `Draining`
+- [ ] New acquires throw `SshPoolDrainingException`
+- [ ] Active connections allowed to complete
+- [ ] Drain progress logged (remaining count)
+- [ ] Pool state transitions to `Drained` when complete
+- [ ] All connections closed after drain
+
+### Scenario 4: Handling Cascading Connection Failures
+**Persona:** SRE responding to SSH server crash  
+**Preconditions:** Pool with 4 connections, SSH server crashes  
+**Steps:**
+1. Observe all connections fail simultaneously
+2. Check escalation events
+3. Verify degraded state
+4. Wait for server recovery
+
+**Verification Checklist:**
+- [ ] `ConnectionFailed` events fire for all 4 connections
+- [ ] `ConnectionEscalated` event fires (multiple failures)
+- [ ] Pool enters `Degraded` state
+- [ ] Reconnection attempts use backoff
+- [ ] Pool recovers when server restarts
+- [ ] All connections re-establish
+
+### Scenario 5: Long-Running Session with Keep-Alive
+**Persona:** Developer running 2-hour build job  
+**Preconditions:** Pool connection acquired, keep-alive enabled  
+**Steps:**
+1. Acquire connection from pool
+2. Run long-running command (2 hours)
+3. Verify keep-alive maintains connection
+4. Release connection after completion
+
+**Verification Checklist:**
+- [ ] Keep-alive packets sent every 15s
+- [ ] Connection remains healthy for 2 hours
+- [ ] No timeout or disconnect during job
+- [ ] Keep-alive metrics show success count
+- [ ] Connection reusable after release
+- [ ] No memory growth over session
+
+### Scenario 6: Concurrent Pool Access from Multiple Threads
+**Persona:** Developer stress-testing thread safety  
+**Preconditions:** Pool configured, multi-threaded test harness  
+**Steps:**
+1. Launch 50 threads acquiring/releasing rapidly
+2. Run for 60 seconds
+3. Check for race conditions
+4. Verify final pool state
+
+**Verification Checklist:**
+- [ ] No deadlocks during test
+- [ ] No race condition exceptions
+- [ ] Acquire/release counts match
+- [ ] Pool stats are consistent
+- [ ] No connection leaks
+- [ ] All threads complete successfully
 
 ---
 
@@ -213,16 +511,53 @@ Console.WriteLine($"Health: {status.OverallHealth}");
 
 ### Unit Tests
 
-- [ ] UT-001: Pool acquire/release
-- [ ] UT-002: Pool exhaustion
-- [ ] UT-003: Keep-alive logic
-- [ ] UT-004: Health check logic
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| UT-030A-01 | Pool creates min connections on first acquire | FR-030A-08, FR-030A-09 |
+| UT-030A-02 | Pool respects max connection limit | FR-030A-05 |
+| UT-030A-03 | Acquire returns connection when available | FR-030A-13 |
+| UT-030A-04 | Acquire waits when pool exhausted | FR-030A-14 |
+| UT-030A-05 | Acquire throws on timeout | FR-030A-16 |
+| UT-030A-06 | Release returns connection for reuse | FR-030A-17 |
+| UT-030A-07 | Failed connection not reused | FR-030A-19 |
+| UT-030A-08 | Replacement created for failed connection | FR-030A-20 |
+| UT-030A-09 | Keep-alive timer starts on pool creation | FR-030A-40 |
+| UT-030A-10 | Keep-alive timer stops on dispose | FR-030A-41 |
+| UT-030A-11 | Missed keep-alive increments counter | FR-030A-34 |
+| UT-030A-12 | Connection marked dead after max missed | FR-030A-36 |
+| UT-030A-13 | Health check runs test command | FR-030A-48 |
+| UT-030A-14 | Health check respects timeout | FR-030A-49 |
+| UT-030A-15 | Failed health marks unhealthy | FR-030A-50 |
+| UT-030A-16 | GetStatus returns correct counts | FR-030A-21-24 |
+| UT-030A-17 | Drain stops new acquires | FR-030A-72 |
+| UT-030A-18 | Drain waits for active connections | FR-030A-73 |
+| UT-030A-19 | Drain timeout forces close | FR-030A-75 |
+| UT-030A-20 | Events fire with correlation ID | FR-030A-68 |
+| UT-030A-21 | Configuration validates min ≤ max | FR-030A-04 |
+| UT-030A-22 | Configuration validates max ≥ 1 | FR-030A-05 |
+| UT-030A-23 | Double-dispose is safe | NFR-030A-19 |
+| UT-030A-24 | Event handler exception isolated | FR-030A-70 |
+| UT-030A-25 | Reconnect backoff increases correctly | FR-030A-45 |
 
 ### Integration Tests
 
-- [ ] IT-001: Real SSH pool
-- [ ] IT-002: Connection recovery
-- [ ] IT-003: Health monitoring
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| IT-030A-01 | Real SSH pool acquires and releases | E2E pool operation |
+| IT-030A-02 | Pool recovers from SSH server restart | FR-030A-37 |
+| IT-030A-03 | Keep-alive maintains long connection | FR-030A-31-33 |
+| IT-030A-04 | Health check detects dead connection | FR-030A-50 |
+| IT-030A-05 | Reconnection preserves workspace path | FR-030A-38 |
+| IT-030A-06 | Concurrent acquires are fair (FIFO) | NFR-030A-20 |
+| IT-030A-07 | Pool handles 100 concurrent acquires | NFR-030A-07 |
+| IT-030A-08 | No leaks in 1000-iteration stress test | NFR-030A-11 |
+| IT-030A-09 | Drain completes with active connections | FR-030A-73 |
+| IT-030A-10 | Metrics report correct values | NFR-030A-22 |
+| IT-030A-11 | Events stream to observer | FR-030A-30 |
+| IT-030A-12 | Pool degrades gracefully under failure | NFR-030A-15 |
+| IT-030A-13 | Distributed tracing propagates | NFR-030A-27 |
+| IT-030A-14 | Health status reflects actual state | FR-030A-54 |
+| IT-030A-15 | Escalation fires after 3 failures | FR-030A-52 |
 - [ ] IT-004: Concurrent usage
 
 ---

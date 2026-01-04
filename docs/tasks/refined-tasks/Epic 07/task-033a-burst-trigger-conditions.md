@@ -30,16 +30,54 @@ This task covers trigger implementations. Aggregation logic is in 033.b. Rate li
 
 ### Integration Points
 
-- Task 033: Triggers feed heuristics
-- Task 026: Queue provides metrics
-- Task 027: Workers provide load
+| Component | Interface | Data Flow | Notes |
+|-----------|-----------|-----------|-------|
+| Task 033 Burst Engine | IBurstTrigger | Signal → Engine | Triggers feed into heuristics |
+| Task 026 Queue | ITaskQueue | Depth/Wait → Context | Queue metrics for triggers |
+| Task 027 Worker Pool | IWorkerPool | Status → Context | Worker saturation data |
+| CPU Sampler | ICpuSampler | Samples → Trigger | System CPU metrics |
+| Configuration | TriggerOptions | Config → Trigger | Per-trigger settings |
+| Metrics System | IMetrics | Stats → Metrics | Trigger telemetry |
+| Event System | IEventPublisher | Events → Subscribers | Fire/Reset events |
 
 ### Failure Modes
 
-- Metric unavailable → Skip trigger
-- Threshold undefined → Use default
-- Trigger error → Log and skip
-- All triggers fail → No burst
+| Failure | Detection | Recovery | User Impact |
+|---------|-----------|----------|-------------|
+| Metric unavailable | Null/exception | Skip trigger with warning | Reduced accuracy |
+| Threshold undefined | Config validation | Use default value | Expected behavior |
+| Trigger exception | Catch in evaluation | Return non-triggered signal | Trigger disabled |
+| Sampling failure | Sample exception | Use last known value | Slightly stale data |
+| All triggers fail | No signals | Conservative (no burst) | Tasks stay local |
+| Moving average overflow | Numeric check | Reset window | Brief accuracy loss |
+| Concurrent evaluation | Race condition | Thread-safe design | No issue |
+| Sustained period stuck | Time overflow | Auto-reset | Trigger re-enabled |
+
+---
+
+## Assumptions
+
+1. Queue depth is accurate and updated in real-time from Task 026
+2. Worker status is available from Task 027 worker pool
+3. CPU sampling is available via system APIs or monitoring
+4. Triggers are evaluated periodically (e.g., every 5 seconds)
+5. Moving average uses a sliding window approach
+6. Sustained periods require continuous samples above threshold
+7. A single dip below threshold resets the sustained counter
+8. Triggers are independent and can fire simultaneously
+
+---
+
+## Security Considerations
+
+1. Trigger signals MUST NOT expose internal metric values externally
+2. CPU sampling MUST NOT require elevated privileges
+3. Queue metrics MUST NOT include sensitive task content
+4. Trigger logs MUST NOT include confidential data
+5. Configuration MUST be validated for reasonable thresholds
+6. Denial-of-service via trigger manipulation MUST be prevented
+7. Trigger events MUST be logged for audit purposes
+8. Threshold changes MUST be logged
 
 ---
 
@@ -68,123 +106,169 @@ This task covers trigger implementations. Aggregation logic is in 033.b. Rate li
 
 ## Functional Requirements
 
-### FR-001 to FR-015: Trigger Interface
+### Trigger Interface
 
-- FR-001: `IBurstTrigger` MUST exist
-- FR-002: `Name` property MUST exist
-- FR-003: `Enabled` property MUST exist
-- FR-004: `EvaluateAsync` MUST return signal
-- FR-005: Signal MUST include triggered flag
-- FR-006: Signal MUST include confidence
-- FR-007: Confidence: 0.0 to 1.0
-- FR-008: Signal MUST include reason
-- FR-009: Signal MUST include suggested scale
-- FR-010: Trigger MUST be stateless
-- FR-011: State in external stores
-- FR-012: Trigger MUST be configurable
-- FR-013: Configuration via options
-- FR-014: Trigger MUST be testable
-- FR-015: Trigger MUST emit metrics
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033A-01 | `IBurstTrigger` interface MUST exist | P0 |
+| FR-033A-02 | `Name` property MUST return trigger identifier | P0 |
+| FR-033A-03 | `Enabled` property MUST be configurable | P0 |
+| FR-033A-04 | `EvaluateAsync` MUST return `TriggerSignal` | P0 |
+| FR-033A-05 | Signal MUST include triggered boolean | P0 |
+| FR-033A-06 | Signal MUST include confidence (0.0-1.0) | P0 |
+| FR-033A-07 | Confidence reflects certainty of trigger | P0 |
+| FR-033A-08 | Signal MUST include human-readable reason | P1 |
+| FR-033A-09 | Signal MUST include suggested scale | P0 |
+| FR-033A-10 | Trigger evaluation MUST be stateless | P0 |
+| FR-033A-11 | State stored externally (samples, history) | P1 |
+| FR-033A-12 | Trigger MUST accept configuration options | P0 |
+| FR-033A-13 | Configuration via strongly-typed options record | P0 |
+| FR-033A-14 | Trigger MUST be unit testable | P0 |
+| FR-033A-15 | Trigger MUST emit metrics on evaluation | P1 |
 
-### FR-016 to FR-030: Queue Depth Trigger
+### Queue Depth Trigger
 
-- FR-016: `QueueDepthTrigger` MUST exist
-- FR-017: Threshold MUST be configurable
-- FR-018: Default threshold: 10
-- FR-019: Depth > threshold MUST fire
-- FR-020: Confidence scales with excess
-- FR-021: 2x threshold = 1.0 confidence
-- FR-022: Suggested scale MUST calculate
-- FR-023: Scale = depth / workers
-- FR-024: Min scale: 1
-- FR-025: Max scale MUST be configurable
-- FR-026: Default max: 5
-- FR-027: Depth MUST be sampled
-- FR-028: Sample interval: 5 seconds
-- FR-029: Smoothing MUST be applied
-- FR-030: Moving average over 3 samples
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033A-16 | `QueueDepthTrigger` MUST exist | P0 |
+| FR-033A-17 | Depth threshold MUST be configurable | P0 |
+| FR-033A-18 | Default threshold: 10 pending tasks | P0 |
+| FR-033A-19 | Depth > threshold MUST fire trigger | P0 |
+| FR-033A-20 | Confidence scales with excess depth | P0 |
+| FR-033A-21 | 2x threshold = 1.0 confidence | P0 |
+| FR-033A-22 | Suggested scale MUST be calculated | P0 |
+| FR-033A-23 | Scale = depth / workers (rounded up) | P0 |
+| FR-033A-24 | Minimum scale: 1 instance | P0 |
+| FR-033A-25 | Max scale MUST be configurable | P1 |
+| FR-033A-26 | Default max scale: 5 instances | P1 |
+| FR-033A-27 | Depth MUST be sampled periodically | P1 |
+| FR-033A-28 | Default sample interval: 5 seconds | P1 |
+| FR-033A-29 | Smoothing MUST be applied | P1 |
+| FR-033A-30 | Moving average over 3 samples | P1 |
 
-### FR-031 to FR-045: Queue Wait Trigger
+### Queue Wait Trigger
 
-- FR-031: `QueueWaitTrigger` MUST exist
-- FR-032: Threshold MUST be configurable
-- FR-033: Default threshold: 5 minutes
-- FR-034: Oldest task wait MUST be checked
-- FR-035: Wait > threshold MUST fire
-- FR-036: Average wait MUST be optional
-- FR-037: P95 wait MUST be optional
-- FR-038: Default: oldest task
-- FR-039: Confidence scales with wait
-- FR-040: 2x threshold = 1.0 confidence
-- FR-041: Priority MUST weight wait
-- FR-042: P0 task: 2x weight
-- FR-043: Suggested scale MUST be 1
-- FR-044: Wait trigger adds 1 instance
-- FR-045: Reason MUST include wait time
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033A-31 | `QueueWaitTrigger` MUST exist | P0 |
+| FR-033A-32 | Wait threshold MUST be configurable | P0 |
+| FR-033A-33 | Default threshold: 5 minutes | P0 |
+| FR-033A-34 | Oldest task wait MUST be checked by default | P0 |
+| FR-033A-35 | Wait > threshold MUST fire trigger | P0 |
+| FR-033A-36 | Average wait MAY be used instead | P2 |
+| FR-033A-37 | P95 wait MAY be used instead | P2 |
+| FR-033A-38 | Default metric: oldest task wait | P0 |
+| FR-033A-39 | Confidence scales with wait time | P0 |
+| FR-033A-40 | 2x threshold = 1.0 confidence | P0 |
+| FR-033A-41 | Priority MUST weight wait time | P1 |
+| FR-033A-42 | P0 task: 2x wait weight | P1 |
+| FR-033A-43 | Suggested scale MUST be 1 | P0 |
+| FR-033A-44 | Wait trigger adds 1 instance | P0 |
+| FR-033A-45 | Reason MUST include actual wait time | P1 |
 
-### FR-046 to FR-060: CPU Utilization Trigger
+### CPU Utilization Trigger
 
-- FR-046: `CpuUtilizationTrigger` MUST exist
-- FR-047: Threshold MUST be configurable
-- FR-048: Default threshold: 80%
-- FR-049: CPU MUST be sampled
-- FR-050: Sample interval: 10 seconds
-- FR-051: Sustained period MUST apply
-- FR-052: Default sustained: 2 minutes
-- FR-053: All samples above threshold
-- FR-054: Single dip resets sustained
-- FR-055: Confidence from utilization
-- FR-056: 100% = 1.0 confidence
-- FR-057: Per-core MUST be available
-- FR-058: Default: aggregate
-- FR-059: Suggested scale from headroom
-- FR-060: Need 20% headroom per instance
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033A-46 | `CpuUtilizationTrigger` MUST exist | P0 |
+| FR-033A-47 | CPU threshold MUST be configurable | P0 |
+| FR-033A-48 | Default threshold: 80% utilization | P0 |
+| FR-033A-49 | CPU MUST be sampled periodically | P0 |
+| FR-033A-50 | Default sample interval: 10 seconds | P0 |
+| FR-033A-51 | Sustained period MUST be enforced | P0 |
+| FR-033A-52 | Default sustained period: 2 minutes | P0 |
+| FR-033A-53 | All samples in period above threshold | P0 |
+| FR-033A-54 | Single sample below resets sustained | P0 |
+| FR-033A-55 | Confidence from CPU utilization | P0 |
+| FR-033A-56 | 100% utilization = 1.0 confidence | P0 |
+| FR-033A-57 | Per-core utilization MAY be available | P2 |
+| FR-033A-58 | Default: aggregate CPU utilization | P0 |
+| FR-033A-59 | Suggested scale from CPU headroom | P1 |
+| FR-033A-60 | ~20% headroom needed per instance | P1 |
 
-### FR-061 to FR-075: Worker Saturation Trigger
+### Worker Saturation Trigger
 
-- FR-061: `WorkerSaturationTrigger` MUST exist
-- FR-062: All workers busy MUST fire
-- FR-063: Per-worker queue MUST be checked
-- FR-064: Queue threshold per worker: 3
-- FR-065: Sustained period MUST apply
-- FR-066: Default sustained: 30 seconds
-- FR-067: Confidence from saturation level
-- FR-068: All busy = 1.0
-- FR-069: 90% busy = 0.9
-- FR-070: Suggested scale from queue
-- FR-071: Total queued / queue threshold
-- FR-072: Idle worker MUST reset
-- FR-073: Single idle prevents trigger
-- FR-074: Grace period MUST exist
-- FR-075: Default grace: 10 seconds
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033A-61 | `WorkerSaturationTrigger` MUST exist | P0 |
+| FR-033A-62 | All workers busy MUST fire trigger | P0 |
+| FR-033A-63 | Per-worker queue depth MUST be checked | P0 |
+| FR-033A-64 | Queue threshold per worker: 3 tasks | P0 |
+| FR-033A-65 | Sustained period MUST be enforced | P0 |
+| FR-033A-66 | Default sustained period: 30 seconds | P0 |
+| FR-033A-67 | Confidence from saturation level | P0 |
+| FR-033A-68 | All workers busy = 1.0 confidence | P0 |
+| FR-033A-69 | 90% workers busy = 0.9 confidence | P0 |
+| FR-033A-70 | Suggested scale from total queue | P0 |
+| FR-033A-71 | Scale = total queued / queue threshold | P0 |
+| FR-033A-72 | Single idle worker MUST reset sustained | P0 |
+| FR-033A-73 | Idle worker prevents trigger firing | P0 |
+| FR-033A-74 | Grace period MUST exist before reset | P1 |
+| FR-033A-75 | Default grace period: 10 seconds | P1 |
 
-### FR-076 to FR-085: Priority Trigger
+### Priority Task Trigger
 
-- FR-076: `PriorityTaskTrigger` MUST exist
-- FR-077: P0 task waiting MUST fire
-- FR-078: P0 wait threshold: 1 minute
-- FR-079: P1 wait threshold: 3 minutes
-- FR-080: Lower priority: disabled
-- FR-081: Confidence: 1.0 for P0
-- FR-082: Confidence: 0.8 for P1
-- FR-083: Suggested scale: 1
-- FR-084: Priority task needs one instance
-- FR-085: Reason MUST include priority
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033A-76 | `PriorityTaskTrigger` MUST exist | P1 |
+| FR-033A-77 | P0 task waiting MUST fire trigger | P1 |
+| FR-033A-78 | P0 wait threshold: 1 minute | P1 |
+| FR-033A-79 | P1 wait threshold: 3 minutes | P1 |
+| FR-033A-80 | Lower priority tasks: trigger disabled | P1 |
+| FR-033A-81 | P0 task confidence: 1.0 | P1 |
+| FR-033A-82 | P1 task confidence: 0.8 | P1 |
+| FR-033A-83 | Suggested scale: 1 instance | P1 |
+| FR-033A-84 | Priority task needs one dedicated instance | P1 |
+| FR-033A-85 | Reason MUST include task priority | P1 |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Trigger evaluation <10ms
-- NFR-002: Sampling overhead <1%
-- NFR-003: Memory efficient
-- NFR-004: No false positives in tests
-- NFR-005: Clear trigger reasons
-- NFR-006: Structured logging
-- NFR-007: Metrics per trigger
-- NFR-008: Configurable thresholds
-- NFR-009: Thread-safe
-- NFR-010: Deterministic
+### Performance
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-033A-01 | Single trigger evaluation | <10ms | P0 |
+| NFR-033A-02 | Sampling overhead | <1% CPU | P0 |
+| NFR-033A-03 | Memory per trigger | <1KB | P1 |
+| NFR-033A-04 | Sample storage | <100 samples | P1 |
+| NFR-033A-05 | Moving average calculation | O(1) | P1 |
+| NFR-033A-06 | Concurrent evaluation | Thread-safe | P0 |
+| NFR-033A-07 | Sample pruning | Automatic | P1 |
+| NFR-033A-08 | Trigger initialization | <10ms | P1 |
+| NFR-033A-09 | Configuration reload | <100ms | P2 |
+| NFR-033A-10 | Metric emission | <1ms | P1 |
+
+### Reliability
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-033A-11 | False positive rate | <2% | P0 |
+| NFR-033A-12 | Trigger isolation | Failure doesn't cascade | P0 |
+| NFR-033A-13 | Missing metric handling | Graceful skip | P0 |
+| NFR-033A-14 | Sustained period accuracy | Within 1 sample | P1 |
+| NFR-033A-15 | Confidence determinism | Same input = same output | P0 |
+| NFR-033A-16 | Scale calculation accuracy | Within 1 instance | P1 |
+| NFR-033A-17 | Threshold enforcement | Exact | P0 |
+| NFR-033A-18 | Default value fallback | Always works | P0 |
+| NFR-033A-19 | Sample overflow prevention | Auto-prune | P1 |
+| NFR-033A-20 | Recovery from stuck state | Auto-reset | P1 |
+
+### Observability
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-033A-21 | Structured logging | All evaluations | P0 |
+| NFR-033A-22 | Trigger fire metric | Counter per trigger | P1 |
+| NFR-033A-23 | Trigger reset metric | Counter | P1 |
+| NFR-033A-24 | Confidence distribution | Histogram | P2 |
+| NFR-033A-25 | TriggerFiredEvent | Published on fire | P1 |
+| NFR-033A-26 | TriggerResetEvent | Published on reset | P2 |
+| NFR-033A-27 | Sample history logging | Debug level | P2 |
+| NFR-033A-28 | Trace correlation | Request ID | P1 |
+| NFR-033A-29 | Threshold logging | On change | P1 |
+| NFR-033A-30 | Scale suggestion logging | Info level | P1 |
 
 ---
 
@@ -240,16 +324,165 @@ burst:
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: Queue depth trigger works
-- [ ] AC-002: Queue wait trigger works
-- [ ] AC-003: CPU trigger works
-- [ ] AC-004: Worker saturation works
-- [ ] AC-005: Priority trigger works
-- [ ] AC-006: Sustained periods work
-- [ ] AC-007: Confidence calculates
-- [ ] AC-008: Scale calculates
-- [ ] AC-009: Configuration works
-- [ ] AC-010: Metrics emit
+### Trigger Interface
+- [ ] AC-001: `IBurstTrigger` interface exists
+- [ ] AC-002: `Name` property returns identifier
+- [ ] AC-003: `Enabled` property is configurable
+- [ ] AC-004: `EvaluateAsync` returns `TriggerSignal`
+- [ ] AC-005: Signal includes triggered boolean
+- [ ] AC-006: Signal includes confidence 0.0-1.0
+- [ ] AC-007: Signal includes reason when triggered
+- [ ] AC-008: Signal includes suggested scale
+- [ ] AC-009: Triggers registered via DI
+- [ ] AC-010: Metrics emitted on evaluation
+
+### Queue Depth Trigger
+- [ ] AC-011: Depth > 10 fires trigger
+- [ ] AC-012: Threshold is configurable
+- [ ] AC-013: Confidence scales: 20 tasks = 1.0
+- [ ] AC-014: Scale calculated from depth/workers
+- [ ] AC-015: Max scale (5) enforced
+- [ ] AC-016: Moving average smoothing works
+- [ ] AC-017: Reason includes actual depth
+
+### Queue Wait Trigger
+- [ ] AC-018: Wait > 5min fires trigger
+- [ ] AC-019: Threshold is configurable
+- [ ] AC-020: Oldest task wait used by default
+- [ ] AC-021: Confidence scales: 10min = 1.0
+- [ ] AC-022: Priority multiplier applied
+- [ ] AC-023: P0 task wait weighted 2x
+- [ ] AC-024: Scale always 1
+- [ ] AC-025: Reason includes wait time
+
+### CPU Utilization Trigger
+- [ ] AC-026: CPU > 80% sustained fires
+- [ ] AC-027: Threshold is configurable
+- [ ] AC-028: Sample interval 10 seconds
+- [ ] AC-029: Sustained period 2 minutes
+- [ ] AC-030: Single dip resets sustained
+- [ ] AC-031: Confidence = CPU utilization
+- [ ] AC-032: Scale from headroom calculation
+- [ ] AC-033: Reason includes CPU % and duration
+
+### Worker Saturation Trigger
+- [ ] AC-034: All workers busy fires
+- [ ] AC-035: Per-worker queue threshold 3
+- [ ] AC-036: Sustained period 30 seconds
+- [ ] AC-037: Confidence = saturation %
+- [ ] AC-038: Scale from total queue
+- [ ] AC-039: Single idle worker resets
+- [ ] AC-040: Grace period 10 seconds
+
+### Priority Task Trigger
+- [ ] AC-041: P0 waiting > 1min fires
+- [ ] AC-042: P1 waiting > 3min fires
+- [ ] AC-043: P0 confidence = 1.0
+- [ ] AC-044: P1 confidence = 0.8
+- [ ] AC-045: Scale always 1
+- [ ] AC-046: Reason includes priority level
+
+### Observability
+- [ ] AC-047: TriggerFiredEvent published
+- [ ] AC-048: TriggerResetEvent published
+- [ ] AC-049: Evaluation logged
+- [ ] AC-050: Metrics by trigger type
+- [ ] AC-051: Confidence histogram available
+- [ ] AC-052: Configuration logged on startup
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Queue Depth Trigger
+**Persona:** Developer with large batch  
+**Preconditions:** Queue empty, 15 tasks submitted  
+**Steps:**
+1. Submit 15 tasks to queue
+2. Observe trigger evaluation
+3. Check trigger fired
+4. Verify scale calculation
+
+**Verification Checklist:**
+- [ ] Depth = 15 > threshold 10
+- [ ] Trigger fired = true
+- [ ] Confidence = 15/20 = 0.75
+- [ ] Scale = 15/workers, max 5
+
+### Scenario 2: CPU Sustained High
+**Persona:** Developer with CPU workload  
+**Preconditions:** CPU idle, then 90% for 3 min  
+**Steps:**
+1. Start CPU-intensive work
+2. Monitor samples over 3 minutes
+3. Check sustained period reached
+4. Verify trigger fires
+
+**Verification Checklist:**
+- [ ] Samples recorded every 10s
+- [ ] All samples > 80%
+- [ ] After 2min, trigger fires
+- [ ] Reason: "CPU 90% for 2 minutes"
+
+### Scenario 3: Single Dip Resets Sustained
+**Persona:** Developer with variable load  
+**Preconditions:** CPU at 85% for 90 seconds  
+**Steps:**
+1. CPU high for 90 seconds
+2. Brief dip to 70% (one sample)
+3. CPU returns to 85%
+4. Sustained counter reset
+
+**Verification Checklist:**
+- [ ] 90 seconds accumulated
+- [ ] Dip to 70% detected
+- [ ] Sustained counter reset to 0
+- [ ] Trigger not fired
+
+### Scenario 4: Worker Saturation
+**Persona:** Developer with busy workers  
+**Preconditions:** All 4 workers have 5+ queued tasks  
+**Steps:**
+1. All workers processing
+2. Each has 5 queued tasks
+3. Sustained 30 seconds
+4. Trigger fires
+
+**Verification Checklist:**
+- [ ] All workers busy detected
+- [ ] Queue per worker > 3
+- [ ] 30 second sustained met
+- [ ] Scale = 20/3 ≈ 7, capped
+
+### Scenario 5: Priority Task Fast Track
+**Persona:** Developer with urgent P0 task  
+**Preconditions:** P0 task queued, waiting 2 minutes  
+**Steps:**
+1. Submit P0 task
+2. Wait 2 minutes (> 1 min threshold)
+3. Trigger fires
+4. Confidence = 1.0
+
+**Verification Checklist:**
+- [ ] P0 task identified
+- [ ] Wait > 1 min threshold
+- [ ] Trigger fires with confidence 1.0
+- [ ] Scale = 1
+
+### Scenario 6: Trigger Configuration Change
+**Persona:** Operations adjusting thresholds  
+**Preconditions:** Default thresholds active  
+**Steps:**
+1. Increase queue depth threshold to 20
+2. Queue 15 tasks
+3. Trigger does NOT fire
+4. Queue 25 tasks, trigger fires
+
+**Verification Checklist:**
+- [ ] New threshold 20 applied
+- [ ] 15 tasks: no trigger
+- [ ] 25 tasks: trigger fires
+- [ ] Config change logged
 
 ---
 
@@ -257,17 +490,43 @@ burst:
 
 ### Unit Tests
 
-- [ ] UT-001: Queue depth logic
-- [ ] UT-002: Wait calculation
-- [ ] UT-003: Sustained period
-- [ ] UT-004: Confidence scoring
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| UT-033A-01 | Queue depth > threshold fires | FR-033A-19 |
+| UT-033A-02 | Queue depth confidence scaling | FR-033A-20-21 |
+| UT-033A-03 | Queue depth scale calculation | FR-033A-22-24 |
+| UT-033A-04 | Queue depth max scale enforcement | FR-033A-26 |
+| UT-033A-05 | Queue wait > threshold fires | FR-033A-35 |
+| UT-033A-06 | Queue wait priority weighting | FR-033A-41-42 |
+| UT-033A-07 | CPU sustained period tracking | FR-033A-51-53 |
+| UT-033A-08 | CPU single dip resets | FR-033A-54 |
+| UT-033A-09 | Worker saturation detection | FR-033A-62 |
+| UT-033A-10 | Worker idle resets sustained | FR-033A-72 |
+| UT-033A-11 | Priority P0 threshold | FR-033A-78 |
+| UT-033A-12 | Priority P1 threshold | FR-033A-79 |
+| UT-033A-13 | Moving average smoothing | FR-033A-30 |
+| UT-033A-14 | Disabled trigger returns false | FR-033A-03 |
+| UT-033A-15 | Confidence determinism | NFR-033A-15 |
 
 ### Integration Tests
 
-- [ ] IT-001: Real CPU sampling
-- [ ] IT-002: Worker metrics
-- [ ] IT-003: Queue integration
-- [ ] IT-004: Priority handling
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| IT-033A-01 | Real CPU sampling | E2E |
+| IT-033A-02 | Worker pool integration | FR-033A-63 |
+| IT-033A-03 | Queue metrics integration | FR-033A-16 |
+| IT-033A-04 | Priority task detection | FR-033A-77 |
+| IT-033A-05 | Multiple triggers simultaneously | Multiple |
+| IT-033A-06 | Sustained period over time | FR-033A-51 |
+| IT-033A-07 | Configuration reload | NFR-033A-09 |
+| IT-033A-08 | Event publishing | NFR-033A-25 |
+| IT-033A-09 | Metrics emission | NFR-033A-22 |
+| IT-033A-10 | Performance <10ms | NFR-033A-01 |
+| IT-033A-11 | Thread safety | NFR-033A-06 |
+| IT-033A-12 | Grace period behavior | FR-033A-75 |
+| IT-033A-13 | Sample pruning | NFR-033A-19 |
+| IT-033A-14 | False positive testing | NFR-033A-11 |
+| IT-033A-15 | Recovery from stuck state | NFR-033A-20 |
 
 ---
 

@@ -30,16 +30,54 @@ This task covers command execution. Connection management is in 030.a. File tran
 
 ### Integration Points
 
-- Task 029.b: Implements exec interface
-- Task 030.a: Uses connection pool
-- Task 027: Workers execute commands
+| Component | Interface | Data Flow | Notes |
+|-----------|-----------|-----------|-------|
+| Task 029.b IExecuteCommands | Implements interface | Commands flow in, results flow out | Core abstraction |
+| Task 030.a Connection Pool | ISshConnectionPool | Acquires connections for execution | Reuses connections |
+| Task 027 Worker Orchestration | IWorker.Execute | Worker triggers command execution | Primary consumer |
+| SSH.NET / Renci Library | SshClient, SshCommand | SSH protocol abstraction | Transport layer |
+| PTY Subsystem | PseudoTerminalMode | Interactive sessions | Optional feature |
+| Output Streaming | IAsyncEnumerable | Real-time output | Non-blocking |
+| Process Control | SSH Channel | Signals, kill commands | Remote control |
 
 ### Failure Modes
 
-- Command timeout → Kill and error
-- Connection lost → Reconnect and retry
-- Exit code non-zero → Report failure
-- Shell error → Parse and report
+| Failure | Detection | Recovery | User Impact |
+|---------|-----------|----------|-------------|
+| Command timeout | Timer expiry | Kill process, return error | Delayed feedback |
+| Connection lost mid-command | SSH disconnect event | Reconnect, optionally retry | Possible data loss |
+| Non-zero exit code | ExitStatus check | Log and propagate error | Clear failure signal |
+| Shell error (syntax) | stderr parsing | Report with context | Debugging needed |
+| OOM on remote | Exit code 137 | Report OOM, no retry | Resource constraints |
+| PTY allocation failure | Exception | Fallback to non-PTY | Degraded mode |
+| Output buffer overflow | Size threshold | Switch to streaming | Memory protection |
+| Signal delivery failure | Timeout on kill | Force close channel | Orphan possible |
+
+---
+
+## Assumptions
+
+1. **SSH.NET Library**: Implementation uses SSH.NET (Renci) for SSH protocol handling
+2. **Connection Pooling**: Task 030.a provides reliable connection acquisition
+3. **Shell Availability**: Remote hosts have standard shell (bash, sh, or zsh)
+4. **Encoding Consistency**: UTF-8 encoding used for all command I/O
+5. **Signal Support**: Remote OS supports POSIX signals (SIGTERM, SIGKILL)
+6. **Process Groups**: Shell supports process group control for child cleanup
+7. **PATH Configuration**: Remote PATH includes standard locations (/usr/bin, /bin)
+8. **Resource Limits**: Remote host has reasonable ulimits for processes
+
+---
+
+## Security Considerations
+
+1. **Command Injection Prevention**: All user input MUST be shell-escaped using proper quoting
+2. **Environment Sanitization**: Environment variables MUST NOT leak secrets to logs
+3. **Output Filtering**: Sensitive patterns in output MUST be redacted in logs
+4. **Timeout Enforcement**: All commands MUST have timeout to prevent resource exhaustion
+5. **Privilege Escalation**: Sudo usage MUST be explicit and logged
+6. **Credential Isolation**: SSH credentials MUST NOT appear in command strings
+7. **Audit Trail**: All command executions MUST be logged with correlation ID
+8. **Kill Authorization**: Only session owner MUST be able to kill commands
 
 ---
 
@@ -68,107 +106,159 @@ This task covers command execution. Connection management is in 030.a. File tran
 
 ## Functional Requirements
 
-### FR-001 to FR-020: Command Execution
+### Command Execution Core
 
-- FR-001: `ExecuteAsync` MUST work over SSH
-- FR-002: Command MUST be string
-- FR-003: Shell MUST be used
-- FR-004: Default shell: user's default
-- FR-005: Shell MUST be overridable
-- FR-006: Working directory MUST be settable
-- FR-007: Environment MUST be settable
-- FR-008: Environment MUST merge with remote
-- FR-009: Exit code MUST be captured
-- FR-010: Exit code MUST be accurate
-- FR-011: Stdout MUST be captured
-- FR-012: Stderr MUST be captured
-- FR-013: Combined output MUST be optional
-- FR-014: Streaming MUST work
-- FR-015: Stream callback MUST be invocable
-- FR-016: Buffered output MUST be available
-- FR-017: Timeout MUST be enforced
-- FR-018: Default timeout: 30 minutes
-- FR-019: Timeout MUST be configurable
-- FR-020: Cancelled commands MUST be killed
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030B-01 | `ExecuteAsync` MUST implement `IExecuteCommands` interface for SSH target | P0 |
+| FR-030B-02 | Command MUST be passed as string with proper shell escaping | P0 |
+| FR-030B-03 | Shell MUST be used for command interpretation (not direct exec) | P0 |
+| FR-030B-04 | Default shell MUST be user's login shell from remote `/etc/passwd` | P1 |
+| FR-030B-05 | Shell MUST be overridable via `ExecuteOptions.Shell` property | P1 |
+| FR-030B-06 | Working directory MUST be settable and validated before execution | P0 |
+| FR-030B-07 | Environment variables MUST be settable as `Dictionary<string, string>` | P0 |
+| FR-030B-08 | Environment MUST merge with remote environment (local overrides) | P0 |
+| FR-030B-09 | Exit code MUST be captured from SSH channel exit status | P0 |
+| FR-030B-10 | Exit code MUST accurately reflect remote process exit | P0 |
+| FR-030B-11 | Stdout MUST be captured as `string` or `IAsyncEnumerable<string>` | P0 |
+| FR-030B-12 | Stderr MUST be captured separately as `string` or `IAsyncEnumerable<string>` | P0 |
+| FR-030B-13 | Combined stdout+stderr MUST be optional via `CombineOutput` flag | P1 |
+| FR-030B-14 | Real-time streaming MUST work via `IAsyncEnumerable<OutputLine>` | P0 |
+| FR-030B-15 | Stream callback MUST be invocable with `Action<OutputLine>` | P1 |
+| FR-030B-16 | Buffered output MUST be available via `ExecuteResult.Output` property | P0 |
+| FR-030B-17 | Timeout MUST be enforced with automatic kill on expiry | P0 |
+| FR-030B-18 | Default timeout MUST be 30 minutes (configurable) | P0 |
+| FR-030B-19 | Timeout MUST be configurable per-execution via `ExecuteOptions.Timeout` | P0 |
+| FR-030B-20 | Cancelled commands MUST be killed with SIGTERM followed by SIGKILL | P0 |
 
-### FR-021 to FR-040: PTY Handling
+### PTY (Pseudo-Terminal) Handling
 
-- FR-021: PTY MUST be optional
-- FR-022: Default: no PTY
-- FR-023: PTY MUST be requestable
-- FR-024: PTY needed for some commands
-- FR-025: PTY dimensions MUST be settable
-- FR-026: Default: 80x24
-- FR-027: PTY MUST support resize
-- FR-028: PTY escape sequences MUST work
-- FR-029: SIGWINCH MUST be sent
-- FR-030: PTY MUST be cleaned up
-- FR-031: Raw mode MUST be available
-- FR-032: Cooked mode MUST be default
-- FR-033: Line buffering MUST work
-- FR-034: Character buffering for PTY
-- FR-035: ANSI codes MUST pass through
-- FR-036: ANSI stripping MUST be optional
-- FR-037: Terminal type MUST be settable
-- FR-038: Default: xterm-256color
-- FR-039: PTY errors MUST be handled
-- FR-040: Fallback to non-PTY MUST work
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030B-21 | PTY allocation MUST be optional via `ExecuteOptions.UsePty` flag | P0 |
+| FR-030B-22 | Default MUST be no PTY (non-interactive mode) | P0 |
+| FR-030B-23 | PTY MUST be requestable for interactive commands | P1 |
+| FR-030B-24 | PTY MUST be auto-enabled for commands requiring terminal (vim, less) | P2 |
+| FR-030B-25 | PTY dimensions MUST be settable via `PtyOptions.Columns` and `Rows` | P1 |
+| FR-030B-26 | Default PTY dimensions MUST be 80 columns × 24 rows | P1 |
+| FR-030B-27 | PTY MUST support runtime resize via `ResizePtyAsync` method | P2 |
+| FR-030B-28 | PTY escape sequences MUST pass through unmodified | P1 |
+| FR-030B-29 | SIGWINCH MUST be sent on resize | P2 |
+| FR-030B-30 | PTY resources MUST be cleaned up on command completion | P0 |
+| FR-030B-31 | Raw mode MUST be available for character-by-character I/O | P2 |
+| FR-030B-32 | Cooked mode MUST be default (line-buffered) | P1 |
+| FR-030B-33 | Line buffering MUST work for non-PTY output | P0 |
+| FR-030B-34 | Character buffering MUST work for PTY output | P1 |
+| FR-030B-35 | ANSI escape codes MUST pass through for color support | P1 |
+| FR-030B-36 | ANSI stripping MUST be optional via `StripAnsi` flag | P2 |
+| FR-030B-37 | Terminal type MUST be settable via `PtyOptions.TerminalType` | P2 |
+| FR-030B-38 | Default terminal type MUST be `xterm-256color` | P2 |
+| FR-030B-39 | PTY allocation failures MUST be handled gracefully | P0 |
+| FR-030B-40 | Fallback to non-PTY MUST work when PTY fails | P1 |
 
-### FR-041 to FR-060: Process Control
+### Process Control
 
-- FR-041: Process MUST be killable
-- FR-042: Kill MUST use SIGTERM first
-- FR-043: SIGTERM grace: 5 seconds
-- FR-044: SIGKILL MUST follow
-- FR-045: Kill MUST work remotely
-- FR-046: Kill via SSH channel close
-- FR-047: Orphan processes MUST be handled
-- FR-048: Process group MUST be killed
-- FR-049: Signals MUST be sendable
-- FR-050: SIGINT MUST work
-- FR-051: SIGHUP MUST work
-- FR-052: Custom signals MUST work
-- FR-053: Background execution MUST work
-- FR-054: Nohup MUST be optional
-- FR-055: Detached MUST work
-- FR-056: PID MUST be retrievable
-- FR-057: Process status MUST be queryable
-- FR-058: /proc MUST be checked (Linux)
-- FR-059: Wait MUST be available
-- FR-060: Wait timeout MUST work
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030B-41 | Running process MUST be killable via `KillAsync` method | P0 |
+| FR-030B-42 | Kill MUST send SIGTERM first for graceful shutdown | P0 |
+| FR-030B-43 | SIGTERM grace period MUST be 5 seconds (configurable) | P0 |
+| FR-030B-44 | SIGKILL MUST follow SIGTERM if process doesn't exit | P0 |
+| FR-030B-45 | Kill MUST work remotely via SSH signal mechanism | P0 |
+| FR-030B-46 | Kill via SSH channel close MUST be fallback option | P1 |
+| FR-030B-47 | Orphan processes MUST be handled via process group kill | P1 |
+| FR-030B-48 | Entire process group MUST be killed (not just leader) | P0 |
+| FR-030B-49 | Custom signals MUST be sendable via `SendSignalAsync(int signal)` | P2 |
+| FR-030B-50 | SIGINT MUST be sendable for Ctrl+C behavior | P1 |
+| FR-030B-51 | SIGHUP MUST be sendable for hangup simulation | P2 |
+| FR-030B-52 | Background execution MUST work via `&` suffix | P1 |
+| FR-030B-53 | Nohup MUST be optional for disconnect-safe execution | P2 |
+| FR-030B-54 | Detached mode MUST allow immediate return without output | P2 |
+| FR-030B-55 | PID MUST be retrievable via `ExecuteResult.ProcessId` | P1 |
+| FR-030B-56 | Process status MUST be queryable via `IsRunningAsync(pid)` | P2 |
+| FR-030B-57 | `/proc/{pid}` MUST be checked on Linux for status | P2 |
+| FR-030B-58 | Wait for process MUST be available via `WaitAsync` | P1 |
+| FR-030B-59 | Wait timeout MUST be supported | P1 |
+| FR-030B-60 | Zombie process cleanup MUST happen automatically | P1 |
 
-### FR-061 to FR-075: Shell Handling
+### Shell Handling and Escaping
 
-- FR-061: Bash MUST be supported
-- FR-062: Sh MUST be supported
-- FR-063: Zsh MUST be supported
-- FR-064: Shell detection MUST work
-- FR-065: Shell via $SHELL
-- FR-066: Fallback to /bin/sh
-- FR-067: Shell escaping MUST work
-- FR-068: Single quotes MUST be escaped
-- FR-069: Double quotes MUST be escaped
-- FR-070: Backticks MUST be escaped
-- FR-071: Dollar signs MUST be escaped
-- FR-072: Newlines MUST be handled
-- FR-073: Multi-line commands MUST work
-- FR-074: Here-doc MUST work
-- FR-075: Script execution MUST work
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030B-61 | Bash shell MUST be fully supported | P0 |
+| FR-030B-62 | Bourne sh MUST be supported as fallback | P0 |
+| FR-030B-63 | Zsh MUST be supported | P1 |
+| FR-030B-64 | Shell detection MUST work via remote `$SHELL` variable | P1 |
+| FR-030B-65 | Shell path MUST be determined from `$SHELL` environment | P1 |
+| FR-030B-66 | Fallback to `/bin/sh` MUST work when shell unknown | P0 |
+| FR-030B-67 | Shell escaping MUST prevent injection attacks | P0 |
+| FR-030B-68 | Single quotes MUST be properly escaped (`'` → `'\''`) | P0 |
+| FR-030B-69 | Double quotes MUST be properly escaped (`"` → `\"`) | P0 |
+| FR-030B-70 | Backticks MUST be escaped to prevent command substitution | P0 |
+| FR-030B-71 | Dollar signs MUST be escaped to prevent variable expansion | P0 |
+| FR-030B-72 | Newlines in commands MUST be handled via quoting | P0 |
+| FR-030B-73 | Multi-line commands MUST work with proper escaping | P0 |
+| FR-030B-74 | Here-doc syntax MUST work for multi-line input | P2 |
+| FR-030B-75 | Script execution via `bash -c` MUST work | P0 |
+
+### Output Handling
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030B-76 | Output encoding MUST default to UTF-8 | P0 |
+| FR-030B-77 | Output encoding MUST be configurable | P2 |
+| FR-030B-78 | Binary output MUST be supported via `byte[]` mode | P2 |
+| FR-030B-79 | Output buffer MUST have configurable max size (default 10MB) | P1 |
+| FR-030B-80 | Buffer overflow MUST switch to truncation with warning | P0 |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Exec latency <200ms overhead
-- NFR-002: Stream latency <100ms
-- NFR-003: 50 concurrent commands
-- NFR-004: 1MB output buffered
-- NFR-005: Larger output streamed
-- NFR-006: No memory leaks
-- NFR-007: Thread-safe
-- NFR-008: Structured logging
-- NFR-009: Metrics on execution
-- NFR-010: Cross-platform client
+### Performance Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030B-01 | Command execution overhead (SSH setup) | <200ms | P0 |
+| NFR-030B-02 | Output stream latency from remote to local | <100ms | P0 |
+| NFR-030B-03 | Concurrent command execution | 50 simultaneous | P0 |
+| NFR-030B-04 | Output buffering capacity for small commands | 1MB per command | P1 |
+| NFR-030B-05 | Large output streaming throughput | 10MB/s sustained | P1 |
+| NFR-030B-06 | PTY allocation time | <50ms | P1 |
+| NFR-030B-07 | Signal delivery latency | <100ms | P1 |
+| NFR-030B-08 | Kill response time | <5s (SIGTERM + SIGKILL) | P0 |
+| NFR-030B-09 | Connection reuse benefit | 80% latency reduction | P2 |
+| NFR-030B-10 | Memory usage per active command | <5MB | P1 |
+
+### Reliability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030B-11 | No memory leaks on command completion | Zero leaks in 1000 iterations | P0 |
+| NFR-030B-12 | Thread-safe concurrent execution | Zero race conditions | P0 |
+| NFR-030B-13 | Exit code accuracy | 100% match with remote | P0 |
+| NFR-030B-14 | Output completeness (no dropped lines) | 100% fidelity | P0 |
+| NFR-030B-15 | Timeout enforcement accuracy | ±1 second | P0 |
+| NFR-030B-16 | Recovery from connection loss | Automatic reconnect | P0 |
+| NFR-030B-17 | Orphan process prevention | No orphans after cleanup | P0 |
+| NFR-030B-18 | PTY fallback success rate | 100% graceful fallback | P1 |
+| NFR-030B-19 | Shell escaping correctness | Zero injection vectors | P0 |
+| NFR-030B-20 | Cancellation responsiveness | <5s to kill | P0 |
+
+### Observability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030B-21 | Structured logging for all executions | JSON with correlation ID | P0 |
+| NFR-030B-22 | Metrics for execution time | Histogram buckets | P1 |
+| NFR-030B-23 | Metrics for exit code distribution | Counter per code | P1 |
+| NFR-030B-24 | Metrics for timeout events | Counter | P1 |
+| NFR-030B-25 | Metrics for kill events | Counter | P1 |
+| NFR-030B-26 | Cross-platform client support | Windows, Linux, macOS | P0 |
+| NFR-030B-27 | Distributed tracing via Activity | W3C trace context | P1 |
+| NFR-030B-28 | Command sanitization in logs | Secrets redacted | P0 |
+| NFR-030B-29 | Output size in metrics | Per-command bytes | P2 |
+| NFR-030B-30 | Error categorization | Typed exception codes | P1 |
 
 ---
 
@@ -225,16 +315,182 @@ await sshTarget.ExecuteAsync(
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: Simple commands work
-- [ ] AC-002: Exit codes captured
-- [ ] AC-003: Stdout captured
-- [ ] AC-004: Stderr captured
-- [ ] AC-005: Streaming works
-- [ ] AC-006: Timeout works
-- [ ] AC-007: PTY works
-- [ ] AC-008: Kill works
-- [ ] AC-009: Environment works
-- [ ] AC-010: Shell escaping works
+### Command Execution Core
+- [ ] AC-001: `ExecuteAsync` successfully runs simple command (`echo hello`)
+- [ ] AC-002: `ExecuteAsync` returns correct exit code (0 for success)
+- [ ] AC-003: `ExecuteAsync` returns correct non-zero exit code
+- [ ] AC-004: Stdout is captured correctly
+- [ ] AC-005: Stderr is captured separately
+- [ ] AC-006: Combined output works with `CombineOutput` flag
+- [ ] AC-007: Working directory is respected
+- [ ] AC-008: Environment variables are set on remote
+- [ ] AC-009: Local environment merges with remote
+- [ ] AC-010: Local environment overrides remote values
+
+### Streaming Output
+- [ ] AC-011: `IAsyncEnumerable<OutputLine>` streams output in real-time
+- [ ] AC-012: Stream callback is invoked for each line
+- [ ] AC-013: Output type (stdout/stderr) is correctly labeled
+- [ ] AC-014: Streaming works for long-running commands
+- [ ] AC-015: Buffered output available after streaming completes
+- [ ] AC-016: Large output (>1MB) streams without memory issues
+
+### Timeout and Cancellation
+- [ ] AC-017: Timeout is enforced (command killed after timeout)
+- [ ] AC-018: Default timeout is 30 minutes
+- [ ] AC-019: Timeout is configurable per-execution
+- [ ] AC-020: `CancellationToken` triggers command kill
+- [ ] AC-021: SIGTERM is sent first on cancellation
+- [ ] AC-022: SIGKILL follows SIGTERM after grace period
+- [ ] AC-023: Cancelled command returns appropriate error
+
+### PTY Handling
+- [ ] AC-024: PTY is NOT allocated by default
+- [ ] AC-025: PTY is allocated when `UsePty=true`
+- [ ] AC-026: PTY dimensions default to 80×24
+- [ ] AC-027: PTY dimensions are configurable
+- [ ] AC-028: PTY resize works at runtime
+- [ ] AC-029: ANSI escape codes pass through
+- [ ] AC-030: ANSI stripping works when enabled
+- [ ] AC-031: Terminal type defaults to xterm-256color
+- [ ] AC-032: PTY failure falls back to non-PTY
+- [ ] AC-033: PTY resources are cleaned up
+
+### Process Control
+- [ ] AC-034: `KillAsync` terminates running command
+- [ ] AC-035: Kill sends SIGTERM first
+- [ ] AC-036: Kill sends SIGKILL after 5s grace
+- [ ] AC-037: Custom signals can be sent
+- [ ] AC-038: SIGINT works (Ctrl+C simulation)
+- [ ] AC-039: Process group is killed (not just leader)
+- [ ] AC-040: Background execution works with `&`
+- [ ] AC-041: Nohup prevents hangup issues
+- [ ] AC-042: PID is retrievable from result
+- [ ] AC-043: Process status is queryable
+
+### Shell Handling
+- [ ] AC-044: Bash shell is fully supported
+- [ ] AC-045: Bourne sh works as fallback
+- [ ] AC-046: Zsh shell works
+- [ ] AC-047: Shell is detected from `$SHELL`
+- [ ] AC-048: Fallback to `/bin/sh` works
+- [ ] AC-049: Shell escaping prevents injection
+- [ ] AC-050: Single quotes are escaped correctly
+- [ ] AC-051: Double quotes are escaped correctly
+- [ ] AC-052: Backticks are escaped (no command substitution)
+- [ ] AC-053: Dollar signs are escaped (no variable expansion)
+- [ ] AC-054: Multi-line commands work
+- [ ] AC-055: Script execution via `bash -c` works
+
+### Error Handling
+- [ ] AC-056: Command not found returns exit code 127
+- [ ] AC-057: Permission denied returns exit code 126
+- [ ] AC-058: Connection loss triggers reconnection attempt
+- [ ] AC-059: Timeout exception is typed and descriptive
+- [ ] AC-060: Shell syntax errors are reported clearly
+
+### Reliability and Performance
+- [ ] AC-061: No memory leaks in 1000-iteration test
+- [ ] AC-062: Thread-safe under concurrent execution
+- [ ] AC-063: 50 concurrent commands complete successfully
+- [ ] AC-064: Execution overhead is <200ms
+- [ ] AC-065: Output stream latency is <100ms
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Developer Runs Build Command
+**Persona:** Developer executing remote build  
+**Preconditions:** SSH target connected, workspace prepared  
+**Steps:**
+1. Execute `make build` with 10-minute timeout
+2. Observe streaming output
+3. Check exit code on completion
+4. Verify artifacts exist
+
+**Verification Checklist:**
+- [ ] Command starts within 500ms
+- [ ] Output streams in real-time
+- [ ] Exit code 0 on success
+- [ ] Non-zero exit code on failure
+- [ ] Timeout kills command if exceeded
+
+### Scenario 2: Running Interactive Command
+**Persona:** Developer needing interactive session  
+**Preconditions:** PTY support enabled  
+**Steps:**
+1. Execute `vim config.yml` with PTY
+2. Verify terminal renders correctly
+3. Send keystrokes
+4. Exit and verify file saved
+
+**Verification Checklist:**
+- [ ] PTY allocated successfully
+- [ ] Cursor movement works
+- [ ] ANSI colors display
+- [ ] Exit code 0 on `:wq`
+
+### Scenario 3: Cancelling Long-Running Command
+**Persona:** Developer aborting stuck build  
+**Preconditions:** Command running for 5+ minutes  
+**Steps:**
+1. Start long-running command
+2. Trigger cancellation after 30 seconds
+3. Verify command killed
+4. Check no orphan processes
+
+**Verification Checklist:**
+- [ ] Cancellation acknowledged
+- [ ] SIGTERM sent first
+- [ ] SIGKILL follows if needed
+- [ ] Command returns cancelled status
+- [ ] No orphan processes on remote
+
+### Scenario 4: Command with Environment Variables
+**Persona:** CI system setting build env  
+**Preconditions:** Build requires specific env vars  
+**Steps:**
+1. Set CC=clang, BUILD_TYPE=release
+2. Execute `make build`
+3. Verify env vars used
+
+**Verification Checklist:**
+- [ ] Environment variables set on remote
+- [ ] Variables available to command
+- [ ] Local vars override remote
+- [ ] Variables don't leak to logs
+
+### Scenario 5: Handling Command Failure
+**Persona:** Developer debugging failed command  
+**Preconditions:** Command expected to fail  
+**Steps:**
+1. Execute command with typo
+2. Observe error output
+3. Check exit code
+4. View stderr content
+
+**Verification Checklist:**
+- [ ] Exit code 127 for not found
+- [ ] Exit code 126 for permission denied
+- [ ] Stderr captured separately
+- [ ] Error message is descriptive
+
+### Scenario 6: Concurrent Command Execution
+**Persona:** CI system running parallel tests  
+**Preconditions:** Multiple workers active  
+**Steps:**
+1. Start 20 commands simultaneously
+2. Each command runs for 30 seconds
+3. Verify all complete
+4. Check no resource leaks
+
+**Verification Checklist:**
+- [ ] All 20 commands start
+- [ ] No deadlocks occur
+- [ ] All complete successfully
+- [ ] Memory stable throughout
+- [ ] Connections reused
 
 ---
 
@@ -242,17 +498,48 @@ await sshTarget.ExecuteAsync(
 
 ### Unit Tests
 
-- [ ] UT-001: Command building
-- [ ] UT-002: Shell escaping
-- [ ] UT-003: Exit code parsing
-- [ ] UT-004: Timeout logic
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| UT-030B-01 | Command building with simple string | FR-030B-02 |
+| UT-030B-02 | Shell escaping for single quotes | FR-030B-68 |
+| UT-030B-03 | Shell escaping for double quotes | FR-030B-69 |
+| UT-030B-04 | Shell escaping for backticks | FR-030B-70 |
+| UT-030B-05 | Shell escaping for dollar signs | FR-030B-71 |
+| UT-030B-06 | Exit code parsing from result | FR-030B-09 |
+| UT-030B-07 | Timeout logic triggers kill | FR-030B-17 |
+| UT-030B-08 | Environment variable merging | FR-030B-08 |
+| UT-030B-09 | Working directory injection | FR-030B-06 |
+| UT-030B-10 | PTY options configuration | FR-030B-25 |
+| UT-030B-11 | Output stream splitting | FR-030B-12 |
+| UT-030B-12 | Combined output mode | FR-030B-13 |
+| UT-030B-13 | SIGTERM grace period logic | FR-030B-43 |
+| UT-030B-14 | SIGKILL fallback | FR-030B-44 |
+| UT-030B-15 | Shell detection logic | FR-030B-64 |
+| UT-030B-16 | ANSI stripping | FR-030B-36 |
+| UT-030B-17 | Output buffer size limits | FR-030B-79 |
+| UT-030B-18 | Multi-line command handling | FR-030B-73 |
+| UT-030B-19 | Process group kill command | FR-030B-48 |
+| UT-030B-20 | Nohup command wrapping | FR-030B-53 |
 
 ### Integration Tests
 
-- [ ] IT-001: Real SSH execution
-- [ ] IT-002: Streaming output
-- [ ] IT-003: PTY interaction
-- [ ] IT-004: Process control
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| IT-030B-01 | Real SSH command execution | E2E basic |
+| IT-030B-02 | Streaming output real-time | FR-030B-14 |
+| IT-030B-03 | PTY interactive command | FR-030B-23 |
+| IT-030B-04 | Process kill and cleanup | FR-030B-41 |
+| IT-030B-05 | 50 concurrent commands | NFR-030B-03 |
+| IT-030B-06 | Large output streaming | NFR-030B-05 |
+| IT-030B-07 | Timeout enforcement | FR-030B-17 |
+| IT-030B-08 | Environment variable passing | FR-030B-07 |
+| IT-030B-09 | Working directory switching | FR-030B-06 |
+| IT-030B-10 | Shell fallback to /bin/sh | FR-030B-66 |
+| IT-030B-11 | Connection reuse benefit | NFR-030B-09 |
+| IT-030B-12 | Cancellation responsiveness | NFR-030B-20 |
+| IT-030B-13 | No orphan processes | NFR-030B-17 |
+| IT-030B-14 | Exit code 127/126 mapping | FR-030B-09 |
+| IT-030B-15 | Memory stability under load | NFR-030B-11 |
 
 ---
 

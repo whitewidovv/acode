@@ -30,16 +30,54 @@ This task covers command execution. Preparation is in 029.a. Artifacts are in 02
 
 ### Integration Points
 
-- Task 029.a: Uses prepared workspace
-- Task 027: Workers invoke execution
-- Task 030-031: Override for remotes
+| Component | Integration Type | Description |
+|-----------|-----------------|-------------|
+| Task 029.a Workspace | Prerequisite | Provides prepared workspace for command execution |
+| Task 027 Workers | Consumer | Workers invoke ExecuteAsync for task operations |
+| Task 030-031 Remote Targets | Override | Override process runner for SSH/cloud execution |
+| IExecutionService | Interface | Main contract for execution logic |
+| IProcessRunner | Strategy | Platform-specific process management |
+| IOutputBuffer | Component | Manages output streaming and buffering |
+| IOutputHandler | Callback | User-provided output streaming handler |
 
 ### Failure Modes
 
-- Command not found → Clear error
-- Timeout → Kill and report
-- Crash → Capture output
-- Signal → Handle gracefully
+| Failure Type | Detection | Recovery | User Impact |
+|--------------|-----------|----------|-------------|
+| Command not found | Exit code 127 | Clear error with command name | Fix command path |
+| Timeout exceeded | Timer expiration | SIGTERM → SIGKILL, report | Command killed |
+| Process crash | Unexpected exit | Capture partial output | Report crash with output |
+| SIGTERM/SIGINT | Signal handler | Graceful shutdown | Clean termination |
+| Out of memory | Exit code 137 | Report with memory used | Increase memory limit |
+| Disk full | Write error | Report space needed | Free disk space |
+| Permission denied | Exit code 126 | Clear error with file path | Fix permissions |
+| Encoding error | Exception | Replace invalid chars | Log warning |
+
+---
+
+## Assumptions
+
+1. **Workspace Ready**: PrepareWorkspaceAsync has been called and target is in Ready state
+2. **Shell Available**: The configured shell (/bin/bash, cmd.exe) is available on the target
+3. **Environment Inheritable**: Process environment can be inherited and extended
+4. **UTF-8 Output**: Command output is UTF-8 encoded (or convertible)
+5. **Process Signals**: Target OS supports SIGTERM/SIGKILL (Unix) or TerminateProcess (Windows)
+6. **Resource Limits**: Memory and CPU limits are enforced at the container/process level
+7. **Time Synchronization**: System clock is accurate for execution duration measurement
+8. **Filesystem Access**: Commands can read/write within the workspace directory
+
+---
+
+## Security Considerations
+
+1. **Command Injection Prevention**: Commands are passed as single strings to shell; user input must be escaped
+2. **Secret Protection**: Environment variables marked as secrets MUST NOT appear in logs
+3. **Output Redaction**: Sensitive patterns (API keys, passwords) must be redacted in stored output
+4. **Privilege Control**: Commands execute as configured user, never as root unless explicitly configured
+5. **Path Traversal**: Working directory cannot be set outside workspace without explicit permission
+6. **Resource Limits**: CPU/memory limits prevent resource exhaustion attacks
+7. **Network Access**: Commands respect mode constraints (no external network in airgapped)
+8. **Audit Trail**: All command executions logged with user, command, duration, exit code
 
 ---
 
@@ -68,94 +106,149 @@ This task covers command execution. Preparation is in 029.a. Artifacts are in 02
 
 ## Functional Requirements
 
-### FR-001 to FR-030: Command Execution
+### Command Execution (FR-029B-01 to FR-029B-30)
 
-- FR-001: `ExecuteAsync` MUST run command
-- FR-002: Command MUST be string
-- FR-003: Shell MUST be configurable
-- FR-004: Default: `/bin/bash -c` (Unix)
-- FR-005: Default: `cmd /c` (Windows)
-- FR-006: Working directory MUST be workspace
-- FR-007: Working directory MUST be overridable
-- FR-008: Environment MUST be inherited
-- FR-009: Additional env MUST be addable
-- FR-010: Env values MUST override
-- FR-011: Secrets MUST be passed via env
-- FR-012: Secrets MUST NOT be logged
-- FR-013: Timeout MUST be enforced
-- FR-014: Default timeout: task-specific
-- FR-015: Timeout MUST kill process
-- FR-016: Kill MUST use SIGTERM first
-- FR-017: SIGKILL after 10 seconds
-- FR-018: Exit code MUST be captured
-- FR-019: Success: exit code 0
-- FR-020: Failure: exit code non-zero
-- FR-021: Stdout MUST be captured
-- FR-022: Stderr MUST be captured
-- FR-023: Combined output MUST be available
-- FR-024: Separate streams MUST be available
-- FR-025: Streaming MUST be supported
-- FR-026: Real-time output MUST stream
-- FR-027: Buffer limit MUST be configurable
-- FR-028: Default buffer: 10MB
-- FR-029: Overflow MUST truncate oldest
-- FR-030: Truncation MUST be indicated
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029B-01 | `ExecuteAsync(ExecutionCommand, CancellationToken)` MUST be defined | Must Have |
+| FR-029B-02 | ExecutionCommand MUST include command string property | Must Have |
+| FR-029B-03 | Shell MUST be configurable per command | Should Have |
+| FR-029B-04 | Default shell on Unix: `/bin/bash -c` | Must Have |
+| FR-029B-05 | Default shell on Windows: `cmd /c` | Must Have |
+| FR-029B-06 | Working directory MUST default to workspace root | Must Have |
+| FR-029B-07 | Working directory MUST be overridable via ExecutionCommand | Should Have |
+| FR-029B-08 | Process MUST inherit parent environment variables | Must Have |
+| FR-029B-09 | Additional environment variables MUST be addable via command | Must Have |
+| FR-029B-10 | Command environment MUST override inherited values | Must Have |
+| FR-029B-11 | Secrets MUST be passed via environment variables | Must Have |
+| FR-029B-12 | Secrets MUST NOT appear in logs or stored output | Must Have |
+| FR-029B-13 | Timeout MUST be enforced per command | Must Have |
+| FR-029B-14 | Timeout MUST be configurable (default from config) | Must Have |
+| FR-029B-15 | Timeout expiration MUST kill the process | Must Have |
+| FR-029B-16 | Kill sequence: SIGTERM first, wait 10s | Must Have |
+| FR-029B-17 | Kill sequence: SIGKILL if process survives | Must Have |
+| FR-029B-18 | Process exit code MUST be captured | Must Have |
+| FR-029B-19 | Exit code 0 MUST be treated as success | Must Have |
+| FR-029B-20 | Exit code non-zero MUST be treated as failure | Must Have |
+| FR-029B-21 | Standard output (stdout) MUST be captured | Must Have |
+| FR-029B-22 | Standard error (stderr) MUST be captured | Must Have |
+| FR-029B-23 | Combined output (stdout+stderr interleaved) MUST be available | Should Have |
+| FR-029B-24 | Separate stdout and stderr MUST be available | Must Have |
+| FR-029B-25 | Real-time streaming MUST be supported | Must Have |
+| FR-029B-26 | Output streaming callback MUST receive lines as generated | Must Have |
+| FR-029B-27 | Output buffer MUST have configurable maximum size | Should Have |
+| FR-029B-28 | Default buffer size: 10MB | Should Have |
+| FR-029B-29 | Buffer overflow MUST truncate oldest content | Should Have |
+| FR-029B-30 | Truncation MUST set flag in ExecutionResult | Must Have |
 
-### FR-031 to FR-050: Result Handling
+### Result Handling (FR-029B-31 to FR-029B-50)
 
-- FR-031: `ExecutionResult` MUST be returned
-- FR-032: Result MUST include exit code
-- FR-033: Result MUST include stdout
-- FR-034: Result MUST include stderr
-- FR-035: Result MUST include duration
-- FR-036: Result MUST include started at
-- FR-037: Result MUST include completed at
-- FR-038: Result MUST include truncated flag
-- FR-039: Success property MUST exist
-- FR-040: Success = exit code 0
-- FR-041: Timeout property MUST exist
-- FR-042: Cancelled property MUST exist
-- FR-043: Error message MUST be parsed
-- FR-044: Common patterns MUST be recognized
-- FR-045: Build errors MUST be extracted
-- FR-046: Test failures MUST be extracted
-- FR-047: Result MUST be serializable
-- FR-048: Result MUST be loggable
-- FR-049: Sensitive output MUST be redactable
-- FR-050: Result MUST support JSON export
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029B-31 | `ExecutionResult` record MUST be returned | Must Have |
+| FR-029B-32 | Result MUST include ExitCode (int) | Must Have |
+| FR-029B-33 | Result MUST include Stdout (string) | Must Have |
+| FR-029B-34 | Result MUST include Stderr (string) | Must Have |
+| FR-029B-35 | Result MUST include Duration (TimeSpan) | Must Have |
+| FR-029B-36 | Result MUST include StartedAt (DateTimeOffset) | Must Have |
+| FR-029B-37 | Result MUST include CompletedAt (DateTimeOffset) | Must Have |
+| FR-029B-38 | Result MUST include OutputTruncated (bool) | Should Have |
+| FR-029B-39 | Result MUST include Success computed property | Must Have |
+| FR-029B-40 | Success MUST be true when ExitCode == 0 | Must Have |
+| FR-029B-41 | Result MUST include TimedOut (bool) | Must Have |
+| FR-029B-42 | Result MUST include Cancelled (bool) | Must Have |
+| FR-029B-43 | Common error patterns MUST be parsed from output | Should Have |
+| FR-029B-44 | Build errors (MSB*, CS*) MUST be extracted | Should Have |
+| FR-029B-45 | Test failures MUST be extracted | Should Have |
+| FR-029B-46 | Parsed errors MUST be available in Errors collection | Should Have |
+| FR-029B-47 | Result MUST be JSON serializable | Must Have |
+| FR-029B-48 | Result MUST support structured logging | Must Have |
+| FR-029B-49 | Sensitive output MUST support redaction | Should Have |
+| FR-029B-50 | Result MUST include Command for debugging | Should Have |
 
-### FR-051 to FR-065: Streaming
+### Streaming (FR-029B-51 to FR-029B-65)
 
-- FR-051: Streaming callback MUST work
-- FR-052: Callback per line MUST work
-- FR-053: Callback per chunk MUST work
-- FR-054: Chunk size MUST be configurable
-- FR-055: Default chunk: 4KB
-- FR-056: Stream type MUST be indicated
-- FR-057: Types: stdout, stderr
-- FR-058: Timestamp MUST be per-chunk
-- FR-059: Backpressure MUST be handled
-- FR-060: Slow consumer MUST buffer
-- FR-061: Buffer full MUST drop or block
-- FR-062: Default: drop oldest
-- FR-063: Streaming MUST not block execution
-- FR-064: Final result MUST include all
-- FR-065: Stream end MUST be signaled
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029B-51 | IOutputHandler callback interface MUST be defined | Must Have |
+| FR-029B-52 | Handler MUST receive output per-line | Must Have |
+| FR-029B-53 | Handler MUST support per-chunk mode | Should Have |
+| FR-029B-54 | Chunk size MUST be configurable | Should Have |
+| FR-029B-55 | Default chunk size: 4KB | Should Have |
+| FR-029B-56 | OutputLine MUST indicate stream type (stdout/stderr) | Must Have |
+| FR-029B-57 | OutputLine MUST include timestamp | Should Have |
+| FR-029B-58 | Backpressure MUST be handled when consumer is slow | Should Have |
+| FR-029B-59 | Slow consumer MUST buffer up to limit | Should Have |
+| FR-029B-60 | Buffer full MUST drop oldest chunks | Should Have |
+| FR-029B-61 | Streaming MUST NOT block command execution | Must Have |
+| FR-029B-62 | Final result MUST include all output (up to buffer) | Must Have |
+| FR-029B-63 | Stream end MUST be signaled to handler | Must Have |
+| FR-029B-64 | Handler exceptions MUST be caught and logged | Must Have |
+| FR-029B-65 | Handler MUST receive output even if execution fails | Must Have |
+
+### Cancellation (FR-029B-66 to FR-029B-75)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029B-66 | CancellationToken MUST be respected | Must Have |
+| FR-029B-67 | Cancellation MUST kill running process | Must Have |
+| FR-029B-68 | Cancellation MUST use graceful shutdown sequence | Should Have |
+| FR-029B-69 | Partial output MUST be captured before kill | Must Have |
+| FR-029B-70 | Result.Cancelled MUST be true after cancellation | Must Have |
+| FR-029B-71 | Cancellation MUST not throw OperationCanceledException by default | Should Have |
+| FR-029B-72 | ThrowOnCancellation option MUST be available | Should Have |
+| FR-029B-73 | Child processes MUST be killed on cancellation | Should Have |
+| FR-029B-74 | Cancellation response time MUST be <1 second | Must Have |
+| FR-029B-75 | Post-cancellation cleanup MUST complete within 5 seconds | Must Have |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Execution start MUST be <100ms
-- NFR-002: Output latency MUST be <100ms
-- NFR-003: 1MB/s output MUST handle
-- NFR-004: Concurrent executions MUST work
-- NFR-005: Memory bounded per execution
-- NFR-006: Clean cancellation
-- NFR-007: No zombie processes
-- NFR-008: Resource cleanup on failure
-- NFR-009: Cross-platform support
-- NFR-010: Structured logging
+### Performance (NFR-029B-01 to NFR-029B-10)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029B-01 | Execution start latency | <100ms from call | Must Have |
+| NFR-029B-02 | Output streaming latency | <100ms from generation | Must Have |
+| NFR-029B-03 | High-volume output throughput | 1MB/s minimum | Should Have |
+| NFR-029B-04 | Concurrent executions supported | 10 per target | Should Have |
+| NFR-029B-05 | Memory per execution (excluding output) | <50MB | Should Have |
+| NFR-029B-06 | Output buffer memory | Configurable, default 10MB | Should Have |
+| NFR-029B-07 | Process spawn time | <50ms | Should Have |
+| NFR-029B-08 | Exit code detection latency | <10ms after exit | Must Have |
+| NFR-029B-09 | Cancellation response time | <1 second | Must Have |
+| NFR-029B-10 | Cleanup time after termination | <5 seconds | Must Have |
+
+### Reliability (NFR-029B-11 to NFR-029B-20)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029B-11 | No zombie processes | 100% cleanup | Must Have |
+| NFR-029B-12 | No orphan processes | Kill process tree | Must Have |
+| NFR-029B-13 | Output encoding robustness | Handle invalid UTF-8 | Must Have |
+| NFR-029B-14 | Long-running command support | Hours without memory leak | Should Have |
+| NFR-029B-15 | Concurrent execution isolation | No cross-talk | Must Have |
+| NFR-029B-16 | Resource cleanup on exception | 100% | Must Have |
+| NFR-029B-17 | Process handle leak prevention | 0 leaked handles | Must Have |
+| NFR-029B-18 | File descriptor cleanup | All closed on exit | Must Have |
+| NFR-029B-19 | Graceful timeout handling | SIGTERM → SIGKILL | Must Have |
+| NFR-029B-20 | Cross-platform behavior consistency | Same API semantics | Must Have |
+
+### Observability (NFR-029B-21 to NFR-029B-30)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029B-21 | Execution start log | Info level with command | Must Have |
+| NFR-029B-22 | Execution complete log | Info level with exit code, duration | Must Have |
+| NFR-029B-23 | Timeout log | Warning level | Must Have |
+| NFR-029B-24 | Cancellation log | Info level | Must Have |
+| NFR-029B-25 | Output streaming log | Debug level | Should Have |
+| NFR-029B-26 | Error logs with context | Error level with stderr sample | Must Have |
+| NFR-029B-27 | Structured logging format | JSON-compatible | Should Have |
+| NFR-029B-28 | TargetId and CommandId in logs | Correlation | Must Have |
+| NFR-029B-29 | Metric: execution_duration_seconds | Histogram | Should Have |
+| NFR-029B-30 | Metric: execution_exit_code | Counter per code | Should Have |
 
 ---
 
@@ -210,34 +303,265 @@ await target.ExecuteAsync(command, outputHandler: line =>
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: Commands execute
-- [ ] AC-002: Exit code captured
-- [ ] AC-003: Stdout captured
-- [ ] AC-004: Stderr captured
-- [ ] AC-005: Timeout enforced
-- [ ] AC-006: Cancellation works
-- [ ] AC-007: Streaming works
-- [ ] AC-008: Environment works
-- [ ] AC-009: Errors handled
-- [ ] AC-010: Cross-platform works
+### Core Execution (AC-029B-01 to AC-029B-15)
+
+- [ ] AC-029B-01: `IExecutionService` interface defined in Application layer
+- [ ] AC-029B-02: `ExecuteAsync` method accepts ExecutionCommand and CancellationToken
+- [ ] AC-029B-03: ExecutionCommand record includes Command, Timeout, Environment properties
+- [ ] AC-029B-04: ExecutionCommand includes optional WorkingDirectory override
+- [ ] AC-029B-05: ExecutionCommand includes optional Shell override
+- [ ] AC-029B-06: Default shell is /bin/bash on Unix, cmd.exe on Windows
+- [ ] AC-029B-07: Working directory defaults to prepared workspace root
+- [ ] AC-029B-08: Parent environment inherited by spawned process
+- [ ] AC-029B-09: Command environment variables added to process
+- [ ] AC-029B-10: Command environment overrides inherited values
+- [ ] AC-029B-11: Process spawned within 100ms of call
+- [ ] AC-029B-12: Command runs asynchronously with proper awaiting
+- [ ] AC-029B-13: Multiple concurrent executions supported
+- [ ] AC-029B-14: Each execution isolated (no cross-talk)
+- [ ] AC-029B-15: Target state set to Executing during execution
+
+### Output Capture (AC-029B-16 to AC-029B-30)
+
+- [ ] AC-029B-16: Stdout captured to string in result
+- [ ] AC-029B-17: Stderr captured to string in result
+- [ ] AC-029B-18: Combined output available via property
+- [ ] AC-029B-19: Separate stdout/stderr preserved
+- [ ] AC-029B-20: Output buffer configurable (default 10MB)
+- [ ] AC-029B-21: Buffer overflow truncates oldest content
+- [ ] AC-029B-22: OutputTruncated flag set when truncated
+- [ ] AC-029B-23: Invalid UTF-8 bytes handled gracefully
+- [ ] AC-029B-24: Binary output converted to string representation
+- [ ] AC-029B-25: Large output (100MB+) doesn't crash
+- [ ] AC-029B-26: Output capture doesn't block command
+- [ ] AC-029B-27: Memory usage bounded by buffer size
+- [ ] AC-029B-28: Output encoding detection works
+- [ ] AC-029B-29: Line endings normalized to \n
+- [ ] AC-029B-30: Empty output results in empty string (not null)
+
+### Streaming (AC-029B-31 to AC-029B-40)
+
+- [ ] AC-029B-31: IOutputHandler interface defined
+- [ ] AC-029B-32: Handler receives lines as generated
+- [ ] AC-029B-33: Handler receives within 100ms of generation
+- [ ] AC-029B-34: OutputLine includes stream type (stdout/stderr)
+- [ ] AC-029B-35: OutputLine includes timestamp
+- [ ] AC-029B-36: Chunk mode option for binary-like output
+- [ ] AC-029B-37: Slow handler buffered up to limit
+- [ ] AC-029B-38: Handler exceptions caught and logged
+- [ ] AC-029B-39: Stream end signaled to handler
+- [ ] AC-029B-40: Handler failures don't affect command execution
+
+### Exit Code and Result (AC-029B-41 to AC-029B-50)
+
+- [ ] AC-029B-41: Exit code captured accurately
+- [ ] AC-029B-42: Exit code 0 sets Success = true
+- [ ] AC-029B-43: Exit code non-zero sets Success = false
+- [ ] AC-029B-44: Duration calculated accurately
+- [ ] AC-029B-45: StartedAt and CompletedAt timestamps accurate
+- [ ] AC-029B-46: TimedOut flag set on timeout
+- [ ] AC-029B-47: Cancelled flag set on cancellation
+- [ ] AC-029B-48: Result serializable to JSON
+- [ ] AC-029B-49: Result loggable in structured format
+- [ ] AC-029B-50: Sensitive content redactable
+
+### Timeout and Cancellation (AC-029B-51 to AC-029B-60)
+
+- [ ] AC-029B-51: Timeout enforced per command
+- [ ] AC-029B-52: Default timeout from configuration
+- [ ] AC-029B-53: Per-command timeout override works
+- [ ] AC-029B-54: Timeout triggers SIGTERM first
+- [ ] AC-029B-55: SIGKILL sent after 10 seconds if needed
+- [ ] AC-029B-56: CancellationToken respected
+- [ ] AC-029B-57: Cancellation kills running process
+- [ ] AC-029B-58: Partial output preserved on cancellation
+- [ ] AC-029B-59: Cancellation response <1 second
+- [ ] AC-029B-60: Child processes killed on cancellation
+
+### Error Parsing (AC-029B-61 to AC-029B-70)
+
+- [ ] AC-029B-61: MSBuild errors (MSB*) extracted
+- [ ] AC-029B-62: C# compiler errors (CS*) extracted
+- [ ] AC-029B-63: Test failures extracted
+- [ ] AC-029B-64: Common error patterns recognized
+- [ ] AC-029B-65: Errors collection populated in result
+- [ ] AC-029B-66: Error includes file, line, message
+- [ ] AC-029B-67: Error extraction doesn't fail on unexpected format
+- [ ] AC-029B-68: Custom error patterns configurable
+- [ ] AC-029B-69: Error parsing optional (can be disabled)
+- [ ] AC-029B-70: Error count reported in logs
+
+### Security and Cleanup (AC-029B-71 to AC-029B-80)
+
+- [ ] AC-029B-71: Secrets in environment not logged
+- [ ] AC-029B-72: Secrets not included in stored output
+- [ ] AC-029B-73: No zombie processes after execution
+- [ ] AC-029B-74: No orphan processes after timeout
+- [ ] AC-029B-75: Process handles closed properly
+- [ ] AC-029B-76: File descriptors cleaned up
+- [ ] AC-029B-77: Temporary files removed
+- [ ] AC-029B-78: Memory released after execution
+- [ ] AC-029B-79: Cross-platform works (Windows, macOS, Linux)
+- [ ] AC-029B-80: Target state returned to Ready after execution
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Successful Build Execution
+
+**Persona:** Developer building .NET project
+
+**Steps:**
+1. Prepare workspace with .NET project
+2. Execute `dotnet build -c Release`
+3. Observe streaming output in console
+4. Observe: "Build succeeded"
+5. Check result.Success == true
+6. Check result.ExitCode == 0
+7. Check result.Duration is reasonable
+
+**Verification:**
+- [ ] Build output streams in real-time
+- [ ] Success property is true
+- [ ] Duration is accurate
+- [ ] No orphan processes
+
+### Scenario 2: Failed Build with Error Extraction
+
+**Persona:** Developer with compile errors
+
+**Steps:**
+1. Introduce syntax error in code
+2. Execute `dotnet build`
+3. Observe build fails
+4. Check result.Success == false
+5. Check result.Errors contains parsed error
+6. Error includes file name and line number
+
+**Verification:**
+- [ ] Failure detected correctly
+- [ ] Errors extracted with location
+- [ ] Stderr captured with full output
+
+### Scenario 3: Timeout on Long-Running Command
+
+**Persona:** Developer with stuck command
+
+**Steps:**
+1. Execute command with 10-second timeout: `sleep 300`
+2. Wait for timeout
+3. Observe: "Command timed out after 10s"
+4. Check result.TimedOut == true
+5. Check process is killed
+6. Check no zombie processes
+
+**Verification:**
+- [ ] Timeout triggers at correct time
+- [ ] Process killed gracefully
+- [ ] TimedOut flag set correctly
+- [ ] Partial output preserved
+
+### Scenario 4: Cancellation During Execution
+
+**Persona:** Developer cancelling command
+
+**Steps:**
+1. Start long-running command
+2. Press Ctrl+C or cancel programmatically
+3. Observe: "Execution cancelled"
+4. Check result.Cancelled == true
+5. Check process killed within 1 second
+6. Check partial output available
+
+**Verification:**
+- [ ] Cancellation responsive
+- [ ] Process killed cleanly
+- [ ] Partial output preserved
+- [ ] No orphan processes
+
+### Scenario 5: High-Volume Output Streaming
+
+**Persona:** Developer running verbose tests
+
+**Steps:**
+1. Execute command generating 100MB output
+2. Observe streaming doesn't lag
+3. Check output buffer limits respected
+4. Check OutputTruncated flag if applicable
+5. Check memory usage stays bounded
+
+**Verification:**
+- [ ] Streaming keeps up (1MB/s)
+- [ ] Memory doesn't explode
+- [ ] Buffer limit enforced
+- [ ] Truncation flagged correctly
+
+### Scenario 6: Secret Environment Variable Protection
+
+**Persona:** Developer with API keys
+
+**Steps:**
+1. Configure secret: `API_KEY=secret123`
+2. Execute command that echoes all env vars
+3. Check logs do NOT contain `secret123`
+4. Check result.Stdout does NOT contain `secret123` (redacted)
+5. Command still receives the secret
+
+**Verification:**
+- [ ] Secret not in logs
+- [ ] Secret redacted in stored output
+- [ ] Command receives actual secret value
 
 ---
 
 ## Testing Requirements
 
-### Unit Tests
+### Unit Tests (UT-029B-01 to UT-029B-25)
 
-- [ ] UT-001: Command parsing
-- [ ] UT-002: Timeout logic
-- [ ] UT-003: Result building
-- [ ] UT-004: Stream handling
+- [ ] UT-029B-01: ExecutionCommand validates command is not empty
+- [ ] UT-029B-02: ExecutionCommand defaults timeout from config
+- [ ] UT-029B-03: ExecutionResult calculates Duration correctly
+- [ ] UT-029B-04: ExecutionResult Success is true when ExitCode == 0
+- [ ] UT-029B-05: ExecutionResult serializes to JSON
+- [ ] UT-029B-06: OutputBuffer respects size limit
+- [ ] UT-029B-07: OutputBuffer truncates oldest on overflow
+- [ ] UT-029B-08: OutputBuffer sets truncated flag
+- [ ] UT-029B-09: ProcessRunner constructs correct shell command (Unix)
+- [ ] UT-029B-10: ProcessRunner constructs correct shell command (Windows)
+- [ ] UT-029B-11: ProcessRunner merges environment correctly
+- [ ] UT-029B-12: Timeout triggers kill after duration
+- [ ] UT-029B-13: Cancellation triggers kill immediately
+- [ ] UT-029B-14: OutputHandler receives lines in order
+- [ ] UT-029B-15: OutputHandler exception is caught
+- [ ] UT-029B-16: MSBuild error pattern matched
+- [ ] UT-029B-17: CS compiler error pattern matched
+- [ ] UT-029B-18: Test failure pattern matched
+- [ ] UT-029B-19: Invalid UTF-8 handled gracefully
+- [ ] UT-029B-20: Empty output handled correctly
+- [ ] UT-029B-21: Secret redaction works
+- [ ] UT-029B-22: Events emitted for start/complete
+- [ ] UT-029B-23: Metrics recorded correctly
+- [ ] UT-029B-24: Concurrent execution isolation
+- [ ] UT-029B-25: Resource cleanup on exception
 
-### Integration Tests
+### Integration Tests (IT-029B-01 to IT-029B-15)
 
-- [ ] IT-001: Full execution
-- [ ] IT-002: Long-running command
-- [ ] IT-003: Output streaming
-- [ ] IT-004: Error scenarios
+- [ ] IT-029B-01: Execute `echo hello` returns hello
+- [ ] IT-029B-02: Execute failing command captures exit code
+- [ ] IT-029B-03: Execute with environment variable works
+- [ ] IT-029B-04: Execute with working directory override
+- [ ] IT-029B-05: Execute with timeout kills process
+- [ ] IT-029B-06: Execute with cancellation kills process
+- [ ] IT-029B-07: Streaming output works end-to-end
+- [ ] IT-029B-08: Large output captured correctly
+- [ ] IT-029B-09: Concurrent executions work
+- [ ] IT-029B-10: Long-running command with cancellation
+- [ ] IT-029B-11: Cross-platform execution
+- [ ] IT-029B-12: Build command with error extraction
+- [ ] IT-029B-13: Test command with failure extraction
+- [ ] IT-029B-14: No zombie processes after 100 executions
+- [ ] IT-029B-15: Memory stable after 100 executions
 
 ---
 

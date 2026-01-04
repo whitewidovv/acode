@@ -30,20 +30,64 @@ This task covers burst decisions. EC2 target is in Task 031. Placement is in Tas
 
 ### Integration Points
 
-- Task 031: Bursts to EC2
-- Task 032: Informs placement
-- Task 027: Worker pool triggers burst
-- Task 026: Queue depth signals burst
+| Component | Interface | Data Flow | Notes |
+|-----------|-----------|-----------|-------|
+| Task 031 EC2 | IEc2InstanceManager | Burst → Provision | Burst triggers EC2 creation |
+| Task 032 Placement | IPlacementEngine | Decision → Placement | Burst informs placement |
+| Task 027 Worker Pool | IWorkerPool | Stats → Context | Worker saturation data |
+| Task 026 Queue | ITaskQueue | Depth/Wait → Context | Queue metrics for heuristics |
+| agent-config.yml | Config parser | Options → Engine | Heuristic configuration |
+| Metrics System | IMetrics | Stats → Metrics | Burst decision telemetry |
+| Event System | IEventPublisher | Events → Subscribers | Burst/Block events |
 
 ### Mode Compliance
 
 | Mode | Burst Behavior |
 |------|----------------|
-| local-only | DISABLED |
-| airgapped | DISABLED |
-| burst | ENABLED |
+| local-only | DISABLED - Never burst to cloud |
+| airgapped | DISABLED - Never burst to cloud |
+| burst | ENABLED - Cloud scaling allowed |
 
-Heuristics MUST respect mode constraints.
+Heuristics MUST respect mode constraints. Mode violations MUST be logged.
+
+### Failure Modes
+
+| Failure | Detection | Recovery | User Impact |
+|---------|-----------|----------|-------------|
+| Heuristic exception | Catch in engine | Skip heuristic | Reduced accuracy |
+| All heuristics fail | No results | Conservative (no burst) | Tasks stay local |
+| Budget data unavailable | Null budget | Allow burst with warning | May overspend |
+| Queue metrics stale | Age check | Use last known | Slightly delayed burst |
+| EC2 provision fails | Provision exception | Retry with backoff | Delayed scaling |
+| Cooldown stuck | Time overflow | Reset cooldown | Burst unblocked |
+| Mode check fails | Exception | Block burst | Safe behavior |
+| Concurrent decisions | Race condition | Single-flight pattern | One decision |
+
+---
+
+## Assumptions
+
+1. Queue depth and wait time metrics are available from Task 026
+2. Worker utilization is available from Task 027 worker pool
+3. System load metrics (CPU, memory) are collected by infrastructure
+4. Cloud pricing data is available for cost estimation
+5. Operating mode is accessible globally and consistent
+6. Cooldown applies per burst event, not per heuristic
+7. Budget tracking is accurate within reasonable tolerance
+8. Burst decisions are made synchronously (not async queue)
+
+---
+
+## Security Considerations
+
+1. Burst decisions MUST NOT expose internal metrics to unauthorized users
+2. Budget data MUST NOT be logged in plain text
+3. Cloud credentials MUST NOT be accessed during heuristic evaluation
+4. Cost estimates MUST NOT include pricing details in logs
+5. Burst events MUST be logged for audit purposes
+6. Mode compliance MUST be enforced at decision time, not deferred
+7. Heuristic configuration MUST be validated for reasonable thresholds
+8. Denial-of-service via forced bursting MUST be prevented by cooldown
 
 ---
 
@@ -72,107 +116,149 @@ Heuristics MUST respect mode constraints.
 
 ## Functional Requirements
 
-### FR-001 to FR-020: Burst Engine
+### Burst Engine
 
-- FR-001: `IBurstHeuristics` MUST exist
-- FR-002: `ShouldBurstAsync` MUST return decision
-- FR-003: Input: current state
-- FR-004: Output: burst decision
-- FR-005: Decision MUST include reason
-- FR-006: Decision MUST include target count
-- FR-007: Multiple heuristics MUST combine
-- FR-008: Heuristics MUST be weighted
-- FR-009: Any trigger MUST burst (OR)
-- FR-010: All triggers MUST burst (AND) optional
-- FR-011: Default: OR logic
-- FR-012: Heuristics MUST be pluggable
-- FR-013: Heuristics MUST be configurable
-- FR-014: Heuristics MUST be disableable
-- FR-015: Burst MUST respect mode
-- FR-016: local-only MUST never burst
-- FR-017: airgapped MUST never burst
-- FR-018: Burst MUST log decision
-- FR-019: Burst MUST emit metrics
-- FR-020: Burst history MUST be tracked
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033-01 | `IBurstHeuristics` interface MUST exist | P0 |
+| FR-033-02 | `EvaluateAsync` MUST return `BurstDecision` | P0 |
+| FR-033-03 | Input: `BurstContext` with current system state | P0 |
+| FR-033-04 | Output: `BurstDecision` with shouldBurst flag | P0 |
+| FR-033-05 | Decision MUST include human-readable reasons | P1 |
+| FR-033-06 | Decision MUST include suggested target count | P0 |
+| FR-033-07 | Multiple heuristics MUST be combinable | P0 |
+| FR-033-08 | Heuristic weights MUST be configurable | P1 |
+| FR-033-09 | Any trigger activates burst (OR logic) default | P0 |
+| FR-033-10 | All triggers required (AND logic) optional | P2 |
+| FR-033-11 | Default logic: OR (any trigger bursts) | P0 |
+| FR-033-12 | Heuristics MUST be pluggable via DI | P1 |
+| FR-033-13 | Each heuristic MUST be individually configurable | P1 |
+| FR-033-14 | Each heuristic MUST be individually disableable | P1 |
+| FR-033-15 | Burst MUST respect operating mode | P0 |
+| FR-033-16 | local-only mode MUST block all bursting | P0 |
+| FR-033-17 | airgapped mode MUST block all bursting | P0 |
+| FR-033-18 | Burst decisions MUST be logged | P0 |
+| FR-033-19 | Burst decisions MUST emit metrics | P1 |
+| FR-033-20 | Burst history MUST be queryable | P2 |
 
-### FR-021 to FR-040: Queue-Based Heuristics
+### Queue-Based Heuristics
 
-- FR-021: Queue depth trigger MUST exist
-- FR-022: Depth threshold MUST be configurable
-- FR-023: Default threshold: 10 tasks
-- FR-024: Queue wait time trigger MUST exist
-- FR-025: Wait threshold MUST be configurable
-- FR-026: Default wait threshold: 5 minutes
-- FR-027: Queue growth rate trigger MUST exist
-- FR-028: Fast growth MUST trigger burst
-- FR-029: Growth rate: tasks per minute
-- FR-030: Default growth threshold: 5/min
-- FR-031: Priority queue trigger MUST exist
-- FR-032: High priority MUST trigger faster
-- FR-033: Priority multiplier MUST exist
-- FR-034: Default multiplier: 2x
-- FR-035: Starvation trigger MUST exist
-- FR-036: Task waiting too long
-- FR-037: Starvation threshold: 15 minutes
-- FR-038: Queue composition MUST matter
-- FR-039: Large tasks MUST weight more
-- FR-040: Estimated runtime MUST factor
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033-21 | Queue depth trigger MUST exist | P0 |
+| FR-033-22 | Depth threshold MUST be configurable | P0 |
+| FR-033-23 | Default depth threshold: 10 pending tasks | P0 |
+| FR-033-24 | Queue wait time trigger MUST exist | P0 |
+| FR-033-25 | Wait threshold MUST be configurable | P0 |
+| FR-033-26 | Default wait threshold: 5 minutes | P0 |
+| FR-033-27 | Queue growth rate trigger MUST exist | P1 |
+| FR-033-28 | Fast queue growth MUST trigger burst | P1 |
+| FR-033-29 | Growth rate: tasks added per minute | P1 |
+| FR-033-30 | Default growth threshold: 5 tasks/min | P1 |
+| FR-033-31 | Priority queue trigger MUST exist | P1 |
+| FR-033-32 | High priority tasks MUST trigger faster | P1 |
+| FR-033-33 | Priority multiplier MUST exist | P1 |
+| FR-033-34 | Default priority multiplier: 2x | P1 |
+| FR-033-35 | Task starvation trigger MUST exist | P1 |
+| FR-033-36 | Starvation: task waiting beyond threshold | P1 |
+| FR-033-37 | Default starvation threshold: 15 minutes | P1 |
+| FR-033-38 | Queue composition MUST influence decision | P2 |
+| FR-033-39 | Large tasks MUST weight more heavily | P2 |
+| FR-033-40 | Estimated runtime MUST factor into decision | P2 |
 
-### FR-041 to FR-060: Load-Based Heuristics
+### Load-Based Heuristics
 
-- FR-041: CPU utilization trigger MUST exist
-- FR-042: CPU threshold MUST be configurable
-- FR-043: Default CPU threshold: 80%
-- FR-044: Sustained high CPU MUST trigger
-- FR-045: Sustained period: 2 minutes
-- FR-046: Memory utilization trigger MUST exist
-- FR-047: Memory threshold MUST be configurable
-- FR-048: Default memory threshold: 80%
-- FR-049: Disk utilization trigger MUST exist
-- FR-050: Disk threshold: 90%
-- FR-051: Worker saturation trigger MUST exist
-- FR-052: All workers busy MUST trigger
-- FR-053: Worker queue depth MUST matter
-- FR-054: Per-worker queue threshold: 3
-- FR-055: Response time trigger MUST exist
-- FR-056: Slow response MUST trigger
-- FR-057: Response threshold: 2x baseline
-- FR-058: Baseline MUST be learned
-- FR-059: Learning period: 10 tasks
-- FR-060: Load average MUST be sampled
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033-41 | CPU utilization trigger MUST exist | P0 |
+| FR-033-42 | CPU threshold MUST be configurable | P0 |
+| FR-033-43 | Default CPU threshold: 80% utilization | P0 |
+| FR-033-44 | Sustained high CPU MUST trigger burst | P0 |
+| FR-033-45 | Sustained period: 2 minutes minimum | P0 |
+| FR-033-46 | Memory utilization trigger MUST exist | P1 |
+| FR-033-47 | Memory threshold MUST be configurable | P1 |
+| FR-033-48 | Default memory threshold: 80% utilization | P1 |
+| FR-033-49 | Disk utilization trigger MUST exist | P2 |
+| FR-033-50 | Default disk threshold: 90% utilization | P2 |
+| FR-033-51 | Worker saturation trigger MUST exist | P0 |
+| FR-033-52 | All workers busy MUST trigger burst | P0 |
+| FR-033-53 | Per-worker queue depth MUST matter | P1 |
+| FR-033-54 | Default per-worker queue threshold: 3 | P1 |
+| FR-033-55 | Response time trigger MUST exist | P2 |
+| FR-033-56 | Slow response (vs baseline) MUST trigger | P2 |
+| FR-033-57 | Response threshold: 2x baseline | P2 |
+| FR-033-58 | Baseline MUST be learned from history | P2 |
+| FR-033-59 | Learning period: first 10 tasks | P2 |
+| FR-033-60 | Load average MUST be sampled periodically | P1 |
 
-### FR-061 to FR-075: Cost Controls
+### Cost Controls
 
-- FR-061: Budget check MUST precede burst
-- FR-062: Over budget MUST block burst
-- FR-063: Near budget MUST warn
-- FR-064: Cost per burst MUST estimate
-- FR-065: ROI calculation MUST exist
-- FR-066: Time saved vs cost
-- FR-067: Minimum ROI threshold MUST exist
-- FR-068: Default ROI: 2x (save 2hr/$1)
-- FR-069: Max concurrent instances MUST limit
-- FR-070: Default max instances: 5
-- FR-071: Cooldown period MUST exist
-- FR-072: Cooldown prevents thrashing
-- FR-073: Default cooldown: 5 minutes
-- FR-074: Burst ramp MUST be gradual
-- FR-075: Start with 1, scale up
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033-61 | Budget check MUST precede burst decision | P0 |
+| FR-033-62 | Over daily budget MUST block burst | P0 |
+| FR-033-63 | Near budget (>80%) MUST log warning | P1 |
+| FR-033-64 | Cost per burst MUST be estimated | P1 |
+| FR-033-65 | ROI calculation MUST exist | P1 |
+| FR-033-66 | ROI: time saved vs cost incurred | P1 |
+| FR-033-67 | Minimum ROI threshold MUST exist | P1 |
+| FR-033-68 | Default minimum ROI: 2.0 (save 2hr/$1) | P1 |
+| FR-033-69 | Max concurrent instances MUST be enforced | P0 |
+| FR-033-70 | Default max instances: 5 | P0 |
+| FR-033-71 | Cooldown period MUST exist | P0 |
+| FR-033-72 | Cooldown prevents burst thrashing | P0 |
+| FR-033-73 | Default cooldown: 5 minutes | P0 |
+| FR-033-74 | Burst ramp MUST be gradual | P1 |
+| FR-033-75 | Start with 1 instance, scale up | P1 |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Decision in <100ms
-- NFR-002: Low overhead monitoring
-- NFR-003: No false positive bursts
-- NFR-004: Minimal false negatives
-- NFR-005: Cost-aware decisions
-- NFR-006: Structured logging
-- NFR-007: Metrics on decisions
-- NFR-008: Audit trail
-- NFR-009: Configurable thresholds
-- NFR-010: Graceful degradation
+### Performance
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-033-01 | Burst decision evaluation | <100ms | P0 |
+| NFR-033-02 | Heuristic evaluation overhead | <10ms each | P0 |
+| NFR-033-03 | Context construction | <20ms | P1 |
+| NFR-033-04 | Metrics collection overhead | <5% CPU | P1 |
+| NFR-033-05 | Memory for history tracking | <10MB | P1 |
+| NFR-033-06 | Concurrent evaluations | Thread-safe | P0 |
+| NFR-033-07 | Single-flight decisions | One at a time | P1 |
+| NFR-033-08 | Heuristic parallelization | Supported | P2 |
+| NFR-033-09 | Cooldown lookup | O(1) | P0 |
+| NFR-033-10 | History query | <50ms | P2 |
+
+### Reliability
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-033-11 | False positive rate | <5% | P0 |
+| NFR-033-12 | False negative rate | <10% | P1 |
+| NFR-033-13 | Mode compliance | Always enforced | P0 |
+| NFR-033-14 | Budget compliance | Always enforced | P0 |
+| NFR-033-15 | Heuristic isolation | Failure doesn't cascade | P0 |
+| NFR-033-16 | Graceful degradation | Partial heuristics OK | P1 |
+| NFR-033-17 | Cooldown persistence | Survive restart | P2 |
+| NFR-033-18 | Decision determinism | Repeatable given state | P1 |
+| NFR-033-19 | Concurrent burst prevention | Single-flight | P0 |
+| NFR-033-20 | Recovery from stuck state | Auto-reset | P1 |
+
+### Observability
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-033-21 | Structured logging | All decisions | P0 |
+| NFR-033-22 | Burst trigger metric | Counter by trigger type | P1 |
+| NFR-033-23 | Burst blocked metric | Counter by reason | P1 |
+| NFR-033-24 | Cooldown remaining metric | Gauge | P2 |
+| NFR-033-25 | BurstTriggeredEvent | Published on burst | P0 |
+| NFR-033-26 | BurstBlockedEvent | Published on block | P0 |
+| NFR-033-27 | BurstCooldownEvent | Published when in cooldown | P1 |
+| NFR-033-28 | Heuristic evaluation trace | Debug level | P2 |
+| NFR-033-29 | Cost estimation logging | Info level | P1 |
+| NFR-033-30 | Decision audit trail | Queryable history | P2 |
 
 ---
 
@@ -232,16 +318,163 @@ burst:
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: Queue depth triggers
-- [ ] AC-002: Queue wait triggers
-- [ ] AC-003: CPU triggers
-- [ ] AC-004: Worker saturation triggers
-- [ ] AC-005: Budget blocks burst
-- [ ] AC-006: Cooldown prevents thrash
-- [ ] AC-007: Mode compliance works
-- [ ] AC-008: Metrics emitted
-- [ ] AC-009: Logging complete
-- [ ] AC-010: ROI calculated
+### Burst Engine Core
+- [ ] AC-001: `IBurstHeuristics` interface exists
+- [ ] AC-002: `EvaluateAsync` returns `BurstDecision`
+- [ ] AC-003: Decision includes shouldBurst flag
+- [ ] AC-004: Decision includes target instance count
+- [ ] AC-005: Decision includes human-readable reasons
+- [ ] AC-006: Decision includes active triggers
+- [ ] AC-007: Multiple heuristics evaluated
+- [ ] AC-008: OR logic triggers on any heuristic
+- [ ] AC-009: AND logic option works
+- [ ] AC-010: Heuristics pluggable via DI
+
+### Queue-Based Triggers
+- [ ] AC-011: Queue depth > 10 triggers burst
+- [ ] AC-012: Queue depth threshold configurable
+- [ ] AC-013: Queue wait > 5min triggers burst
+- [ ] AC-014: Queue wait threshold configurable
+- [ ] AC-015: Queue growth rate tracked
+- [ ] AC-016: Fast growth triggers burst
+- [ ] AC-017: Priority tasks trigger faster
+- [ ] AC-018: Priority multiplier works
+- [ ] AC-019: Starvation (15min wait) triggers
+- [ ] AC-020: Large tasks weighted more
+
+### Load-Based Triggers
+- [ ] AC-021: CPU > 80% sustained triggers
+- [ ] AC-022: CPU threshold configurable
+- [ ] AC-023: Sustained period (2min) enforced
+- [ ] AC-024: Memory > 80% triggers
+- [ ] AC-025: Memory threshold configurable
+- [ ] AC-026: Worker saturation triggers
+- [ ] AC-027: All workers busy detected
+- [ ] AC-028: Per-worker queue depth tracked
+- [ ] AC-029: Load samples collected periodically
+- [ ] AC-030: Disk > 90% triggers (optional)
+
+### Cost Controls
+- [ ] AC-031: Budget checked before burst
+- [ ] AC-032: Over budget blocks burst
+- [ ] AC-033: Near budget (80%) logs warning
+- [ ] AC-034: Cost per burst estimated
+- [ ] AC-035: ROI calculated (time saved / cost)
+- [ ] AC-036: Below ROI threshold blocks burst
+- [ ] AC-037: Max instances (5) enforced
+- [ ] AC-038: Cooldown (5min) prevents thrashing
+- [ ] AC-039: Gradual ramp (start with 1)
+- [ ] AC-040: Running instance count tracked
+
+### Mode Compliance
+- [ ] AC-041: local-only mode blocks all bursts
+- [ ] AC-042: airgapped mode blocks all bursts
+- [ ] AC-043: burst mode allows bursting
+- [ ] AC-044: Mode violation logged
+- [ ] AC-045: BurstBlockedEvent published for mode
+
+### Observability
+- [ ] AC-046: BurstTriggeredEvent published
+- [ ] AC-047: BurstBlockedEvent published
+- [ ] AC-048: BurstCooldownEvent published
+- [ ] AC-049: Decision logging complete
+- [ ] AC-050: Metrics emitted by trigger type
+- [ ] AC-051: Cooldown remaining queryable
+- [ ] AC-052: Decision history queryable
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Queue Depth Triggers Burst
+**Persona:** Developer with many pending tasks  
+**Preconditions:** Mode is burst, 15 tasks queued  
+**Steps:**
+1. Queue 15 tasks
+2. Observe heuristics evaluation
+3. Check burst decision
+4. Verify EC2 instance provisioned
+
+**Verification Checklist:**
+- [ ] Queue depth heuristic triggered
+- [ ] Decision shows "15 > 10"
+- [ ] targetInstanceCount > 0
+- [ ] EC2 provisioning started
+
+### Scenario 2: CPU Sustained High Triggers Burst
+**Persona:** Developer with CPU-intensive workload  
+**Preconditions:** Local CPU at 90% for 3 minutes  
+**Steps:**
+1. Run CPU-intensive tasks locally
+2. Wait for sustained period
+3. Check burst decision
+4. Verify CPU trigger reason
+
+**Verification Checklist:**
+- [ ] CPU heuristic tracked samples
+- [ ] Sustained period exceeded
+- [ ] Burst triggered
+- [ ] Reason includes "CPU 90% for 3 minutes"
+
+### Scenario 3: Budget Blocks Burst
+**Persona:** Developer near daily budget  
+**Preconditions:** Daily budget $10, spent $10.50  
+**Steps:**
+1. Queue many tasks to trigger burst
+2. Observe budget check
+3. Burst blocked
+4. Check blocked event
+
+**Verification Checklist:**
+- [ ] Budget checked first
+- [ ] Burst blocked (blockedByBudget=true)
+- [ ] BurstBlockedEvent published
+- [ ] Clear reason: "Budget exceeded"
+
+### Scenario 4: Cooldown Prevents Thrashing
+**Persona:** Developer with fluctuating load  
+**Preconditions:** Just burst 2 minutes ago  
+**Steps:**
+1. Previous burst completed
+2. Load spikes again within cooldown
+3. Burst requested
+4. Cooldown enforced
+
+**Verification Checklist:**
+- [ ] Cooldown remaining calculated
+- [ ] Burst blocked (blockedByCooldown=true)
+- [ ] CooldownRemaining in decision
+- [ ] BurstCooldownEvent published
+
+### Scenario 5: Mode Compliance Enforced
+**Persona:** Developer in airgapped environment  
+**Preconditions:** Mode is airgapped, heavy queue  
+**Steps:**
+1. Set mode to airgapped
+2. Queue 20 tasks
+3. Heuristics would normally trigger
+4. Burst blocked by mode
+
+**Verification Checklist:**
+- [ ] Mode checked first
+- [ ] Burst blocked (blockedByMode=true)
+- [ ] No EC2 attempted
+- [ ] Clear error message
+
+### Scenario 6: Multi-Heuristic Combination
+**Persona:** Developer with multiple triggers active  
+**Preconditions:** Queue depth 12, CPU 85%, all workers busy  
+**Steps:**
+1. All three conditions true
+2. Evaluate heuristics
+3. Check all triggers in decision
+4. Instance count reflects severity
+
+**Verification Checklist:**
+- [ ] All three heuristics triggered
+- [ ] Decision.ActiveTriggers has 3 entries
+- [ ] Reasons list all three
+- [ ] Higher instance count suggested
 
 ---
 
@@ -249,17 +482,43 @@ burst:
 
 ### Unit Tests
 
-- [ ] UT-001: Queue heuristics
-- [ ] UT-002: Load heuristics
-- [ ] UT-003: Cost controls
-- [ ] UT-004: Mode compliance
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| UT-033-01 | Queue depth threshold triggers | FR-033-21 |
+| UT-033-02 | Queue wait threshold triggers | FR-033-24 |
+| UT-033-03 | Queue growth rate calculation | FR-033-27 |
+| UT-033-04 | Priority task multiplier | FR-033-33 |
+| UT-033-05 | CPU sustained period tracking | FR-033-45 |
+| UT-033-06 | Memory threshold triggers | FR-033-46 |
+| UT-033-07 | Worker saturation detection | FR-033-51 |
+| UT-033-08 | OR logic any trigger | FR-033-09 |
+| UT-033-09 | AND logic all triggers | FR-033-10 |
+| UT-033-10 | Budget block | FR-033-62 |
+| UT-033-11 | Max instances limit | FR-033-69 |
+| UT-033-12 | Cooldown calculation | FR-033-71 |
+| UT-033-13 | Mode compliance local-only | FR-033-16 |
+| UT-033-14 | Mode compliance airgapped | FR-033-17 |
+| UT-033-15 | ROI threshold enforcement | FR-033-67 |
 
 ### Integration Tests
 
-- [ ] IT-001: End-to-end burst
-- [ ] IT-002: Cooldown behavior
-- [ ] IT-003: Budget enforcement
-- [ ] IT-004: Multi-heuristic
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| IT-033-01 | End-to-end burst trigger | E2E |
+| IT-033-02 | Queue depth + EC2 provision | Integration |
+| IT-033-03 | Cooldown behavior over time | FR-033-72 |
+| IT-033-04 | Budget enforcement | FR-033-61 |
+| IT-033-05 | Mode compliance e2e | Mode table |
+| IT-033-06 | Multi-heuristic combination | FR-033-07 |
+| IT-033-07 | Gradual ramp 1→N | FR-033-74 |
+| IT-033-08 | Event publishing | NFR-033-25-27 |
+| IT-033-09 | Metrics emission | NFR-033-22-23 |
+| IT-033-10 | Performance <100ms | NFR-033-01 |
+| IT-033-11 | Concurrent decision prevention | NFR-033-19 |
+| IT-033-12 | History query | FR-033-20 |
+| IT-033-13 | Heuristic disable | FR-033-14 |
+| IT-033-14 | False positive rate | NFR-033-11 |
+| IT-033-15 | Recovery from stuck cooldown | NFR-033-20 |
 
 ---
 

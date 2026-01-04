@@ -6,6 +6,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the **Agentic Coding Bot (Acode)** project - a locally-hosted, privacy-first AI-powered coding assistant. The repository contains both comprehensive task specifications and the implementation codebase for building a system that operates entirely within the user's infrastructure.
 
+## CRITICAL: Autonomous Work and Asynchronous Communication
+
+**MOST IMPORTANT PRINCIPLE: Work autonomously until context runs dangerously low (<5k tokens remaining).**
+
+### DO NOT Stop to Report Progress
+
+- **DO NOT** stop work to give status updates, milestone announcements, or progress reports
+- **DO NOT** ask for permission to continue after each commit
+- **DO NOT** wait for user acknowledgment between subtasks
+- **DO NOT** waste tokens on progress summaries mid-session
+
+### Instead: Work Continuously and Update Documentation
+
+When you feel the need to announce progress:
+1. **Update `docs/PROGRESS_NOTES.md`** with your milestone (user reads asynchronously)
+2. **Update implementation plan** (`docs/implementation-plans/task-XXX-plan.md`) with progress
+3. **Continue working** on the next subtask immediately
+
+### Only Stop When:
+
+1. **Context is dangerously low** (<5k tokens remaining)
+2. **Task is fully complete** (all subtasks done, audit passed, PR created)
+3. **You encounter a blocker** requiring user decision
+
+### When Stopping (Low Context Only):
+
+1. Update `docs/implementation-plans/task-XXX-plan.md` with detailed progress
+2. Update `docs/PROGRESS_NOTES.md` with summary
+3. Commit all work with descriptive message
+4. Push to feature branch
+5. Report: "Context low. X tokens remaining. Updated implementation plan. Ready to resume in next session."
+
+### Efficient Token Usage
+
+- Progress tracking happens in files (implementation plans, PROGRESS_NOTES.md)
+- User monitors progress asynchronously by reading these files
+- Stopping mid-flow to report wastes tokens and breaks momentum
+- Autonomous work until completion or <5k tokens is the expected behavior
+
 ## Core Working Principles
 
 **CRITICAL: Read these principles before starting ANY work.**
@@ -43,15 +82,49 @@ This is the **Agentic Coding Bot (Acode)** project - a locally-hosted, privacy-f
 - `src/Acode.Application/Foo/Bar.cs` → `tests/Acode.Application.Tests/Foo/BarTests.cs`
 - `src/Acode.Infrastructure/Foo/Bar.cs` → `tests/Acode.Infrastructure.Tests/Foo/BarTests.cs`
 
-### 3. Mandatory Audit Before PR
+### 3. Subtask Completion is MANDATORY (Hard Rule)
+
+**CRITICAL: A task is NOT complete until ALL subtasks are complete.**
+
+Before marking any task complete, auditing, or creating a PR:
+
+1. **Run subtask discovery**: `find docs/tasks/refined-tasks -name "task-XXX*.md"` (replace XXX with task number)
+2. **List ALL subtasks found**: task-XXXa.md, task-XXXb.md, task-XXXc.md, etc.
+3. **Verify EACH subtask is complete**:
+   - Implementation exists with file paths
+   - Tests written and passing
+   - Commit hash recorded
+4. **If ANY subtask is incomplete**: STOP - task XXX is NOT complete
+5. **Continue implementing incomplete subtasks** - do NOT skip ahead to audit/PR
+
+**There are NO exceptions to this rule.**
+
+### When a Subtask Cannot Be Completed
+
+If you discover a subtask literally cannot be completed (e.g., task-006b requires widget Y which doesn't exist until task-007):
+
+1. **STOP work immediately**
+2. **Explain the blocking dependency to the user**:
+   - "Task XXXb cannot be completed because it requires [dependency]"
+   - "This dependency is delivered in Task YYY"
+   - "Subtask XXXb should be moved to Task YYY or a new task"
+3. **Wait for user approval** to modify the task specification
+4. **Update the task specification files** to reflect the agreed change
+5. **Only then continue** with the modified scope
+
+**NEVER self-approve subtask deferrals.** The user decides task scope, not you.
+
+### 4. Mandatory Audit Before PR
 
 - **DO NOT create PR without passing audit**
+- **DO NOT audit until ALL subtasks are verified complete** (see Section 3)
 - Follow `docs/AUDIT-GUIDELINES.md` checklist line-by-line
 - Audit failure = task is NOT complete
 - Fix all issues, then re-audit from step 1
 - Only create PR when audit passes
 
 **Audit Failure Criteria (automatic task incomplete):**
+- Any subtask incomplete (task-XXXa, task-XXXb, etc.)
 - Any source file without tests
 - Build has errors or warnings
 - Any test fails

@@ -30,16 +30,54 @@ This task covers cleanup. Execution is in 029.b. Artifacts are in 029.c.
 
 ### Integration Points
 
-- Task 029: Part of target interface
-- Task 031: EC2 termination
-- Task 027: Workers trigger teardown
+| Component | Integration Type | Description |
+|-----------|-----------------|-------------|
+| Task 029 IComputeTarget | Parent | DisposeAsync is part of target interface |
+| Task 031 EC2 Target | Override | EC2-specific termination logic |
+| Task 027 Workers | Consumer | Workers trigger teardown after task completion |
+| Task 030 SSH Target | Override | SSH-specific cleanup logic |
+| ITargetRegistry | Dependency | Tracks active targets for orphan detection |
+| IOrphanDetector | Component | Scans for and cleans orphaned resources |
+| ITeardownService | Interface | Main contract for teardown logic |
 
 ### Failure Modes
 
-- Teardown timeout → Force terminate
-- Resource stuck → Log and continue
-- Cloud API failure → Retry
-- Orphan found → Clean up
+| Failure Type | Detection | Recovery | User Impact |
+|--------------|-----------|----------|-------------|
+| Teardown timeout | Timer expiration | Force terminate | Delayed cleanup |
+| Resource stuck | API call hangs | Skip and log, continue others | Manual cleanup may be needed |
+| Cloud API failure | Exception | Retry with backoff | Automatic retry |
+| Orphan found | Registry mismatch | Automatic cleanup | No user impact |
+| Process won't die | SIGTERM timeout | SIGKILL | Forced termination |
+| Network unreachable | Connection timeout | Retry then mark for later | Background retry |
+| Permission denied | API error | Log and escalate | Admin intervention |
+| Partial teardown | Some resources remain | Log state, retry on restart | May need manual cleanup |
+
+---
+
+## Assumptions
+
+1. **Resource Trackability**: All provisioned resources are tracked in a persistent registry
+2. **API Availability**: Cloud APIs (EC2, etc.) are reachable for teardown operations
+3. **Permission Sufficiency**: Teardown has same or greater permissions as provisioning
+4. **Idempotent APIs**: Underlying APIs handle duplicate termination requests gracefully
+5. **Registry Durability**: Target registry survives application restarts
+6. **Time Synchronization**: Clocks synchronized for orphan age calculation
+7. **Network Access**: For remote targets, network is available for cleanup
+8. **Graceful Shutdown**: Processes respond to SIGTERM within grace period
+
+---
+
+## Security Considerations
+
+1. **Authorization Check**: Teardown verifies caller has permission to terminate target
+2. **Audit Logging**: All teardown operations logged with user, target, timestamp
+3. **Credential Cleanup**: Temporary credentials/keys removed during teardown
+4. **Secret Purging**: Secrets in environment cleared before workspace deletion
+5. **Data Sanitization**: Sensitive workspace data securely deleted (not just unlinked)
+6. **Cross-Account Safety**: Teardown cannot affect resources in other accounts
+7. **Registry Integrity**: Registry protected from unauthorized modification
+8. **Orphan Cleanup Authorization**: Orphan cleanup requires elevated permission
 
 ---
 
@@ -68,79 +106,119 @@ This task covers cleanup. Execution is in 029.b. Artifacts are in 029.c.
 
 ## Functional Requirements
 
-### FR-001 to FR-020: Teardown Operation
+### Teardown Operation (FR-029D-01 to FR-029D-20)
 
-- FR-001: `TeardownAsync` MUST be defined
-- FR-002: Teardown MUST release compute
-- FR-003: Teardown MUST clean workspace
-- FR-004: Teardown MUST remove temp files
-- FR-005: Graceful shutdown MUST be first
-- FR-006: Grace period MUST be configurable
-- FR-007: Default grace: 30 seconds
-- FR-008: Force MUST be available
-- FR-009: Force skips graceful
-- FR-010: Running processes MUST be killed
-- FR-011: Open connections MUST close
-- FR-012: Teardown MUST be idempotent
-- FR-013: Second teardown succeeds
-- FR-014: Concurrent teardown MUST serialize
-- FR-015: State MUST update to Terminated
-- FR-016: State MUST be final
-- FR-017: No restart after teardown
-- FR-018: Metrics MUST be captured first
-- FR-019: Logs MUST be retrieved first
-- FR-020: Artifacts MUST be collected first
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029D-01 | `TeardownAsync(CancellationToken)` or `DisposeAsync()` MUST be defined | Must Have |
+| FR-029D-02 | Teardown MUST release compute resources (processes, containers, instances) | Must Have |
+| FR-029D-03 | Teardown MUST clean workspace directory | Must Have |
+| FR-029D-04 | Teardown MUST remove temporary files created during execution | Must Have |
+| FR-029D-05 | Graceful shutdown MUST be attempted first | Must Have |
+| FR-029D-06 | Grace period MUST be configurable (default: 30 seconds) | Should Have |
+| FR-029D-07 | Force teardown option MUST skip graceful shutdown | Should Have |
+| FR-029D-08 | Running processes MUST be killed (SIGTERM then SIGKILL) | Must Have |
+| FR-029D-09 | Open network connections MUST be closed | Must Have |
+| FR-029D-10 | Open file handles MUST be closed | Must Have |
+| FR-029D-11 | Teardown MUST be idempotent (safe to call multiple times) | Must Have |
+| FR-029D-12 | Second teardown call MUST succeed without error | Must Have |
+| FR-029D-13 | Concurrent teardown calls MUST serialize safely | Must Have |
+| FR-029D-14 | State MUST update to TearingDown during teardown | Must Have |
+| FR-029D-15 | State MUST update to Terminated after completion | Must Have |
+| FR-029D-16 | Terminated state MUST be final (no transitions out) | Must Have |
+| FR-029D-17 | Restart after teardown MUST throw InvalidOperationException | Must Have |
+| FR-029D-18 | Metrics MUST be captured before resource cleanup | Should Have |
+| FR-029D-19 | Logs MUST be retrieved before workspace deletion | Should Have |
+| FR-029D-20 | Artifacts MUST be collected before workspace deletion | Should Have |
 
-### FR-021 to FR-035: Provider-Specific
+### Provider-Specific Teardown (FR-029D-21 to FR-029D-35)
 
-- FR-021: Local: kill processes
-- FR-022: Local: remove workspace
-- FR-023: Docker: stop container
-- FR-024: Docker: remove container
-- FR-025: Docker: remove volumes (optional)
-- FR-026: SSH: kill remote processes
-- FR-027: SSH: remove remote workspace
-- FR-028: SSH: close connection
-- FR-029: EC2: terminate instance
-- FR-030: EC2: wait for termination
-- FR-031: EC2: release elastic IP (if any)
-- FR-032: EC2: delete security group (if temp)
-- FR-033: EC2: clean up key pair (if temp)
-- FR-034: All providers MUST log actions
-- FR-035: All providers MUST return status
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029D-21 | Local: kill all spawned processes | Must Have |
+| FR-029D-22 | Local: remove workspace directory | Must Have |
+| FR-029D-23 | Local: remove temporary files from system temp | Should Have |
+| FR-029D-24 | Docker: stop container gracefully | Must Have |
+| FR-029D-25 | Docker: remove container after stop | Must Have |
+| FR-029D-26 | Docker: optionally remove volumes (configurable) | Should Have |
+| FR-029D-27 | SSH: kill remote processes via SSH | Must Have |
+| FR-029D-28 | SSH: remove remote workspace directory | Should Have |
+| FR-029D-29 | SSH: close SSH connection | Must Have |
+| FR-029D-30 | EC2: terminate instance via API | Must Have |
+| FR-029D-31 | EC2: wait for instance termination confirmation | Should Have |
+| FR-029D-32 | EC2: release elastic IP if dynamically allocated | Should Have |
+| FR-029D-33 | EC2: delete temporary security group if created | Should Have |
+| FR-029D-34 | EC2: delete temporary key pair if created | Should Have |
+| FR-029D-35 | All providers MUST log all teardown actions | Must Have |
 
-### FR-036 to FR-050: Orphan Detection
+### Orphan Detection (FR-029D-36 to FR-029D-50)
 
-- FR-036: Orphan detector MUST exist
-- FR-037: Orphan: resource without owner
-- FR-038: Owner: tracked by registry
-- FR-039: Registry MUST be persistent
-- FR-040: Startup MUST scan for orphans
-- FR-041: Periodic scan MUST be optional
-- FR-042: Default scan: every 15 minutes
-- FR-043: Orphan age threshold MUST exist
-- FR-044: Default threshold: 1 hour
-- FR-045: Orphans MUST be cleaned
-- FR-046: Cleanup MUST be logged
-- FR-047: Cleanup MUST be auditable
-- FR-048: Manual override MUST work
-- FR-049: Dry-run MUST be available
-- FR-050: Report MUST list all orphans
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029D-36 | `IOrphanDetector` interface MUST be defined | Should Have |
+| FR-029D-37 | Orphan defined as: resource in cloud but not in registry | Must Have |
+| FR-029D-38 | Registry MUST track all active targets with unique ID | Must Have |
+| FR-029D-39 | Registry MUST persist to survive application restart | Must Have |
+| FR-029D-40 | Application startup MUST scan for orphans | Should Have |
+| FR-029D-41 | Periodic orphan scan MUST be configurable (default: every 15 min) | Should Have |
+| FR-029D-42 | Orphan age threshold MUST be configurable (default: 1 hour) | Should Have |
+| FR-029D-43 | Orphans older than threshold MUST be cleaned up | Should Have |
+| FR-029D-44 | Orphan cleanup MUST be logged with resource details | Must Have |
+| FR-029D-45 | Orphan cleanup MUST be auditable (who, when, what) | Should Have |
+| FR-029D-46 | Manual orphan cleanup command MUST exist | Should Have |
+| FR-029D-47 | Dry-run mode MUST be available (list without cleanup) | Should Have |
+| FR-029D-48 | Orphan report MUST list all detected orphans | Should Have |
+| FR-029D-49 | Orphan report MUST include resource type, ID, age | Should Have |
+| FR-029D-50 | Orphan cleanup MUST respect resource tags (only clean our resources) | Must Have |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Teardown MUST complete in <60s
-- NFR-002: Force MUST complete in <10s
-- NFR-003: No resource leaks
-- NFR-004: No orphan accumulation
-- NFR-005: Idempotent always
-- NFR-006: Structured logging
-- NFR-007: Metrics on duration
-- NFR-008: Audit trail
-- NFR-009: Cross-platform
-- NFR-010: Graceful degradation
+### Performance (NFR-029D-01 to NFR-029D-10)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029D-01 | Graceful teardown time | <60 seconds | Must Have |
+| NFR-029D-02 | Force teardown time | <10 seconds | Must Have |
+| NFR-029D-03 | Local workspace deletion (10GB) | <30 seconds | Should Have |
+| NFR-029D-04 | EC2 termination confirmation | <2 minutes | Should Have |
+| NFR-029D-05 | SSH teardown time | <30 seconds | Should Have |
+| NFR-029D-06 | Orphan scan time (100 instances) | <60 seconds | Should Have |
+| NFR-029D-07 | Registry query time | <10ms | Should Have |
+| NFR-029D-08 | Concurrent teardown support | 50 targets | Should Have |
+| NFR-029D-09 | Memory usage during teardown | <10MB | Should Have |
+| NFR-029D-10 | Cleanup parallelism | 10 concurrent cleanups | Should Have |
+
+### Reliability (NFR-029D-11 to NFR-029D-20)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029D-11 | No resource leaks | 100% cleanup | Must Have |
+| NFR-029D-12 | No orphan accumulation | <1% orphan rate | Must Have |
+| NFR-029D-13 | Idempotent teardown | Always safe to retry | Must Have |
+| NFR-029D-14 | Partial failure handling | Continue other cleanups | Must Have |
+| NFR-029D-15 | Registry consistency | Always accurate | Must Have |
+| NFR-029D-16 | Graceful degradation | Best effort on API failure | Should Have |
+| NFR-029D-17 | Retry on transient failure | 3 retries with backoff | Should Have |
+| NFR-029D-18 | Timeout handling | Proceed to force after timeout | Must Have |
+| NFR-029D-19 | Cross-platform support | Windows, macOS, Linux | Must Have |
+| NFR-029D-20 | Application crash recovery | Orphan cleanup on restart | Should Have |
+
+### Observability (NFR-029D-21 to NFR-029D-30)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029D-21 | Teardown start log | Info level with target ID | Must Have |
+| NFR-029D-22 | Teardown complete log | Info level with duration | Must Have |
+| NFR-029D-23 | Force teardown log | Warning level | Should Have |
+| NFR-029D-24 | Orphan detection log | Info level with count | Should Have |
+| NFR-029D-25 | Orphan cleanup log | Warning level with resource ID | Must Have |
+| NFR-029D-26 | Cleanup failure log | Error level with reason | Must Have |
+| NFR-029D-27 | Structured logging format | JSON-compatible | Should Have |
+| NFR-029D-28 | TargetId in all logs | Correlation | Must Have |
+| NFR-029D-29 | Metric: teardown_duration_seconds | Histogram | Should Have |
+| NFR-029D-30 | Metric: orphans_cleaned_total | Counter | Should Have |
 
 ---
 
@@ -205,34 +283,230 @@ acode target orphans clean --dry-run
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: Teardown releases resources
-- [ ] AC-002: Force teardown works
-- [ ] AC-003: Idempotent verified
-- [ ] AC-004: Orphan detection works
-- [ ] AC-005: Orphan cleanup works
-- [ ] AC-006: State transitions correct
-- [ ] AC-007: Logs/artifacts retrieved
-- [ ] AC-008: EC2 terminates
-- [ ] AC-009: Docker removes
-- [ ] AC-010: No leaks in tests
+### Core Teardown (AC-029D-01 to AC-029D-15)
+
+- [ ] AC-029D-01: `ITeardownService` interface defined in Application layer
+- [ ] AC-029D-02: `TeardownAsync` method accepts optional force flag and CancellationToken
+- [ ] AC-029D-03: Graceful teardown waits up to grace period for processes to exit
+- [ ] AC-029D-04: Force teardown skips graceful wait and immediately kills
+- [ ] AC-029D-05: Running processes killed with SIGTERM then SIGKILL
+- [ ] AC-029D-06: All open connections closed
+- [ ] AC-029D-07: All file handles released
+- [ ] AC-029D-08: Workspace directory removed
+- [ ] AC-029D-09: Temporary files removed from system temp
+- [ ] AC-029D-10: State transitions to TearingDown during teardown
+- [ ] AC-029D-11: State transitions to Terminated on completion
+- [ ] AC-029D-12: Terminated is final state (no further transitions)
+- [ ] AC-029D-13: Attempting operation on terminated target throws
+- [ ] AC-029D-14: Teardown is idempotent (second call succeeds)
+- [ ] AC-029D-15: Concurrent teardown calls serialize correctly
+
+### Pre-Teardown Data Capture (AC-029D-16 to AC-029D-25)
+
+- [ ] AC-029D-16: Metrics captured before resource cleanup
+- [ ] AC-029D-17: Logs retrieved before workspace deletion
+- [ ] AC-029D-18: Artifacts collected before workspace deletion
+- [ ] AC-029D-19: Order: metrics → logs → artifacts → teardown
+- [ ] AC-029D-20: Failure to capture doesn't block teardown
+- [ ] AC-029D-21: Capture failures logged as warnings
+- [ ] AC-029D-22: Captured data stored in TeardownResult
+- [ ] AC-029D-23: Configurable: retrieveLogsFirst (default true)
+- [ ] AC-029D-24: Configurable: retrieveArtifactsFirst (default true)
+- [ ] AC-029D-25: Skip capture on force teardown (configurable)
+
+### Provider-Specific Local (AC-029D-26 to AC-029D-35)
+
+- [ ] AC-029D-26: Local teardown kills all spawned processes
+- [ ] AC-029D-27: Local teardown removes workspace directory recursively
+- [ ] AC-029D-28: Local teardown handles read-only files
+- [ ] AC-029D-29: Local teardown handles files in use (retry)
+- [ ] AC-029D-30: Docker teardown stops container gracefully
+- [ ] AC-029D-31: Docker teardown removes container after stop
+- [ ] AC-029D-32: Docker teardown removes volumes if configured
+- [ ] AC-029D-33: Docker teardown handles container not found
+- [ ] AC-029D-34: Docker teardown handles container already stopped
+- [ ] AC-029D-35: All actions logged with resource IDs
+
+### Provider-Specific Remote (AC-029D-36 to AC-029D-45)
+
+- [ ] AC-029D-36: SSH teardown kills remote processes via SSH
+- [ ] AC-029D-37: SSH teardown removes remote workspace
+- [ ] AC-029D-38: SSH teardown closes SSH connection
+- [ ] AC-029D-39: SSH teardown handles connection lost gracefully
+- [ ] AC-029D-40: EC2 teardown terminates instance via API
+- [ ] AC-029D-41: EC2 teardown waits for termination confirmation
+- [ ] AC-029D-42: EC2 teardown releases elastic IP if dynamically allocated
+- [ ] AC-029D-43: EC2 teardown deletes temporary security group
+- [ ] AC-029D-44: EC2 teardown deletes temporary key pair
+- [ ] AC-029D-45: EC2 teardown handles instance already terminated
+
+### Orphan Detection (AC-029D-46 to AC-029D-60)
+
+- [ ] AC-029D-46: `IOrphanDetector` interface defined
+- [ ] AC-029D-47: Registry tracks all active targets persistently
+- [ ] AC-029D-48: Application startup scans for orphans
+- [ ] AC-029D-49: Periodic scan runs at configured interval
+- [ ] AC-029D-50: Orphan defined as: resource in cloud but not in registry
+- [ ] AC-029D-51: Orphan age threshold configurable (default 1 hour)
+- [ ] AC-029D-52: Only orphans older than threshold cleaned
+- [ ] AC-029D-53: Resource tags used to identify our resources
+- [ ] AC-029D-54: Orphan cleanup logged with full details
+- [ ] AC-029D-55: Orphan cleanup auditable (user, time, resources)
+- [ ] AC-029D-56: Manual `acode target orphans clean` command works
+- [ ] AC-029D-57: Dry-run mode lists without cleaning
+- [ ] AC-029D-58: Orphan report includes resource type, ID, age
+- [ ] AC-029D-59: Report available in JSON format
+- [ ] AC-029D-60: Orphan count exposed as metric
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Graceful Local Target Teardown
+
+**Persona:** Developer finishing work session
+
+**Steps:**
+1. Create local target and execute some commands
+2. Call `target.TeardownAsync()`
+3. Observe: State changes to TearingDown
+4. Observe: Running processes given chance to exit
+5. Observe: Workspace directory removed
+6. Observe: State changes to Terminated
+7. Verify no orphan processes remain
+
+**Verification:**
+- [ ] Graceful shutdown sequence followed
+- [ ] Workspace completely removed
+- [ ] No orphan processes
+- [ ] State is Terminated
+
+### Scenario 2: Force Teardown of Hung Target
+
+**Persona:** Developer with stuck process
+
+**Steps:**
+1. Target has process ignoring SIGTERM
+2. Call `target.TeardownAsync(force: true)`
+3. Observe: Immediate SIGKILL (no 30s wait)
+4. Observe: Teardown completes in <10 seconds
+5. Verify process actually killed
+
+**Verification:**
+- [ ] Force bypasses graceful wait
+- [ ] Completes within 10 seconds
+- [ ] Stuck process killed
+
+### Scenario 3: Idempotent Teardown
+
+**Persona:** Developer calling teardown multiple times
+
+**Steps:**
+1. Call `target.TeardownAsync()` - succeeds
+2. Call `target.TeardownAsync()` again - also succeeds
+3. No error thrown
+4. State remains Terminated
+
+**Verification:**
+- [ ] Second call doesn't throw
+- [ ] No side effects from second call
+- [ ] Correct final state
+
+### Scenario 4: Pre-Teardown Data Capture
+
+**Persona:** Developer needing logs from failed execution
+
+**Steps:**
+1. Execute command that generates logs
+2. Call teardown
+3. Observe: Logs retrieved before workspace deletion
+4. Observe: Artifacts collected
+5. TeardownResult contains captured data
+
+**Verification:**
+- [ ] Logs captured successfully
+- [ ] Artifacts captured
+- [ ] Data available in result
+- [ ] Workspace then deleted
+
+### Scenario 5: Orphan Detection on Restart
+
+**Persona:** Application crashed, restarting
+
+**Steps:**
+1. Simulate crash (kill application with active EC2 target)
+2. Restart application
+3. Observe: Orphan scan runs on startup
+4. Observe: "Detected 1 orphan resource: i-abc123"
+5. After threshold, observe cleanup
+
+**Verification:**
+- [ ] Orphan detected on startup
+- [ ] Orphan logged with details
+- [ ] Cleanup happens after threshold
+- [ ] Resource actually terminated
+
+### Scenario 6: Orphan Dry-Run
+
+**Persona:** Administrator reviewing orphans
+
+**Steps:**
+1. Run `acode target orphans list`
+2. See list of potential orphans with age
+3. Run `acode target orphans clean --dry-run`
+4. See what would be cleaned (no actual cleanup)
+5. Run `acode target orphans clean` for real
+
+**Verification:**
+- [ ] List shows orphans accurately
+- [ ] Dry-run doesn't cleanup
+- [ ] Real cleanup removes resources
+- [ ] Audit log updated
 
 ---
 
 ## Testing Requirements
 
-### Unit Tests
+### Unit Tests (UT-029D-01 to UT-029D-20)
 
-- [ ] UT-001: Teardown state machine
-- [ ] UT-002: Idempotent behavior
-- [ ] UT-003: Force vs graceful
-- [ ] UT-004: Orphan detection logic
+- [ ] UT-029D-01: TeardownPhase enum has all required values
+- [ ] UT-029D-02: State machine allows TearingDown → Terminated
+- [ ] UT-029D-03: State machine rejects Terminated → anything
+- [ ] UT-029D-04: Idempotent teardown returns success
+- [ ] UT-029D-05: Force flag skips graceful wait
+- [ ] UT-029D-06: Grace period configurable
+- [ ] UT-029D-07: Concurrent teardown serializes
+- [ ] UT-029D-08: Pre-teardown capture runs in order
+- [ ] UT-029D-09: Capture failure doesn't block teardown
+- [ ] UT-029D-10: TeardownResult includes captured data
+- [ ] UT-029D-11: Orphan age calculation correct
+- [ ] UT-029D-12: Orphan threshold filtering works
+- [ ] UT-029D-13: Registry tracks targets correctly
+- [ ] UT-029D-14: Registry persists across restarts
+- [ ] UT-029D-15: Resource tagging for identification
+- [ ] UT-029D-16: Events emitted for each phase
+- [ ] UT-029D-17: Metrics recorded correctly
+- [ ] UT-029D-18: Error handling doesn't leak resources
+- [ ] UT-029D-19: Timeout handling triggers force
+- [ ] UT-029D-20: Dry-run mode doesn't cleanup
 
-### Integration Tests
+### Integration Tests (IT-029D-01 to IT-029D-15)
 
-- [ ] IT-001: Local process cleanup
-- [ ] IT-002: Docker container removal
-- [ ] IT-003: Orphan scan and clean
-- [ ] IT-004: Crash recovery cleanup
+- [ ] IT-029D-01: Local process cleanup end-to-end
+- [ ] IT-029D-02: Local workspace deletion
+- [ ] IT-029D-03: Docker container stop and remove
+- [ ] IT-029D-04: SSH remote cleanup
+- [ ] IT-029D-05: EC2 instance termination
+- [ ] IT-029D-06: Force teardown of stuck process
+- [ ] IT-029D-07: Idempotent teardown
+- [ ] IT-029D-08: Orphan detection on startup
+- [ ] IT-029D-09: Orphan periodic scan
+- [ ] IT-029D-10: Orphan cleanup
+- [ ] IT-029D-11: Pre-teardown log capture
+- [ ] IT-029D-12: Pre-teardown artifact capture
+- [ ] IT-029D-13: Cross-platform teardown
+- [ ] IT-029D-14: No resource leaks after 100 teardowns
+- [ ] IT-029D-15: Crash recovery cleanup
 
 ---
 

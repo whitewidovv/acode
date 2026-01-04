@@ -30,15 +30,58 @@ This task covers template content. Pinned versions are in 034.b. Caching is in 0
 
 ### Integration Points
 
-- Task 034: Part of generator
-- Task 034.b: Security settings applied
-- Task 034.c: Caching added
+| Component | Interface | Data Flow | Notes |
+|-----------|-----------|-----------|-------|
+| Template Generator | `ICiTemplateGenerator` | Requests stack template | From 034 |
+| Stack Registry | `ICiStackProvider` | Provides stack-specific config | Per-stack |
+| Project Detector | `IProjectDetector` | Scans for project files | Auto-detect |
+| Version Detector | `IVersionDetector` | Extracts SDK/runtime versions | From project |
+| Security Module | Task 034.b | Applies pinned versions, permissions | Required |
+| Caching Module | Task 034.c | Adds dependency caching | Optional |
+| YAML Renderer | `IYamlRenderer` | Produces final YAML | Common |
 
 ### Failure Modes
 
-- Project detection fails → Ask user
-- SDK version unknown → Use latest
-- Missing project file → Error
+| Failure | Detection | Recovery | User Impact |
+|---------|-----------|----------|-------------|
+| Project detection fails | No recognized files | Prompt user for stack | Interactive fallback |
+| SDK version unknown | Cannot parse project file | Use latest stable version | Warning logged |
+| Missing project file | File not found | Error with instructions | Clear message |
+| Multiple stacks detected | >1 stack type | Prompt user to choose | Interactive selection |
+| Invalid package.json | JSON parse error | Error with file path | User fixes file |
+| Unsupported .NET version | Version < 6.0 | Suggest upgrade | Warning with docs link |
+| Monorepo too complex | Too many entry points | Simplified template | Manual adjustment needed |
+| Test project not found | No test patterns | Skip test step | Warning logged |
+
+### Mode Compliance
+
+| Operating Mode | Template Generation | Project Detection |
+|----------------|---------------------|-------------------|
+| Local-Only | ALLOWED | ALLOWED |
+| Burst | ALLOWED | ALLOWED |
+| Air-Gapped | ALLOWED | ALLOWED |
+
+### Assumptions
+
+1. **Standard project structure**: Projects follow conventional directory layouts
+2. **Single SDK per project**: One primary SDK version per project
+3. **Standard test patterns**: Test projects use `.Tests` or `__tests__` naming
+4. **Package manager lockfiles present**: npm-lock.json, yarn.lock, or pnpm-lock.yaml exist
+5. **GitHub Actions runner available**: Ubuntu-latest has required SDKs
+6. **Network access for packages**: CI can download NuGet/npm packages
+7. **Repository root is workspace**: Generator runs from repo root
+8. **Single CI workflow per stack**: One build workflow per technology stack
+
+### Security Considerations
+
+1. **No credentials in templates**: Templates use secrets references only
+2. **Minimal checkout depth**: Use shallow clone for speed
+3. **Locked dependency versions**: Use lockfiles in CI
+4. **No arbitrary script execution**: Only predefined build commands
+5. **Safe environment variables**: No user input in run commands
+6. **Trusted actions only**: Use verified GitHub actions
+7. **Version pinning enforced**: All actions use SHA or version tag
+8. **Read-only permissions default**: Write only when needed
 
 ---
 
@@ -69,82 +112,122 @@ This task covers template content. Pinned versions are in 034.b. Caching is in 0
 
 ### FR-001 to FR-020: .NET Templates
 
-- FR-001: .NET template MUST exist
-- FR-002: Detect .NET version from project
-- FR-003: Parse `<TargetFramework>` element
-- FR-004: Support .NET 6, 7, 8
-- FR-005: `actions/setup-dotnet` MUST be used
-- FR-006: Version from project or latest
-- FR-007: `dotnet restore` MUST run
-- FR-008: `dotnet build` MUST run
-- FR-009: `dotnet test` MUST run
-- FR-010: Test results MUST upload
-- FR-011: Code coverage MUST be optional
-- FR-012: `dotnet publish` MUST be optional
-- FR-013: Publish artifacts MUST upload
-- FR-014: NuGet pack MUST be optional
-- FR-015: Multi-project solutions MUST work
-- FR-016: Solution file detected
-- FR-017: Project dependencies resolved
-- FR-018: Global.json respected
-- FR-019: Directory.Build.props respected
-- FR-020: Windows runner option
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-034A-01 | .NET template provider MUST exist implementing `ICiStackProvider` | P0 |
+| FR-034A-02 | .NET version MUST be detected from project file | P0 |
+| FR-034A-03 | `<TargetFramework>` element MUST be parsed from .csproj | P1 |
+| FR-034A-04 | .NET 6, 7, 8 MUST be supported as target frameworks | P0 |
+| FR-034A-05 | `actions/setup-dotnet` action MUST be used in template | P0 |
+| FR-034A-06 | .NET version MUST be from project or use latest stable | P1 |
+| FR-034A-07 | `dotnet restore` step MUST be included | P0 |
+| FR-034A-08 | `dotnet build` step MUST be included | P0 |
+| FR-034A-09 | `dotnet test` step MUST be included | P0 |
+| FR-034A-10 | Test results MUST support upload to GitHub | P1 |
+| FR-034A-11 | Code coverage MUST be optional step | P2 |
+| FR-034A-12 | `dotnet publish` MUST be optional step | P2 |
+| FR-034A-13 | Publish artifacts MUST support upload | P2 |
+| FR-034A-14 | NuGet pack MUST be optional step | P2 |
+| FR-034A-15 | Multi-project solutions MUST be supported | P1 |
+| FR-034A-16 | Solution file (.sln) MUST be auto-detected | P1 |
+| FR-034A-17 | Project dependencies MUST be resolved correctly | P1 |
+| FR-034A-18 | `global.json` MUST be respected for SDK version | P1 |
+| FR-034A-19 | `Directory.Build.props` MUST be respected | P2 |
+| FR-034A-20 | Windows runner MUST be optional for Windows-only projects | P2 |
 
 ### FR-021 to FR-040: Node.js Templates
 
-- FR-021: Node.js template MUST exist
-- FR-022: Detect Node version
-- FR-023: From `.nvmrc` or `package.json`
-- FR-024: `actions/setup-node` MUST be used
-- FR-025: npm MUST be supported
-- FR-026: yarn MUST be supported
-- FR-027: pnpm MUST be supported
-- FR-028: Package manager auto-detected
-- FR-029: From lockfile presence
-- FR-030: `npm ci` preferred over install
-- FR-031: `npm run build` MUST run
-- FR-032: `npm test` MUST run
-- FR-033: Lint step MUST be optional
-- FR-034: TypeScript builds supported
-- FR-035: Monorepo support MUST work
-- FR-036: Workspace detection
-- FR-037: Build artifacts MUST upload
-- FR-038: Coverage reports MUST upload
-- FR-039: E2E tests MUST be optional
-- FR-040: Browser testing setup optional
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-034A-21 | Node.js template provider MUST exist implementing `ICiStackProvider` | P0 |
+| FR-034A-22 | Node.js version MUST be detected from project | P0 |
+| FR-034A-23 | Version MUST be read from `.nvmrc` or `package.json` engines | P1 |
+| FR-034A-24 | `actions/setup-node` action MUST be used in template | P0 |
+| FR-034A-25 | npm package manager MUST be supported | P0 |
+| FR-034A-26 | yarn package manager MUST be supported | P1 |
+| FR-034A-27 | pnpm package manager MUST be supported | P2 |
+| FR-034A-28 | Package manager MUST be auto-detected from lockfile | P1 |
+| FR-034A-29 | Detection MUST check for package-lock.json, yarn.lock, pnpm-lock.yaml | P1 |
+| FR-034A-30 | `npm ci` MUST be preferred over `npm install` | P1 |
+| FR-034A-31 | `npm run build` step MUST be included | P0 |
+| FR-034A-32 | `npm test` step MUST be included | P0 |
+| FR-034A-33 | Lint step MUST be optional | P2 |
+| FR-034A-34 | TypeScript builds MUST be supported | P1 |
+| FR-034A-35 | Monorepo support MUST be available | P2 |
+| FR-034A-36 | Workspace detection for npm/yarn/pnpm MUST work | P2 |
+| FR-034A-37 | Build artifacts MUST support upload | P2 |
+| FR-034A-38 | Coverage reports MUST support upload | P2 |
+| FR-034A-39 | E2E tests MUST be optional step | P2 |
+| FR-034A-40 | Browser testing setup MUST be optional | P2 |
 
 ### FR-041 to FR-055: Project Detection
 
-- FR-041: Auto-detect stack MUST work
-- FR-042: Scan for project files
-- FR-043: `.csproj` → .NET
-- FR-044: `package.json` → Node.js
-- FR-045: Both present → Ask user
-- FR-046: Override MUST work
-- FR-047: Version detection MUST work
-- FR-048: Multiple projects MUST work
-- FR-049: Monorepo patterns MUST detect
-- FR-050: Test project detection
-- FR-051: `.Tests` suffix for .NET
-- FR-052: `__tests__` for Node.js
-- FR-053: Entry point detection
-- FR-054: Main project identified
-- FR-055: Build order determined
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-034A-41 | Auto-detect stack MUST scan repository root | P0 |
+| FR-034A-42 | Scan MUST check for known project file patterns | P0 |
+| FR-034A-43 | `.csproj` file MUST indicate .NET stack | P0 |
+| FR-034A-44 | `package.json` file MUST indicate Node.js stack | P0 |
+| FR-034A-45 | Both present MUST prompt user for selection | P1 |
+| FR-034A-46 | User override MUST be available via `--stack` flag | P1 |
+| FR-034A-47 | Version detection MUST extract from project files | P1 |
+| FR-034A-48 | Multiple projects MUST be detected and listed | P1 |
+| FR-034A-49 | Monorepo patterns MUST be recognized | P2 |
+| FR-034A-50 | Test projects MUST be detected separately | P1 |
+| FR-034A-51 | `.Tests` suffix MUST indicate .NET test project | P1 |
+| FR-034A-52 | `__tests__` directory MUST indicate Node.js tests | P1 |
+| FR-034A-53 | Entry point project MUST be identified | P1 |
+| FR-034A-54 | Main project MUST be used for build commands | P1 |
+| FR-034A-55 | Build order MUST be determined from dependencies | P2 |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Detection <1 second
-- NFR-002: Template rendering <500ms
-- NFR-003: Valid for current GitHub
-- NFR-004: Actions up to date
-- NFR-005: Best practices followed
-- NFR-006: Clear structure
-- NFR-007: Helpful comments
-- NFR-008: Extensible templates
-- NFR-009: Easy customization
-- NFR-010: Version matrix optional
+### Performance Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-034A-01 | Project detection latency | <1 second | P0 |
+| NFR-034A-02 | Template rendering latency | <500ms | P0 |
+| NFR-034A-03 | Version extraction latency | <200ms | P1 |
+| NFR-034A-04 | File scanning for detection | <50 files | P2 |
+| NFR-034A-05 | Memory during detection | <20MB | P2 |
+| NFR-034A-06 | Parallel project scanning | Supported | P2 |
+| NFR-034A-07 | Monorepo detection timeout | <5 seconds | P2 |
+| NFR-034A-08 | Package manager detection | <100ms | P1 |
+| NFR-034A-09 | Solution parsing time | <500ms | P1 |
+| NFR-034A-10 | Template cache hits | >90% | P2 |
+
+### Reliability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-034A-11 | Valid for current GitHub Actions | Always | P0 |
+| NFR-034A-12 | Actions use up-to-date versions | Latest stable | P0 |
+| NFR-034A-13 | Best practices followed | Always | P0 |
+| NFR-034A-14 | Clear structure for editing | Human-readable | P1 |
+| NFR-034A-15 | Helpful comments in output | Yes | P1 |
+| NFR-034A-16 | Extensible template system | Plugin-based | P1 |
+| NFR-034A-17 | Easy customization support | Override options | P1 |
+| NFR-034A-18 | Version matrix optional | Configurable | P2 |
+| NFR-034A-19 | Graceful fallback on error | Use defaults | P1 |
+| NFR-034A-20 | Detection accuracy | >95% | P0 |
+
+### Observability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-034A-21 | Structured logging for detection | JSON format | P1 |
+| NFR-034A-22 | Metrics on stack detection | Per-stack | P2 |
+| NFR-034A-23 | Events on project detected | Async publish | P1 |
+| NFR-034A-24 | Clear error on detection fail | Actionable | P0 |
+| NFR-034A-25 | Version extraction logged | Debug level | P2 |
+| NFR-034A-26 | Package manager logged | Info level | P1 |
+| NFR-034A-27 | Monorepo detection logged | Info level | P2 |
+| NFR-034A-28 | Template selection logged | Info level | P1 |
+| NFR-034A-29 | Test project count logged | Debug level | P2 |
+| NFR-034A-30 | Build order logged | Debug level | P2 |
 
 ---
 
@@ -210,16 +293,163 @@ jobs:
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: .NET template generates
-- [ ] AC-002: .NET version detected
-- [ ] AC-003: Build and test work
-- [ ] AC-004: Node.js template generates
-- [ ] AC-005: Node version detected
-- [ ] AC-006: npm/yarn/pnpm work
-- [ ] AC-007: Project auto-detected
-- [ ] AC-008: Monorepo works
-- [ ] AC-009: Artifacts upload
-- [ ] AC-010: Comments helpful
+### .NET Template Provider
+- [ ] AC-001: `DotNetTemplateProvider` implements `ICiStackProvider`
+- [ ] AC-002: .NET version detected from .csproj
+- [ ] AC-003: `<TargetFramework>` parsed correctly
+- [ ] AC-004: .NET 6, 7, 8 all supported
+- [ ] AC-005: `actions/setup-dotnet` included
+- [ ] AC-006: Version from project or latest stable
+- [ ] AC-007: `dotnet restore` step present
+- [ ] AC-008: `dotnet build` step present
+- [ ] AC-009: `dotnet test` step present
+- [ ] AC-010: Test results upload optional
+- [ ] AC-011: Coverage step optional
+
+### Node.js Template Provider
+- [ ] AC-012: `NodeJsTemplateProvider` implements `ICiStackProvider`
+- [ ] AC-013: Node version detected from project
+- [ ] AC-014: `.nvmrc` parsed correctly
+- [ ] AC-015: `package.json` engines.node parsed
+- [ ] AC-016: `actions/setup-node` included
+- [ ] AC-017: npm package manager works
+- [ ] AC-018: yarn package manager works
+- [ ] AC-019: pnpm package manager works
+- [ ] AC-020: Package manager auto-detected
+- [ ] AC-021: `npm ci` used instead of install
+- [ ] AC-022: `npm run build` step present
+- [ ] AC-023: `npm test` step present
+
+### Project Detection
+- [ ] AC-024: Auto-detect scans repo root
+- [ ] AC-025: .csproj detected as .NET
+- [ ] AC-026: package.json detected as Node.js
+- [ ] AC-027: Both present prompts user
+- [ ] AC-028: `--stack` override works
+- [ ] AC-029: Version extraction works
+- [ ] AC-030: Multiple projects detected
+- [ ] AC-031: Test projects identified
+
+### Solution Support
+- [ ] AC-032: .sln file auto-detected
+- [ ] AC-033: All projects in solution found
+- [ ] AC-034: Project dependencies resolved
+- [ ] AC-035: `global.json` respected
+- [ ] AC-036: Build targets correct
+
+### Package Manager Detection
+- [ ] AC-037: package-lock.json → npm
+- [ ] AC-038: yarn.lock → yarn
+- [ ] AC-039: pnpm-lock.yaml → pnpm
+- [ ] AC-040: Correct install command used
+
+### Monorepo Support
+- [ ] AC-041: npm workspaces detected
+- [ ] AC-042: yarn workspaces detected
+- [ ] AC-043: .NET solution with multiple projects
+- [ ] AC-044: Entry point identified
+
+### Template Output
+- [ ] AC-045: Workflow name correct
+- [ ] AC-046: Steps in correct order
+- [ ] AC-047: Comments helpful
+- [ ] AC-048: YAML valid
+- [ ] AC-049: Artifacts upload works
+- [ ] AC-050: Coverage reports work
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: .NET Console App
+**Persona:** Developer with simple .NET project  
+**Preconditions:** Repository with single .csproj  
+**Steps:**
+1. Run `acode ci generate --stack dotnet`
+2. Check setup-dotnet action
+3. Verify restore/build/test steps
+4. Confirm .NET version correct
+
+**Verification Checklist:**
+- [ ] .NET version from .csproj
+- [ ] `dotnet restore` present
+- [ ] `dotnet build --no-restore`
+- [ ] `dotnet test --no-build`
+
+### Scenario 2: .NET Solution with Tests
+**Persona:** Developer with multi-project solution  
+**Preconditions:** Repository with .sln and Test project  
+**Steps:**
+1. Run `acode ci generate`
+2. Stack auto-detected as .NET
+3. Solution file used
+4. Test project included
+
+**Verification Checklist:**
+- [ ] .sln detected
+- [ ] All projects built
+- [ ] Tests run
+- [ ] Correct build order
+
+### Scenario 3: Node.js with npm
+**Persona:** Developer with package.json  
+**Preconditions:** Repository with package-lock.json  
+**Steps:**
+1. Run `acode ci generate`
+2. Stack auto-detected as Node.js
+3. npm detected from lockfile
+4. `npm ci` used
+
+**Verification Checklist:**
+- [ ] Node.js detected
+- [ ] npm selected
+- [ ] `npm ci` not `npm install`
+- [ ] Build and test steps
+
+### Scenario 4: Node.js with yarn
+**Persona:** Developer using yarn  
+**Preconditions:** Repository with yarn.lock  
+**Steps:**
+1. Run `acode ci generate`
+2. Stack auto-detected
+3. yarn detected from lockfile
+4. `yarn install --frozen-lockfile`
+
+**Verification Checklist:**
+- [ ] yarn selected
+- [ ] Frozen lockfile flag
+- [ ] Correct build command
+- [ ] Correct test command
+
+### Scenario 5: TypeScript Project
+**Persona:** Developer with TS project  
+**Preconditions:** tsconfig.json present  
+**Steps:**
+1. Run `acode ci generate --stack node`
+2. TypeScript detected
+3. Build step includes compile
+4. Tests run on compiled code
+
+**Verification Checklist:**
+- [ ] TypeScript recognized
+- [ ] Build compiles TS
+- [ ] Tests pass
+- [ ] Output correct
+
+### Scenario 6: Mixed Stack Repository
+**Persona:** Developer with .NET and Node.js  
+**Preconditions:** Both .csproj and package.json  
+**Steps:**
+1. Run `acode ci generate`
+2. Prompted to choose stack
+3. Select .NET
+4. Only .NET workflow generated
+
+**Verification Checklist:**
+- [ ] Both detected
+- [ ] User prompted
+- [ ] Selection respected
+- [ ] Single workflow output
 
 ---
 
@@ -227,17 +457,43 @@ jobs:
 
 ### Unit Tests
 
-- [ ] UT-001: .NET version parsing
-- [ ] UT-002: Node version parsing
-- [ ] UT-003: Project detection
-- [ ] UT-004: Package manager detection
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| UT-034A-01 | .NET version parsing from TargetFramework | FR-034A-03 |
+| UT-034A-02 | Node version parsing from .nvmrc | FR-034A-23 |
+| UT-034A-03 | Node version parsing from package.json | FR-034A-23 |
+| UT-034A-04 | Package manager detection npm | FR-034A-28 |
+| UT-034A-05 | Package manager detection yarn | FR-034A-28 |
+| UT-034A-06 | Package manager detection pnpm | FR-034A-28 |
+| UT-034A-07 | .csproj indicates .NET | FR-034A-43 |
+| UT-034A-08 | package.json indicates Node | FR-034A-44 |
+| UT-034A-09 | .sln file parsing | FR-034A-16 |
+| UT-034A-10 | Test project detection .NET | FR-034A-51 |
+| UT-034A-11 | Test project detection Node | FR-034A-52 |
+| UT-034A-12 | global.json parsing | FR-034A-18 |
+| UT-034A-13 | Monorepo detection | FR-034A-49 |
+| UT-034A-14 | Template rendering .NET | NFR-034A-02 |
+| UT-034A-15 | Template rendering Node | NFR-034A-02 |
 
 ### Integration Tests
 
-- [ ] IT-001: Real .NET project
-- [ ] IT-002: Real Node project
-- [ ] IT-003: Monorepo detection
-- [ ] IT-004: Multi-stack repo
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| IT-034A-01 | Real .NET project generation | E2E |
+| IT-034A-02 | Real Node.js project generation | E2E |
+| IT-034A-03 | Multi-project .NET solution | FR-034A-15 |
+| IT-034A-04 | Monorepo detection npm workspaces | FR-034A-35 |
+| IT-034A-05 | Mixed stack detection | FR-034A-45 |
+| IT-034A-06 | TypeScript project | FR-034A-34 |
+| IT-034A-07 | yarn project | FR-034A-26 |
+| IT-034A-08 | pnpm project | FR-034A-27 |
+| IT-034A-09 | Artifacts upload step | FR-034A-13 |
+| IT-034A-10 | Coverage step .NET | FR-034A-11 |
+| IT-034A-11 | Coverage step Node | FR-034A-38 |
+| IT-034A-12 | Windows runner .NET | FR-034A-20 |
+| IT-034A-13 | E2E tests step | FR-034A-39 |
+| IT-034A-14 | Detection under 1 second | NFR-034A-01 |
+| IT-034A-15 | Template valid for GitHub | NFR-034A-11 |
 
 ---
 

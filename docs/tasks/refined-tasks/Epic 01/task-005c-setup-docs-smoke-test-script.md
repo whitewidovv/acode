@@ -4,7 +4,9 @@
 **Tier:** Developer Experience  
 **Complexity:** 5 (Fibonacci points)  
 **Phase:** Foundation  
-**Dependencies:** Task 005, Task 005.a, Task 005.b, Task 002  
+**Dependencies:** Task 005, Task 005.a, Task 002
+
+**Note:** Originally depended on Task 005.b (tool calling), which was moved to Task 007.d. Tool calling smoke test will be implemented as a stub ("Requires Task 007d - skipped") and completed when 007d is done.  
 
 ---
 
