@@ -46,6 +46,11 @@ public sealed class VllmClientConfiguration
     public int StreamingReadTimeoutSeconds { get; set; } = 60;
 
     /// <summary>
+    /// Gets or sets the health check timeout in seconds.
+    /// </summary>
+    public int HealthCheckTimeoutSeconds { get; set; } = 5;
+
+    /// <summary>
     /// Validates the configuration and throws if invalid.
     /// </summary>
     /// <exception cref="ArgumentException">Thrown when configuration is invalid.</exception>
@@ -84,6 +89,11 @@ public sealed class VllmClientConfiguration
         if (StreamingReadTimeoutSeconds <= 0)
         {
             throw new ArgumentException("StreamingReadTimeoutSeconds timeout must be greater than 0.", nameof(StreamingReadTimeoutSeconds));
+        }
+
+        if (HealthCheckTimeoutSeconds <= 0)
+        {
+            throw new ArgumentException("HealthCheckTimeoutSeconds timeout must be greater than 0.", nameof(HealthCheckTimeoutSeconds));
         }
     }
 }
