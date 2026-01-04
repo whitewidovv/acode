@@ -1217,9 +1217,11 @@ public sealed class SandboxPolicyEnforcer : ISandboxPolicyEnforcer
     private ProcessPolicy BuildProcessPolicy(OperatingMode mode, PolicyConfiguration config)
     {
         var user = config.User ?? "1000:1000";
+        var userPart = user.Split(':')[0].Trim();
         
-        // Validate not root
-        if (user.StartsWith("0:") || user == "root")
+        // Validate not root (by username or UID)
+        if (string.Equals(userPart, "root", StringComparison.OrdinalIgnoreCase) ||
+            (int.TryParse(userPart, out var uid) && uid == 0))
         {
             throw new PolicyViolationException(new PolicyViolation
             {
