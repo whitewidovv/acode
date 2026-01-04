@@ -264,6 +264,77 @@ scopePatterns:
 
 ---
 
+## Best Practices
+
+### Heuristic Design
+
+1. **Err on Side of Caution**: Better to warn about non-conflicts than miss real ones
+2. **Configurable Thresholds**: Allow per-project tuning of sensitivity
+3. **Fast Analysis**: Heuristics should run in <1 second for typical diffs
+4. **Clear Severity Levels**: Use consistent Low/Medium/High/Critical definitions
+
+### Line Analysis
+
+5. **Context Lines**: Consider N lines above/below modified lines as "affected zone"
+6. **Ignore Whitespace**: Option to ignore whitespace-only changes
+7. **Track Moves**: Detect moved code blocks to avoid false positives
+8. **Binary Detection**: Identify binary files early and skip detailed analysis
+
+### Integration
+
+9. **Pre-Merge Hook**: Run heuristics before merge attempt, not after failure
+10. **Warning vs Blocking**: Low/Medium warn only; High/Critical can block
+11. **Human Override**: Allow force-merge with explicit acknowledgment
+12. **Feedback Loop**: Track heuristic accuracy and tune over time
+
+---
+
+## Troubleshooting
+
+### Issue: Too Many False Positives
+
+**Symptoms:** Heuristics flag conflicts that merge cleanly
+
+**Possible Causes:**
+- Overlap threshold too sensitive
+- Not accounting for file type (e.g., lock files)
+- Proximity radius too large
+
+**Solutions:**
+1. Increase overlap threshold for low-risk file types
+2. Add file patterns to ignore list (e.g., *.lock, package-lock.json)
+3. Reduce proximity radius for warning generation
+
+### Issue: Missed Conflict (False Negative)
+
+**Symptoms:** Heuristics said safe but merge failed with conflict
+
+**Possible Causes:**
+- Changes within same function but different lines
+- Semantic conflict not detectable by line analysis
+- File added in both branches (not a line overlap)
+
+**Solutions:**
+1. Enable scope-aware analysis (function/class level)
+2. Add file-level conflict detection for add/add scenarios
+3. Accept that some semantic conflicts require human review
+
+### Issue: Heuristic Analysis Slow
+
+**Symptoms:** Conflict check takes >5 seconds for small changes
+
+**Possible Causes:**
+- Large repository with many files
+- Diff generation slow (not cached)
+- Complex regex patterns in file rules
+
+**Solutions:**
+1. Cache diff results during task execution
+2. Limit analysis to changed files only
+3. Simplify file matching patterns
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

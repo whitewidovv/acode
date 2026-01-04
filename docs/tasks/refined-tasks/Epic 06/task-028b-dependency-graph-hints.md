@@ -282,6 +282,77 @@ files:
 
 ---
 
+## Best Practices
+
+### Graph Design
+
+1. **DAG Enforcement**: Always validate no cycles before adding edges
+2. **Immutable Nodes**: Once added, task nodes should not be modified
+3. **Edge Semantics**: Clearly distinguish hard dependencies from soft hints
+4. **Incremental Updates**: Support adding tasks without rebuilding entire graph
+
+### Hint Generation
+
+5. **File Overlap Only**: Generate hints based on actual file overlap, not guesses
+6. **Bidirectional Hints**: If A overlaps B, both A→B and B→A hints exist
+7. **Hint Decay**: Old hints may become stale; consider TTL for hints
+8. **Don't Over-Hint**: Too many hints defeats the purpose; prioritize high-overlap
+
+### Scheduling Integration
+
+9. **Respect Hard Dependencies**: Never schedule task before its dependencies
+10. **Hints Affect Priority**: Tasks with hints should schedule cautiously
+11. **Critical Path First**: Prioritize tasks on critical path for faster completion
+12. **Visualize for Debugging**: Provide DOT export for graph visualization
+
+---
+
+## Troubleshooting
+
+### Issue: Cycle Detected in Dependencies
+
+**Symptoms:** "Circular dependency detected" error when adding task
+
+**Possible Causes:**
+- Explicit circular depends_on declarations
+- File overlap hints creating apparent cycle
+- Task A depends on B which depends on A
+
+**Solutions:**
+1. Review depends_on declarations in task specs
+2. Hints don't create cycles; check if hints wrongly treated as dependencies
+3. Refactor tasks to break circular relationship
+
+### Issue: Tasks Running Out of Order
+
+**Symptoms:** Dependent task starts before its dependency completes
+
+**Possible Causes:**
+- Dependency not registered in graph
+- Scheduler not consulting graph
+- Race condition in status check
+
+**Solutions:**
+1. Verify dependency appears in graph: `acode graph show <task-id>`
+2. Check scheduler logs for task selection reasoning
+3. Ensure atomic check-and-dequeue operation
+
+### Issue: Graph Export Empty or Malformed
+
+**Symptoms:** DOT export produces empty or unparseable output
+
+**Possible Causes:**
+- No tasks in graph
+- Special characters in task IDs/titles not escaped
+- Newlines in labels breaking DOT syntax
+
+**Solutions:**
+1. Verify tasks exist: `acode task list`
+2. Escape special characters in DOT output
+3. Truncate or sanitize task titles for labels
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
