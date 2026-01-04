@@ -257,67 +257,254 @@ burst:
 
 ## Implementation Prompt
 
-### Interface
+### Part 1: File Structure + Domain Models
+
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Burst/
+│           └── Aggregation/
+│               ├── AggregationStrategy.cs
+│               └── Events/
+│                   └── AggregationCompletedEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Burst/
+│           └── Aggregation/
+│               ├── ITriggerAggregator.cs
+│               ├── IAggregatorRegistry.cs
+│               ├── AggregatedDecision.cs
+│               └── AggregationOptions.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Burst/
+            └── Aggregation/
+                ├── AggregatorRegistry.cs
+                ├── OrAggregator.cs
+                ├── AndAggregator.cs
+                ├── WeightedAggregator.cs
+                └── QuorumAggregator.cs
+```
 
 ```csharp
+// src/Acode.Domain/Compute/Burst/Aggregation/AggregationStrategy.cs
+namespace Acode.Domain.Compute.Burst.Aggregation;
+
+public enum AggregationStrategy
+{
+    Or,       // Any trigger fires
+    And,      // All triggers fire
+    Weighted, // Score threshold
+    Quorum    // N of M triggers
+}
+
+// src/Acode.Domain/Compute/Burst/Aggregation/Events/AggregationCompletedEvent.cs
+namespace Acode.Domain.Compute.Burst.Aggregation.Events;
+
+public sealed record AggregationCompletedEvent(
+    AggregationStrategy Strategy,
+    bool ShouldBurst,
+    double Confidence,
+    int TriggersEvaluated,
+    int TriggersFired,
+    DateTimeOffset Timestamp) : IDomainEvent;
+```
+
+**End of Task 033.b Specification - Part 1/3**
+
+### Part 2: Application Interfaces
+
+```csharp
+// src/Acode.Application/Compute/Burst/Aggregation/AggregationOptions.cs
+namespace Acode.Application.Compute.Burst.Aggregation;
+
+public sealed record AggregationOptions
+{
+    public double ConfidenceThreshold { get; init; } = 0.0;
+    public int? Quorum { get; init; }
+    public double? QuorumPercentage { get; init; }
+    public IReadOnlyDictionary<string, double> Weights { get; init; } = new Dictionary<string, double>();
+}
+
+// src/Acode.Application/Compute/Burst/Aggregation/AggregatedDecision.cs
+namespace Acode.Application.Compute.Burst.Aggregation;
+
+public sealed record AggregatedDecision
+{
+    public bool ShouldBurst { get; init; }
+    public double Confidence { get; init; }
+    public int SuggestedScale { get; init; }
+    public IReadOnlyList<string> Reasons { get; init; } = [];
+    public int TriggersEvaluated { get; init; }
+    public int TriggersFired { get; init; }
+    public AggregationStrategy Strategy { get; init; }
+}
+
+// src/Acode.Application/Compute/Burst/Aggregation/ITriggerAggregator.cs
+namespace Acode.Application.Compute.Burst.Aggregation;
+
 public interface ITriggerAggregator
 {
     string Name { get; }
+    AggregationStrategy Strategy { get; }
     
     AggregatedDecision Aggregate(
         IReadOnlyList<TriggerSignal> signals,
-        AggregationOptions options = null);
+        AggregationOptions? options = null);
 }
 
-public record AggregatedDecision(
-    bool ShouldBurst,
-    double Confidence,
-    int SuggestedScale,
-    IReadOnlyList<string> Reasons,
-    int TriggersEvaluated,
-    int TriggersFired);
+// src/Acode.Application/Compute/Burst/Aggregation/IAggregatorRegistry.cs
+namespace Acode.Application.Compute.Burst.Aggregation;
 
-public record AggregationOptions(
-    double ConfidenceThreshold = 0.0,
-    int? Quorum = null,
-    IReadOnlyDictionary<string, double> Weights = null);
-```
-
-### Implementations
-
-```csharp
-public class OrAggregator : ITriggerAggregator
-{
-    public string Name => "or";
-}
-
-public class AndAggregator : ITriggerAggregator
-{
-    public string Name => "and";
-}
-
-public class WeightedAggregator : ITriggerAggregator
-{
-    public string Name => "weighted";
-}
-
-public class QuorumAggregator : ITriggerAggregator
-{
-    public string Name => "quorum";
-}
-```
-
-### Registry
-
-```csharp
 public interface IAggregatorRegistry
 {
     void Register(ITriggerAggregator aggregator);
-    ITriggerAggregator Get(string name);
+    ITriggerAggregator? Get(string name);
+    ITriggerAggregator? Get(AggregationStrategy strategy);
     ITriggerAggregator GetDefault();
+    IReadOnlyList<ITriggerAggregator> GetAll();
 }
 ```
 
----
+**End of Task 033.b Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation + Checklist
+
+```csharp
+// src/Acode.Infrastructure/Compute/Burst/Aggregation/OrAggregator.cs
+namespace Acode.Infrastructure.Compute.Burst.Aggregation;
+
+public sealed class OrAggregator : ITriggerAggregator
+{
+    public string Name => "or";
+    public AggregationStrategy Strategy => AggregationStrategy.Or;
+    
+    public AggregatedDecision Aggregate(IReadOnlyList<TriggerSignal> signals, AggregationOptions? options = null)
+    {
+        options ??= new AggregationOptions();
+        var fired = signals.Where(s => s.Triggered && s.Confidence >= options.ConfidenceThreshold).ToList();
+        
+        return new AggregatedDecision
+        {
+            ShouldBurst = fired.Count > 0,
+            Confidence = fired.Count > 0 ? fired.Max(s => s.Confidence) : 0.0,
+            SuggestedScale = fired.Count > 0 ? fired.Max(s => s.SuggestedScale) : 0,
+            Reasons = fired.Select(s => s.Reason!).ToList(),
+            TriggersEvaluated = signals.Count,
+            TriggersFired = fired.Count,
+            Strategy = AggregationStrategy.Or
+        };
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Burst/Aggregation/WeightedAggregator.cs
+namespace Acode.Infrastructure.Compute.Burst.Aggregation;
+
+public sealed class WeightedAggregator : ITriggerAggregator
+{
+    public string Name => "weighted";
+    public AggregationStrategy Strategy => AggregationStrategy.Weighted;
+    
+    public AggregatedDecision Aggregate(IReadOnlyList<TriggerSignal> signals, AggregationOptions? options = null)
+    {
+        options ??= new AggregationOptions();
+        var threshold = options.ConfidenceThreshold > 0 ? options.ConfidenceThreshold : 0.5;
+        
+        var totalWeight = 0.0;
+        var weightedScore = 0.0;
+        var reasons = new List<string>();
+        var fired = 0;
+        
+        foreach (var signal in signals)
+        {
+            var weight = options.Weights.GetValueOrDefault(signal.TriggerName, 1.0);
+            totalWeight += weight;
+            if (signal.Triggered)
+            {
+                weightedScore += signal.Confidence * weight;
+                fired++;
+                reasons.Add($"{signal.Reason} (weight {weight:F1}, confidence {signal.Confidence:F2})");
+            }
+        }
+        
+        var normalizedScore = totalWeight > 0 ? weightedScore / totalWeight : 0.0;
+        
+        return new AggregatedDecision
+        {
+            ShouldBurst = normalizedScore >= threshold,
+            Confidence = normalizedScore,
+            SuggestedScale = signals.Where(s => s.Triggered).Select(s => s.SuggestedScale).DefaultIfEmpty(0).Max(),
+            Reasons = reasons,
+            TriggersEvaluated = signals.Count,
+            TriggersFired = fired,
+            Strategy = AggregationStrategy.Weighted
+        };
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Burst/Aggregation/QuorumAggregator.cs
+namespace Acode.Infrastructure.Compute.Burst.Aggregation;
+
+public sealed class QuorumAggregator : ITriggerAggregator
+{
+    public string Name => "quorum";
+    public AggregationStrategy Strategy => AggregationStrategy.Quorum;
+    
+    public AggregatedDecision Aggregate(IReadOnlyList<TriggerSignal> signals, AggregationOptions? options = null)
+    {
+        options ??= new AggregationOptions();
+        var fired = signals.Where(s => s.Triggered).ToList();
+        
+        var requiredQuorum = options.Quorum 
+            ?? (options.QuorumPercentage.HasValue 
+                ? (int)Math.Ceiling(signals.Count * options.QuorumPercentage.Value) 
+                : 2);
+        
+        requiredQuorum = Math.Min(requiredQuorum, signals.Count);
+        var meetsQuorum = fired.Count >= requiredQuorum;
+        
+        return new AggregatedDecision
+        {
+            ShouldBurst = meetsQuorum,
+            Confidence = fired.Count > 0 ? fired.Average(s => s.Confidence) : 0.0,
+            SuggestedScale = fired.Count > 0 ? fired.Max(s => s.SuggestedScale) : 0,
+            Reasons = fired.Select(s => s.Reason!).ToList(),
+            TriggersEvaluated = signals.Count,
+            TriggersFired = fired.Count,
+            Strategy = AggregationStrategy.Quorum
+        };
+    }
+}
+
+// AndAggregator follows similar pattern with All() logic
+```
+
+### Implementation Checklist
+
+| Step | Action | Verification |
+|------|--------|--------------|
+| 1 | Create AggregationStrategy enum | Enum compiles |
+| 2 | Add aggregation events | Event serialization verified |
+| 3 | Define AggregationOptions, AggregatedDecision | Records compile |
+| 4 | Create ITriggerAggregator, IAggregatorRegistry | Interface contracts clear |
+| 5 | Implement OrAggregator | Any-fired logic works |
+| 6 | Implement AndAggregator | All-fired logic works |
+| 7 | Implement WeightedAggregator | Weighted scoring verified |
+| 8 | Implement QuorumAggregator | N-of-M logic works |
+| 9 | Implement AggregatorRegistry | Strategy lookup works |
+| 10 | Add confidence threshold | Below threshold filtered |
+| 11 | Add percentage quorum | Percentage rounds up |
+| 12 | Register aggregators in DI | All aggregators resolved |
+| 13 | Add metrics per strategy | Strategy metrics emitted |
+| 14 | Performance verify <5ms | Benchmark passes |
+
+### Rollout Plan
+
+1. **Phase 1**: Implement interfaces and OrAggregator
+2. **Phase 2**: Add AndAggregator
+3. **Phase 3**: Add WeightedAggregator with configurable weights
+4. **Phase 4**: Add QuorumAggregator with percentage support
+5. **Phase 5**: Implement registry and integration tests
 
 **End of Task 033.b Specification**

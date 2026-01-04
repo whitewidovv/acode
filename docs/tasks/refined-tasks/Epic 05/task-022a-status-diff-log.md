@@ -487,8 +487,10 @@ src/
 │   └── Git/
 │       ├── GitStatus.cs
 │       ├── FileStatus.cs
+│       ├── GitFileState.cs
 │       ├── GitCommit.cs
-│       └── DiffResult.cs
+│       ├── DiffResult.cs
+│       └── DiffStat.cs
 ├── Acode.Application/
 │   └── Git/
 │       ├── Queries/
@@ -500,26 +502,497 @@ src/
 │           └── LogOptions.cs
 └── Acode.Infrastructure/
     └── Git/
-        ├── StatusParser.cs
-        ├── DiffParser.cs
-        └── LogParser.cs
+        ├── Parsers/
+        │   ├── StatusParser.cs
+        │   ├── DiffParser.cs
+        │   ├── LogParser.cs
+        │   └── NumStatParser.cs
+        └── GitService.Status.cs
+        └── GitService.Diff.cs
+        └── GitService.Log.cs
 ```
 
-### Validation Checklist
+### Domain Models
 
-- [ ] Status parsing handles all file states
-- [ ] Diff streaming works for large output
-- [ ] Log pagination respects limits
-- [ ] All parsers handle edge cases
-- [ ] Performance benchmarks met
+```csharp
+// GitStatus.cs - already defined in task-022
+// See Task 022 for full model
+
+// DiffResult.cs
+namespace Acode.Domain.Git;
+
+public sealed record DiffResult
+{
+    public required string RawDiff { get; init; }
+    public required IReadOnlyList<FileDiff> Files { get; init; }
+    public required DiffStat Summary { get; init; }
+    public bool IsEmpty => Files.Count == 0;
+}
+
+public sealed record FileDiff
+{
+    public required string Path { get; init; }
+    public string? OldPath { get; init; } // For renames
+    public required FileChangeType ChangeType { get; init; }
+    public required int AddedLines { get; init; }
+    public required int RemovedLines { get; init; }
+    public required bool IsBinary { get; init; }
+    public string? Content { get; init; } // Unified diff content
+}
+
+public enum FileChangeType { Added, Modified, Deleted, Renamed, Copied }
+
+public sealed record DiffStat
+{
+    public required int FilesChanged { get; init; }
+    public required int Insertions { get; init; }
+    public required int Deletions { get; init; }
+    
+    public override string ToString() => 
+        $"{FilesChanged} files changed, {Insertions} insertions(+), {Deletions} deletions(-)";
+}
+```
+
+### Parser Implementation
+
+```csharp
+// StatusParser.cs
+namespace Acode.Infrastructure.Git.Parsers;
+
+public sealed class StatusParser : IGitOutputParser<GitStatus>
+{
+    public GitStatus Parse(string output)
+    {
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var branch = "";
+        var upstream = (string?)null;
+        var ahead = (int?)null;
+        var behind = (int?)null;
+        var isDetached = false;
+        var staged = new List<FileStatus>();
+        var unstaged = new List<FileStatus>();
+        var untracked = new List<string>();
+        
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("# branch.head "))
+            {
+                branch = line[14..];
+                isDetached = branch == "(detached)";
+            }
+            else if (line.StartsWith("# branch.upstream "))
+            {
+                upstream = line[18..];
+            }
+            else if (line.StartsWith("# branch.ab "))
+            {
+                var match = Regex.Match(line, @"\+(\d+) -(\d+)");
+                if (match.Success)
+                {
+                    ahead = int.Parse(match.Groups[1].Value);
+                    behind = int.Parse(match.Groups[2].Value);
+                }
+            }
+            else if (line.StartsWith("1 ") || line.StartsWith("2 "))
+            {
+                ParseChangedEntry(line, staged, unstaged);
+            }
+            else if (line.StartsWith("? "))
+            {
+                untracked.Add(line[2..]);
+            }
+            else if (line.StartsWith("u "))
+            {
+                ParseUnmergedEntry(line, unstaged);
+            }
+        }
+        
+        return new GitStatus
+        {
+            Branch = branch,
+            IsClean = staged.Count == 0 && unstaged.Count == 0 && untracked.Count == 0,
+            IsDetachedHead = isDetached,
+            UpstreamBranch = upstream,
+            AheadBy = ahead,
+            BehindBy = behind,
+            StagedFiles = staged,
+            UnstagedFiles = unstaged,
+            UntrackedFiles = untracked
+        };
+    }
+    
+    private void ParseChangedEntry(string line, List<FileStatus> staged, List<FileStatus> unstaged)
+    {
+        // Format: 1 XY subm <mH> <mI> <mW> <hH> <hI> <path>
+        // or:     2 XY subm <mH> <mI> <mW> <hH> <hI> <x> <path>\t<origPath>
+        var parts = line.Split(' ');
+        var xy = parts[1]; // Index and worktree status
+        
+        // Handle renamed files (line type "2")
+        string path, originalPath = null;
+        if (line.StartsWith("2 "))
+        {
+            var pathPart = string.Join(" ", parts.Skip(9));
+            var tabIdx = pathPart.IndexOf('\t');
+            path = pathPart[..tabIdx];
+            originalPath = pathPart[(tabIdx + 1)..];
+        }
+        else
+        {
+            path = string.Join(" ", parts.Skip(8));
+        }
+        
+        // Index status (staged)
+        if (xy[0] != '.')
+        {
+            staged.Add(new FileStatus 
+            { 
+                Path = path, 
+                State = MapState(xy[0]),
+                OriginalPath = originalPath
+            });
+        }
+        
+        // Worktree status (unstaged)
+        if (xy[1] != '.')
+        {
+            unstaged.Add(new FileStatus 
+            { 
+                Path = path, 
+                State = MapState(xy[1])
+            });
+        }
+    }
+    
+    private static GitFileState MapState(char c) => c switch
+    {
+        'M' => GitFileState.Modified,
+        'A' => GitFileState.Added,
+        'D' => GitFileState.Deleted,
+        'R' => GitFileState.Renamed,
+        'C' => GitFileState.Copied,
+        'T' => GitFileState.TypeChanged,
+        'U' => GitFileState.Unmerged,
+        _ => GitFileState.Modified
+    };
+}
+
+// LogParser.cs
+namespace Acode.Infrastructure.Git.Parsers;
+
+public sealed class LogParser : IGitOutputParser<IReadOnlyList<GitCommit>>
+{
+    // Custom format for reliable parsing
+    // %H = full hash, %h = short hash, %an = author name, %ae = author email
+    // %aI = author date ISO, %cn = committer name, %ce = committer email
+    // %cI = committer date ISO, %P = parent hashes, %s = subject, %b = body
+    public const string Format = "%H%n%h%n%an%n%ae%n%aI%n%cn%n%ce%n%cI%n%P%n%s%n%b%x00";
+    
+    public IReadOnlyList<GitCommit> Parse(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return Array.Empty<GitCommit>();
+        
+        var commits = new List<GitCommit>();
+        var entries = output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        
+        foreach (var entry in entries)
+        {
+            var lines = entry.Split('\n');
+            if (lines.Length < 10) continue;
+            
+            commits.Add(new GitCommit
+            {
+                Sha = lines[0].Trim(),
+                ShortSha = lines[1].Trim(),
+                Author = lines[2].Trim(),
+                AuthorEmail = lines[3].Trim(),
+                AuthorDate = DateTimeOffset.Parse(lines[4].Trim()),
+                Committer = lines[5].Trim(),
+                CommitterEmail = lines[6].Trim(),
+                CommitDate = DateTimeOffset.Parse(lines[7].Trim()),
+                ParentShas = lines[8].Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                Subject = lines[9].Trim(),
+                Body = lines.Length > 10 ? string.Join('\n', lines.Skip(10)).Trim() : null
+            });
+        }
+        
+        return commits;
+    }
+}
+```
+
+### Service Implementation
+
+```csharp
+// GitService.Status.cs
+namespace Acode.Infrastructure.Git;
+
+public partial class GitService
+{
+    private readonly StatusParser _statusParser = new();
+    
+    public async Task<GitStatus> GetStatusAsync(string workingDir, CancellationToken ct = default)
+    {
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var result = await ExecuteGitAsync(
+            workingDir,
+            new[] { "status", "--porcelain=v2", "--branch", "--untracked-files=all" },
+            ct);
+        
+        return _statusParser.Parse(result.StdOut);
+    }
+}
+
+// GitService.Diff.cs
+public partial class GitService
+{
+    public async Task<string> GetDiffAsync(
+        string workingDir, 
+        DiffOptions options, 
+        CancellationToken ct = default)
+    {
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var args = new List<string> { "diff" };
+        
+        if (options.Staged)
+        {
+            args.Add("--cached");
+        }
+        
+        if (options.NameOnly)
+        {
+            args.Add("--name-only");
+        }
+        
+        if (options.Stat)
+        {
+            args.Add("--stat");
+        }
+        
+        if (options.Context.HasValue)
+        {
+            args.Add($"-U{options.Context}");
+        }
+        
+        if (!string.IsNullOrEmpty(options.Commit1))
+        {
+            args.Add(options.Commit1);
+        }
+        
+        if (!string.IsNullOrEmpty(options.Commit2))
+        {
+            args.Add(options.Commit2);
+        }
+        
+        if (options.Paths?.Count > 0)
+        {
+            args.Add("--");
+            args.AddRange(options.Paths);
+        }
+        
+        var result = await ExecuteGitAsync(workingDir, args, ct);
+        return result.StdOut;
+    }
+    
+    public async Task<DiffStat> GetDiffStatAsync(
+        string workingDir,
+        DiffOptions options,
+        CancellationToken ct = default)
+    {
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var args = new List<string> { "diff", "--numstat" };
+        
+        if (options.Staged) args.Add("--cached");
+        if (!string.IsNullOrEmpty(options.Commit1)) args.Add(options.Commit1);
+        if (!string.IsNullOrEmpty(options.Commit2)) args.Add(options.Commit2);
+        
+        var result = await ExecuteGitAsync(workingDir, args, ct);
+        
+        int files = 0, insertions = 0, deletions = 0;
+        foreach (var line in result.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.Split('\t');
+            if (parts.Length >= 2)
+            {
+                files++;
+                if (int.TryParse(parts[0], out var add)) insertions += add;
+                if (int.TryParse(parts[1], out var del)) deletions += del;
+            }
+        }
+        
+        return new DiffStat
+        {
+            FilesChanged = files,
+            Insertions = insertions,
+            Deletions = deletions
+        };
+    }
+}
+
+// GitService.Log.cs
+public partial class GitService
+{
+    private readonly LogParser _logParser = new();
+    
+    public async Task<IReadOnlyList<GitCommit>> GetLogAsync(
+        string workingDir, 
+        LogOptions options, 
+        CancellationToken ct = default)
+    {
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var args = new List<string> 
+        { 
+            "log", 
+            $"--format={LogParser.Format}" 
+        };
+        
+        if (options.Limit.HasValue)
+        {
+            args.Add($"-n{options.Limit}");
+        }
+        
+        if (!string.IsNullOrEmpty(options.Since))
+        {
+            args.Add($"--since={options.Since}");
+        }
+        
+        if (!string.IsNullOrEmpty(options.Until))
+        {
+            args.Add($"--until={options.Until}");
+        }
+        
+        if (!string.IsNullOrEmpty(options.Author))
+        {
+            args.Add($"--author={options.Author}");
+        }
+        
+        if (!string.IsNullOrEmpty(options.Grep))
+        {
+            args.Add($"--grep={options.Grep}");
+        }
+        
+        if (options.FirstParent)
+        {
+            args.Add("--first-parent");
+        }
+        
+        if (options.NoMerges)
+        {
+            args.Add("--no-merges");
+        }
+        
+        if (!string.IsNullOrEmpty(options.Path))
+        {
+            args.Add("--");
+            args.Add(options.Path);
+        }
+        
+        var result = await ExecuteGitAsync(workingDir, args, ct);
+        return _logParser.Parse(result.StdOut);
+    }
+}
+```
+
+### CLI Commands
+
+```csharp
+// GitStatusCommand.cs
+namespace Acode.Cli.Commands.Git;
+
+[Command("git status", Description = "Show repository status")]
+public class GitStatusCommand
+{
+    [Option("--include-ignored", Description = "Include ignored files")]
+    public bool IncludeIgnored { get; set; }
+    
+    [Option("--format", Description = "Output format: text, json")]
+    public string Format { get; set; } = "text";
+    
+    public async Task<int> ExecuteAsync(
+        IGitService git,
+        IConsole console,
+        CancellationToken ct)
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        var status = await git.GetStatusAsync(cwd, ct);
+        
+        if (Format == "json")
+        {
+            console.WriteLine(JsonSerializer.Serialize(status, JsonOptions.Pretty));
+            return 0;
+        }
+        
+        console.WriteLine($"On branch: {status.Branch}");
+        console.WriteLine($"Status: {(status.IsClean ? "clean" : "dirty")}");
+        
+        if (status.AheadBy.HasValue || status.BehindBy.HasValue)
+        {
+            console.WriteLine($"Tracking: {status.UpstreamBranch} (+{status.AheadBy ?? 0}/-{status.BehindBy ?? 0})");
+        }
+        
+        if (!status.IsClean)
+        {
+            console.WriteLine("\nChanges:");
+            foreach (var f in status.StagedFiles)
+            {
+                console.WriteLine($"  A  {f.Path,-40} (staged)");
+            }
+            foreach (var f in status.UnstagedFiles)
+            {
+                console.WriteLine($"  M  {f.Path,-40} (modified)");
+            }
+            foreach (var f in status.UntrackedFiles)
+            {
+                console.WriteLine($"  ?  {f,-40} (untracked)");
+            }
+        }
+        
+        return 0;
+    }
+}
+```
+
+### Error Codes
+
+| Code | Name | Description | Recovery |
+|------|------|-------------|----------|
+| GIT-022A-001 | ParseError | Failed to parse git output | Report bug with output sample |
+| GIT-022A-002 | EmptyOutput | Git returned no output | Check repository state |
+| GIT-022A-003 | DiffTooLarge | Diff exceeds size limit | Use path filter |
+| GIT-022A-004 | LogTooLarge | Log exceeds limit | Use --limit option |
+
+### Implementation Checklist
+
+- [ ] Implement StatusParser with porcelain v2 format
+- [ ] Implement LogParser with custom format
+- [ ] Implement DiffParser for stat extraction
+- [ ] Add GetStatusAsync to GitService
+- [ ] Add GetDiffAsync to GitService
+- [ ] Add GetLogAsync to GitService
+- [ ] Implement CLI status command
+- [ ] Implement CLI diff command
+- [ ] Implement CLI log command
+- [ ] Add JSON output format
+- [ ] Add unit tests for parsers
+- [ ] Add integration tests with real repos
+- [ ] Run performance benchmarks
 
 ### Rollout Plan
 
-1. Implement parsers
-2. Implement queries
-3. Add CLI commands
-4. Integration testing
-5. Performance testing
+| Phase | Action | Validation |
+|-------|--------|------------|
+| 1 | Implement StatusParser | Parser tests pass |
+| 2 | Implement LogParser | Parser tests pass |
+| 3 | Add GetStatusAsync | Status tests pass |
+| 4 | Add GetDiffAsync | Diff tests pass |
+| 5 | Add GetLogAsync | Log tests pass |
+| 6 | Add CLI commands | E2E tests pass |
+| 7 | Performance testing | Benchmarks pass |
 
 ---
 

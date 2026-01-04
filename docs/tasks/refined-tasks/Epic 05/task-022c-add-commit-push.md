@@ -304,31 +304,608 @@ $ acode git push
 
 ## Implementation Prompt
 
-### Core Methods
+### File Structure
+
+```
+src/
+├── Acode.Domain/
+│   └── Git/
+│       ├── GitCommit.cs
+│       ├── PushResult.cs
+│       └── StageResult.cs
+├── Acode.Application/
+│   └── Git/
+│       ├── Options/
+│       │   ├── StageOptions.cs
+│       │   ├── CommitOptions.cs
+│       │   └── PushOptions.cs
+│       └── Exceptions/
+│           ├── NothingToCommitException.cs
+│           ├── AuthenticationException.cs
+│           ├── PushRejectedException.cs
+│           └── ModeViolationException.cs
+├── Acode.Infrastructure/
+│   └── Git/
+│       ├── GitService.Stage.cs
+│       ├── GitService.Commit.cs
+│       ├── GitService.Push.cs
+│       └── PushRetryPolicy.cs
+└── Acode.Cli/
+    └── Commands/
+        └── Git/
+            ├── GitAddCommand.cs
+            ├── GitCommitCommand.cs
+            └── GitPushCommand.cs
+```
+
+### Domain Models
 
 ```csharp
-public interface IGitService
+// PushResult.cs
+namespace Acode.Domain.Git;
+
+public sealed record PushResult
 {
-    Task StageAsync(string workingDir, IEnumerable<string> paths,
-        StageOptions? options = null, CancellationToken ct = default);
-    
-    Task UnstageAsync(string workingDir, IEnumerable<string> paths,
-        CancellationToken ct = default);
-    
-    Task<GitCommit> CommitAsync(string workingDir, string message,
-        CommitOptions? options = null, CancellationToken ct = default);
-    
-    Task<PushResult> PushAsync(string workingDir,
-        PushOptions? options = null, CancellationToken ct = default);
+    public required bool Success { get; init; }
+    public required string Remote { get; init; }
+    public required string Branch { get; init; }
+    public required IReadOnlyList<RefUpdate> RefUpdates { get; init; }
+    public TimeSpan Duration { get; init; }
+}
+
+public sealed record RefUpdate
+{
+    public required string RefName { get; init; }
+    public required string OldSha { get; init; }
+    public required string NewSha { get; init; }
+    public required RefUpdateStatus Status { get; init; }
+}
+
+public enum RefUpdateStatus
+{
+    Updated,
+    Created,
+    Deleted,
+    Rejected,
+    UpToDate
+}
+
+// StageResult.cs
+public sealed record StageResult
+{
+    public required int FilesStaged { get; init; }
+    public required IReadOnlyList<string> StagedPaths { get; init; }
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 }
 ```
 
-### Validation Checklist
+### Options Classes
 
-- [ ] Mode validation implemented
-- [ ] Retry logic with backoff
-- [ ] Credential redaction works
-- [ ] All exceptions defined
+```csharp
+// StageOptions.cs
+namespace Acode.Application.Git.Options;
+
+public sealed record StageOptions
+{
+    public bool All { get; init; }
+    public bool Force { get; init; }
+    public bool DryRun { get; init; }
+}
+
+// CommitOptions.cs
+public sealed record CommitOptions
+{
+    public bool AllowEmpty { get; init; }
+    public bool Amend { get; init; }
+    public string? Author { get; init; }
+    public DateTimeOffset? Date { get; init; }
+    public bool NoVerify { get; init; }
+}
+
+// PushOptions.cs
+public sealed record PushOptions
+{
+    public string? Remote { get; init; }
+    public string? Branch { get; init; }
+    public bool SetUpstream { get; init; }
+    public bool Force { get; init; }
+    public bool ForceWithLease { get; init; }
+    public bool DryRun { get; init; }
+    public IProgress<PushProgress>? Progress { get; init; }
+}
+
+public sealed record PushProgress
+{
+    public required string Phase { get; init; }
+    public int? Current { get; init; }
+    public int? Total { get; init; }
+}
+```
+
+### Service Implementation
+
+```csharp
+// GitService.Stage.cs
+namespace Acode.Infrastructure.Git;
+
+public partial class GitService
+{
+    public async Task<StageResult> StageAsync(
+        string workingDir, 
+        IEnumerable<string> paths,
+        StageOptions? options = null,
+        CancellationToken ct = default)
+    {
+        options ??= new StageOptions();
+        
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var pathList = paths.ToList();
+        
+        var args = new List<string> { "add" };
+        
+        if (options.All)
+        {
+            args.Add("--all");
+        }
+        
+        if (options.Force)
+        {
+            args.Add("--force");
+        }
+        
+        if (options.DryRun)
+        {
+            args.Add("--dry-run");
+        }
+        
+        args.Add("--");
+        args.AddRange(pathList.Count > 0 ? pathList : new[] { "." });
+        
+        await ExecuteGitAsync(workingDir, args, ct);
+        
+        // Get what was staged
+        var status = await GetStatusAsync(workingDir, ct);
+        
+        _logger.LogInformation("Staged {Count} files", status.StagedFiles.Count);
+        
+        return new StageResult
+        {
+            FilesStaged = status.StagedFiles.Count,
+            StagedPaths = status.StagedFiles.Select(f => f.Path).ToList()
+        };
+    }
+    
+    public async Task UnstageAsync(
+        string workingDir, 
+        IEnumerable<string> paths,
+        CancellationToken ct = default)
+    {
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var pathList = paths.ToList();
+        
+        var args = new List<string> { "reset", "HEAD", "--" };
+        args.AddRange(pathList);
+        
+        await ExecuteGitAsync(workingDir, args, ct);
+        
+        _logger.LogInformation("Unstaged {Count} paths", pathList.Count);
+    }
+}
+
+// GitService.Commit.cs
+public partial class GitService
+{
+    public async Task<GitCommit> CommitAsync(
+        string workingDir, 
+        string message,
+        CommitOptions? options = null,
+        CancellationToken ct = default)
+    {
+        options ??= new CommitOptions();
+        
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        // Validate message
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            throw new ArgumentException("Commit message cannot be empty", nameof(message));
+        }
+        
+        // Check for staged changes (unless allow-empty or amend)
+        if (!options.AllowEmpty && !options.Amend)
+        {
+            var status = await GetStatusAsync(workingDir, ct);
+            if (status.StagedFiles.Count == 0)
+            {
+                throw new NothingToCommitException(workingDir);
+            }
+        }
+        
+        var args = new List<string> { "commit", "-m", message };
+        
+        if (options.AllowEmpty)
+        {
+            args.Add("--allow-empty");
+        }
+        
+        if (options.Amend)
+        {
+            args.Add("--amend");
+        }
+        
+        if (options.NoVerify)
+        {
+            args.Add("--no-verify");
+        }
+        
+        if (options.Author is not null)
+        {
+            args.Add($"--author={options.Author}");
+        }
+        
+        if (options.Date.HasValue)
+        {
+            args.Add($"--date={options.Date.Value:o}");
+        }
+        
+        await ExecuteGitAsync(workingDir, args, ct);
+        
+        // Get the commit we just created
+        var log = await GetLogAsync(workingDir, new LogOptions { Limit = 1 }, ct);
+        var commit = log.First();
+        
+        _logger.LogInformation("Created commit {Sha}: {Message}", commit.ShortSha, message);
+        
+        return commit;
+    }
+}
+
+// GitService.Push.cs
+public partial class GitService
+{
+    private readonly PushRetryPolicy _pushRetryPolicy;
+    
+    public async Task<PushResult> PushAsync(
+        string workingDir,
+        PushOptions? options = null,
+        CancellationToken ct = default)
+    {
+        options ??= new PushOptions();
+        var stopwatch = Stopwatch.StartNew();
+        
+        // Mode check - push is network operation
+        var mode = await _modeResolver.GetCurrentModeAsync(ct);
+        if (mode is OperatingMode.LocalOnly)
+        {
+            _logger.LogWarning("Push blocked by local-only mode");
+            throw new ModeViolationException(mode.ToString(), "push");
+        }
+        
+        if (mode is OperatingMode.Airgapped)
+        {
+            _logger.LogWarning("Push blocked by airgapped mode");
+            throw new ModeViolationException(mode.ToString(), "push");
+        }
+        
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var remote = options.Remote ?? "origin";
+        var branch = options.Branch ?? await GetCurrentBranchAsync(workingDir, ct);
+        
+        var args = new List<string> { "push" };
+        
+        if (options.SetUpstream)
+        {
+            args.Add("--set-upstream");
+        }
+        
+        if (options.ForceWithLease)
+        {
+            args.Add("--force-with-lease");
+        }
+        else if (options.Force)
+        {
+            args.Add("--force");
+        }
+        
+        if (options.DryRun)
+        {
+            args.Add("--dry-run");
+        }
+        
+        args.Add("--porcelain");
+        args.Add(remote);
+        args.Add(branch);
+        
+        // Execute with retry
+        CommandResult result;
+        try
+        {
+            result = await _pushRetryPolicy.ExecuteWithRetryAsync(
+                async () => await ExecuteGitAsync(workingDir, args, ct,
+                    timeout: TimeSpan.FromSeconds(_config.Value.TimeoutSeconds)),
+                ct);
+        }
+        catch (GitException ex) when (ex.StdErr?.Contains("Authentication failed") == true)
+        {
+            throw new AuthenticationException(_redactor.Redact(ex.StdErr ?? ""), workingDir);
+        }
+        catch (GitException ex) when (ex.StdErr?.Contains("rejected") == true)
+        {
+            throw new PushRejectedException(_redactor.Redact(ex.StdErr ?? ""), workingDir);
+        }
+        
+        var refUpdates = ParsePushOutput(result.StdOut);
+        
+        _logger.LogInformation("Pushed {Branch} to {Remote}", branch, remote);
+        
+        return new PushResult
+        {
+            Success = true,
+            Remote = remote,
+            Branch = branch,
+            RefUpdates = refUpdates,
+            Duration = stopwatch.Elapsed
+        };
+    }
+    
+    private IReadOnlyList<RefUpdate> ParsePushOutput(string output)
+    {
+        var updates = new List<RefUpdate>();
+        
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            // Porcelain format: <flag>\t<from>:<to>\t<summary> (<reason>)
+            var match = Regex.Match(line, @"^([!=\*-+])\t([^:]+):([^\t]+)\t(.*)$");
+            if (match.Success)
+            {
+                var flag = match.Groups[1].Value[0];
+                var fromRef = match.Groups[2].Value;
+                var toRef = match.Groups[3].Value;
+                
+                updates.Add(new RefUpdate
+                {
+                    RefName = toRef,
+                    OldSha = "", // Would need additional parsing
+                    NewSha = "",
+                    Status = flag switch
+                    {
+                        ' ' => RefUpdateStatus.Updated,
+                        '*' => RefUpdateStatus.Created,
+                        '-' => RefUpdateStatus.Deleted,
+                        '!' => RefUpdateStatus.Rejected,
+                        '=' => RefUpdateStatus.UpToDate,
+                        _ => RefUpdateStatus.Updated
+                    }
+                });
+            }
+        }
+        
+        return updates;
+    }
+}
+
+// PushRetryPolicy.cs
+namespace Acode.Infrastructure.Git;
+
+public sealed class PushRetryPolicy
+{
+    private readonly IOptions<GitConfiguration> _config;
+    private readonly ILogger<PushRetryPolicy> _logger;
+    
+    public async Task<CommandResult> ExecuteWithRetryAsync(
+        Func<Task<CommandResult>> operation,
+        CancellationToken ct)
+    {
+        var maxRetries = _config.Value.RetryCount;
+        var baseDelay = TimeSpan.FromMilliseconds(_config.Value.RetryDelayMs);
+        
+        for (var attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                return await operation();
+            }
+            catch (GitException ex) when (IsRetryable(ex) && attempt < maxRetries)
+            {
+                var delay = baseDelay * Math.Pow(2, attempt);
+                _logger.LogWarning(
+                    "Push attempt {Attempt} failed, retrying in {Delay}ms: {Error}",
+                    attempt + 1, delay.TotalMilliseconds, ex.Message);
+                
+                await Task.Delay(delay, ct);
+            }
+        }
+        
+        throw new InvalidOperationException("Retry exhausted");
+    }
+    
+    private static bool IsRetryable(GitException ex)
+    {
+        var stderr = ex.StdErr ?? "";
+        return stderr.Contains("Could not resolve host") ||
+               stderr.Contains("Connection refused") ||
+               stderr.Contains("Connection timed out") ||
+               stderr.Contains("temporarily unavailable");
+    }
+}
+```
+
+### CLI Commands
+
+```csharp
+// GitAddCommand.cs
+namespace Acode.Cli.Commands.Git;
+
+[Command("git add", Description = "Stage files")]
+public class GitAddCommand
+{
+    [Argument(0, Description = "Paths to stage")]
+    public string[] Paths { get; set; } = Array.Empty<string>();
+    
+    [Option("--all", Description = "Stage all changes")]
+    public bool All { get; set; }
+    
+    [Option("--force", Description = "Stage ignored files")]
+    public bool Force { get; set; }
+    
+    public async Task<int> ExecuteAsync(
+        IGitService git,
+        IConsole console,
+        CancellationToken ct)
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        
+        var result = await git.StageAsync(cwd, Paths, new StageOptions
+        {
+            All = All,
+            Force = Force
+        }, ct);
+        
+        console.WriteLine($"✓ Staged {result.FilesStaged} files");
+        return 0;
+    }
+}
+
+// GitCommitCommand.cs
+[Command("git commit", Description = "Create commit")]
+public class GitCommitCommand
+{
+    [Argument(0, Description = "Commit message")]
+    public string Message { get; set; } = "";
+    
+    [Option("--amend", Description = "Amend last commit")]
+    public bool Amend { get; set; }
+    
+    [Option("--allow-empty", Description = "Allow empty commit")]
+    public bool AllowEmpty { get; set; }
+    
+    [Option("--author", Description = "Override author")]
+    public string? Author { get; set; }
+    
+    public async Task<int> ExecuteAsync(
+        IGitService git,
+        IConsole console,
+        CancellationToken ct)
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        
+        var commit = await git.CommitAsync(cwd, Message, new CommitOptions
+        {
+            Amend = Amend,
+            AllowEmpty = AllowEmpty,
+            Author = Author
+        }, ct);
+        
+        console.WriteLine($"✓ [{commit.ShortSha}] {Message}");
+        return 0;
+    }
+}
+
+// GitPushCommand.cs
+[Command("git push", Description = "Push to remote")]
+public class GitPushCommand
+{
+    [Option("--remote", Description = "Remote name")]
+    public string? Remote { get; set; }
+    
+    [Option("--branch", Description = "Branch to push")]
+    public string? Branch { get; set; }
+    
+    [Option("--set-upstream", Description = "Set upstream tracking")]
+    public bool SetUpstream { get; set; }
+    
+    [Option("--force", Description = "Force push (DANGEROUS)")]
+    public bool Force { get; set; }
+    
+    public async Task<int> ExecuteAsync(
+        IGitService git,
+        IConsole console,
+        CancellationToken ct)
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        
+        if (Force)
+        {
+            console.Error.WriteLine("⚠ WARNING: Force push may overwrite remote history");
+        }
+        
+        try
+        {
+            var result = await git.PushAsync(cwd, new PushOptions
+            {
+                Remote = Remote,
+                Branch = Branch,
+                SetUpstream = SetUpstream,
+                Force = Force
+            }, ct);
+            
+            console.WriteLine($"✓ Pushed to {result.Remote}/{result.Branch}");
+            return 0;
+        }
+        catch (ModeViolationException ex)
+        {
+            console.Error.WriteLine($"✗ Push blocked by {ex.CurrentMode} mode");
+            console.Error.WriteLine("  Switch to burst mode to enable push");
+            return 3;
+        }
+        catch (AuthenticationException)
+        {
+            console.Error.WriteLine("✗ Authentication failed");
+            console.Error.WriteLine("  Configure credentials: git config credential.helper store");
+            return 4;
+        }
+        catch (PushRejectedException ex)
+        {
+            console.Error.WriteLine($"✗ Push rejected: {ex.Message}");
+            console.Error.WriteLine("  Pull changes first: acode git pull");
+            return 5;
+        }
+    }
+}
+```
+
+### Error Codes
+
+| Code | Name | Description | Recovery |
+|------|------|-------------|----------|
+| GIT-022C-001 | NothingToCommit | No staged changes | Stage files first |
+| GIT-022C-002 | EmptyMessage | Commit message empty | Provide message |
+| GIT-022C-003 | AuthFailed | Authentication failed | Configure credentials |
+| GIT-022C-004 | NetworkError | Network unreachable | Check connectivity |
+| GIT-022C-005 | PushRejected | Remote rejected push | Pull first |
+| GIT-022C-006 | ModeBlocked | Operation blocked by mode | Switch to burst mode |
+| GIT-022C-007 | Timeout | Push timed out | Increase timeout |
+
+### Implementation Checklist
+
+- [ ] Implement StageAsync with path handling
+- [ ] Implement UnstageAsync
+- [ ] Implement CommitAsync with validation
+- [ ] Implement PushAsync with mode check
+- [ ] Implement PushRetryPolicy with backoff
+- [ ] Add credential redaction
+- [ ] Implement CLI add command
+- [ ] Implement CLI commit command
+- [ ] Implement CLI push command
+- [ ] Add unit tests for retry logic
+- [ ] Add integration tests with real repos
+- [ ] Add E2E tests for CLI commands
+- [ ] Run performance benchmarks
+
+### Rollout Plan
+
+| Phase | Action | Validation |
+|-------|--------|------------|
+| 1 | Implement StageAsync | Stage tests pass |
+| 2 | Implement CommitAsync | Commit tests pass |
+| 3 | Implement PushRetryPolicy | Retry tests pass |
+| 4 | Implement PushAsync | Push tests pass |
+| 5 | Add mode validation | Mode tests pass |
+| 6 | Add CLI commands | E2E tests pass |
+| 7 | Performance testing | Benchmarks pass |
 
 ---
 

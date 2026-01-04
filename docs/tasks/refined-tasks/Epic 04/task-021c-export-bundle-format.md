@@ -10,53 +10,69 @@
 
 ## Description
 
-Task 021.c defines the export bundle format for sharing and archiving execution runs. Bundles MUST be self-contained archives that include all metadata and artifacts needed for replay or audit. This enables debugging across machines and sharing run data with team members.
+### Overview
 
-The export bundle MUST include a DB snapshot containing run, session, task, step, and tool-call metadata. All sensitive data MUST be redacted before export. The redaction process MUST follow the patterns defined in Task 021.b for environment variables.
-
-The bundle MUST include outbox/sync status summary. This captures pending, acknowledged, and failed message counts. This metadata enables understanding the synchronization state at the time of export.
-
-Stable pointers to included artifacts MUST be present. Artifacts MUST be referenced by content hash rather than filesystem paths. This ensures bundles remain valid when moved between systems.
-
-Provenance fields MUST be included for audit and replay support. These fields MUST include repository SHA, worktree ID, and timestamps. This enables correlating exported runs with specific code versions.
-
-The bundle format MUST be a ZIP archive with a defined internal structure. The format MUST be versioned to support future evolution. Older readers MUST be able to detect incompatible versions and fail gracefully.
-
-Import functionality MUST validate bundle integrity before extracting. Corrupted or tampered bundles MUST be rejected. Signature verification MUST be optional but supported.
-
-The CLI MUST provide `acode runs export` and `acode runs import` commands. Export MUST support selecting specific runs or date ranges. Import MUST support merging with existing data or replacing.
+Task 021.c defines the export bundle format for sharing and archiving execution runs. Bundles MUST be self-contained ZIP archives that include all metadata and artifacts needed for replay, audit, or cross-machine debugging. This enables teams to share run data, support compliance requirements, and accelerate troubleshooting across distributed environments.
 
 ### Business Value
 
-Export bundles enable portable debugging. When a run fails in one environment, the bundle can be shared for analysis elsewhere. This accelerates troubleshooting across distributed teams. Bundles also serve as audit trails for compliance requirements.
+1. **Portable Debugging**: Share run data across machines for collaborative troubleshooting
+2. **Audit Trail Compliance**: Bundles serve as immutable records for compliance requirements
+3. **Knowledge Transfer**: New team members can review historical runs for learning
+4. **Incident Response**: Quick export of relevant runs during outage investigation
+5. **Backup and Archive**: Long-term storage of execution history
+6. **Reproducibility Support**: Provenance data enables correlating runs with code versions
 
-### Scope Boundaries
+### Bundle Contents
 
-This task covers the bundle format definition and CLI commands for export/import. It does NOT cover the artifact storage (Task 021), directory standards (Task 021.a), or viewing commands (Task 021.b).
+| Component | File | Purpose |
+|-----------|------|---------|
+| Manifest | `manifest.json` | Bundle metadata, file hashes, version |
+| Provenance | `provenance.json` | Git repo, commit SHA, worktree ID |
+| Outbox Summary | `outbox-summary.json` | Sync status at export time |
+| Run Metadata | `runs/*.json` | Redacted run records |
+| Artifacts | `artifacts/{run-id}/*` | Stdout, stderr, logs, results |
+
+### Scope
+
+This task covers:
+1. **Bundle Format Definition**: ZIP structure, manifest schema, versioning
+2. **Export Command**: Selection, filtering, redaction, signing
+3. **Import Command**: Validation, merge strategies, integrity checks
+4. **Redaction**: Sensitive data masking before export
+5. **Integrity**: Content hashing, signature verification
+6. **Security**: Path traversal prevention, ZIP bomb detection
 
 ### Integration Points
 
-- Task 021: RunRecord and artifact data sources
-- Task 021.a: Artifact directory structure for collection
-- Task 021.b: Redaction patterns for sensitive data
-- Task 039: Session metadata for inclusion
-- Task 038: Outbox status summary
-- Task 049.e: Provenance fields
+| Component | Integration Type | Data Flow |
+|-----------|------------------|-----------|
+| Task 021 | Run Records | RunRepository → Exporter |
+| Task 021.a | Artifact Paths | PathResolver → Exporter |
+| Task 021.b | Redaction Patterns | RedactionService |
+| Task 039 | Session Data | SessionRepository → Exporter |
+| Task 038 | Outbox Status | OutboxService → Exporter |
+| Task 049.e | Provenance | ProvenanceService → Exporter |
 
 ### Failure Modes
 
-- Export with missing artifacts → Include manifest noting missing files
-- Import with version mismatch → Reject with clear error message
-- Import with hash mismatch → Reject as corrupted
-- Export to read-only path → Return exit code 1 with error
-- Import conflicts with existing runs → Configurable merge strategy
+| Failure Mode | Detection | Recovery |
+|--------------|-----------|----------|
+| Missing artifacts | File not found | Include in manifest as missing |
+| Version mismatch | Version comparison | Reject with clear error |
+| Hash mismatch | SHA-256 verification | Reject as corrupted |
+| Export disk full | Write exception | Clean temp file, error message |
+| Import conflicts | Run ID exists | Prompt for merge strategy |
+| Path traversal | Path validation | Block import, log violation |
+| ZIP bomb | Size ratio check | Abort extraction |
 
 ### Assumptions
 
 - ZIP format is universally supported
 - SHA-256 provides sufficient integrity verification
-- Bundles will typically be <100MB
+- Bundles will typically be <100MB (large bundles up to 10GB)
 - Import frequency is low (occasional, not continuous)
+- Signing keys are managed externally
 
 ---
 
@@ -617,22 +633,25 @@ src/
 │       ├── BundleManifest.cs
 │       ├── BundleVersion.cs
 │       ├── Provenance.cs
-│       └── OutboxSummary.cs
+│       ├── OutboxSummary.cs
+│       ├── ExportedRun.cs
+│       └── IBundleExporter.cs
 ├── Acode.Application/
 │   └── Export/
 │       ├── Commands/
 │       │   ├── ExportBundleCommand.cs
 │       │   └── ImportBundleCommand.cs
-│       └── Services/
-│           ├── IBundleExporter.cs
-│           ├── IBundleImporter.cs
-│           └── IRedactionService.cs
+│       └── Handlers/
+│           ├── ExportBundleHandler.cs
+│           └── ImportBundleHandler.cs
 ├── Acode.Infrastructure/
 │   └── Export/
 │       ├── ZipBundleExporter.cs
 │       ├── ZipBundleImporter.cs
 │       ├── RedactionService.cs
-│       └── HashCalculator.cs
+│       ├── HashCalculator.cs
+│       ├── BundleValidator.cs
+│       └── SignatureService.cs
 └── Acode.Cli/
     └── Commands/
         └── Runs/
@@ -640,62 +659,738 @@ src/
             └── RunsImportCommand.cs
 ```
 
-### Core Interfaces
+### Domain Models
 
 ```csharp
+// BundleManifest.cs
+namespace Acode.Domain.Export;
+
+public sealed record BundleManifest
+{
+    public const string CurrentVersion = "1.0.0";
+    public const string FileName = "manifest.json";
+    
+    public required string Version { get; init; }
+    public required DateTimeOffset CreatedAt { get; init; }
+    public required string ToolVersion { get; init; }
+    public required int RunCount { get; init; }
+    public required long TotalArtifactBytes { get; init; }
+    public required IReadOnlyDictionary<string, FileHash> Files { get; init; }
+    public IReadOnlyList<string> MissingArtifacts { get; init; } = Array.Empty<string>();
+    
+    public bool IsCompatible(string readerVersion)
+    {
+        if (!TryGetMajorVersion(Version, out var bundleMajor))
+        {
+            // If the bundle manifest has an invalid version, treat it as incompatible.
+            return false;
+        }
+
+        if (!TryGetMajorVersion(readerVersion, out var readerMajor))
+        {
+            // If the reader's version is invalid, conservatively treat as incompatible.
+            return false;
+        }
+
+        return bundleMajor <= readerMajor;
+    }
+
+    private static bool TryGetMajorVersion(string? version, out int major)
+    {
+        major = 0;
+
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return false;
+        }
+
+        var parts = version.Split('.');
+        if (parts.Length == 0 || string.IsNullOrWhiteSpace(parts[0]))
+        {
+            return false;
+        }
+
+        return int.TryParse(parts[0], out major);
+    }
+}
+
+public sealed record FileHash
+{
+    public required string Sha256 { get; init; }
+    public required long SizeBytes { get; init; }
+}
+
+// Provenance.cs
+namespace Acode.Domain.Export;
+
+public sealed record Provenance
+{
+    public const string FileName = "provenance.json";
+    
+    public string? RemoteUrl { get; init; }
+    public string? CommitSha { get; init; }
+    public string? Branch { get; init; }
+    public string? WorktreeId { get; init; }
+    public required DateTimeOffset ExportTimestamp { get; init; }
+    public string? ExportedBy { get; init; }
+    public string? MachineName { get; init; }
+}
+
+// OutboxSummary.cs
+namespace Acode.Domain.Export;
+
+public sealed record OutboxSummary
+{
+    public const string FileName = "outbox-summary.json";
+    
+    public required int PendingCount { get; init; }
+    public required int AcknowledgedCount { get; init; }
+    public required int FailedCount { get; init; }
+    public DateTimeOffset? OldestPending { get; init; }
+    public DateTimeOffset? NewestPending { get; init; }
+}
+
+// ExportedRun.cs
+namespace Acode.Domain.Export;
+
+public sealed record ExportedRun
+{
+    public required string RunId { get; init; }
+    public required string TaskName { get; init; }
+    public required DateTimeOffset StartTime { get; init; }
+    public required DateTimeOffset EndTime { get; init; }
+    public required long DurationMs { get; init; }
+    public required int ExitCode { get; init; }
+    public required string Status { get; init; }
+    public required string Command { get; init; }
+    public required string WorkingDirectory { get; init; }
+    public required string OperatingMode { get; init; }
+    public string? ContainerId { get; init; }
+    public IReadOnlyDictionary<string, string> Environment { get; init; } = 
+        new Dictionary<string, string>();
+    public IReadOnlyList<string> Artifacts { get; init; } = Array.Empty<string>();
+}
+
+// IBundleExporter.cs
+namespace Acode.Domain.Export;
+
 public interface IBundleExporter
 {
-    Task<ExportResult> ExportAsync(ExportOptions options);
+    Task<ExportResult> ExportAsync(
+        ExportOptions options,
+        IProgress<ExportProgress>? progress = null,
+        CancellationToken cancellationToken = default);
 }
+
+public sealed record ExportOptions
+{
+    public IReadOnlyList<string>? RunIds { get; init; }
+    public DateTimeOffset? Since { get; init; }
+    public DateTimeOffset? Until { get; init; }
+    public int? LastN { get; init; }
+    public bool ExportAll { get; init; }
+    public bool IncludeArtifacts { get; init; } = true;
+    public bool ApplyRedaction { get; init; } = true;
+    public bool Sign { get; init; }
+    public string? OutputPath { get; init; }
+}
+
+public sealed record ExportResult
+{
+    public required bool Success { get; init; }
+    public required string OutputPath { get; init; }
+    public required int RunCount { get; init; }
+    public required long TotalBytes { get; init; }
+    public required TimeSpan Duration { get; init; }
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
+}
+
+public sealed record ExportProgress
+{
+    public required string Phase { get; init; }
+    public required int CurrentItem { get; init; }
+    public required int TotalItems { get; init; }
+    public string? CurrentFile { get; init; }
+}
+
+// IBundleImporter.cs
+namespace Acode.Domain.Export;
 
 public interface IBundleImporter
 {
-    Task<ImportPreview> PreviewAsync(string bundlePath);
-    Task<ImportResult> ImportAsync(string bundlePath, ImportOptions options);
+    Task<ImportPreview> PreviewAsync(
+        string bundlePath,
+        CancellationToken cancellationToken = default);
+    
+    Task<ImportResult> ImportAsync(
+        string bundlePath,
+        ImportOptions options,
+        IProgress<ImportProgress>? progress = null,
+        CancellationToken cancellationToken = default);
 }
 
-public interface IRedactionService
+public sealed record ImportOptions
 {
-    string RedactValue(string key, string value);
-    Dictionary<string, string> RedactEnvironment(Dictionary<string, string> env);
-    bool IsRedactionPattern(string pattern);
+    public MergeStrategy Strategy { get; init; } = MergeStrategy.Merge;
+    public bool VerifySignature { get; init; }
+    public bool Force { get; init; }
 }
 
-public record ExportOptions(
-    IReadOnlyList<RunId>? RunIds,
-    DateTimeOffset? Since,
-    DateTimeOffset? Until,
-    int? LastN,
-    bool IncludeArtifacts,
-    bool ApplyRedaction,
-    bool Sign,
-    string OutputPath);
+public enum MergeStrategy
+{
+    Merge,      // Add new, skip existing
+    Replace,    // Overwrite existing
+    SkipExisting // Only add new, skip all conflicts
+}
 
-public record ImportOptions(
-    MergeStrategy Strategy,
-    bool VerifySignature,
-    bool Force);
+public sealed record ImportPreview
+{
+    public required BundleManifest Manifest { get; init; }
+    public required Provenance Provenance { get; init; }
+    public required int NewRuns { get; init; }
+    public required int ConflictingRuns { get; init; }
+    public required long TotalBytes { get; init; }
+    public IReadOnlyList<string> Conflicts { get; init; } = Array.Empty<string>();
+}
 
-public enum MergeStrategy { Merge, Replace, SkipExisting }
+public sealed record ImportResult
+{
+    public required bool Success { get; init; }
+    public required int ImportedRuns { get; init; }
+    public required int SkippedRuns { get; init; }
+    public required int ReplacedRuns { get; init; }
+    public required TimeSpan Duration { get; init; }
+    public IReadOnlyList<string> Errors { get; init; } = Array.Empty<string>();
+}
+```
 
-public record BundleManifest(
-    string Version,
-    DateTimeOffset CreatedAt,
-    string ToolVersion,
-    int RunCount,
-    long TotalArtifactBytes,
-    IReadOnlyDictionary<string, string> FileHashes);
+### Infrastructure Implementation
 
-public record Provenance(
-    string? RemoteUrl,
-    string? CommitSha,
-    string? WorktreeId,
-    DateTimeOffset Timestamp);
+```csharp
+// ZipBundleExporter.cs
+namespace Acode.Infrastructure.Export;
 
-public record OutboxSummary(
-    int PendingCount,
-    int AcknowledgedCount,
-    int FailedCount);
+public sealed class ZipBundleExporter : IBundleExporter
+{
+    private readonly IRunRepository _runRepository;
+    private readonly IArtifactReader _artifactReader;
+    private readonly IRedactionService _redactionService;
+    private readonly IHashCalculator _hashCalculator;
+    private readonly IProvenanceService _provenanceService;
+    private readonly IOutboxService _outboxService;
+    private readonly ISignatureService _signatureService;
+    private readonly ILogger<ZipBundleExporter> _logger;
+    
+    public async Task<ExportResult> ExportAsync(
+        ExportOptions options,
+        IProgress<ExportProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var tempPath = Path.GetTempFileName();
+        
+        try
+        {
+            var runs = await GetRunsToExportAsync(options, ct);
+            
+            if (runs.Count == 0)
+            {
+                throw new ExportException("No runs match the selection criteria");
+            }
+            
+            var outputPath = options.OutputPath ?? 
+                $"acode-export-{DateTime.UtcNow:yyyyMMdd-HHmmss}.acode-bundle";
+            
+            await using var zipStream = File.Create(tempPath);
+            using var archive = new ZipArchive(zipStream, ZipArchiveMode.Create);
+            
+            var fileHashes = new Dictionary<string, FileHash>();
+            var missingArtifacts = new List<string>();
+            long totalBytes = 0;
+            
+            // Export runs
+            for (var i = 0; i < runs.Count; i++)
+            {
+                progress?.Report(new ExportProgress
+                {
+                    Phase = "Exporting runs",
+                    CurrentItem = i + 1,
+                    TotalItems = runs.Count,
+                    CurrentFile = runs[i].RunId
+                });
+                
+                var run = runs[i];
+                var exportedRun = await ExportRunAsync(run, options, ct);
+                
+                var runPath = $"runs/{run.RunId}.json";
+                var runJson = JsonSerializer.Serialize(exportedRun, JsonOptions.Pretty);
+                var runBytes = Encoding.UTF8.GetBytes(runJson);
+                
+                var entry = archive.CreateEntry(runPath);
+                await using var entryStream = entry.Open();
+                await entryStream.WriteAsync(runBytes, ct);
+                
+                fileHashes[runPath] = new FileHash
+                {
+                    Sha256 = _hashCalculator.ComputeSha256(runBytes),
+                    SizeBytes = runBytes.Length
+                };
+                totalBytes += runBytes.Length;
+                
+                // Export artifacts
+                if (options.IncludeArtifacts)
+                {
+                    foreach (var artifact in run.Artifacts)
+                    {
+                        var artifactPath = $"artifacts/{run.RunId}/{artifact}";
+                        
+                        if (!await _artifactReader.ExistsAsync(run.RunId, artifact))
+                        {
+                            missingArtifacts.Add(artifactPath);
+                            continue;
+                        }
+                        
+                        var artifactEntry = archive.CreateEntry(artifactPath);
+                        await using var artifactStream = artifactEntry.Open();
+                        
+                        await using var sourceStream = 
+                            await _artifactReader.OpenAsync(run.RunId, artifact, ct);
+                        
+                        var hash = await _hashCalculator.ComputeSha256StreamingAsync(
+                            sourceStream, artifactStream, ct);
+                        
+                        fileHashes[artifactPath] = new FileHash
+                        {
+                            Sha256 = hash,
+                            SizeBytes = sourceStream.Position
+                        };
+                        totalBytes += sourceStream.Position;
+                    }
+                }
+            }
+            
+            // Add provenance
+            var provenance = await _provenanceService.GetCurrentAsync(ct);
+            var provenanceJson = JsonSerializer.Serialize(provenance, JsonOptions.Pretty);
+            var provenanceEntry = archive.CreateEntry(Provenance.FileName);
+            await using (var ps = provenanceEntry.Open())
+            {
+                await ps.WriteAsync(Encoding.UTF8.GetBytes(provenanceJson), ct);
+            }
+            fileHashes[Provenance.FileName] = new FileHash
+            {
+                Sha256 = _hashCalculator.ComputeSha256(provenanceJson),
+                SizeBytes = Encoding.UTF8.GetByteCount(provenanceJson)
+            };
+            
+            // Add outbox summary
+            var outboxSummary = await _outboxService.GetSummaryAsync(ct);
+            var outboxJson = JsonSerializer.Serialize(outboxSummary, JsonOptions.Pretty);
+            var outboxEntry = archive.CreateEntry(OutboxSummary.FileName);
+            await using (var os = outboxEntry.Open())
+            {
+                await os.WriteAsync(Encoding.UTF8.GetBytes(outboxJson), ct);
+            }
+            fileHashes[OutboxSummary.FileName] = new FileHash
+            {
+                Sha256 = _hashCalculator.ComputeSha256(outboxJson),
+                SizeBytes = Encoding.UTF8.GetByteCount(outboxJson)
+            };
+            
+            // Add manifest (last, after all hashes computed)
+            var manifest = new BundleManifest
+            {
+                Version = BundleManifest.CurrentVersion,
+                CreatedAt = DateTimeOffset.UtcNow,
+                ToolVersion = typeof(ZipBundleExporter).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+                RunCount = runs.Count,
+                TotalArtifactBytes = totalBytes,
+                Files = fileHashes,
+                MissingArtifacts = missingArtifacts
+            };
+            
+            var manifestJson = JsonSerializer.Serialize(manifest, JsonOptions.Pretty);
+            var manifestEntry = archive.CreateEntry(BundleManifest.FileName);
+            await using (var ms = manifestEntry.Open())
+            {
+                await ms.WriteAsync(Encoding.UTF8.GetBytes(manifestJson), ct);
+            }
+            
+            // Sign if requested
+            if (options.Sign)
+            {
+                var signature = await _signatureService.SignAsync(tempPath, ct);
+                var sigEntry = archive.CreateEntry("signature.sig");
+                await using var ss = sigEntry.Open();
+                await ss.WriteAsync(signature, ct);
+            }
+            
+            // Close archive and move to final location
+            archive.Dispose();
+            zipStream.Dispose();
+            
+            File.Move(tempPath, outputPath, overwrite: true);
+            
+            _logger.LogInformation(
+                "Exported {RunCount} runs to {Path} ({Bytes} bytes)",
+                runs.Count, outputPath, totalBytes);
+            
+            return new ExportResult
+            {
+                Success = true,
+                OutputPath = outputPath,
+                RunCount = runs.Count,
+                TotalBytes = totalBytes,
+                Duration = stopwatch.Elapsed,
+                Warnings = missingArtifacts.Select(a => $"Missing artifact: {a}").ToList()
+            };
+        }
+        catch
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+            throw;
+        }
+    }
+    
+    private async Task<ExportedRun> ExportRunAsync(
+        RunDetails run,
+        ExportOptions options,
+        CancellationToken ct)
+    {
+        var environment = options.ApplyRedaction
+            ? _redactionService.RedactEnvironment(run.Environment)
+            : run.Environment;
+        
+        var command = options.ApplyRedaction
+            ? _redactionService.RedactCommand(run.Command)
+            : run.Command;
+        
+        return new ExportedRun
+        {
+            RunId = run.Id.Value,
+            TaskName = run.TaskName,
+            StartTime = run.StartTime,
+            EndTime = run.EndTime,
+            DurationMs = (long)run.Duration.TotalMilliseconds,
+            ExitCode = run.ExitCode,
+            Status = run.Status.ToString(),
+            Command = command,
+            WorkingDirectory = run.WorkingDirectory,
+            OperatingMode = run.OperatingMode,
+            ContainerId = run.ContainerId,
+            Environment = environment,
+            Artifacts = run.Artifacts.Select(a => a.FileName).ToList()
+        };
+    }
+}
+
+// RedactionService.cs
+namespace Acode.Infrastructure.Export;
+
+public sealed class RedactionService : IRedactionService
+{
+    private readonly IReadOnlyList<string> _patterns;
+    private const string RedactedValue = "[REDACTED]";
+    
+    public RedactionService(IOptions<RedactionConfig> config)
+    {
+        _patterns = config.Value.Patterns ?? new[]
+        {
+            "PASSWORD", "SECRET", "KEY", "TOKEN", "API_KEY",
+            "APIKEY", "CREDENTIAL", "PRIVATE", "AUTH", "BEARER"
+        };
+    }
+    
+    public IReadOnlyDictionary<string, string> RedactEnvironment(
+        IReadOnlyDictionary<string, string> environment)
+    {
+        var redacted = new Dictionary<string, string>(environment.Count);
+        
+        foreach (var (key, value) in environment)
+        {
+            redacted[key] = ShouldRedact(key, value) ? RedactedValue : value;
+        }
+        
+        return redacted;
+    }
+    
+    public string RedactCommand(string command)
+    {
+        foreach (var pattern in _patterns)
+        {
+            // Redact --password=value, --secret value patterns
+            var regex = new Regex(
+                $@"(--{pattern}[=\s]+)(\S+)",
+                RegexOptions.IgnoreCase);
+            command = regex.Replace(command, $"$1{RedactedValue}");
+        }
+        
+        return command;
+    }
+    
+    private bool ShouldRedact(string key, string value)
+    {
+        return _patterns.Any(p => 
+            key.Contains(p, StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+// BundleValidator.cs
+namespace Acode.Infrastructure.Export;
+
+public sealed class BundleValidator : IBundleValidator
+{
+    private readonly IHashCalculator _hashCalculator;
+    private const long MaxDecompressionRatio = 100; // ZIP bomb protection
+    
+    public async Task<ValidationResult> ValidateAsync(
+        string bundlePath,
+        CancellationToken ct = default)
+    {
+        var errors = new List<string>();
+        var warnings = new List<string>();
+        
+        try
+        {
+            using var archive = ZipFile.OpenRead(bundlePath);
+            
+            // Check for manifest
+            var manifestEntry = archive.GetEntry(BundleManifest.FileName);
+            if (manifestEntry is null)
+            {
+                errors.Add("Bundle missing manifest.json");
+                return new ValidationResult(false, errors, warnings);
+            }
+            
+            // Parse manifest
+            await using var ms = manifestEntry.Open();
+            var manifest = await JsonSerializer.DeserializeAsync<BundleManifest>(ms, ct: ct);
+            
+            if (manifest is null)
+            {
+                errors.Add("Invalid manifest.json format");
+                return new ValidationResult(false, errors, warnings);
+            }
+            
+            // Version check
+            if (!manifest.IsCompatible(BundleManifest.CurrentVersion))
+            {
+                errors.Add($"Incompatible bundle version: {manifest.Version}");
+                return new ValidationResult(false, errors, warnings);
+            }
+            
+            // ZIP bomb check
+            var totalDecompressed = archive.Entries.Sum(e => e.Length);
+            var compressedSize = new FileInfo(bundlePath).Length;
+            
+            if (totalDecompressed > compressedSize * MaxDecompressionRatio)
+            {
+                errors.Add("Potential ZIP bomb detected");
+                return new ValidationResult(false, errors, warnings);
+            }
+            
+            // Hash verification
+            foreach (var (path, expectedHash) in manifest.Files)
+            {
+                var entry = archive.GetEntry(path);
+                if (entry is null)
+                {
+                    errors.Add($"Missing file: {path}");
+                    continue;
+                }
+                
+                // Path traversal check
+                if (path.Contains("..") || Path.IsPathRooted(path))
+                {
+                    errors.Add($"Invalid path (traversal detected): {path}");
+                    continue;
+                }
+                
+                await using var stream = entry.Open();
+                var actualHash = await _hashCalculator.ComputeSha256Async(stream, ct);
+                
+                if (actualHash != expectedHash.Sha256)
+                {
+                    errors.Add($"Hash mismatch for {path}");
+                }
+            }
+            
+            return new ValidationResult(errors.Count == 0, errors, warnings);
+        }
+        catch (InvalidDataException)
+        {
+            errors.Add("Invalid or corrupted ZIP archive");
+            return new ValidationResult(false, errors, warnings);
+        }
+    }
+}
+```
+
+### CLI Commands
+
+```csharp
+// RunsExportCommand.cs
+namespace Acode.Cli.Commands.Runs;
+
+[Command("runs export", Description = "Export runs to a bundle")]
+public class RunsExportCommand
+{
+    [Option("-o|--output", Description = "Output file path")]
+    public string? Output { get; set; }
+    
+    [Option("--run", Description = "Run ID to export (repeatable)")]
+    public string[] RunIds { get; set; } = Array.Empty<string>();
+    
+    [Option("--since", Description = "Export runs after date")]
+    public string? Since { get; set; }
+    
+    [Option("--last", Description = "Export last N runs")]
+    public int? Last { get; set; }
+    
+    [Option("--no-artifacts", Description = "Exclude artifact files")]
+    public bool NoArtifacts { get; set; }
+    
+    [Option("--no-redact", Description = "Skip redaction (WARNING)")]
+    public bool NoRedact { get; set; }
+    
+    [Option("--sign", Description = "Sign the bundle")]
+    public bool Sign { get; set; }
+    
+    public async Task<int> ExecuteAsync(
+        IBundleExporter exporter,
+        IConsole console,
+        CancellationToken ct)
+    {
+        if (NoRedact)
+        {
+            console.Error.WriteLine("WARNING: Exporting without redaction may expose secrets!");
+        }
+        
+        var options = new ExportOptions
+        {
+            RunIds = RunIds.Length > 0 ? RunIds.ToList() : null,
+            Since = ParseDate(Since),
+            LastN = Last,
+            IncludeArtifacts = !NoArtifacts,
+            ApplyRedaction = !NoRedact,
+            Sign = Sign,
+            OutputPath = Output
+        };
+        
+        var progress = new Progress<ExportProgress>(p =>
+        {
+            console.Write($"\r{p.Phase}: {p.CurrentItem}/{p.TotalItems}");
+        });
+        
+        var result = await exporter.ExportAsync(options, progress, ct);
+        
+        console.WriteLine();
+        console.WriteLine($"✓ Exported {result.RunCount} runs to {result.OutputPath}");
+        console.WriteLine($"  Size: {FormatBytes(result.TotalBytes)}");
+        console.WriteLine($"  Duration: {result.Duration.TotalSeconds:F1}s");
+        
+        foreach (var warning in result.Warnings)
+        {
+            console.Error.WriteLine($"  ⚠ {warning}");
+        }
+        
+        return 0;
+    }
+}
+
+// RunsImportCommand.cs
+namespace Acode.Cli.Commands.Runs;
+
+[Command("runs import", Description = "Import runs from a bundle")]
+public class RunsImportCommand
+{
+    [Argument(0, Description = "Bundle file path")]
+    public string BundlePath { get; set; } = "";
+    
+    [Option("--dry-run", Description = "Preview without changes")]
+    public bool DryRun { get; set; }
+    
+    [Option("--merge", Description = "Add new, skip existing (default)")]
+    public bool Merge { get; set; }
+    
+    [Option("--replace", Description = "Overwrite existing runs")]
+    public bool Replace { get; set; }
+    
+    [Option("--skip-existing", Description = "Skip all conflicts")]
+    public bool SkipExisting { get; set; }
+    
+    [Option("--verify", Description = "Verify bundle signature")]
+    public bool Verify { get; set; }
+    
+    [Option("--force", Description = "Skip confirmation prompts")]
+    public bool Force { get; set; }
+    
+    public async Task<int> ExecuteAsync(
+        IBundleImporter importer,
+        IConsole console,
+        CancellationToken ct)
+    {
+        // Preview first
+        var preview = await importer.PreviewAsync(BundlePath, ct);
+        
+        console.WriteLine($"Bundle: {Path.GetFileName(BundlePath)}");
+        console.WriteLine($"  Version: {preview.Manifest.Version}");
+        console.WriteLine($"  Created: {preview.Manifest.CreatedAt:yyyy-MM-dd HH:mm}");
+        console.WriteLine($"  Runs: {preview.Manifest.RunCount}");
+        console.WriteLine($"  Size: {FormatBytes(preview.TotalBytes)}");
+        console.WriteLine();
+        console.WriteLine($"  New runs: {preview.NewRuns}");
+        console.WriteLine($"  Conflicts: {preview.ConflictingRuns}");
+        
+        if (DryRun)
+        {
+            console.WriteLine();
+            console.WriteLine("(Dry run - no changes made)");
+            return 0;
+        }
+        
+        if (preview.ConflictingRuns > 0 && !Force)
+        {
+            console.WriteLine();
+            console.WriteLine($"Found {preview.ConflictingRuns} conflicting runs.");
+            console.Write("Continue with merge? [y/N]: ");
+            var response = Console.ReadLine();
+            if (!response?.Equals("y", StringComparison.OrdinalIgnoreCase) ?? true)
+            {
+                console.WriteLine("Cancelled.");
+                return 0;
+            }
+        }
+        
+        var strategy = Replace ? MergeStrategy.Replace
+            : SkipExisting ? MergeStrategy.SkipExisting
+            : MergeStrategy.Merge;
+        
+        var options = new ImportOptions
+        {
+            Strategy = strategy,
+            VerifySignature = Verify,
+            Force = Force
+        };
+        
+        var result = await importer.ImportAsync(BundlePath, options, null, ct);
+        
+        console.WriteLine();
+        console.WriteLine($"✓ Imported {result.ImportedRuns} runs");
+        
+        if (result.SkippedRuns > 0)
+            console.WriteLine($"  Skipped: {result.SkippedRuns}");
+        if (result.ReplacedRuns > 0)
+            console.WriteLine($"  Replaced: {result.ReplacedRuns}");
+        
+        console.WriteLine($"  Duration: {result.Duration.TotalSeconds:F1}s");
+        
+        return result.Success ? 0 : 1;
+    }
+}
 ```
 
 ### Manifest Schema
@@ -708,51 +1403,71 @@ public record OutboxSummary(
   "runCount": 10,
   "totalArtifactBytes": 1048576,
   "files": {
-    "runs/run-001.json": "sha256:abc123...",
-    "artifacts/run-001/stdout.txt": "sha256:def456..."
-  }
+    "runs/run-001.json": {
+      "sha256": "abc123...",
+      "sizeBytes": 1024
+    },
+    "artifacts/run-001/stdout.txt": {
+      "sha256": "def456...",
+      "sizeBytes": 45678
+    }
+  },
+  "missingArtifacts": []
 }
 ```
 
 ### Error Codes
 
-| Code | Name | Description |
-|------|------|-------------|
-| EXPORT_001 | OutputPathExists | Output file already exists |
-| EXPORT_002 | NoRunsSelected | No runs match selection criteria |
-| EXPORT_003 | ArtifactMissing | Referenced artifact not found |
-| EXPORT_004 | SigningFailed | Unable to sign bundle |
-| IMPORT_001 | InvalidFormat | Bundle format unrecognized |
-| IMPORT_002 | VersionMismatch | Incompatible bundle version |
-| IMPORT_003 | HashMismatch | Content hash verification failed |
-| IMPORT_004 | SignatureInvalid | Signature verification failed |
-| IMPORT_005 | PathTraversal | Malicious path detected |
+| Code | Name | Description | Recovery |
+|------|------|-------------|----------|
+| ACODE-EXP-001 | OutputPathExists | Output file already exists | Use --force or different path |
+| ACODE-EXP-002 | NoRunsSelected | No runs match criteria | Adjust filter options |
+| ACODE-EXP-003 | ArtifactMissing | Artifact file not found | Warning logged, export continues |
+| ACODE-EXP-004 | SigningFailed | Cannot sign bundle | Check signing key config |
+| ACODE-EXP-005 | DiskFull | Insufficient disk space | Free disk space |
+| ACODE-IMP-001 | InvalidFormat | Bundle format unrecognized | Use valid .acode-bundle |
+| ACODE-IMP-002 | VersionMismatch | Incompatible bundle version | Update acode |
+| ACODE-IMP-003 | HashMismatch | Content verification failed | Obtain fresh bundle |
+| ACODE-IMP-004 | SignatureInvalid | Signature verification failed | Check public key |
+| ACODE-IMP-005 | PathTraversal | Malicious path in bundle | Do not import |
+| ACODE-IMP-006 | ZipBomb | Decompression attack detected | Do not import |
 
-### Validation Checklist Before Merge
+### Implementation Checklist
 
-- [ ] Export creates valid ZIP archive
-- [ ] Manifest includes all required fields
-- [ ] Content hashes match file contents
-- [ ] Redaction patterns are applied
-- [ ] Path traversal is blocked on import
-- [ ] ZIP bomb detection works
-- [ ] Signature generation and verification work
-- [ ] Round-trip preserves all data
-- [ ] Performance benchmarks pass
-- [ ] Memory profiling completed
+- [ ] Create domain models for BundleManifest, Provenance, OutboxSummary
+- [ ] Implement IBundleExporter interface
+- [ ] Implement ZipBundleExporter with streaming
+- [ ] Implement IBundleImporter interface
+- [ ] Implement ZipBundleImporter with validation
+- [ ] Implement RedactionService with configurable patterns
+- [ ] Implement HashCalculator for SHA-256
+- [ ] Implement BundleValidator with security checks
+- [ ] Implement SignatureService for signing/verification
+- [ ] Create RunsExportCommand with all options
+- [ ] Create RunsImportCommand with merge strategies
+- [ ] Add progress reporting for large bundles
+- [ ] Add unit tests for all components
+- [ ] Add integration tests for round-trip
+- [ ] Add E2E tests for CLI commands
+- [ ] Performance test with large bundles
+- [ ] Security test for path traversal and ZIP bombs
+- [ ] Document configuration options
 
 ### Rollout Plan
 
-1. Implement BundleManifest and domain models
-2. Implement RedactionService
-3. Implement ZipBundleExporter
-4. Implement ZipBundleImporter
-5. Add CLI commands
-6. Integration tests for round-trip
-7. E2E tests for CLI workflow
-8. Performance testing with large bundles
-9. Documentation updates
-10. Release as part of CLI bundle
+| Phase | Action | Validation |
+|-------|--------|------------|
+| 1 | Implement domain models | Unit tests pass |
+| 2 | Implement RedactionService | Redaction tests pass |
+| 3 | Implement HashCalculator | Hash tests pass |
+| 4 | Implement ZipBundleExporter | Export tests pass |
+| 5 | Implement BundleValidator | Validation tests pass |
+| 6 | Implement ZipBundleImporter | Import tests pass |
+| 7 | Implement SignatureService | Signing tests pass |
+| 8 | Add CLI commands | E2E tests pass |
+| 9 | Performance testing | <30s for 100 runs |
+| 10 | Security testing | No vulnerabilities |
+| 11 | Documentation and release | User manual complete |
 
 ---
 

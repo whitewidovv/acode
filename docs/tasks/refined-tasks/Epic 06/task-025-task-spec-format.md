@@ -368,50 +368,1088 @@ task:
 
 ## Implementation Prompt
 
-### Interfaces
+### File Structure
+
+```
+src/
+├── Acode.Core/
+│   └── Domain/
+│       └── Tasks/
+│           ├── TaskSpec.cs               # Task spec entity
+│           ├── TaskStatus.cs             # Status enum
+│           ├── TaskId.cs                 # ULID wrapper
+│           └── TaskSpecDefaults.cs       # Default values
+│
+├── Acode.Application/
+│   └── Services/
+│       └── TaskSpec/
+│           ├── ITaskSpecParser.cs        # Parser interface
+│           ├── TaskSpecParser.cs         # YAML/JSON parser
+│           ├── ITaskSpecValidator.cs     # Validator interface
+│           ├── TaskSpecValidator.cs      # Validation rules
+│           ├── ITaskSpecSerializer.cs    # Serializer interface
+│           ├── TaskSpecSerializer.cs     # YAML/JSON output
+│           ├── ParseResult.cs            # Parse result type
+│           └── ValidationResult.cs       # Validation result
+│
+└── Acode.Cli/
+    └── Commands/
+        └── Task/
+            ├── TaskValidateCommand.cs
+            ├── TaskAddCommand.cs
+            ├── TaskShowCommand.cs
+            ├── TaskListCommand.cs
+            ├── TaskRetryCommand.cs
+            └── TaskCancelCommand.cs
+
+tests/
+├── Acode.Application.Tests/
+│   └── Services/
+│       └── TaskSpec/
+│           ├── TaskSpecParserTests.cs
+│           ├── TaskSpecValidatorTests.cs
+│           └── TaskSpecSerializerTests.cs
+│
+└── Acode.Integration.Tests/
+    └── TaskSpec/
+        └── TaskSpecRoundTripTests.cs
+```
+
+### Domain Models
 
 ```csharp
+// Acode.Core/Domain/Tasks/TaskId.cs
+namespace Acode.Core.Domain.Tasks;
+
+/// <summary>
+/// Strongly-typed ULID wrapper for task identification.
+/// </summary>
+public readonly record struct TaskId
+{
+    private readonly string _value;
+    
+    public TaskId(string value)
+    {
+        if (!IsValid(value))
+            throw new ArgumentException($"Invalid task ID: {value}", nameof(value));
+        _value = value;
+    }
+    
+    public static TaskId NewId() => new(Ulid.NewUlid().ToString());
+    
+    public static bool IsValid(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 26)
+            return false;
+        
+        return value.All(c => 
+            (c >= '0' && c <= '9') || 
+            (c >= 'A' && c <= 'Z'));
+    }
+    
+    public static bool TryParse(string value, out TaskId id)
+    {
+        if (IsValid(value))
+        {
+            id = new TaskId(value);
+            return true;
+        }
+        id = default;
+        return false;
+    }
+    
+    public string Value => _value;
+    public override string ToString() => _value;
+    
+    public static implicit operator string(TaskId id) => id._value;
+}
+
+// Acode.Core/Domain/Tasks/TaskStatus.cs
+namespace Acode.Core.Domain.Tasks;
+
+/// <summary>
+/// Status of a task in the queue.
+/// </summary>
+public enum TaskStatus
+{
+    /// <summary>Waiting to be executed.</summary>
+    Pending = 0,
+    
+    /// <summary>Currently being executed.</summary>
+    Running = 1,
+    
+    /// <summary>Successfully completed.</summary>
+    Completed = 2,
+    
+    /// <summary>Execution failed.</summary>
+    Failed = 3,
+    
+    /// <summary>Cancelled by user.</summary>
+    Cancelled = 4,
+    
+    /// <summary>Blocked by dependencies.</summary>
+    Blocked = 5
+}
+
+// Acode.Core/Domain/Tasks/TaskSpec.cs
+namespace Acode.Core.Domain.Tasks;
+
+/// <summary>
+/// A structured task specification describing work for execution.
+/// </summary>
+public sealed record TaskSpec
+{
+    /// <summary>Unique task identifier (ULID).</summary>
+    public required TaskId Id { get; init; }
+    
+    /// <summary>Short title (1-200 chars).</summary>
+    public required string Title { get; init; }
+    
+    /// <summary>Full description (1-10000 chars).</summary>
+    public required string Description { get; init; }
+    
+    /// <summary>Current status.</summary>
+    public TaskStatus Status { get; init; } = TaskStatus.Pending;
+    
+    /// <summary>Priority 1-5 (1 = highest).</summary>
+    public int Priority { get; init; } = TaskSpecDefaults.Priority;
+    
+    /// <summary>Task IDs that must complete first.</summary>
+    public IReadOnlyList<TaskId> Dependencies { get; init; } = Array.Empty<TaskId>();
+    
+    /// <summary>Files affected by this task (relative paths).</summary>
+    public IReadOnlyList<string> Files { get; init; } = Array.Empty<string>();
+    
+    /// <summary>Categorization tags.</summary>
+    public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
+    
+    /// <summary>Extension metadata (JSON-serializable).</summary>
+    public IReadOnlyDictionary<string, object?> Metadata { get; init; } = 
+        new Dictionary<string, object?>();
+    
+    /// <summary>Max execution time in seconds.</summary>
+    public int TimeoutSeconds { get; init; } = TaskSpecDefaults.TimeoutSeconds;
+    
+    /// <summary>Max retry attempts (0-10).</summary>
+    public int RetryLimit { get; init; } = TaskSpecDefaults.RetryLimit;
+    
+    /// <summary>Parent task ID (for subtasks).</summary>
+    public TaskId? ParentId { get; init; }
+    
+    /// <summary>Estimated duration in seconds.</summary>
+    public int? EstimatedDurationSeconds { get; init; }
+    
+    /// <summary>Key-value labels for filtering.</summary>
+    public IReadOnlyDictionary<string, string> Labels { get; init; } = 
+        new Dictionary<string, string>();
+    
+    /// <summary>When the task was created.</summary>
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+}
+
+// Acode.Core/Domain/Tasks/TaskSpecDefaults.cs
+namespace Acode.Core.Domain.Tasks;
+
+/// <summary>
+/// Default values for task spec fields.
+/// </summary>
+public static class TaskSpecDefaults
+{
+    public const int Priority = 3;
+    public const int TimeoutSeconds = 3600;
+    public const int RetryLimit = 3;
+    public const int MaxTitleLength = 200;
+    public const int MaxDescriptionLength = 10000;
+    public const int MaxDependencies = 100;
+    public const int MaxFiles = 1000;
+    public const int MaxTags = 50;
+    public const int MaxMetadataKeys = 100;
+    public const int MaxFileSize = 1024 * 1024; // 1MB
+    public const int MaxNestingDepth = 20;
+    public const int MaxArraySize = 10000;
+}
+```
+
+### Parse Result Types
+
+```csharp
+// Acode.Application/Services/TaskSpec/ParseResult.cs
+namespace Acode.Application.Services.TaskSpec;
+
+/// <summary>
+/// Result of parsing a task spec.
+/// </summary>
+public sealed record ParseResult<T>
+{
+    public bool Success { get; init; }
+    public T? Value { get; init; }
+    public IReadOnlyList<ParseError> Errors { get; init; } = Array.Empty<ParseError>();
+    public SerializationFormat DetectedFormat { get; init; }
+    public TimeSpan Duration { get; init; }
+    
+    public static ParseResult<T> Ok(T value, SerializationFormat format, TimeSpan duration) => new()
+    {
+        Success = true,
+        Value = value,
+        DetectedFormat = format,
+        Duration = duration
+    };
+    
+    public static ParseResult<T> Fail(IEnumerable<ParseError> errors, TimeSpan duration) => new()
+    {
+        Success = false,
+        Errors = errors.ToList(),
+        Duration = duration
+    };
+}
+
+/// <summary>
+/// A parse error with location information.
+/// </summary>
+public sealed record ParseError
+{
+    public required string Message { get; init; }
+    public int? Line { get; init; }
+    public int? Column { get; init; }
+    public string? Context { get; init; }
+    public ParseErrorCode Code { get; init; } = ParseErrorCode.Unknown;
+}
+
+public enum ParseErrorCode
+{
+    Unknown,
+    InvalidSyntax,
+    InvalidEncoding,
+    SizeLimitExceeded,
+    NestingDepthExceeded,
+    ArraySizeExceeded,
+    Timeout,
+    BinaryContent
+}
+
+public enum SerializationFormat
+{
+    Unknown,
+    Yaml,
+    Json
+}
+```
+
+### Validation Result Types
+
+```csharp
+// Acode.Application/Services/TaskSpec/ValidationResult.cs
+namespace Acode.Application.Services.TaskSpec;
+
+/// <summary>
+/// Result of validating a task spec.
+/// </summary>
+public sealed record ValidationResult
+{
+    public bool IsValid => Errors.Count == 0;
+    public IReadOnlyList<ValidationError> Errors { get; init; } = Array.Empty<ValidationError>();
+    public IReadOnlyList<ValidationWarning> Warnings { get; init; } = Array.Empty<ValidationWarning>();
+    
+    public static ValidationResult Valid() => new();
+    
+    public static ValidationResult Invalid(IEnumerable<ValidationError> errors) => new()
+    {
+        Errors = errors.ToList()
+    };
+    
+    public static ValidationResult WithWarnings(IEnumerable<ValidationWarning> warnings) => new()
+    {
+        Warnings = warnings.ToList()
+    };
+}
+
+/// <summary>
+/// A validation error with field path.
+/// </summary>
+public sealed record ValidationError
+{
+    public required string FieldPath { get; init; }
+    public required string Message { get; init; }
+    public string? ExpectedValue { get; init; }
+    public string? ActualValue { get; init; }
+    public ValidationErrorCode Code { get; init; }
+}
+
+public sealed record ValidationWarning
+{
+    public required string FieldPath { get; init; }
+    public required string Message { get; init; }
+}
+
+public enum ValidationErrorCode
+{
+    Unknown,
+    RequiredFieldMissing,
+    InvalidFieldType,
+    ValueOutOfRange,
+    InvalidFormat,
+    InvalidUlid,
+    CircularDependency,
+    InvalidFilePath,
+    PathTraversal,
+    StringTooLong,
+    StringTooShort,
+    InvalidPattern
+}
+```
+
+### Parser Interface and Implementation
+
+```csharp
+// Acode.Application/Services/TaskSpec/ITaskSpecParser.cs
+namespace Acode.Application.Services.TaskSpec;
+
+/// <summary>
+/// Parses task specifications from YAML or JSON.
+/// </summary>
 public interface ITaskSpecParser
 {
+    /// <summary>
+    /// Parses a task spec from a stream.
+    /// </summary>
     Task<ParseResult<TaskSpec>> ParseAsync(
         Stream input, 
         CancellationToken ct = default);
-        
+    
+    /// <summary>
+    /// Parses a task spec from a string.
+    /// </summary>
     Task<ParseResult<TaskSpec>> ParseAsync(
         string content, 
         CancellationToken ct = default);
 }
 
+// Acode.Application/Services/TaskSpec/TaskSpecParser.cs
+namespace Acode.Application.Services.TaskSpec;
+
+public sealed class TaskSpecParser : ITaskSpecParser
+{
+    private readonly ILogger<TaskSpecParser> _logger;
+    private static readonly TimeSpan ParseTimeout = TimeSpan.FromSeconds(5);
+    
+    public TaskSpecParser(ILogger<TaskSpecParser> logger)
+    {
+        _logger = logger;
+    }
+    
+    public async Task<ParseResult<TaskSpec>> ParseAsync(
+        Stream input, 
+        CancellationToken ct = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        
+        using var timeoutCts = new CancellationTokenSource(ParseTimeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        
+        try
+        {
+            // Check size limit
+            if (input.CanSeek && input.Length > TaskSpecDefaults.MaxFileSize)
+            {
+                return ParseResult<TaskSpec>.Fail(
+                    [new ParseError 
+                    { 
+                        Message = $"File exceeds size limit ({TaskSpecDefaults.MaxFileSize} bytes)",
+                        Code = ParseErrorCode.SizeLimitExceeded
+                    }],
+                    stopwatch.Elapsed);
+            }
+            
+            // Read content (with size limit for non-seekable streams)
+            using var reader = new StreamReader(input, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var content = await ReadWithLimitAsync(reader, TaskSpecDefaults.MaxFileSize, linkedCts.Token);
+            
+            return await ParseAsync(content, linkedCts.Token);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+        {
+            return ParseResult<TaskSpec>.Fail(
+                [new ParseError 
+                { 
+                    Message = "Parse timeout exceeded",
+                    Code = ParseErrorCode.Timeout
+                }],
+                stopwatch.Elapsed);
+        }
+    }
+    
+    public async Task<ParseResult<TaskSpec>> ParseAsync(
+        string content, 
+        CancellationToken ct = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        
+        // Validate UTF-8
+        if (!IsValidUtf8(content))
+        {
+            return ParseResult<TaskSpec>.Fail(
+                [new ParseError 
+                { 
+                    Message = "Invalid UTF-8 encoding",
+                    Code = ParseErrorCode.InvalidEncoding
+                }],
+                stopwatch.Elapsed);
+        }
+        
+        // Check for binary content
+        if (ContainsBinaryContent(content))
+        {
+            return ParseResult<TaskSpec>.Fail(
+                [new ParseError 
+                { 
+                    Message = "Binary content not allowed",
+                    Code = ParseErrorCode.BinaryContent
+                }],
+                stopwatch.Elapsed);
+        }
+        
+        // Detect format
+        var format = DetectFormat(content);
+        
+        try
+        {
+            var spec = format == SerializationFormat.Json
+                ? ParseJson(content)
+                : ParseYaml(content);
+            
+            return ParseResult<TaskSpec>.Ok(spec, format, stopwatch.Elapsed);
+        }
+        catch (YamlException ex)
+        {
+            return ParseResult<TaskSpec>.Fail(
+                [new ParseError 
+                { 
+                    Message = ex.Message,
+                    Line = ex.Start.Line,
+                    Column = ex.Start.Column,
+                    Code = ParseErrorCode.InvalidSyntax
+                }],
+                stopwatch.Elapsed);
+        }
+        catch (JsonException ex)
+        {
+            return ParseResult<TaskSpec>.Fail(
+                [new ParseError 
+                { 
+                    Message = ex.Message,
+                    Line = (int?)ex.LineNumber,
+                    Code = ParseErrorCode.InvalidSyntax
+                }],
+                stopwatch.Elapsed);
+        }
+    }
+    
+    private static SerializationFormat DetectFormat(string content)
+    {
+        var trimmed = content.TrimStart();
+        if (trimmed.StartsWith("{") || trimmed.StartsWith("["))
+            return SerializationFormat.Json;
+        return SerializationFormat.Yaml;
+    }
+    
+    private TaskSpec ParseYaml(string content)
+    {
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .Build();
+        
+        var dto = deserializer.Deserialize<TaskSpecDto>(content);
+        return MapToTaskSpec(dto);
+    }
+    
+    private TaskSpec ParseJson(string content)
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
+            MaxDepth = TaskSpecDefaults.MaxNestingDepth
+        };
+        
+        var dto = JsonSerializer.Deserialize<TaskSpecDto>(content, options)
+            ?? throw new JsonException("Empty JSON document");
+        
+        return MapToTaskSpec(dto);
+    }
+    
+    private TaskSpec MapToTaskSpec(TaskSpecDto dto)
+    {
+        var id = string.IsNullOrWhiteSpace(dto.Id) 
+            ? TaskId.NewId() 
+            : new TaskId(dto.Id.ToUpperInvariant());
+        
+        return new TaskSpec
+        {
+            Id = id,
+            Title = dto.Title?.Trim() ?? throw new InvalidOperationException("Title is required"),
+            Description = dto.Description?.Trim() ?? throw new InvalidOperationException("Description is required"),
+            Status = dto.Status ?? TaskStatus.Pending,
+            Priority = dto.Priority ?? TaskSpecDefaults.Priority,
+            Dependencies = dto.Dependencies?.Select(d => new TaskId(d)).ToList() 
+                ?? Array.Empty<TaskId>(),
+            Files = dto.Files?.ToList() ?? Array.Empty<string>(),
+            Tags = dto.Tags?.ToList() ?? Array.Empty<string>(),
+            Metadata = dto.Metadata ?? new Dictionary<string, object?>(),
+            TimeoutSeconds = dto.Timeout ?? TaskSpecDefaults.TimeoutSeconds,
+            RetryLimit = dto.RetryLimit ?? TaskSpecDefaults.RetryLimit,
+            ParentId = dto.ParentId != null ? new TaskId(dto.ParentId) : null,
+            EstimatedDurationSeconds = dto.EstimatedDuration,
+            Labels = dto.Labels ?? new Dictionary<string, string>(),
+            CreatedAt = dto.CreatedAt ?? DateTimeOffset.UtcNow
+        };
+    }
+    
+    private static bool IsValidUtf8(string content) => true; // String is already UTF-16
+    
+    private static bool ContainsBinaryContent(string content)
+    {
+        foreach (var c in content)
+        {
+            if (c < 0x20 && c != '\r' && c != '\n' && c != '\t')
+                return true;
+        }
+        return false;
+    }
+    
+    private static async Task<string> ReadWithLimitAsync(
+        StreamReader reader, 
+        int maxBytes,
+        CancellationToken ct)
+    {
+        var buffer = new char[8192];
+        var sb = new StringBuilder();
+        int totalRead = 0;
+        int read;
+        
+        while ((read = await reader.ReadAsync(buffer, ct)) > 0)
+        {
+            totalRead += read * 2; // Approximate bytes
+            if (totalRead > maxBytes)
+                throw new InvalidOperationException("Size limit exceeded");
+            
+            sb.Append(buffer, 0, read);
+        }
+        
+        return sb.ToString();
+    }
+}
+
+/// <summary>
+/// DTO for deserializing task specs.
+/// </summary>
+internal sealed class TaskSpecDto
+{
+    public string? Id { get; set; }
+    public string? Title { get; set; }
+    public string? Description { get; set; }
+    public TaskStatus? Status { get; set; }
+    public int? Priority { get; set; }
+    public List<string>? Dependencies { get; set; }
+    public List<string>? Files { get; set; }
+    public List<string>? Tags { get; set; }
+    public Dictionary<string, object?>? Metadata { get; set; }
+    public int? Timeout { get; set; }
+    public int? RetryLimit { get; set; }
+    public string? ParentId { get; set; }
+    public int? EstimatedDuration { get; set; }
+    public Dictionary<string, string>? Labels { get; set; }
+    public DateTimeOffset? CreatedAt { get; set; }
+}
+```
+
+### Validator Implementation
+
+```csharp
+// Acode.Application/Services/TaskSpec/ITaskSpecValidator.cs
+namespace Acode.Application.Services.TaskSpec;
+
+/// <summary>
+/// Validates task specifications.
+/// </summary>
 public interface ITaskSpecValidator
 {
+    /// <summary>
+    /// Validates a task spec against all rules.
+    /// </summary>
     Task<ValidationResult> ValidateAsync(
         TaskSpec spec, 
         CancellationToken ct = default);
 }
 
+// Acode.Application/Services/TaskSpec/TaskSpecValidator.cs
+namespace Acode.Application.Services.TaskSpec;
+
+public sealed class TaskSpecValidator : ITaskSpecValidator
+{
+    private static readonly Regex TagPattern = new(
+        @"^[a-z0-9-]+$", 
+        RegexOptions.Compiled,
+        TimeSpan.FromMilliseconds(100));
+    
+    private static readonly Regex LabelKeyPattern = new(
+        @"^[a-z0-9-]+$", 
+        RegexOptions.Compiled,
+        TimeSpan.FromMilliseconds(100));
+    
+    public Task<ValidationResult> ValidateAsync(
+        TaskSpec spec, 
+        CancellationToken ct = default)
+    {
+        var errors = new List<ValidationError>();
+        var warnings = new List<ValidationWarning>();
+        
+        // Required fields
+        ValidateRequired(spec.Title, "title", errors);
+        ValidateRequired(spec.Description, "description", errors);
+        
+        // String lengths
+        ValidateLength(spec.Title, "title", 1, TaskSpecDefaults.MaxTitleLength, errors);
+        ValidateLength(spec.Description, "description", 1, TaskSpecDefaults.MaxDescriptionLength, errors);
+        
+        // Numeric ranges
+        ValidateRange(spec.Priority, "priority", 1, 5, errors);
+        ValidateRange(spec.RetryLimit, "retryLimit", 0, 10, errors);
+        
+        if (spec.TimeoutSeconds <= 0)
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = "timeout",
+                Message = "Timeout must be positive",
+                ActualValue = spec.TimeoutSeconds.ToString(),
+                Code = ValidationErrorCode.ValueOutOfRange
+            });
+        }
+        
+        // Collection sizes
+        if (spec.Dependencies.Count > TaskSpecDefaults.MaxDependencies)
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = "dependencies",
+                Message = $"Too many dependencies (max {TaskSpecDefaults.MaxDependencies})",
+                Code = ValidationErrorCode.ValueOutOfRange
+            });
+        }
+        
+        // Dependency cycle detection
+        if (spec.Dependencies.Contains(spec.Id))
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = "dependencies",
+                Message = "Task cannot depend on itself",
+                Code = ValidationErrorCode.CircularDependency
+            });
+        }
+        
+        // File paths
+        for (int i = 0; i < spec.Files.Count; i++)
+        {
+            ValidateFilePath(spec.Files[i], $"files[{i}]", errors);
+        }
+        
+        // Tags
+        for (int i = 0; i < spec.Tags.Count; i++)
+        {
+            ValidatePattern(spec.Tags[i], $"tags[{i}]", TagPattern, errors);
+        }
+        
+        // Label keys
+        foreach (var key in spec.Labels.Keys)
+        {
+            ValidatePattern(key, $"labels.{key}", LabelKeyPattern, errors);
+        }
+        
+        // Metadata keys
+        foreach (var key in spec.Metadata.Keys)
+        {
+            if (key.StartsWith("_"))
+            {
+                errors.Add(new ValidationError
+                {
+                    FieldPath = $"metadata.{key}",
+                    Message = "Metadata keys must not start with underscore",
+                    Code = ValidationErrorCode.InvalidPattern
+                });
+            }
+        }
+        
+        var result = errors.Count > 0
+            ? ValidationResult.Invalid(errors)
+            : ValidationResult.Valid();
+        
+        if (warnings.Count > 0)
+        {
+            result = result with { Warnings = warnings };
+        }
+        
+        return Task.FromResult(result);
+    }
+    
+    private static void ValidateRequired(string? value, string fieldPath, List<ValidationError> errors)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = fieldPath,
+                Message = $"Required field '{fieldPath}' is missing or empty",
+                Code = ValidationErrorCode.RequiredFieldMissing
+            });
+        }
+    }
+    
+    private static void ValidateLength(
+        string? value, 
+        string fieldPath, 
+        int min, 
+        int max, 
+        List<ValidationError> errors)
+    {
+        if (value == null) return;
+        
+        if (value.Length < min)
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = fieldPath,
+                Message = $"Value too short (min {min} chars)",
+                ExpectedValue = $">= {min}",
+                ActualValue = value.Length.ToString(),
+                Code = ValidationErrorCode.StringTooShort
+            });
+        }
+        else if (value.Length > max)
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = fieldPath,
+                Message = $"Value too long (max {max} chars)",
+                ExpectedValue = $"<= {max}",
+                ActualValue = value.Length.ToString(),
+                Code = ValidationErrorCode.StringTooLong
+            });
+        }
+    }
+    
+    private static void ValidateRange(
+        int value, 
+        string fieldPath, 
+        int min, 
+        int max, 
+        List<ValidationError> errors)
+    {
+        if (value < min || value > max)
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = fieldPath,
+                Message = $"Value must be between {min} and {max}",
+                ExpectedValue = $"{min}-{max}",
+                ActualValue = value.ToString(),
+                Code = ValidationErrorCode.ValueOutOfRange
+            });
+        }
+    }
+    
+    private static void ValidateFilePath(string path, string fieldPath, List<ValidationError> errors)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = fieldPath,
+                Message = "File path cannot be empty",
+                Code = ValidationErrorCode.RequiredFieldMissing
+            });
+            return;
+        }
+        
+        // Must be relative
+        if (Path.IsPathRooted(path))
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = fieldPath,
+                Message = "File path must be relative",
+                ActualValue = path,
+                Code = ValidationErrorCode.InvalidFilePath
+            });
+            return;
+        }
+        
+        // No path traversal
+        var normalized = Path.GetFullPath(Path.Combine("/root", path));
+        if (!normalized.StartsWith("/root"))
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = fieldPath,
+                Message = "Path traversal not allowed",
+                ActualValue = path,
+                Code = ValidationErrorCode.PathTraversal
+            });
+        }
+    }
+    
+    private static void ValidatePattern(
+        string value, 
+        string fieldPath, 
+        Regex pattern, 
+        List<ValidationError> errors)
+    {
+        try
+        {
+            if (!pattern.IsMatch(value))
+            {
+                errors.Add(new ValidationError
+                {
+                    FieldPath = fieldPath,
+                    Message = $"Value does not match required pattern",
+                    ExpectedValue = pattern.ToString(),
+                    ActualValue = value,
+                    Code = ValidationErrorCode.InvalidPattern
+                });
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            errors.Add(new ValidationError
+            {
+                FieldPath = fieldPath,
+                Message = "Pattern validation timed out",
+                Code = ValidationErrorCode.Unknown
+            });
+        }
+    }
+}
+```
+
+### Serializer Implementation
+
+```csharp
+// Acode.Application/Services/TaskSpec/ITaskSpecSerializer.cs
+namespace Acode.Application.Services.TaskSpec;
+
+/// <summary>
+/// Serializes task specifications to YAML or JSON.
+/// </summary>
 public interface ITaskSpecSerializer
 {
+    /// <summary>
+    /// Serializes a task spec to the specified format.
+    /// </summary>
     Task<string> SerializeAsync(
         TaskSpec spec, 
         SerializationFormat format,
         CancellationToken ct = default);
 }
 
-public record TaskSpec(
-    string Id,
-    string Title,
-    string Description,
-    TaskStatus Status,
-    int Priority,
-    IReadOnlyList<string> Dependencies,
-    IReadOnlyList<string> Files,
-    IReadOnlyList<string> Tags,
-    IReadOnlyDictionary<string, object> Metadata,
-    int TimeoutSeconds,
-    int RetryLimit,
-    DateTimeOffset CreatedAt);
+// Acode.Application/Services/TaskSpec/TaskSpecSerializer.cs
+namespace Acode.Application.Services.TaskSpec;
 
-public enum SerializationFormat { Yaml, Json }
+public sealed class TaskSpecSerializer : ITaskSpecSerializer
+{
+    public Task<string> SerializeAsync(
+        TaskSpec spec, 
+        SerializationFormat format,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        
+        var result = format switch
+        {
+            SerializationFormat.Json => SerializeJson(spec),
+            SerializationFormat.Yaml => SerializeYaml(spec),
+            _ => throw new ArgumentException($"Unsupported format: {format}")
+        };
+        
+        return Task.FromResult(result);
+    }
+    
+    private static string SerializeJson(TaskSpec spec)
+    {
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+        
+        return JsonSerializer.Serialize(spec, options);
+    }
+    
+    private static string SerializeYaml(TaskSpec spec)
+    {
+        var serializer = new SerializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
+            .Build();
+        
+        return serializer.Serialize(spec);
+    }
+}
+```
+
+### CLI Commands
+
+```csharp
+// Acode.Cli/Commands/Task/TaskValidateCommand.cs
+namespace Acode.Cli.Commands.Task;
+
+[Command("task validate", Description = "Validate a task spec file")]
+public sealed class TaskValidateCommand : ICommand
+{
+    [CommandArgument(0, "<file>", Description = "Task spec file path")]
+    public string FilePath { get; init; } = string.Empty;
+    
+    [CommandOption("--json", Description = "Output as JSON")]
+    public bool Json { get; init; }
+    
+    public async ValueTask ExecuteAsync(IConsole console)
+    {
+        var parser = GetParser(); // DI
+        var validator = GetValidator();
+        
+        await using var stream = File.OpenRead(FilePath);
+        var parseResult = await parser.ParseAsync(stream);
+        
+        if (!parseResult.Success)
+        {
+            foreach (var error in parseResult.Errors)
+            {
+                var location = error.Line.HasValue 
+                    ? $":{error.Line}:{error.Column}" 
+                    : "";
+                console.Error.WriteLine($"✗ Parse error{location}: {error.Message}");
+            }
+            Environment.ExitCode = ExitCodes.ParseError;
+            return;
+        }
+        
+        var validationResult = await validator.ValidateAsync(parseResult.Value!);
+        
+        if (Json)
+        {
+            console.Output.WriteLine(JsonSerializer.Serialize(validationResult));
+            return;
+        }
+        
+        if (validationResult.IsValid)
+        {
+            console.Output.WriteLine("✓ Task spec valid");
+            return;
+        }
+        
+        foreach (var error in validationResult.Errors)
+        {
+            console.Error.WriteLine($"✗ {error.FieldPath}: {error.Message}");
+        }
+        
+        Environment.ExitCode = ExitCodes.ValidationError;
+    }
+}
+
+// Acode.Cli/Commands/Task/TaskAddCommand.cs
+namespace Acode.Cli.Commands.Task;
+
+[Command("task add", Description = "Add a task to the queue")]
+public sealed class TaskAddCommand : ICommand
+{
+    [CommandArgument(0, "[file]", Description = "Task spec file (use - for stdin)")]
+    public string? FilePath { get; init; }
+    
+    [CommandOption("--title", Description = "Task title (inline mode)")]
+    public string? Title { get; init; }
+    
+    [CommandOption("--description", Description = "Task description (inline mode)")]
+    public string? Description { get; init; }
+    
+    [CommandOption("--priority", Description = "Priority 1-5")]
+    public int? Priority { get; init; }
+    
+    [CommandOption("--json", Description = "Output as JSON")]
+    public bool Json { get; init; }
+    
+    public async ValueTask ExecuteAsync(IConsole console)
+    {
+        var parser = GetParser();
+        var validator = GetValidator();
+        var queue = GetQueue();
+        
+        TaskSpec spec;
+        
+        if (Title != null && Description != null)
+        {
+            // Inline mode
+            spec = new TaskSpec
+            {
+                Id = TaskId.NewId(),
+                Title = Title,
+                Description = Description,
+                Priority = Priority ?? TaskSpecDefaults.Priority
+            };
+        }
+        else if (FilePath == "-")
+        {
+            // Stdin mode
+            using var reader = new StreamReader(Console.OpenStandardInput());
+            var content = await reader.ReadToEndAsync();
+            var result = await parser.ParseAsync(content);
+            if (!result.Success)
+            {
+                console.Error.WriteLine($"Parse error: {result.Errors[0].Message}");
+                Environment.ExitCode = ExitCodes.ParseError;
+                return;
+            }
+            spec = result.Value!;
+        }
+        else if (FilePath != null)
+        {
+            // File mode
+            await using var stream = File.OpenRead(FilePath);
+            var result = await parser.ParseAsync(stream);
+            if (!result.Success)
+            {
+                console.Error.WriteLine($"Parse error: {result.Errors[0].Message}");
+                Environment.ExitCode = ExitCodes.ParseError;
+                return;
+            }
+            spec = result.Value!;
+        }
+        else
+        {
+            console.Error.WriteLine("Provide file path, use - for stdin, or --title/--description for inline");
+            Environment.ExitCode = ExitCodes.InvalidArgument;
+            return;
+        }
+        
+        var validation = await validator.ValidateAsync(spec);
+        if (!validation.IsValid)
+        {
+            console.Error.WriteLine($"Validation error: {validation.Errors[0].Message}");
+            Environment.ExitCode = ExitCodes.ValidationError;
+            return;
+        }
+        
+        var taskId = await queue.EnqueueAsync(spec);
+        
+        if (Json)
+        {
+            console.Output.WriteLine(JsonSerializer.Serialize(new { id = taskId }));
+        }
+        else
+        {
+            console.Output.WriteLine($"Task {taskId} added to queue");
+        }
+    }
+}
 ```
 
 ### Error Codes
@@ -426,6 +1464,72 @@ public enum SerializationFormat { Yaml, Json }
 | TASK-006 | Circular dependency |
 | TASK-007 | Invalid file path |
 | TASK-008 | Size limit exceeded |
+
+### Implementation Checklist
+
+- [ ] Create `TaskId` value object with ULID validation
+- [ ] Create `TaskStatus` enum
+- [ ] Create `TaskSpec` record with all fields
+- [ ] Create `TaskSpecDefaults` constants
+- [ ] Create `ParseResult<T>` and `ParseError` types
+- [ ] Create `ValidationResult` and `ValidationError` types
+- [ ] Implement `ITaskSpecParser` interface
+- [ ] Implement YAML parsing with YamlDotNet
+- [ ] Implement JSON parsing with System.Text.Json
+- [ ] Add format auto-detection
+- [ ] Add size limit checking
+- [ ] Add timeout handling
+- [ ] Implement `ITaskSpecValidator` interface
+- [ ] Add required field validation
+- [ ] Add string length validation
+- [ ] Add numeric range validation
+- [ ] Add file path validation (relative, no traversal)
+- [ ] Add tag/label pattern validation
+- [ ] Add dependency cycle detection (self-reference)
+- [ ] Implement `ITaskSpecSerializer` interface
+- [ ] Add YAML serialization
+- [ ] Add JSON serialization
+- [ ] Create `TaskValidateCommand` CLI
+- [ ] Create `TaskAddCommand` CLI with file/stdin/inline modes
+- [ ] Register services in DI
+- [ ] Write unit tests for parser
+- [ ] Write unit tests for validator
+- [ ] Write round-trip tests
+
+### Rollout Plan
+
+1. **Phase 1: Domain Models** (Day 1)
+   - Create all records and enums
+   - Create TaskId with ULID support
+   - Unit test value objects
+
+2. **Phase 2: Parser** (Day 2)
+   - Implement YAML parsing
+   - Implement JSON parsing
+   - Add format detection
+   - Add size/timeout limits
+   - Unit test parse scenarios
+
+3. **Phase 3: Validator** (Day 2)
+   - Implement all validation rules
+   - Add regex pattern matching
+   - Add path traversal detection
+   - Unit test validation rules
+
+4. **Phase 4: Serializer** (Day 3)
+   - Implement YAML output
+   - Implement JSON output
+   - Test round-trip equality
+
+5. **Phase 5: CLI** (Day 3)
+   - Implement validate command
+   - Implement add command
+   - Manual testing
+
+6. **Phase 6: Integration** (Day 4)
+   - Wire up DI
+   - Integration tests
+   - Documentation
 
 ---
 

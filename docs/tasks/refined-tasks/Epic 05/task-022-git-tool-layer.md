@@ -591,51 +591,58 @@ src/
 │           ├── BranchNotFoundException.cs
 │           ├── AuthenticationException.cs
 │           ├── NetworkException.cs
+│           ├── PushRejectedException.cs
+│           ├── MergeConflictException.cs
+│           ├── GitTimeoutException.cs
 │           └── ModeViolationException.cs
 ├── Acode.Infrastructure/
 │   └── Git/
 │       ├── GitService.cs
 │       ├── GitOutputParser.cs
 │       ├── GitCommandBuilder.cs
-│       └── CredentialRedactor.cs
+│       ├── CredentialRedactor.cs
+│       └── GitConfiguration.cs
 └── Acode.Cli/
     └── Commands/
         └── Git/
             ├── GitStatusCommand.cs
             ├── GitLogCommand.cs
-            └── GitBranchCommand.cs
-```
-
-### Core Interface
-
-```csharp
-public interface IGitService
-{
-    Task<GitStatus> GetStatusAsync(string workingDir, CancellationToken ct = default);
-    Task<string> GetDiffAsync(string workingDir, DiffOptions options, CancellationToken ct = default);
-    Task<IReadOnlyList<GitCommit>> GetLogAsync(string workingDir, LogOptions options, CancellationToken ct = default);
-    Task<GitBranch> CreateBranchAsync(string workingDir, string name, CancellationToken ct = default);
-    Task CheckoutAsync(string workingDir, string branch, CancellationToken ct = default);
-    Task StageAsync(string workingDir, IEnumerable<string> paths, CancellationToken ct = default);
-    Task<GitCommit> CommitAsync(string workingDir, string message, CancellationToken ct = default);
-    Task PushAsync(string workingDir, PushOptions options, CancellationToken ct = default);
-    Task<string> GetCurrentBranchAsync(string workingDir, CancellationToken ct = default);
-    Task<IReadOnlyList<GitRemote>> GetRemotesAsync(string workingDir, CancellationToken ct = default);
-    Task<bool> IsRepositoryAsync(string path, CancellationToken ct = default);
-}
+            ├── GitDiffCommand.cs
+            ├── GitBranchCommand.cs
+            └── GitCheckoutCommand.cs
 ```
 
 ### Domain Models
 
 ```csharp
-public record GitStatus(
-    string Branch,
-    bool IsClean,
-    IReadOnlyList<FileStatus> Files);
+// GitStatus.cs
+namespace Acode.Domain.Git;
 
-public record FileStatus(
-    string Path,
-    GitFileState State);
+public sealed record GitStatus
+{
+    public required string Branch { get; init; }
+    public required bool IsClean { get; init; }
+    public required bool IsDetachedHead { get; init; }
+    public string? UpstreamBranch { get; init; }
+    public int? AheadBy { get; init; }
+    public int? BehindBy { get; init; }
+    public required IReadOnlyList<FileStatus> StagedFiles { get; init; }
+    public required IReadOnlyList<FileStatus> UnstagedFiles { get; init; }
+    public required IReadOnlyList<string> UntrackedFiles { get; init; }
+    
+    public int TotalChangedFiles => 
+        StagedFiles.Count + UnstagedFiles.Count + UntrackedFiles.Count;
+}
+
+// FileStatus.cs
+namespace Acode.Domain.Git;
+
+public sealed record FileStatus
+{
+    public required string Path { get; init; }
+    public required GitFileState State { get; init; }
+    public string? OriginalPath { get; init; } // For renames
+}
 
 public enum GitFileState 
 { 
@@ -644,67 +651,617 @@ public enum GitFileState
     Added, 
     Deleted, 
     Renamed, 
-    Copied 
+    Copied,
+    TypeChanged,
+    Unmerged
 }
 
-public record GitCommit(
-    string Sha,
-    string ShortSha,
-    string Author,
-    string Email,
-    DateTimeOffset Date,
-    string Message);
+// GitCommit.cs
+namespace Acode.Domain.Git;
 
-public record GitBranch(
-    string Name,
-    string Sha,
-    bool IsCurrent);
+public sealed record GitCommit
+{
+    public required string Sha { get; init; }
+    public required string ShortSha { get; init; }
+    public required string Author { get; init; }
+    public required string AuthorEmail { get; init; }
+    public required DateTimeOffset AuthorDate { get; init; }
+    public required string Committer { get; init; }
+    public required string CommitterEmail { get; init; }
+    public required DateTimeOffset CommitDate { get; init; }
+    public required string Subject { get; init; }
+    public string? Body { get; init; }
+    public IReadOnlyList<string> ParentShas { get; init; } = Array.Empty<string>();
+}
 
-public record GitRemote(
-    string Name,
-    string FetchUrl,
-    string PushUrl);
+// GitBranch.cs
+namespace Acode.Domain.Git;
+
+public sealed record GitBranch
+{
+    public required string Name { get; init; }
+    public required string FullName { get; init; }
+    public required string Sha { get; init; }
+    public required bool IsCurrent { get; init; }
+    public required bool IsRemote { get; init; }
+    public string? Upstream { get; init; }
+}
+
+// GitRemote.cs
+namespace Acode.Domain.Git;
+
+public sealed record GitRemote
+{
+    public required string Name { get; init; }
+    public required string FetchUrl { get; init; }
+    public required string PushUrl { get; init; }
+}
+```
+
+### Core Interface
+
+```csharp
+// IGitService.cs
+namespace Acode.Application.Git;
+
+public interface IGitService
+{
+    // Repository info
+    Task<bool> IsRepositoryAsync(string path, CancellationToken ct = default);
+    Task<string> GetRepositoryRootAsync(string path, CancellationToken ct = default);
+    
+    // Status and diff
+    Task<GitStatus> GetStatusAsync(string workingDir, CancellationToken ct = default);
+    Task<string> GetDiffAsync(string workingDir, DiffOptions options, CancellationToken ct = default);
+    Task<IReadOnlyList<GitCommit>> GetLogAsync(string workingDir, LogOptions options, CancellationToken ct = default);
+    
+    // Branch operations
+    Task<string> GetCurrentBranchAsync(string workingDir, CancellationToken ct = default);
+    Task<IReadOnlyList<GitBranch>> GetBranchesAsync(string workingDir, BranchListOptions? options = null, CancellationToken ct = default);
+    Task<GitBranch> CreateBranchAsync(string workingDir, string name, string? startPoint = null, CancellationToken ct = default);
+    Task CheckoutAsync(string workingDir, string branchOrCommit, CancellationToken ct = default);
+    Task DeleteBranchAsync(string workingDir, string name, bool force = false, CancellationToken ct = default);
+    
+    // Staging and committing
+    Task StageAsync(string workingDir, IEnumerable<string> paths, CancellationToken ct = default);
+    Task StageAllAsync(string workingDir, CancellationToken ct = default);
+    Task UnstageAsync(string workingDir, IEnumerable<string> paths, CancellationToken ct = default);
+    Task<GitCommit> CommitAsync(string workingDir, string message, CommitOptions? options = null, CancellationToken ct = default);
+    
+    // Remote operations
+    Task<IReadOnlyList<GitRemote>> GetRemotesAsync(string workingDir, CancellationToken ct = default);
+    Task PushAsync(string workingDir, PushOptions options, CancellationToken ct = default);
+    Task FetchAsync(string workingDir, FetchOptions? options = null, CancellationToken ct = default);
+}
+
+// Options classes
+public sealed record DiffOptions
+{
+    public string? Commit1 { get; init; }
+    public string? Commit2 { get; init; }
+    public bool Staged { get; init; }
+    public bool NameOnly { get; init; }
+    public IReadOnlyList<string>? Paths { get; init; }
+}
+
+public sealed record LogOptions
+{
+    public int? Limit { get; init; } = 50;
+    public string? Since { get; init; }
+    public string? Until { get; init; }
+    public string? Author { get; init; }
+    public string? Path { get; init; }
+    public bool FirstParent { get; init; }
+}
+
+public sealed record BranchListOptions
+{
+    public bool IncludeRemote { get; init; }
+    public string? Pattern { get; init; }
+}
+
+public sealed record CommitOptions
+{
+    public bool AllowEmpty { get; init; }
+    public bool Amend { get; init; }
+}
+
+public sealed record PushOptions
+{
+    public string? Remote { get; init; }
+    public string? Branch { get; init; }
+    public bool SetUpstream { get; init; }
+    public bool Force { get; init; }
+}
+
+public sealed record FetchOptions
+{
+    public string? Remote { get; init; }
+    public bool Prune { get; init; }
+}
+```
+
+### Exception Hierarchy
+
+```csharp
+// GitException.cs
+namespace Acode.Application.Git.Exceptions;
+
+public class GitException : Exception
+{
+    public int ExitCode { get; }
+    public string? StdErr { get; }
+    public string? WorkingDirectory { get; }
+    public string ErrorCode { get; }
+    
+    public GitException(string message, int exitCode, string? stderr, string? workingDir, string errorCode)
+        : base(message)
+    {
+        ExitCode = exitCode;
+        StdErr = stderr;
+        WorkingDirectory = workingDir;
+        ErrorCode = errorCode;
+    }
+}
+
+// NotARepositoryException.cs
+public sealed class NotARepositoryException : GitException
+{
+    public NotARepositoryException(string path)
+        : base($"Not a git repository: {path}. Run 'git init' to create one.", 128, null, path, "GIT_001")
+    { }
+}
+
+// BranchNotFoundException.cs
+public sealed class BranchNotFoundException : GitException
+{
+    public string BranchName { get; }
+    
+    public BranchNotFoundException(string branch, string? workingDir, string? stderr)
+        : base($"Branch '{branch}' not found. Use 'git branch -a' to list available branches.", 1, stderr, workingDir, "GIT_002")
+    {
+        BranchName = branch;
+    }
+}
+
+// ModeViolationException.cs
+public sealed class ModeViolationException : GitException
+{
+    public string CurrentMode { get; }
+    public string BlockedOperation { get; }
+    
+    public ModeViolationException(string mode, string operation)
+        : base($"Operation '{operation}' is blocked in {mode} mode. Switch to burst mode to enable network operations.", 0, null, null, "GIT_008")
+    {
+        CurrentMode = mode;
+        BlockedOperation = operation;
+    }
+}
+```
+
+### Infrastructure Implementation
+
+```csharp
+// GitService.cs
+namespace Acode.Infrastructure.Git;
+
+public sealed class GitService : IGitService
+{
+    private readonly ICommandExecutor _executor;
+    private readonly IGitOutputParser _parser;
+    private readonly ICredentialRedactor _redactor;
+    private readonly IModeResolver _modeResolver;
+    private readonly IOptions<GitConfiguration> _config;
+    private readonly ILogger<GitService> _logger;
+    
+    public async Task<GitStatus> GetStatusAsync(string workingDir, CancellationToken ct = default)
+    {
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var result = await ExecuteGitAsync(
+            workingDir,
+            new[] { "status", "--porcelain=v2", "--branch" },
+            ct);
+        
+        return _parser.ParseStatus(result.StdOut);
+    }
+    
+    public async Task<GitBranch> CreateBranchAsync(
+        string workingDir, 
+        string name, 
+        string? startPoint = null, 
+        CancellationToken ct = default)
+    {
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var args = new List<string> { "branch", name };
+        if (startPoint is not null)
+        {
+            args.Add(startPoint);
+        }
+        
+        await ExecuteGitAsync(workingDir, args, ct);
+        
+        _logger.LogInformation("Created branch {Branch} in {Dir}", name, workingDir);
+        
+        // Get branch details
+        var sha = await GetBranchShaAsync(workingDir, name, ct);
+        return new GitBranch
+        {
+            Name = name,
+            FullName = $"refs/heads/{name}",
+            Sha = sha,
+            IsCurrent = false,
+            IsRemote = false
+        };
+    }
+    
+    public async Task PushAsync(string workingDir, PushOptions options, CancellationToken ct = default)
+    {
+        // Mode check - push is network operation
+        var mode = await _modeResolver.GetCurrentModeAsync(ct);
+        if (mode is OperatingMode.LocalOnly or OperatingMode.Airgapped)
+        {
+            _logger.LogWarning("Push blocked by {Mode} mode", mode);
+            throw new ModeViolationException(mode.ToString(), "push");
+        }
+        
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var args = new List<string> { "push" };
+        
+        if (options.SetUpstream)
+            args.Add("--set-upstream");
+        if (options.Force)
+            args.Add("--force-with-lease");
+        
+        args.Add(options.Remote ?? "origin");
+        
+        if (options.Branch is not null)
+            args.Add(options.Branch);
+        
+        await ExecuteGitAsync(workingDir, args, ct, 
+            timeout: TimeSpan.FromSeconds(_config.Value.TimeoutSeconds));
+        
+        _logger.LogInformation("Pushed to {Remote}", options.Remote ?? "origin");
+    }
+    
+    public async Task<GitCommit> CommitAsync(
+        string workingDir, 
+        string message, 
+        CommitOptions? options = null, 
+        CancellationToken ct = default)
+    {
+        await EnsureRepositoryAsync(workingDir, ct);
+        
+        var args = new List<string> { "commit", "-m", message };
+        
+        if (options?.AllowEmpty == true)
+            args.Add("--allow-empty");
+        if (options?.Amend == true)
+            args.Add("--amend");
+        
+        await ExecuteGitAsync(workingDir, args, ct);
+        
+        // Get the commit we just created
+        var log = await GetLogAsync(workingDir, new LogOptions { Limit = 1 }, ct);
+        return log.First();
+    }
+    
+    private async Task<CommandResult> ExecuteGitAsync(
+        string workingDir,
+        IEnumerable<string> args,
+        CancellationToken ct,
+        TimeSpan? timeout = null)
+    {
+        var gitPath = _config.Value.Executable ?? "git";
+        var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(_config.Value.TimeoutSeconds);
+        
+        var command = new CommandSpec
+        {
+            Executable = gitPath,
+            Arguments = args.ToArray(),
+            WorkingDirectory = workingDir,
+            Timeout = effectiveTimeout,
+            RedactSecrets = true
+        };
+        
+        var result = await _executor.ExecuteAsync(command, ct);
+        
+        if (result.ExitCode != 0)
+        {
+            throw MapToException(result, workingDir);
+        }
+        
+        return result;
+    }
+    
+    private GitException MapToException(CommandResult result, string workingDir)
+    {
+        var stderr = result.StdErr ?? "";
+        var redacted = _redactor.Redact(stderr);
+        
+        return result.ExitCode switch
+        {
+            128 when stderr.Contains("not a git repository") => 
+                new NotARepositoryException(workingDir),
+            128 when stderr.Contains("Authentication failed") =>
+                new AuthenticationException(redacted, workingDir),
+            1 when stderr.Contains("CONFLICT") =>
+                new MergeConflictException(redacted, workingDir),
+            1 when stderr.Contains("did not match any") =>
+                new BranchNotFoundException(ExtractBranchName(stderr), workingDir, redacted),
+            _ when stderr.Contains("Could not resolve host") =>
+                new NetworkException(redacted, workingDir),
+            _ when stderr.Contains("rejected") =>
+                new PushRejectedException(redacted, workingDir),
+            _ => new GitException($"Git command failed: {redacted}", result.ExitCode, redacted, workingDir, "GIT_000")
+        };
+    }
+}
+
+// GitOutputParser.cs
+namespace Acode.Infrastructure.Git;
+
+public sealed class GitOutputParser : IGitOutputParser
+{
+    public GitStatus ParseStatus(string output)
+    {
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var branch = "";
+        var upstream = (string?)null;
+        var ahead = (int?)null;
+        var behind = (int?)null;
+        var staged = new List<FileStatus>();
+        var unstaged = new List<FileStatus>();
+        var untracked = new List<string>();
+        
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("# branch.head "))
+            {
+                branch = line[14..];
+            }
+            else if (line.StartsWith("# branch.upstream "))
+            {
+                upstream = line[18..];
+            }
+            else if (line.StartsWith("# branch.ab "))
+            {
+                var match = Regex.Match(line, @"\+(\d+) -(\d+)");
+                if (match.Success)
+                {
+                    ahead = int.Parse(match.Groups[1].Value);
+                    behind = int.Parse(match.Groups[2].Value);
+                }
+            }
+            else if (line.StartsWith("1 ") || line.StartsWith("2 "))
+            {
+                // Changed entry
+                var parts = line.Split(' ');
+                var xy = parts[1];
+                var path = parts.Last();
+                
+                if (xy[0] != '.')
+                    staged.Add(new FileStatus { Path = path, State = ParseState(xy[0]) });
+                if (xy[1] != '.')
+                    unstaged.Add(new FileStatus { Path = path, State = ParseState(xy[1]) });
+            }
+            else if (line.StartsWith("? "))
+            {
+                untracked.Add(line[2..]);
+            }
+        }
+        
+        return new GitStatus
+        {
+            Branch = branch,
+            IsClean = staged.Count == 0 && unstaged.Count == 0 && untracked.Count == 0,
+            IsDetachedHead = branch == "(detached)",
+            UpstreamBranch = upstream,
+            AheadBy = ahead,
+            BehindBy = behind,
+            StagedFiles = staged,
+            UnstagedFiles = unstaged,
+            UntrackedFiles = untracked
+        };
+    }
+    
+    private static GitFileState ParseState(char c) => c switch
+    {
+        'M' => GitFileState.Modified,
+        'A' => GitFileState.Added,
+        'D' => GitFileState.Deleted,
+        'R' => GitFileState.Renamed,
+        'C' => GitFileState.Copied,
+        'T' => GitFileState.TypeChanged,
+        'U' => GitFileState.Unmerged,
+        _ => GitFileState.Modified
+    };
+}
+
+// CredentialRedactor.cs
+namespace Acode.Infrastructure.Git;
+
+public sealed class CredentialRedactor : ICredentialRedactor
+{
+    private static readonly Regex UrlWithCredentials = new(
+        @"(https?://)([^:]+):([^@]+)@",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    
+    private static readonly string[] SensitivePatterns = 
+    {
+        "password", "token", "secret", "key", "credential",
+        "auth", "bearer", "api_key", "apikey"
+    };
+    
+    public string Redact(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return input;
+        
+        // Redact URLs with embedded credentials
+        var result = UrlWithCredentials.Replace(input, "$1[REDACTED]@");
+        
+        // Redact lines containing sensitive patterns
+        var lines = result.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            foreach (var pattern in SensitivePatterns)
+            {
+                if (lines[i].Contains(pattern, StringComparison.OrdinalIgnoreCase) &&
+                    lines[i].Contains('='))
+                {
+                    var eqIndex = lines[i].IndexOf('=');
+                    lines[i] = lines[i][..(eqIndex + 1)] + "[REDACTED]";
+                    break;
+                }
+            }
+        }
+        
+        return string.Join('\n', lines);
+    }
+}
+```
+
+### CLI Commands
+
+```csharp
+// GitStatusCommand.cs
+namespace Acode.Cli.Commands.Git;
+
+[Command("git status", Description = "Show repository status")]
+public class GitStatusCommand
+{
+    [Option("-s|--short", Description = "Show short format")]
+    public bool Short { get; set; }
+    
+    public async Task<int> ExecuteAsync(
+        IGitService git,
+        IConsole console,
+        CancellationToken ct)
+    {
+        try
+        {
+            var cwd = Directory.GetCurrentDirectory();
+            var status = await git.GetStatusAsync(cwd, ct);
+            
+            if (Short)
+            {
+                PrintShortStatus(console, status);
+            }
+            else
+            {
+                PrintLongStatus(console, status);
+            }
+            
+            return 0;
+        }
+        catch (NotARepositoryException)
+        {
+            console.Error.WriteLine("fatal: not a git repository");
+            return 128;
+        }
+    }
+    
+    private void PrintLongStatus(IConsole console, GitStatus status)
+    {
+        console.WriteLine($"On branch {status.Branch}");
+        
+        if (status.UpstreamBranch is not null)
+        {
+            if (status.AheadBy > 0 && status.BehindBy > 0)
+                console.WriteLine($"Your branch has diverged ({status.AheadBy} ahead, {status.BehindBy} behind)");
+            else if (status.AheadBy > 0)
+                console.WriteLine($"Your branch is ahead by {status.AheadBy} commits");
+            else if (status.BehindBy > 0)
+                console.WriteLine($"Your branch is behind by {status.BehindBy} commits");
+        }
+        
+        if (status.IsClean)
+        {
+            console.WriteLine("nothing to commit, working tree clean");
+            return;
+        }
+        
+        if (status.StagedFiles.Count > 0)
+        {
+            console.WriteLine("\nChanges to be committed:");
+            foreach (var file in status.StagedFiles)
+            {
+                console.WriteLine($"  {file.State.ToString().ToLower()}: {file.Path}");
+            }
+        }
+        
+        if (status.UnstagedFiles.Count > 0)
+        {
+            console.WriteLine("\nChanges not staged for commit:");
+            foreach (var file in status.UnstagedFiles)
+            {
+                console.WriteLine($"  {file.State.ToString().ToLower()}: {file.Path}");
+            }
+        }
+        
+        if (status.UntrackedFiles.Count > 0)
+        {
+            console.WriteLine("\nUntracked files:");
+            foreach (var file in status.UntrackedFiles)
+            {
+                console.WriteLine($"  {file}");
+            }
+        }
+    }
+}
 ```
 
 ### Error Codes
 
-| Code | Name | Description |
-|------|------|-------------|
-| GIT_001 | NotARepository | Working directory is not a git repository |
-| GIT_002 | BranchNotFound | Specified branch does not exist |
-| GIT_003 | AuthFailed | Git authentication failed |
-| GIT_004 | NetworkError | Network operation failed |
-| GIT_005 | PushRejected | Remote rejected push |
-| GIT_006 | MergeConflict | Merge conflict detected |
-| GIT_007 | Timeout | Operation timed out |
-| GIT_008 | ModeViolation | Operation blocked by mode |
+| Code | Name | Description | Recovery |
+|------|------|-------------|----------|
+| GIT_001 | NotARepository | Working directory is not a git repository | Run `git init` or change directory |
+| GIT_002 | BranchNotFound | Specified branch does not exist | Use `git branch -a` to list branches |
+| GIT_003 | AuthFailed | Git authentication failed | Configure credentials with `git config` |
+| GIT_004 | NetworkError | Network operation failed | Check connectivity, retry |
+| GIT_005 | PushRejected | Remote rejected push | Pull changes first, then push |
+| GIT_006 | MergeConflict | Merge conflict detected | Resolve conflicts manually |
+| GIT_007 | Timeout | Operation timed out | Increase timeout in config |
+| GIT_008 | ModeViolation | Operation blocked by mode | Switch to burst mode |
+| GIT_009 | GitNotFound | Git executable not found | Install Git and add to PATH |
+| GIT_010 | VersionTooOld | Git version below minimum | Update Git to 2.20+ |
 
-### Validation Checklist Before Merge
+### Implementation Checklist
 
-- [ ] IGitService interface complete
-- [ ] All domain models defined
-- [ ] All exception types defined
-- [ ] Command execution integration works
-- [ ] Mode validation works
-- [ ] Credential redaction works
-- [ ] Configuration loading works
-- [ ] Unit tests pass with >90% coverage
-- [ ] Integration tests pass
-- [ ] E2E tests pass
-- [ ] Performance benchmarks met
+- [ ] Define all domain models (GitStatus, GitCommit, etc.)
+- [ ] Define IGitService interface in Application layer
+- [ ] Implement all exception types with proper error codes
+- [ ] Implement GitService with command execution
+- [ ] Implement GitOutputParser for status, log, branch parsing
+- [ ] Implement CredentialRedactor for secret masking
+- [ ] Add mode validation for network operations
+- [ ] Add configuration loading from agent config
+- [ ] Implement CLI commands (status, log, branch, etc.)
+- [ ] Add unit tests for output parsing
+- [ ] Add unit tests for exception mapping
+- [ ] Add integration tests with real git repos
+- [ ] Add E2E tests for CLI commands
+- [ ] Run performance benchmarks
+- [ ] Document configuration options
 
 ### Rollout Plan
 
-1. Implement domain models
-2. Implement IGitService interface
-3. Implement GitService with command execution
-4. Implement GitOutputParser
-5. Implement exception handling
-6. Add mode validation
-7. Add credential redaction
-8. Add CLI commands
-9. Integration testing
-10. Documentation
+| Phase | Action | Validation |
+|-------|--------|------------|
+| 1 | Implement domain models | Compile check |
+| 2 | Define IGitService interface | Compile check |
+| 3 | Implement exception types | Unit tests pass |
+| 4 | Implement GitOutputParser | Parser tests pass |
+| 5 | Implement CredentialRedactor | Redaction tests pass |
+| 6 | Implement GitService core | Integration tests pass |
+| 7 | Add mode validation | Mode tests pass |
+| 8 | Add configuration | Config tests pass |
+| 9 | Implement CLI commands | E2E tests pass |
+| 10 | Performance testing | Benchmarks pass |
+| 11 | Documentation | User manual complete |
 
 ---
 

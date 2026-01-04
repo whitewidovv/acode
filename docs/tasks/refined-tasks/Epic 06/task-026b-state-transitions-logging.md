@@ -269,69 +269,804 @@ queue:
 
 ## Implementation Prompt
 
-### Interface
+### File Structure
+
+```
+src/
+├── Acode.Application/
+│   └── Services/
+│       └── TaskQueue/
+│           ├── IStateMachine.cs           # State machine interface
+│           ├── TaskStateMachine.cs        # Implementation
+│           ├── TransitionMatrix.cs        # Valid transitions
+│           ├── TransitionGuards.cs        # Guard conditions
+│           ├── TransitionActions.cs       # Side effects
+│           ├── ITransitionHistory.cs      # History interface
+│           └── TransitionHistoryService.cs
+│
+├── Acode.Core/
+│   └── Domain/
+│       └── Tasks/
+│           └── Events/
+│               ├── TaskStatusChangedEvent.cs
+│               ├── TaskStartedEvent.cs
+│               ├── TaskCompletedEvent.cs
+│               ├── TaskFailedEvent.cs
+│               └── TaskCancelledEvent.cs
+
+tests/
+└── Acode.Application.Tests/
+    └── Services/
+        └── TaskQueue/
+            ├── TaskStateMachineTests.cs
+            └── TransitionHistoryTests.cs
+```
+
+### State Machine Interface
 
 ```csharp
+// Acode.Application/Services/TaskQueue/IStateMachine.cs
+namespace Acode.Application.Services.TaskQueue;
+
+/// <summary>
+/// Manages task state transitions with validation and logging.
+/// </summary>
 public interface IStateMachine
 {
+    /// <summary>
+    /// Checks if a transition is valid.
+    /// </summary>
     bool CanTransition(TaskStatus from, TaskStatus to);
     
+    /// <summary>
+    /// Executes a state transition atomically.
+    /// </summary>
     Task<TransitionResult> TransitionAsync(
-        string taskId,
+        TaskId taskId,
         TaskStatus to,
-        string actor,
+        TransitionActor actor,
         string? reason = null,
+        TransitionContext? context = null,
         CancellationToken ct = default);
-        
+    
+    /// <summary>
+    /// Gets valid target states from a given state.
+    /// </summary>
     IReadOnlyList<TaskStatus> GetValidTransitions(TaskStatus from);
+    
+    /// <summary>
+    /// Gets the terminal states.
+    /// </summary>
+    IReadOnlySet<TaskStatus> TerminalStates { get; }
 }
 
-public record TransitionResult(
-    bool Success,
-    TaskStatus FromStatus,
-    TaskStatus ToStatus,
-    DateTimeOffset Timestamp,
-    string? Error);
-
-public interface ITransitionHistory
+/// <summary>
+/// Result of a transition attempt.
+/// </summary>
+public sealed record TransitionResult
 {
-    Task<IReadOnlyList<TransitionRecord>> GetHistoryAsync(
-        string taskId,
-        CancellationToken ct = default);
-        
-    Task<int> PurgeAsync(
-        DateTimeOffset before,
-        int batchSize,
-        CancellationToken ct = default);
+    public bool Success { get; init; }
+    public TaskStatus FromStatus { get; init; }
+    public TaskStatus ToStatus { get; init; }
+    public DateTimeOffset Timestamp { get; init; }
+    public string? Error { get; init; }
+    public string? ErrorCode { get; init; }
+    
+    public static TransitionResult Succeeded(TaskStatus from, TaskStatus to) => new()
+    {
+        Success = true,
+        FromStatus = from,
+        ToStatus = to,
+        Timestamp = DateTimeOffset.UtcNow
+    };
+    
+    public static TransitionResult Failed(TaskStatus from, TaskStatus to, string error, string code) => new()
+    {
+        Success = false,
+        FromStatus = from,
+        ToStatus = to,
+        Timestamp = DateTimeOffset.UtcNow,
+        Error = error,
+        ErrorCode = code
+    };
 }
 
-public record TransitionRecord(
-    long Id,
-    string TaskId,
-    TaskStatus? FromStatus,
-    TaskStatus ToStatus,
-    string Actor,
-    string? Reason,
-    DateTimeOffset Timestamp);
+/// <summary>
+/// Actor performing the transition.
+/// </summary>
+public sealed record TransitionActor
+{
+    public required string Type { get; init; } // worker, user, system, scheduler
+    public string? Id { get; init; }
+    
+    public override string ToString() => Id != null ? $"{Type}/{Id}" : Type;
+    
+    public static TransitionActor Worker(WorkerId id) => new() { Type = "worker", Id = id.Value };
+    public static TransitionActor User(string name) => new() { Type = "user", Id = name };
+    public static TransitionActor System => new() { Type = "system" };
+    public static TransitionActor Scheduler => new() { Type = "scheduler" };
+}
+
+/// <summary>
+/// Additional context for a transition.
+/// </summary>
+public sealed record TransitionContext
+{
+    public WorkerId? WorkerId { get; init; }
+    public TaskResult? Result { get; init; }
+    public string? Error { get; init; }
+    public Dictionary<string, object>? Metadata { get; init; }
+}
 ```
 
 ### Transition Matrix
 
 ```csharp
-private static readonly Dictionary<(TaskStatus, TaskStatus), bool> ValidTransitions = new()
+// Acode.Application/Services/TaskQueue/TransitionMatrix.cs
+namespace Acode.Application.Services.TaskQueue;
+
+/// <summary>
+/// Defines valid state transitions.
+/// </summary>
+public static class TransitionMatrix
 {
-    { (TaskStatus.Pending, TaskStatus.Running), true },
-    { (TaskStatus.Pending, TaskStatus.Cancelled), true },
-    { (TaskStatus.Pending, TaskStatus.Blocked), true },
-    { (TaskStatus.Running, TaskStatus.Completed), true },
-    { (TaskStatus.Running, TaskStatus.Failed), true },
-    { (TaskStatus.Running, TaskStatus.Cancelled), true },
-    { (TaskStatus.Failed, TaskStatus.Pending), true },
-    { (TaskStatus.Failed, TaskStatus.Cancelled), true },
-    { (TaskStatus.Blocked, TaskStatus.Pending), true },
-    { (TaskStatus.Blocked, TaskStatus.Cancelled), true },
-};
+    private static readonly Dictionary<(TaskStatus From, TaskStatus To), TransitionSpec> _transitions = new()
+    {
+        // From Pending
+        { (TaskStatus.Pending, TaskStatus.Running), new("Worker claims task", RequiresWorkerId: true) },
+        { (TaskStatus.Pending, TaskStatus.Cancelled), new("User or system cancellation") },
+        { (TaskStatus.Pending, TaskStatus.Blocked), new("Dependencies not satisfied") },
+        
+        // From Running
+        { (TaskStatus.Running, TaskStatus.Completed), new("Task succeeded", RequiresResult: true) },
+        { (TaskStatus.Running, TaskStatus.Failed), new("Task failed", RequiresError: true) },
+        { (TaskStatus.Running, TaskStatus.Cancelled), new("Cancelled while running") },
+        
+        // From Failed
+        { (TaskStatus.Failed, TaskStatus.Pending), new("Retry requested", IsRetry: true) },
+        { (TaskStatus.Failed, TaskStatus.Cancelled), new("Cancellation after failure") },
+        
+        // From Blocked
+        { (TaskStatus.Blocked, TaskStatus.Pending), new("Dependencies satisfied") },
+        { (TaskStatus.Blocked, TaskStatus.Cancelled), new("Cancelled while blocked") },
+    };
+    
+    private static readonly HashSet<TaskStatus> _terminalStates = new()
+    {
+        TaskStatus.Completed,
+        TaskStatus.Cancelled
+    };
+    
+    public static bool IsValid(TaskStatus from, TaskStatus to)
+    {
+        if (from == to) return false; // No self-transitions
+        if (_terminalStates.Contains(from)) return false; // No transitions from terminal
+        return _transitions.ContainsKey((from, to));
+    }
+    
+    public static TransitionSpec? GetSpec(TaskStatus from, TaskStatus to) =>
+        _transitions.TryGetValue((from, to), out var spec) ? spec : null;
+    
+    public static IReadOnlyList<TaskStatus> GetValidTargets(TaskStatus from)
+    {
+        if (_terminalStates.Contains(from))
+            return Array.Empty<TaskStatus>();
+        
+        return _transitions.Keys
+            .Where(k => k.From == from)
+            .Select(k => k.To)
+            .ToList();
+    }
+    
+    public static IReadOnlySet<TaskStatus> TerminalStates => _terminalStates;
+}
+
+public sealed record TransitionSpec(
+    string Description,
+    bool RequiresWorkerId = false,
+    bool RequiresResult = false,
+    bool RequiresError = false,
+    bool IsRetry = false);
 ```
+
+### State Machine Implementation
+
+```csharp
+// Acode.Application/Services/TaskQueue/TaskStateMachine.cs
+namespace Acode.Application.Services.TaskQueue;
+
+public sealed class TaskStateMachine : IStateMachine
+{
+    private readonly ITaskRepository _repository;
+    private readonly ITransitionHistoryService _history;
+    private readonly IEventPublisher _events;
+    private readonly ILogger<TaskStateMachine> _logger;
+    
+    public IReadOnlySet<TaskStatus> TerminalStates => TransitionMatrix.TerminalStates;
+    
+    public TaskStateMachine(
+        ITaskRepository repository,
+        ITransitionHistoryService history,
+        IEventPublisher events,
+        ILogger<TaskStateMachine> logger)
+    {
+        _repository = repository;
+        _history = history;
+        _events = events;
+        _logger = logger;
+    }
+    
+    public bool CanTransition(TaskStatus from, TaskStatus to)
+    {
+        return TransitionMatrix.IsValid(from, to);
+    }
+    
+    public IReadOnlyList<TaskStatus> GetValidTransitions(TaskStatus from)
+    {
+        return TransitionMatrix.GetValidTargets(from);
+    }
+    
+    public async Task<TransitionResult> TransitionAsync(
+        TaskId taskId,
+        TaskStatus to,
+        TransitionActor actor,
+        string? reason = null,
+        TransitionContext? context = null,
+        CancellationToken ct = default)
+    {
+        var task = await _repository.GetAsync(taskId, ct);
+        if (task == null)
+        {
+            return TransitionResult.Failed(
+                TaskStatus.Pending, to,
+                $"Task not found: {taskId}",
+                "QUEUE-001");
+        }
+        
+        var from = task.Status;
+        
+        // Validate transition
+        if (!CanTransition(from, to))
+        {
+            _logger.LogWarning(
+                "Invalid transition attempted: {TaskId} {From} -> {To}",
+                taskId, from, to);
+            
+            return TransitionResult.Failed(
+                from, to,
+                $"Invalid transition from {from} to {to}",
+                "QUEUE-002");
+        }
+        
+        // Check guards
+        var spec = TransitionMatrix.GetSpec(from, to)!;
+        var guardResult = await CheckGuardsAsync(task, to, spec, context, ct);
+        if (!guardResult.Passed)
+        {
+            _logger.LogWarning(
+                "Transition guard failed: {TaskId} {From} -> {To}: {Reason}",
+                taskId, from, to, guardResult.Reason);
+            
+            return TransitionResult.Failed(from, to, guardResult.Reason!, "QUEUE-003");
+        }
+        
+        // Execute transition in transaction
+        var timestamp = DateTimeOffset.UtcNow;
+        
+        await _repository.ExecuteInTransactionAsync(async tx =>
+        {
+            // Apply transition actions
+            ApplyTransitionActions(task, to, context, timestamp);
+            
+            // Update task
+            task.Status = to;
+            task.UpdatedAt = timestamp;
+            await _repository.UpdateAsync(task, tx, ct);
+            
+            // Record history
+            await _history.RecordAsync(new TransitionRecord
+            {
+                TaskId = taskId,
+                FromStatus = from,
+                ToStatus = to,
+                Actor = actor.ToString(),
+                Reason = reason,
+                Timestamp = timestamp,
+                WorkerId = context?.WorkerId?.Value,
+                Context = context?.Metadata != null 
+                    ? JsonSerializer.Serialize(context.Metadata)
+                    : null
+            }, tx, ct);
+        }, ct);
+        
+        _logger.LogInformation(
+            "Task {TaskId} transitioned {From} -> {To} by {Actor}",
+            taskId, from, to, actor);
+        
+        // Emit event (async, non-blocking)
+        _ = EmitEventAsync(taskId, from, to, actor, timestamp, context);
+        
+        return TransitionResult.Succeeded(from, to);
+    }
+    
+    private async Task<GuardResult> CheckGuardsAsync(
+        QueuedTask task,
+        TaskStatus to,
+        TransitionSpec spec,
+        TransitionContext? context,
+        CancellationToken ct)
+    {
+        // Check required context
+        if (spec.RequiresWorkerId && context?.WorkerId == null)
+        {
+            return GuardResult.Fail("WorkerId required for this transition");
+        }
+        
+        if (spec.RequiresResult && context?.Result == null)
+        {
+            return GuardResult.Fail("Result required for completion");
+        }
+        
+        if (spec.RequiresError && string.IsNullOrEmpty(context?.Error))
+        {
+            return GuardResult.Fail("Error message required for failure");
+        }
+        
+        // Check retry limit
+        if (spec.IsRetry && task.AttemptCount >= task.Spec.RetryLimit)
+        {
+            return GuardResult.Fail($"Retry limit exceeded ({task.AttemptCount}/{task.Spec.RetryLimit})");
+        }
+        
+        return GuardResult.Pass();
+    }
+    
+    private void ApplyTransitionActions(
+        QueuedTask task,
+        TaskStatus to,
+        TransitionContext? context,
+        DateTimeOffset timestamp)
+    {
+        switch (to)
+        {
+            case TaskStatus.Running:
+                task.StartedAt = timestamp;
+                task.WorkerId = context?.WorkerId;
+                break;
+            
+            case TaskStatus.Completed:
+                task.CompletedAt = timestamp;
+                task.Result = context?.Result;
+                task.WorkerId = null;
+                break;
+            
+            case TaskStatus.Failed:
+                task.CompletedAt = timestamp;
+                task.LastError = context?.Error;
+                task.AttemptCount++;
+                task.WorkerId = null;
+                break;
+            
+            case TaskStatus.Pending when task.Status == TaskStatus.Failed:
+                // Retry - optionally clear error
+                task.StartedAt = null;
+                task.CompletedAt = null;
+                break;
+            
+            case TaskStatus.Cancelled:
+                task.CompletedAt = timestamp;
+                task.WorkerId = null;
+                break;
+        }
+    }
+    
+    private async Task EmitEventAsync(
+        TaskId taskId,
+        TaskStatus from,
+        TaskStatus to,
+        TransitionActor actor,
+        DateTimeOffset timestamp,
+        TransitionContext? context)
+    {
+        try
+        {
+            var baseEvent = new TaskStatusChangedEvent
+            {
+                TaskId = taskId.Value,
+                FromStatus = from.ToString(),
+                ToStatus = to.ToString(),
+                Actor = actor.ToString(),
+                Timestamp = timestamp
+            };
+            
+            await _events.PublishAsync(baseEvent);
+            
+            // Emit specific event
+            IDomainEvent? specificEvent = (from, to) switch
+            {
+                (TaskStatus.Pending, TaskStatus.Running) => new TaskStartedEvent
+                {
+                    TaskId = taskId.Value,
+                    WorkerId = context?.WorkerId?.Value,
+                    Timestamp = timestamp
+                },
+                (TaskStatus.Running, TaskStatus.Completed) => new TaskCompletedEvent
+                {
+                    TaskId = taskId.Value,
+                    Timestamp = timestamp
+                },
+                (TaskStatus.Running, TaskStatus.Failed) => new TaskFailedEvent
+                {
+                    TaskId = taskId.Value,
+                    Error = context?.Error,
+                    AttemptCount = context?.Metadata?.GetValueOrDefault("attemptCount") as int? ?? 0,
+                    Timestamp = timestamp
+                },
+                (_, TaskStatus.Cancelled) => new TaskCancelledEvent
+                {
+                    TaskId = taskId.Value,
+                    Timestamp = timestamp
+                },
+                _ => null
+            };
+            
+            if (specificEvent != null)
+            {
+                await _events.PublishAsync(specificEvent);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to emit event for task {TaskId}", taskId);
+            // Event emission failure does not fail the transition
+        }
+    }
+    
+    private record struct GuardResult(bool Passed, string? Reason)
+    {
+        public static GuardResult Pass() => new(true, null);
+        public static GuardResult Fail(string reason) => new(false, reason);
+    }
+}
+```
+
+### Transition History Interface
+
+```csharp
+// Acode.Application/Services/TaskQueue/ITransitionHistory.cs
+namespace Acode.Application.Services.TaskQueue;
+
+/// <summary>
+/// Manages task state transition history.
+/// </summary>
+public interface ITransitionHistoryService
+{
+    /// <summary>
+    /// Records a transition.
+    /// </summary>
+    Task RecordAsync(TransitionRecord record, IDbTransaction? tx = null, CancellationToken ct = default);
+    
+    /// <summary>
+    /// Gets history for a task.
+    /// </summary>
+    Task<IReadOnlyList<TransitionRecord>> GetHistoryAsync(
+        TaskId taskId,
+        int? limit = null,
+        CancellationToken ct = default);
+    
+    /// <summary>
+    /// Gets recent transitions.
+    /// </summary>
+    Task<IReadOnlyList<TransitionRecord>> GetRecentAsync(
+        DateTimeOffset since,
+        int limit = 100,
+        CancellationToken ct = default);
+    
+    /// <summary>
+    /// Purges old history records.
+    /// </summary>
+    Task<PurgeResult> PurgeAsync(
+        DateTimeOffset before,
+        int batchSize = 1000,
+        CancellationToken ct = default);
+    
+    /// <summary>
+    /// Exports history.
+    /// </summary>
+    Task<Stream> ExportAsync(
+        TaskId? taskId,
+        DateTimeOffset? since,
+        HistoryExportFormat format,
+        CancellationToken ct = default);
+}
+
+public sealed record TransitionRecord
+{
+    public long Id { get; init; }
+    public required TaskId TaskId { get; init; }
+    public TaskStatus? FromStatus { get; init; }
+    public required TaskStatus ToStatus { get; init; }
+    public required string Actor { get; init; }
+    public string? Reason { get; init; }
+    public required DateTimeOffset Timestamp { get; init; }
+    public string? WorkerId { get; init; }
+    public string? Context { get; init; }
+}
+
+public sealed record PurgeResult(int DeletedCount, TimeSpan Duration);
+
+public enum HistoryExportFormat { Json, Csv }
+```
+
+### Transition History Service
+
+```csharp
+// Acode.Application/Services/TaskQueue/TransitionHistoryService.cs
+namespace Acode.Application.Services.TaskQueue;
+
+public sealed class TransitionHistoryService : ITransitionHistoryService
+{
+    private readonly IDbConnectionFactory _connectionFactory;
+    private readonly ILogger<TransitionHistoryService> _logger;
+    
+    public TransitionHistoryService(
+        IDbConnectionFactory connectionFactory,
+        ILogger<TransitionHistoryService> logger)
+    {
+        _connectionFactory = connectionFactory;
+        _logger = logger;
+    }
+    
+    public async Task RecordAsync(
+        TransitionRecord record,
+        IDbTransaction? tx = null,
+        CancellationToken ct = default)
+    {
+        const string sql = @"
+            INSERT INTO task_history (task_id, from_status, to_status, actor, reason, timestamp, worker_id, context)
+            VALUES (@TaskId, @FromStatus, @ToStatus, @Actor, @Reason, @Timestamp, @WorkerId, @Context)";
+        
+        var conn = tx?.Connection ?? await _connectionFactory.CreateAsync(ct);
+        
+        await conn.ExecuteAsync(sql, new
+        {
+            TaskId = record.TaskId.Value,
+            FromStatus = record.FromStatus?.ToString(),
+            ToStatus = record.ToStatus.ToString(),
+            record.Actor,
+            record.Reason,
+            Timestamp = record.Timestamp.ToString("O"),
+            record.WorkerId,
+            record.Context
+        }, tx);
+    }
+    
+    public async Task<IReadOnlyList<TransitionRecord>> GetHistoryAsync(
+        TaskId taskId,
+        int? limit = null,
+        CancellationToken ct = default)
+    {
+        var sql = @"
+            SELECT id, task_id, from_status, to_status, actor, reason, timestamp, worker_id, context
+            FROM task_history
+            WHERE task_id = @TaskId
+            ORDER BY timestamp ASC";
+        
+        if (limit.HasValue)
+            sql += " LIMIT @Limit";
+        
+        using var conn = await _connectionFactory.CreateAsync(ct);
+        var rows = await conn.QueryAsync(sql, new { TaskId = taskId.Value, Limit = limit });
+        
+        return rows.Select(MapRecord).ToList();
+    }
+    
+    public async Task<IReadOnlyList<TransitionRecord>> GetRecentAsync(
+        DateTimeOffset since,
+        int limit = 100,
+        CancellationToken ct = default)
+    {
+        const string sql = @"
+            SELECT id, task_id, from_status, to_status, actor, reason, timestamp, worker_id, context
+            FROM task_history
+            WHERE timestamp >= @Since
+            ORDER BY timestamp DESC
+            LIMIT @Limit";
+        
+        using var conn = await _connectionFactory.CreateAsync(ct);
+        var rows = await conn.QueryAsync(sql, new { Since = since.ToString("O"), Limit = limit });
+        
+        return rows.Select(MapRecord).ToList();
+    }
+    
+    public async Task<PurgeResult> PurgeAsync(
+        DateTimeOffset before,
+        int batchSize = 1000,
+        CancellationToken ct = default)
+    {
+        var sw = Stopwatch.StartNew();
+        var totalDeleted = 0;
+        
+        using var conn = await _connectionFactory.CreateAsync(ct);
+        
+        while (!ct.IsCancellationRequested)
+        {
+            // Delete in batches to avoid long-running transactions
+            var deleted = await conn.ExecuteAsync(@"
+                DELETE FROM task_history
+                WHERE id IN (
+                    SELECT id FROM task_history
+                    WHERE timestamp < @Before
+                    LIMIT @BatchSize
+                )", new { Before = before.ToString("O"), BatchSize = batchSize });
+            
+            totalDeleted += deleted;
+            
+            if (deleted < batchSize)
+                break;
+            
+            // Yield to avoid blocking
+            await Task.Delay(10, ct);
+        }
+        
+        _logger.LogInformation("Purged {Count} history records older than {Before}", totalDeleted, before);
+        
+        return new PurgeResult(totalDeleted, sw.Elapsed);
+    }
+    
+    public async Task<Stream> ExportAsync(
+        TaskId? taskId,
+        DateTimeOffset? since,
+        HistoryExportFormat format,
+        CancellationToken ct = default)
+    {
+        var sql = "SELECT * FROM task_history WHERE 1=1";
+        var parameters = new DynamicParameters();
+        
+        if (taskId != null)
+        {
+            sql += " AND task_id = @TaskId";
+            parameters.Add("TaskId", taskId.Value);
+        }
+        
+        if (since != null)
+        {
+            sql += " AND timestamp >= @Since";
+            parameters.Add("Since", since.Value.ToString("O"));
+        }
+        
+        sql += " ORDER BY timestamp ASC";
+        
+        using var conn = await _connectionFactory.CreateAsync(ct);
+        var rows = await conn.QueryAsync(sql, parameters);
+        var records = rows.Select(MapRecord).ToList();
+        
+        var stream = new MemoryStream();
+        
+        if (format == HistoryExportFormat.Json)
+        {
+            await JsonSerializer.SerializeAsync(stream, records, cancellationToken: ct);
+        }
+        else
+        {
+            await using var writer = new StreamWriter(stream, leaveOpen: true);
+            await writer.WriteLineAsync("id,task_id,from_status,to_status,actor,reason,timestamp");
+            foreach (var r in records)
+            {
+                await writer.WriteLineAsync($"{r.Id},{r.TaskId},{r.FromStatus},{r.ToStatus},{r.Actor},{r.Reason},{r.Timestamp:O}");
+            }
+        }
+        
+        stream.Position = 0;
+        return stream;
+    }
+    
+    private static TransitionRecord MapRecord(dynamic row) => new()
+    {
+        Id = (long)row.id,
+        TaskId = new TaskId((string)row.task_id),
+        FromStatus = row.from_status != null ? Enum.Parse<TaskStatus>((string)row.from_status) : null,
+        ToStatus = Enum.Parse<TaskStatus>((string)row.to_status),
+        Actor = (string)row.actor,
+        Reason = row.reason,
+        Timestamp = DateTimeOffset.Parse((string)row.timestamp),
+        WorkerId = row.worker_id,
+        Context = row.context
+    };
+}
+```
+
+### Domain Events
+
+```csharp
+// Acode.Core/Domain/Tasks/Events/TaskStatusChangedEvent.cs
+namespace Acode.Core.Domain.Tasks.Events;
+
+public sealed record TaskStatusChangedEvent : IDomainEvent
+{
+    public required string TaskId { get; init; }
+    public required string FromStatus { get; init; }
+    public required string ToStatus { get; init; }
+    public required string Actor { get; init; }
+    public required DateTimeOffset Timestamp { get; init; }
+}
+
+public sealed record TaskStartedEvent : IDomainEvent
+{
+    public required string TaskId { get; init; }
+    public string? WorkerId { get; init; }
+    public required DateTimeOffset Timestamp { get; init; }
+}
+
+public sealed record TaskCompletedEvent : IDomainEvent
+{
+    public required string TaskId { get; init; }
+    public required DateTimeOffset Timestamp { get; init; }
+}
+
+public sealed record TaskFailedEvent : IDomainEvent
+{
+    public required string TaskId { get; init; }
+    public string? Error { get; init; }
+    public int AttemptCount { get; init; }
+    public required DateTimeOffset Timestamp { get; init; }
+}
+
+public sealed record TaskCancelledEvent : IDomainEvent
+{
+    public required string TaskId { get; init; }
+    public required DateTimeOffset Timestamp { get; init; }
+}
+```
+
+### Implementation Checklist
+
+- [ ] Create `TransitionMatrix` with all valid transitions
+- [ ] Define `TransitionSpec` for each transition
+- [ ] Define `IStateMachine` interface
+- [ ] Implement `TaskStateMachine`
+- [ ] Add guard validation logic
+- [ ] Add transition action logic (startedAt, completedAt, etc.)
+- [ ] Implement atomic transaction handling
+- [ ] Define `ITransitionHistoryService` interface
+- [ ] Implement `TransitionHistoryService`
+- [ ] Add batch purge with non-blocking yields
+- [ ] Add JSON export
+- [ ] Add CSV export
+- [ ] Define all domain events
+- [ ] Implement event emission (async, non-blocking)
+- [ ] Add structured logging
+- [ ] Register in DI
+- [ ] Write state machine unit tests
+- [ ] Write history service tests
+- [ ] Test concurrent transitions
+
+### Rollout Plan
+
+1. **Phase 1: Transition Matrix** (Day 1)
+   - Define all valid transitions
+   - Add transition specs
+   - Unit tests
+
+2. **Phase 2: State Machine** (Day 2)
+   - Guard checking
+   - Action application
+   - Transaction handling
+
+3. **Phase 3: History Service** (Day 2)
+   - Recording
+   - Querying
+   - Purging
+
+4. **Phase 4: Events** (Day 3)
+   - Domain event definitions
+   - Event emission
+   - Async handling
+
+5. **Phase 5: Integration** (Day 3)
+   - DI registration
+   - End-to-end testing
+   - Performance validation
 
 ---
 

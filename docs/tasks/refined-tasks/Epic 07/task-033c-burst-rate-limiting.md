@@ -269,39 +269,44 @@ acode burst history --last 24h
 
 ## Implementation Prompt
 
-### Interface
+### Part 1: File Structure + Domain Models
+
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Burst/
+│           └── RateLimit/
+│               ├── RateLimitReason.cs
+│               └── Events/
+│                   ├── BurstRateLimitedEvent.cs
+│                   ├── CooldownStartedEvent.cs
+│                   └── BackoffAppliedEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Burst/
+│           └── RateLimit/
+│               ├── IBurstRateLimiter.cs
+│               ├── IGradualScaler.cs
+│               ├── BurstRequest.cs
+│               ├── RateLimitResult.cs
+│               ├── RateLimitStatus.cs
+│               ├── ScaleStep.cs
+│               └── RateLimitOptions.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Burst/
+            └── RateLimit/
+                ├── BurstRateLimiter.cs
+                ├── RateLimitStateStore.cs
+                ├── CooldownTracker.cs
+                ├── BackoffCalculator.cs
+                └── GradualScaler.cs
+```
 
 ```csharp
-public interface IBurstRateLimiter
-{
-    Task<RateLimitResult> CheckAsync(
-        BurstRequest request,
-        CancellationToken ct);
-    
-    Task RecordBurstAsync(
-        BurstRecord record,
-        CancellationToken ct);
-    
-    Task<RateLimitStatus> GetStatusAsync(
-        CancellationToken ct);
-    
-    Task ResetBackoffAsync(
-        string targetType = null,
-        CancellationToken ct = default);
-}
-
-public record BurstRequest(
-    string TargetType,
-    int RequestedInstances,
-    TaskPriority? HighestPriority,
-    bool Force);
-
-public record RateLimitResult(
-    bool Allowed,
-    RateLimitReason? BlockReason,
-    TimeSpan? WaitTime,
-    DateTime? NextAllowed,
-    int AllowedInstances);
+// src/Acode.Domain/Compute/Burst/RateLimit/RateLimitReason.cs
+namespace Acode.Domain.Compute.Burst.RateLimit;
 
 public enum RateLimitReason
 {
@@ -312,36 +317,270 @@ public enum RateLimitReason
     Backoff
 }
 
-public record RateLimitStatus(
-    bool InCooldown,
-    TimeSpan CooldownRemaining,
-    int BurstsThisHour,
-    int HourlyLimit,
-    int BurstsToday,
-    int DailyLimit,
-    int RunningInstances,
-    int MaxInstances,
-    bool InBackoff,
-    TimeSpan BackoffRemaining);
+// src/Acode.Domain/Compute/Burst/RateLimit/Events/BurstRateLimitedEvent.cs
+namespace Acode.Domain.Compute.Burst.RateLimit.Events;
+
+public sealed record BurstRateLimitedEvent(
+    RateLimitReason Reason,
+    TimeSpan WaitTime,
+    string TargetType,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/Compute/Burst/RateLimit/Events/CooldownStartedEvent.cs
+namespace Acode.Domain.Compute.Burst.RateLimit.Events;
+
+public sealed record CooldownStartedEvent(
+    string TargetType,
+    TimeSpan Duration,
+    DateTimeOffset EndsAt,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/Compute/Burst/RateLimit/Events/BackoffAppliedEvent.cs
+namespace Acode.Domain.Compute.Burst.RateLimit.Events;
+
+public sealed record BackoffAppliedEvent(
+    string TargetType,
+    int FailureCount,
+    TimeSpan BackoffDuration,
+    DateTimeOffset Timestamp) : IDomainEvent;
 ```
 
-### Gradual Scaler
+**End of Task 033.c Specification - Part 1/3**
+
+### Part 2: Application Interfaces
 
 ```csharp
-public interface IGradualScaler
+// src/Acode.Application/Compute/Burst/RateLimit/BurstRequest.cs
+namespace Acode.Application.Compute.Burst.RateLimit;
+
+public sealed record BurstRequest
 {
-    Task<ScaleStep> GetNextStepAsync(
-        int targetScale,
-        int currentScale,
-        CancellationToken ct);
+    public required string TargetType { get; init; }
+    public int RequestedInstances { get; init; } = 1;
+    public int? HighestPriority { get; init; }
+    public bool Force { get; init; } = false;
 }
 
-public record ScaleStep(
-    int InstancestoAdd,
-    TimeSpan WaitBeforeNext,
-    bool IsFinal);
+// src/Acode.Application/Compute/Burst/RateLimit/RateLimitResult.cs
+namespace Acode.Application.Compute.Burst.RateLimit;
+
+public sealed record RateLimitResult
+{
+    public bool Allowed { get; init; }
+    public RateLimitReason? BlockReason { get; init; }
+    public TimeSpan? WaitTime { get; init; }
+    public DateTimeOffset? NextAllowed { get; init; }
+    public int AllowedInstances { get; init; }
+}
+
+// src/Acode.Application/Compute/Burst/RateLimit/RateLimitStatus.cs
+namespace Acode.Application.Compute.Burst.RateLimit;
+
+public sealed record RateLimitStatus
+{
+    public bool InCooldown { get; init; }
+    public TimeSpan CooldownRemaining { get; init; }
+    public int BurstsThisHour { get; init; }
+    public int HourlyLimit { get; init; }
+    public int BurstsToday { get; init; }
+    public int DailyLimit { get; init; }
+    public int RunningInstances { get; init; }
+    public int MaxInstances { get; init; }
+    public bool InBackoff { get; init; }
+    public TimeSpan BackoffRemaining { get; init; }
+}
+
+// src/Acode.Application/Compute/Burst/RateLimit/ScaleStep.cs
+namespace Acode.Application.Compute.Burst.RateLimit;
+
+public sealed record ScaleStep
+{
+    public int InstancesToAdd { get; init; }
+    public TimeSpan WaitBeforeNext { get; init; }
+    public bool IsFinal { get; init; }
+}
+
+// src/Acode.Application/Compute/Burst/RateLimit/RateLimitOptions.cs
+namespace Acode.Application.Compute.Burst.RateLimit;
+
+public sealed record RateLimitOptions
+{
+    public int PerHour { get; init; } = 10;
+    public int PerDay { get; init; } = 50;
+    public int MaxInstancesPerBurst { get; init; } = 3;
+    public int MaxConcurrentInstances { get; init; } = 5;
+    public TimeSpan DefaultCooldown { get; init; } = TimeSpan.FromMinutes(5);
+    public double P0CooldownReduction { get; init; } = 0.5;
+    public TimeSpan InitialBackoff { get; init; } = TimeSpan.FromMinutes(1);
+    public double BackoffMultiplier { get; init; } = 2.0;
+    public TimeSpan MaxBackoff { get; init; } = TimeSpan.FromMinutes(30);
+    public bool GradualScalingEnabled { get; init; } = true;
+    public TimeSpan StabilizationPeriod { get; init; } = TimeSpan.FromMinutes(2);
+    public double ScaleFactor { get; init; } = 1.5;
+}
+
+// src/Acode.Application/Compute/Burst/RateLimit/IBurstRateLimiter.cs
+namespace Acode.Application.Compute.Burst.RateLimit;
+
+public interface IBurstRateLimiter
+{
+    Task<RateLimitResult> CheckAsync(BurstRequest request, CancellationToken ct = default);
+    Task RecordBurstAsync(string targetType, int instanceCount, bool success, CancellationToken ct = default);
+    Task<RateLimitStatus> GetStatusAsync(CancellationToken ct = default);
+    Task ResetBackoffAsync(string? targetType = null, CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Burst/RateLimit/IGradualScaler.cs
+namespace Acode.Application.Compute.Burst.RateLimit;
+
+public interface IGradualScaler
+{
+    Task<ScaleStep> GetNextStepAsync(int targetScale, int currentScale, CancellationToken ct = default);
+    bool IsScalingComplete(int targetScale, int currentScale);
+}
 ```
 
----
+**End of Task 033.c Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation + Checklist
+
+```csharp
+// src/Acode.Infrastructure/Compute/Burst/RateLimit/BackoffCalculator.cs
+namespace Acode.Infrastructure.Compute.Burst.RateLimit;
+
+public sealed class BackoffCalculator
+{
+    private readonly RateLimitOptions _options;
+    private readonly Dictionary<string, (int FailureCount, DateTimeOffset LastFailure)> _state = new();
+    
+    public TimeSpan GetBackoff(string targetType)
+    {
+        if (!_state.TryGetValue(targetType, out var state))
+            return TimeSpan.Zero;
+        
+        var backoff = _options.InitialBackoff * Math.Pow(_options.BackoffMultiplier, state.FailureCount - 1);
+        backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks, _options.MaxBackoff.Ticks));
+        
+        var elapsed = DateTimeOffset.UtcNow - state.LastFailure;
+        return elapsed >= backoff ? TimeSpan.Zero : backoff - elapsed;
+    }
+    
+    public void RecordFailure(string targetType)
+    {
+        var count = _state.TryGetValue(targetType, out var s) ? s.FailureCount + 1 : 1;
+        _state[targetType] = (count, DateTimeOffset.UtcNow);
+    }
+    
+    public void RecordSuccess(string targetType) => _state.Remove(targetType);
+    
+    public void Reset(string? targetType = null)
+    {
+        if (targetType != null) _state.Remove(targetType);
+        else _state.Clear();
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Burst/RateLimit/GradualScaler.cs
+namespace Acode.Infrastructure.Compute.Burst.RateLimit;
+
+public sealed class GradualScaler : IGradualScaler
+{
+    private readonly RateLimitOptions _options;
+    
+    public Task<ScaleStep> GetNextStepAsync(int targetScale, int currentScale, CancellationToken ct)
+    {
+        if (!_options.GradualScalingEnabled || currentScale >= targetScale)
+            return Task.FromResult(new ScaleStep { InstancesToAdd = 0, IsFinal = true });
+        
+        var remaining = targetScale - currentScale;
+        var toAdd = currentScale == 0 
+            ? 1 
+            : Math.Min((int)Math.Ceiling(currentScale * (_options.ScaleFactor - 1)), remaining);
+        
+        toAdd = Math.Min(toAdd, 2); // Max increment
+        
+        return Task.FromResult(new ScaleStep
+        {
+            InstancesToAdd = toAdd,
+            WaitBeforeNext = _options.StabilizationPeriod,
+            IsFinal = currentScale + toAdd >= targetScale
+        });
+    }
+    
+    public bool IsScalingComplete(int targetScale, int currentScale) => currentScale >= targetScale;
+}
+
+// src/Acode.Infrastructure/Compute/Burst/RateLimit/BurstRateLimiter.cs
+namespace Acode.Infrastructure.Compute.Burst.RateLimit;
+
+public sealed class BurstRateLimiter : IBurstRateLimiter
+{
+    private readonly RateLimitOptions _options;
+    private readonly RateLimitStateStore _store;
+    private readonly BackoffCalculator _backoff;
+    private readonly IEventPublisher _events;
+    
+    public async Task<RateLimitResult> CheckAsync(BurstRequest request, CancellationToken ct)
+    {
+        // Force bypass for P0 (with reduced cooldown)
+        var cooldown = _options.DefaultCooldown;
+        if (request.HighestPriority == 0)
+            cooldown = TimeSpan.FromTicks((long)(cooldown.Ticks * (1 - _options.P0CooldownReduction)));
+        
+        // Check cooldown
+        var cooldownRemaining = await _store.GetCooldownRemainingAsync(request.TargetType, ct);
+        if (!request.Force && cooldownRemaining > TimeSpan.Zero)
+        {
+            await _events.PublishAsync(new BurstRateLimitedEvent(RateLimitReason.Cooldown, cooldownRemaining, request.TargetType, DateTimeOffset.UtcNow), ct);
+            return new RateLimitResult { Allowed = false, BlockReason = RateLimitReason.Cooldown, WaitTime = cooldownRemaining };
+        }
+        
+        // Check backoff
+        var backoffRemaining = _backoff.GetBackoff(request.TargetType);
+        if (!request.Force && backoffRemaining > TimeSpan.Zero)
+            return new RateLimitResult { Allowed = false, BlockReason = RateLimitReason.Backoff, WaitTime = backoffRemaining };
+        
+        // Check hourly/daily limits
+        var status = await GetStatusAsync(ct);
+        if (status.BurstsThisHour >= _options.PerHour)
+            return new RateLimitResult { Allowed = false, BlockReason = RateLimitReason.HourlyLimit };
+        
+        if (status.RunningInstances >= _options.MaxConcurrentInstances)
+            return new RateLimitResult { Allowed = false, BlockReason = RateLimitReason.MaxInstances };
+        
+        var allowedInstances = Math.Min(request.RequestedInstances, 
+            Math.Min(_options.MaxInstancesPerBurst, _options.MaxConcurrentInstances - status.RunningInstances));
+        
+        return new RateLimitResult { Allowed = true, AllowedInstances = allowedInstances };
+    }
+}
+```
+
+### Implementation Checklist
+
+| Step | Action | Verification |
+|------|--------|--------------|
+| 1 | Create RateLimitReason enum | Enum compiles |
+| 2 | Add rate limit events | Event serialization verified |
+| 3 | Define all records (BurstRequest, RateLimitResult, etc.) | Records compile |
+| 4 | Create IBurstRateLimiter, IGradualScaler interfaces | Interface contracts clear |
+| 5 | Implement RateLimitStateStore with SQLite | State persists across restarts |
+| 6 | Implement CooldownTracker | Cooldown timing accurate |
+| 7 | Implement BackoffCalculator | Exponential backoff verified |
+| 8 | Implement GradualScaler | Step-by-step scaling works |
+| 9 | Implement BurstRateLimiter | All rate checks work |
+| 10 | Add P0 cooldown reduction | 50% reduction verified |
+| 11 | Add force bypass | Force flag works |
+| 12 | Implement CLI status command | `acode burst status` works |
+| 13 | Add metrics and logging | Rate limit metrics emitted |
+| 14 | Performance verify <5ms | Benchmark passes |
+
+### Rollout Plan
+
+1. **Phase 1**: Implement state store and cooldown tracker
+2. **Phase 2**: Add backoff calculator with exponential delays
+3. **Phase 3**: Build rate limiter with all limit checks
+4. **Phase 4**: Add gradual scaler with stabilization
+5. **Phase 5**: CLI integration and end-to-end tests
 
 **End of Task 033.c Specification**

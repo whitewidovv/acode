@@ -303,52 +303,750 @@ Summary: 3 errors, 1 warning - validation failed
 
 ## Implementation Prompt
 
-### Interfaces
+### File Structure
+
+```
+src/
+├── Acode.Application/
+│   └── Services/
+│       └── Errors/
+│           ├── TaskError.cs            # Error model
+│           ├── ErrorSeverity.cs        # Severity enum
+│           ├── SourceLocation.cs       # Source location
+│           ├── ErrorFormatOptions.cs   # Formatter options
+│           ├── IErrorFormatter.cs      # Formatter interface
+│           ├── TerminalErrorFormatter.cs
+│           ├── JsonErrorFormatter.cs
+│           ├── PlainTextErrorFormatter.cs
+│           ├── ContextExtractor.cs     # Snippet extraction
+│           └── ErrorCodes.cs           # Error code registry
+│
+└── Acode.Cli/
+    └── Infrastructure/
+        └── TerminalCapabilities.cs     # Color/width detection
+
+tests/
+└── Acode.Application.Tests/
+    └── Services/
+        └── Errors/
+            ├── TerminalErrorFormatterTests.cs
+            ├── JsonErrorFormatterTests.cs
+            └── ContextExtractorTests.cs
+```
+
+### Domain Models
 
 ```csharp
-public interface IErrorFormatter
+// Acode.Application/Services/Errors/TaskError.cs
+namespace Acode.Application.Services.Errors;
+
+/// <summary>
+/// Represents a validation or parse error.
+/// </summary>
+public sealed record TaskError
 {
-    string Format(IReadOnlyList<TaskError> errors, 
-        ErrorFormatOptions options);
+    /// <summary>Machine-readable error code (e.g., TASK-002).</summary>
+    public required string Code { get; init; }
+    
+    /// <summary>Human-readable error message.</summary>
+    public required string Message { get; init; }
+    
+    /// <summary>Error severity level.</summary>
+    public required ErrorSeverity Severity { get; init; }
+    
+    /// <summary>Source file location (optional).</summary>
+    public SourceLocation? Source { get; init; }
+    
+    /// <summary>Field path in dot notation (e.g., dependencies[0]).</summary>
+    public string? Path { get; init; }
+    
+    /// <summary>Context snippet around the error.</summary>
+    public ErrorContext? Context { get; init; }
+    
+    /// <summary>Suggested fix action.</summary>
+    public string? Suggestion { get; init; }
+    
+    /// <summary>Documentation URL for this error.</summary>
+    public string? DocumentationUrl { get; init; }
+    
+    /// <summary>Expected value or type.</summary>
+    public string? Expected { get; init; }
+    
+    /// <summary>Actual value (truncated if necessary).</summary>
+    public string? Actual { get; init; }
+    
+    /// <summary>Related errors (for grouping).</summary>
+    public IReadOnlyList<TaskError> RelatedErrors { get; init; } = Array.Empty<TaskError>();
 }
 
-public record TaskError(
-    string Code,
-    string Message,
-    ErrorSeverity Severity,
-    SourceLocation? Source,
-    string? Context,
-    string? Suggestion,
-    string? DocumentationUrl);
+// Acode.Application/Services/Errors/ErrorSeverity.cs
+namespace Acode.Application.Services.Errors;
 
-public record SourceLocation(
-    string File,
-    int Line,
-    int Column);
+public enum ErrorSeverity
+{
+    Error,
+    Warning,
+    Info
+}
 
-public record ErrorFormatOptions(
-    OutputFormat Format,
-    bool UseColors,
-    int ContextLines,
-    int MaxWidth);
+// Acode.Application/Services/Errors/SourceLocation.cs
+namespace Acode.Application.Services.Errors;
 
-public enum OutputFormat { Terminal, Plain, Json }
-public enum ErrorSeverity { Error, Warning, Info }
+public sealed record SourceLocation
+{
+    public required string File { get; init; }
+    public required int Line { get; init; }
+    public required int Column { get; init; }
+    
+    public override string ToString() => $"{File}:{Line}:{Column}";
+}
+
+// Acode.Application/Services/Errors/ErrorContext.cs
+namespace Acode.Application.Services.Errors;
+
+public sealed record ErrorContext
+{
+    /// <summary>Lines of source content.</summary>
+    public required IReadOnlyList<ContextLine> Lines { get; init; }
+    
+    /// <summary>Line number of the error.</summary>
+    public required int ErrorLineNumber { get; init; }
+    
+    /// <summary>Column number for caret position.</summary>
+    public int? CaretColumn { get; init; }
+    
+    /// <summary>Length of error span.</summary>
+    public int CaretLength { get; init; } = 1;
+}
+
+public sealed record ContextLine(int LineNumber, string Content, bool IsError);
+```
+
+### Error Format Options
+
+```csharp
+// Acode.Application/Services/Errors/ErrorFormatOptions.cs
+namespace Acode.Application.Services.Errors;
+
+public sealed record ErrorFormatOptions
+{
+    /// <summary>Output format.</summary>
+    public OutputFormat Format { get; init; } = OutputFormat.Terminal;
+    
+    /// <summary>Whether to use ANSI colors.</summary>
+    public bool UseColors { get; init; } = true;
+    
+    /// <summary>Number of context lines before/after error.</summary>
+    public int ContextLines { get; init; } = 3;
+    
+    /// <summary>Maximum output width (0 for no limit).</summary>
+    public int MaxWidth { get; init; } = 120;
+    
+    /// <summary>Whether to use Unicode icons.</summary>
+    public bool UseIcons { get; init; } = true;
+    
+    /// <summary>Whether to show documentation URLs.</summary>
+    public bool ShowUrls { get; init; } = true;
+    
+    /// <summary>Whether to pretty-print JSON.</summary>
+    public bool PrettyJson { get; init; } = false;
+    
+    /// <summary>Maximum value length before truncation.</summary>
+    public int MaxValueLength { get; init; } = 100;
+    
+    public static ErrorFormatOptions Default => new();
+    
+    public static ErrorFormatOptions FromEnvironment()
+    {
+        var noColor = Environment.GetEnvironmentVariable("NO_COLOR") != null;
+        var termDumb = Environment.GetEnvironmentVariable("TERM") == "dumb";
+        
+        return new ErrorFormatOptions
+        {
+            UseColors = !noColor && !termDumb,
+            UseIcons = !termDumb && Console.OutputEncoding.EncodingName.Contains("Unicode"),
+            MaxWidth = Console.IsOutputRedirected ? 0 : Math.Max(80, Console.WindowWidth)
+        };
+    }
+}
+
+public enum OutputFormat
+{
+    Terminal,
+    Plain,
+    Json
+}
+```
+
+### Error Formatter Interface
+
+```csharp
+// Acode.Application/Services/Errors/IErrorFormatter.cs
+namespace Acode.Application.Services.Errors;
+
+/// <summary>
+/// Formats task errors for display.
+/// </summary>
+public interface IErrorFormatter
+{
+    /// <summary>
+    /// Formats a list of errors.
+    /// </summary>
+    string Format(IReadOnlyList<TaskError> errors, ErrorFormatOptions? options = null);
+    
+    /// <summary>
+    /// Formats a single error.
+    /// </summary>
+    string FormatSingle(TaskError error, ErrorFormatOptions? options = null);
+    
+    /// <summary>
+    /// Formats a summary line.
+    /// </summary>
+    string FormatSummary(int errorCount, int warningCount, bool isValid);
+}
+```
+
+### Terminal Error Formatter
+
+```csharp
+// Acode.Application/Services/Errors/TerminalErrorFormatter.cs
+namespace Acode.Application.Services.Errors;
+
+public sealed class TerminalErrorFormatter : IErrorFormatter
+{
+    public string Format(IReadOnlyList<TaskError> errors, ErrorFormatOptions? options = null)
+    {
+        options ??= ErrorFormatOptions.FromEnvironment();
+        
+        if (errors.Count == 0)
+            return string.Empty;
+        
+        var sb = new StringBuilder();
+        
+        // Sort: errors first, then by location
+        var sorted = errors
+            .OrderByDescending(e => e.Severity == ErrorSeverity.Error)
+            .ThenBy(e => e.Source?.Line ?? int.MaxValue)
+            .ToList();
+        
+        // Deduplicate
+        var unique = sorted
+            .DistinctBy(e => (e.Code, e.Source?.Line, e.Source?.Column, e.Path))
+            .ToList();
+        
+        // Header
+        var firstFile = unique.FirstOrDefault(e => e.Source != null)?.Source?.File;
+        var errorCount = unique.Count(e => e.Severity == ErrorSeverity.Error);
+        var warningCount = unique.Count(e => e.Severity == ErrorSeverity.Warning);
+        
+        if (firstFile != null)
+        {
+            sb.AppendLine(FormatHeader(firstFile, errorCount, warningCount, options));
+            sb.AppendLine();
+        }
+        
+        // Format each error
+        foreach (var error in unique)
+        {
+            sb.AppendLine(FormatSingle(error, options));
+        }
+        
+        // Summary
+        sb.AppendLine(FormatSummary(errorCount, warningCount, errorCount == 0));
+        
+        return sb.ToString();
+    }
+    
+    public string FormatSingle(TaskError error, ErrorFormatOptions? options = null)
+    {
+        options ??= ErrorFormatOptions.FromEnvironment();
+        
+        var sb = new StringBuilder();
+        var colors = options.UseColors ? ErrorColors.Instance : ErrorColors.NoColor;
+        
+        // Icon and code
+        var icon = options.UseIcons ? GetIcon(error.Severity) : GetTextIcon(error.Severity);
+        var severityColor = GetSeverityColor(error.Severity, colors);
+        
+        sb.Append(severityColor);
+        sb.Append(icon);
+        sb.Append(' ');
+        sb.Append(colors.Bold);
+        sb.Append(error.Code);
+        sb.Append(colors.Reset);
+        sb.Append(": ");
+        sb.Append(error.Message);
+        
+        // Path
+        if (error.Path != null)
+        {
+            sb.Append(" at ");
+            sb.Append(colors.Cyan);
+            sb.Append(error.Path);
+            sb.Append(colors.Reset);
+        }
+        
+        sb.AppendLine();
+        
+        // Source location
+        if (error.Source != null)
+        {
+            sb.AppendLine();
+            sb.Append("  ");
+            sb.Append(colors.Cyan);
+            sb.Append("--> ");
+            sb.Append(error.Source);
+            sb.Append(colors.Reset);
+            sb.AppendLine();
+        }
+        
+        // Context snippet
+        if (error.Context != null)
+        {
+            sb.Append(FormatContext(error.Context, options, colors));
+        }
+        
+        // Expected/Actual
+        if (error.Expected != null || error.Actual != null)
+        {
+            sb.AppendLine();
+            if (error.Expected != null)
+            {
+                sb.Append("   = expected: ");
+                sb.Append(colors.Green);
+                sb.Append(error.Expected);
+                sb.Append(colors.Reset);
+                sb.AppendLine();
+            }
+            if (error.Actual != null)
+            {
+                var truncated = TruncateValue(error.Actual, options.MaxValueLength);
+                sb.Append("   = got: ");
+                sb.Append(colors.Red);
+                sb.Append(truncated);
+                sb.Append(colors.Reset);
+                sb.AppendLine();
+            }
+        }
+        
+        // Suggestion
+        if (error.Suggestion != null)
+        {
+            sb.AppendLine();
+            sb.Append("  ");
+            sb.Append(colors.Blue);
+            sb.Append("Suggestion: ");
+            sb.Append(colors.Reset);
+            sb.AppendLine(error.Suggestion);
+        }
+        
+        // Documentation URL
+        if (error.DocumentationUrl != null && options.ShowUrls)
+        {
+            sb.AppendLine();
+            sb.Append("  See: ");
+            if (options.UseColors)
+            {
+                // OSC 8 hyperlink
+                sb.Append($"\x1b]8;;{error.DocumentationUrl}\x1b\\");
+                sb.Append(colors.Cyan);
+                sb.Append(error.DocumentationUrl);
+                sb.Append(colors.Reset);
+                sb.Append("\x1b]8;;\x1b\\");
+            }
+            else
+            {
+                sb.Append(error.DocumentationUrl);
+            }
+            sb.AppendLine();
+        }
+        
+        return sb.ToString();
+    }
+    
+    public string FormatSummary(int errorCount, int warningCount, bool isValid)
+    {
+        var options = ErrorFormatOptions.FromEnvironment();
+        var colors = options.UseColors ? ErrorColors.Instance : ErrorColors.NoColor;
+        
+        var sb = new StringBuilder();
+        
+        if (isValid)
+        {
+            sb.Append(colors.Green);
+            sb.Append(options.UseIcons ? "✓ " : "");
+            sb.Append("Validation passed");
+            sb.Append(colors.Reset);
+        }
+        else
+        {
+            sb.Append("Summary: ");
+            sb.Append(colors.Red);
+            sb.Append(errorCount);
+            sb.Append(" error");
+            if (errorCount != 1) sb.Append('s');
+            sb.Append(colors.Reset);
+            
+            if (warningCount > 0)
+            {
+                sb.Append(", ");
+                sb.Append(colors.Yellow);
+                sb.Append(warningCount);
+                sb.Append(" warning");
+                if (warningCount != 1) sb.Append('s');
+                sb.Append(colors.Reset);
+            }
+            
+            sb.Append(" - ");
+            sb.Append(colors.Red);
+            sb.Append("validation failed");
+            sb.Append(colors.Reset);
+        }
+        
+        return sb.ToString();
+    }
+    
+    private static string FormatHeader(string file, int errors, int warnings, ErrorFormatOptions options)
+    {
+        var colors = options.UseColors ? ErrorColors.Instance : ErrorColors.NoColor;
+        return $"Found {colors.Red}{errors} error{(errors != 1 ? "s" : "")}{colors.Reset} and {colors.Yellow}{warnings} warning{(warnings != 1 ? "s" : "")}{colors.Reset} in {colors.Cyan}{file}{colors.Reset}";
+    }
+    
+    private static string FormatContext(ErrorContext context, ErrorFormatOptions options, ErrorColors colors)
+    {
+        var sb = new StringBuilder();
+        var gutterWidth = context.Lines.Max(l => l.LineNumber).ToString().Length;
+        
+        foreach (var line in context.Lines)
+        {
+            sb.Append("   ");
+            if (line.IsError)
+            {
+                sb.Append(colors.Red);
+            }
+            else
+            {
+                sb.Append(colors.Gray);
+            }
+            sb.Append(line.LineNumber.ToString().PadLeft(gutterWidth));
+            sb.Append(" | ");
+            sb.Append(line.Content);
+            sb.Append(colors.Reset);
+            sb.AppendLine();
+            
+            // Caret line
+            if (line.IsError && context.CaretColumn.HasValue)
+            {
+                sb.Append("   ");
+                sb.Append(new string(' ', gutterWidth));
+                sb.Append(" | ");
+                sb.Append(new string(' ', context.CaretColumn.Value - 1));
+                sb.Append(colors.Red);
+                sb.Append(new string('^', Math.Max(1, context.CaretLength)));
+                sb.Append(colors.Reset);
+                sb.AppendLine();
+            }
+        }
+        
+        return sb.ToString();
+    }
+    
+    private static string GetIcon(ErrorSeverity severity) => severity switch
+    {
+        ErrorSeverity.Error => "✗",
+        ErrorSeverity.Warning => "⚠",
+        ErrorSeverity.Info => "ℹ",
+        _ => "•"
+    };
+    
+    private static string GetTextIcon(ErrorSeverity severity) => severity switch
+    {
+        ErrorSeverity.Error => "ERROR",
+        ErrorSeverity.Warning => "WARN",
+        ErrorSeverity.Info => "INFO",
+        _ => "NOTE"
+    };
+    
+    private static string GetSeverityColor(ErrorSeverity severity, ErrorColors colors) => severity switch
+    {
+        ErrorSeverity.Error => colors.Red,
+        ErrorSeverity.Warning => colors.Yellow,
+        ErrorSeverity.Info => colors.Blue,
+        _ => colors.Reset
+    };
+    
+    private static string TruncateValue(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+            return value;
+        
+        return $"{value[..(maxLength - 20)]}... ({value.Length} chars)";
+    }
+}
 ```
 
 ### Color Scheme
 
 ```csharp
-public static class ErrorColors
+// Acode.Application/Services/Errors/ErrorColors.cs
+namespace Acode.Application.Services.Errors;
+
+public sealed class ErrorColors
 {
-    public const string Error = "\x1b[31m";      // Red
-    public const string Warning = "\x1b[33m";   // Yellow
-    public const string Info = "\x1b[34m";      // Blue
-    public const string Path = "\x1b[36m";      // Cyan
-    public const string Code = "\x1b[1m";       // Bold
-    public const string Reset = "\x1b[0m";
+    public string Red { get; init; } = "\x1b[31m";
+    public string Green { get; init; } = "\x1b[32m";
+    public string Yellow { get; init; } = "\x1b[33m";
+    public string Blue { get; init; } = "\x1b[34m";
+    public string Cyan { get; init; } = "\x1b[36m";
+    public string Gray { get; init; } = "\x1b[90m";
+    public string Bold { get; init; } = "\x1b[1m";
+    public string Reset { get; init; } = "\x1b[0m";
+    
+    public static ErrorColors Instance { get; } = new();
+    
+    public static ErrorColors NoColor { get; } = new()
+    {
+        Red = "",
+        Green = "",
+        Yellow = "",
+        Blue = "",
+        Cyan = "",
+        Gray = "",
+        Bold = "",
+        Reset = ""
+    };
 }
 ```
+
+### JSON Error Formatter
+
+```csharp
+// Acode.Application/Services/Errors/JsonErrorFormatter.cs
+namespace Acode.Application.Services.Errors;
+
+public sealed class JsonErrorFormatter : IErrorFormatter
+{
+    public string Format(IReadOnlyList<TaskError> errors, ErrorFormatOptions? options = null)
+    {
+        options ??= ErrorFormatOptions.Default;
+        
+        var errorCount = errors.Count(e => e.Severity == ErrorSeverity.Error);
+        var warningCount = errors.Count(e => e.Severity == ErrorSeverity.Warning);
+        
+        var output = new
+        {
+            errors = errors.Select(e => new
+            {
+                code = e.Code,
+                message = e.Message,
+                severity = e.Severity.ToString().ToLowerInvariant(),
+                path = e.Path,
+                source = e.Source == null ? null : new
+                {
+                    file = e.Source.File,
+                    line = e.Source.Line,
+                    column = e.Source.Column
+                },
+                context = e.Context == null ? null : new
+                {
+                    snippet = string.Join("\n", e.Context.Lines.Select(l => l.Content)),
+                    highlightLine = e.Context.ErrorLineNumber
+                },
+                expected = e.Expected,
+                actual = e.Actual,
+                suggestion = e.Suggestion,
+                url = e.DocumentationUrl
+            }),
+            summary = new
+            {
+                errorCount,
+                warningCount,
+                valid = errorCount == 0
+            }
+        };
+        
+        var jsonOptions = new JsonSerializerOptions
+        {
+            WriteIndented = options.PrettyJson,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+        
+        return JsonSerializer.Serialize(output, jsonOptions);
+    }
+    
+    public string FormatSingle(TaskError error, ErrorFormatOptions? options = null)
+    {
+        return Format(new[] { error }, options);
+    }
+    
+    public string FormatSummary(int errorCount, int warningCount, bool isValid)
+    {
+        return JsonSerializer.Serialize(new { errorCount, warningCount, valid = isValid });
+    }
+}
+```
+
+### Context Extractor
+
+```csharp
+// Acode.Application/Services/Errors/ContextExtractor.cs
+namespace Acode.Application.Services.Errors;
+
+public sealed class ContextExtractor
+{
+    /// <summary>
+    /// Extracts context lines around an error location.
+    /// </summary>
+    public ErrorContext Extract(
+        string content, 
+        int errorLine, 
+        int errorColumn, 
+        int contextLines = 3)
+    {
+        var lines = content.Split('\n');
+        
+        if (errorLine < 1 || errorLine > lines.Length)
+        {
+            return new ErrorContext
+            {
+                Lines = Array.Empty<ContextLine>(),
+                ErrorLineNumber = errorLine,
+                CaretColumn = errorColumn
+            };
+        }
+        
+        var startLine = Math.Max(1, errorLine - contextLines);
+        var endLine = Math.Min(lines.Length, errorLine + contextLines);
+        
+        var contextLinesList = new List<ContextLine>();
+        
+        for (var i = startLine; i <= endLine; i++)
+        {
+            var lineContent = lines[i - 1].TrimEnd('\r'); // Handle CRLF
+            contextLinesList.Add(new ContextLine(i, lineContent, i == errorLine));
+        }
+        
+        return new ErrorContext
+        {
+            Lines = contextLinesList,
+            ErrorLineNumber = errorLine,
+            CaretColumn = Math.Max(1, errorColumn),
+            CaretLength = 1
+        };
+    }
+    
+    /// <summary>
+    /// Extracts context with a span for the error.
+    /// </summary>
+    public ErrorContext ExtractWithSpan(
+        string content,
+        int errorLine,
+        int startColumn,
+        int endColumn,
+        int contextLines = 3)
+    {
+        var context = Extract(content, errorLine, startColumn, contextLines);
+        
+        return context with
+        {
+            CaretLength = Math.Max(1, endColumn - startColumn + 1)
+        };
+    }
+}
+```
+
+### Error Codes Registry
+
+```csharp
+// Acode.Application/Services/Errors/ErrorCodes.cs
+namespace Acode.Application.Services.Errors;
+
+public static class ErrorCodes
+{
+    public const string ParseError = "TASK-001";
+    public const string MissingRequired = "TASK-002";
+    public const string InvalidType = "TASK-003";
+    public const string OutOfRange = "TASK-004";
+    public const string InvalidFormat = "TASK-005";
+    public const string CircularDependency = "TASK-006";
+    public const string InvalidPath = "TASK-007";
+    public const string SizeExceeded = "TASK-008";
+    public const string NestingTooDeep = "TASK-009";
+    public const string UnknownField = "TASK-010";
+    
+    private static readonly Dictionary<string, ErrorCodeInfo> _registry = new()
+    {
+        [ParseError] = new("Parse", "YAML/JSON syntax error", "https://acode.dev/docs/errors/TASK-001"),
+        [MissingRequired] = new("Validation", "Missing required field", "https://acode.dev/docs/errors/TASK-002"),
+        [InvalidType] = new("Validation", "Invalid field type", "https://acode.dev/docs/errors/TASK-003"),
+        [OutOfRange] = new("Validation", "Value out of range", "https://acode.dev/docs/errors/TASK-004"),
+        [InvalidFormat] = new("Validation", "Invalid ULID/path format", "https://acode.dev/docs/errors/TASK-005"),
+        [CircularDependency] = new("Validation", "Circular dependency detected", "https://acode.dev/docs/errors/TASK-006"),
+        [InvalidPath] = new("Validation", "Invalid file path", "https://acode.dev/docs/errors/TASK-007"),
+        [SizeExceeded] = new("Limit", "Size limit exceeded", "https://acode.dev/docs/errors/TASK-008"),
+        [NestingTooDeep] = new("Limit", "Nesting too deep", "https://acode.dev/docs/errors/TASK-009"),
+        [UnknownField] = new("Warning", "Unknown field", "https://acode.dev/docs/errors/TASK-010")
+    };
+    
+    public static ErrorCodeInfo? GetInfo(string code) =>
+        _registry.TryGetValue(code, out var info) ? info : null;
+    
+    public static string? GetDocUrl(string code) =>
+        GetInfo(code)?.DocumentationUrl;
+}
+
+public sealed record ErrorCodeInfo(
+    string Category,
+    string Description,
+    string DocumentationUrl);
+```
+
+### Implementation Checklist
+
+- [ ] Create `TaskError` and related models
+- [ ] Create `ErrorFormatOptions` with environment detection
+- [ ] Define `IErrorFormatter` interface
+- [ ] Implement `TerminalErrorFormatter` with colors
+- [ ] Implement caret positioning logic
+- [ ] Implement OSC 8 hyperlinks
+- [ ] Implement `JsonErrorFormatter`
+- [ ] Implement `PlainTextErrorFormatter`
+- [ ] Create `ContextExtractor` for snippets
+- [ ] Create `ErrorCodes` registry
+- [ ] Add error deduplication
+- [ ] Add error sorting (severity, location)
+- [ ] Handle NO_COLOR environment variable
+- [ ] Handle TERM=dumb
+- [ ] Add value truncation with length display
+- [ ] Register formatters in DI
+- [ ] Write unit tests for formatters
+- [ ] Write unit tests for context extraction
+- [ ] Test color output manually
+
+### Rollout Plan
+
+1. **Phase 1: Models** (Day 1)
+   - TaskError and related types
+   - ErrorFormatOptions
+   - ErrorCodes registry
+
+2. **Phase 2: Terminal Formatter** (Day 2)
+   - Color support
+   - Context snippets
+   - Caret positioning
+
+3. **Phase 3: JSON Formatter** (Day 2)
+   - Structured output
+   - Pretty printing
+
+4. **Phase 4: Context Extractor** (Day 3)
+   - Line extraction
+   - Span calculation
+
+5. **Phase 5: Integration** (Day 3)
+   - DI registration
+   - CLI integration
+   - Manual testing
 
 ---
 

@@ -256,83 +256,707 @@ VS Code users can add to settings:
 
 ## Implementation Prompt
 
-### Schema Structure
+### File Structure
+
+```
+src/
+├── Acode.Core/
+│   └── Domain/
+│       └── Tasks/
+│           └── Schemas/
+│               └── task-spec.schema.json  # JSON Schema file
+│
+├── Acode.Application/
+│   └── Services/
+│       └── TaskSpec/
+│           ├── ISchemaValidator.cs       # Validation interface
+│           ├── SchemaValidator.cs        # JSON Schema validator
+│           ├── ISchemaProvider.cs        # Schema loading
+│           ├── SchemaProvider.cs         # Embedded/file schema
+│           ├── IFormatValidator.cs       # Custom format interface
+│           └── Formats/
+│               ├── UlidFormatValidator.cs
+│               ├── FilePathFormatValidator.cs
+│               └── TagFormatValidator.cs
+│
+└── Acode.Cli/
+    └── Commands/
+        └── Schema/
+            └── SchemaExportCommand.cs
+
+tests/
+├── Acode.Application.Tests/
+│   └── Services/
+│       └── TaskSpec/
+│           ├── SchemaValidatorTests.cs
+│           └── FormatValidatorTests.cs
+```
+
+### Complete JSON Schema
 
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://acode.dev/schemas/task-spec/v1",
   "title": "Acode Task Specification",
-  "description": "Schema for Acode task specifications",
+  "description": "Schema for defining tasks in the Acode task queue system",
   "type": "object",
   "required": ["title", "description"],
   "properties": {
     "id": {
-      "type": "string",
-      "format": "ulid",
-      "description": "Unique task identifier (auto-generated if omitted)"
+      "$ref": "#/definitions/ulid",
+      "description": "Unique task identifier (ULID). Auto-generated if omitted."
     },
     "title": {
       "type": "string",
       "minLength": 1,
       "maxLength": 200,
-      "description": "Short task title"
+      "description": "Short, descriptive task title",
+      "examples": ["Implement user login", "Fix validation bug #123"]
     },
     "description": {
       "type": "string",
       "minLength": 1,
       "maxLength": 10000,
-      "description": "Full task description"
+      "description": "Full task description with implementation details",
+      "examples": ["Add login functionality with email/password validation"]
     },
     "status": {
-      "type": "string",
-      "enum": ["pending", "running", "completed", "failed", "cancelled", "blocked"],
-      "default": "pending"
+      "$ref": "#/definitions/taskStatus",
+      "default": "pending",
+      "description": "Current task status (defaults to pending)"
     },
     "priority": {
       "type": "integer",
       "minimum": 1,
       "maximum": 5,
-      "default": 3
+      "default": 3,
+      "description": "Priority level: 1 (highest) to 5 (lowest)"
     },
     "dependencies": {
       "type": "array",
-      "items": { "type": "string", "format": "ulid" },
+      "items": { "$ref": "#/definitions/ulid" },
       "default": [],
-      "uniqueItems": true
+      "uniqueItems": true,
+      "maxItems": 100,
+      "description": "Task IDs that must complete before this task"
     },
     "files": {
       "type": "array",
-      "items": { "type": "string", "format": "file-path" },
+      "items": { "$ref": "#/definitions/filePath" },
       "default": [],
-      "maxItems": 1000
+      "maxItems": 1000,
+      "description": "Files affected by this task (relative paths)"
     },
     "tags": {
       "type": "array",
-      "items": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+      "items": { "$ref": "#/definitions/tag" },
       "default": [],
-      "maxItems": 50
+      "maxItems": 50,
+      "uniqueItems": true,
+      "description": "Categorization tags"
     },
     "metadata": {
       "type": "object",
       "default": {},
-      "additionalProperties": true
+      "additionalProperties": true,
+      "propertyNames": {
+        "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+        "not": { "pattern": "^_" }
+      },
+      "description": "Extension metadata (keys must not start with underscore)"
     },
     "timeout": {
       "type": "integer",
       "minimum": 1,
-      "default": 3600
+      "maximum": 86400,
+      "default": 3600,
+      "description": "Maximum execution time in seconds"
     },
     "retryLimit": {
       "type": "integer",
       "minimum": 0,
       "maximum": 10,
-      "default": 3
+      "default": 3,
+      "description": "Maximum retry attempts on failure"
+    },
+    "parentId": {
+      "$ref": "#/definitions/ulid",
+      "description": "Parent task ID for subtasks"
+    },
+    "estimatedDuration": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Estimated execution time in seconds"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "propertyNames": { "$ref": "#/definitions/labelKey" },
+      "default": {},
+      "description": "Key-value labels for filtering"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Creation timestamp (ISO 8601)"
     }
   },
-  "additionalProperties": true
+  "additionalProperties": true,
+  "definitions": {
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Universally Unique Lexicographically Sortable Identifier"
+    },
+    "taskStatus": {
+      "type": "string",
+      "enum": ["pending", "running", "completed", "failed", "cancelled", "blocked"],
+      "description": "Valid task status values"
+    },
+    "filePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "^(?!.*\\.\\.)(?!/)(?!.*//)[a-zA-Z0-9_./-]+$",
+      "description": "Relative file path (no traversal, no absolute paths)"
+    },
+    "tag": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50,
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$",
+      "description": "Lowercase alphanumeric tag with optional hyphens"
+    },
+    "labelKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$",
+      "description": "Label key format"
+    }
+  }
 }
 ```
+
+### Schema Provider
+
+```csharp
+// Acode.Application/Services/TaskSpec/ISchemaProvider.cs
+namespace Acode.Application.Services.TaskSpec;
+
+/// <summary>
+/// Provides access to the task spec JSON schema.
+/// </summary>
+public interface ISchemaProvider
+{
+    /// <summary>
+    /// Gets the JSON schema as a string.
+    /// </summary>
+    Task<string> GetSchemaAsync(CancellationToken ct = default);
+    
+    /// <summary>
+    /// Gets the parsed JSON schema.
+    /// </summary>
+    Task<JsonSchema> GetParsedSchemaAsync(CancellationToken ct = default);
+    
+    /// <summary>
+    /// Schema version.
+    /// </summary>
+    string Version { get; }
+}
+
+// Acode.Application/Services/TaskSpec/SchemaProvider.cs
+namespace Acode.Application.Services.TaskSpec;
+
+public sealed class SchemaProvider : ISchemaProvider
+{
+    private const string SchemaResourceName = "Acode.Core.Domain.Tasks.Schemas.task-spec.schema.json";
+    private JsonSchema? _cachedSchema;
+    private string? _cachedSchemaText;
+    private readonly SemaphoreSlim _lock = new(1, 1);
+    
+    public string Version => "1.0.0";
+    
+    public async Task<string> GetSchemaAsync(CancellationToken ct = default)
+    {
+        if (_cachedSchemaText != null)
+            return _cachedSchemaText;
+        
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (_cachedSchemaText != null)
+                return _cachedSchemaText;
+            
+            var assembly = typeof(TaskSpec).Assembly;
+            using var stream = assembly.GetManifestResourceStream(SchemaResourceName);
+            
+            if (stream == null)
+                throw new InvalidOperationException($"Schema resource not found: {SchemaResourceName}");
+            
+            using var reader = new StreamReader(stream);
+            _cachedSchemaText = await reader.ReadToEndAsync(ct);
+            
+            return _cachedSchemaText;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+    
+    public async Task<JsonSchema> GetParsedSchemaAsync(CancellationToken ct = default)
+    {
+        if (_cachedSchema != null)
+            return _cachedSchema;
+        
+        var schemaText = await GetSchemaAsync(ct);
+        _cachedSchema = JsonSchema.FromText(schemaText);
+        
+        return _cachedSchema;
+    }
+}
+```
+
+### Schema Validator
+
+```csharp
+// Acode.Application/Services/TaskSpec/ISchemaValidator.cs
+namespace Acode.Application.Services.TaskSpec;
+
+/// <summary>
+/// Validates JSON/YAML content against the task spec schema.
+/// </summary>
+public interface ISchemaValidator
+{
+    /// <summary>
+    /// Validates a JSON node against the schema.
+    /// </summary>
+    Task<SchemaValidationResult> ValidateAsync(
+        JsonNode content, 
+        CancellationToken ct = default);
+    
+    /// <summary>
+    /// Validates parsed content against the schema.
+    /// </summary>
+    Task<SchemaValidationResult> ValidateAsync(
+        string jsonContent, 
+        CancellationToken ct = default);
+}
+
+/// <summary>
+/// Result of schema validation.
+/// </summary>
+public sealed record SchemaValidationResult
+{
+    public bool IsValid => Errors.Count == 0;
+    public IReadOnlyList<SchemaError> Errors { get; init; } = Array.Empty<SchemaError>();
+    public IReadOnlyList<SchemaWarning> Warnings { get; init; } = Array.Empty<SchemaWarning>();
+    
+    public static SchemaValidationResult Valid() => new();
+    
+    public static SchemaValidationResult Invalid(IEnumerable<SchemaError> errors) => new()
+    {
+        Errors = errors.ToList()
+    };
+}
+
+/// <summary>
+/// A schema validation error.
+/// </summary>
+public sealed record SchemaError
+{
+    /// <summary>JSON Pointer path to the error.</summary>
+    public required string Path { get; init; }
+    
+    /// <summary>Human-readable error message.</summary>
+    public required string Message { get; init; }
+    
+    /// <summary>Error code.</summary>
+    public required string Code { get; init; }
+    
+    /// <summary>Schema path that failed.</summary>
+    public string? SchemaPath { get; init; }
+    
+    /// <summary>Expected value/type.</summary>
+    public string? Expected { get; init; }
+    
+    /// <summary>Actual value (truncated).</summary>
+    public string? Actual { get; init; }
+}
+
+public sealed record SchemaWarning
+{
+    public required string Path { get; init; }
+    public required string Message { get; init; }
+}
+
+// Acode.Application/Services/TaskSpec/SchemaValidator.cs
+namespace Acode.Application.Services.TaskSpec;
+
+public sealed class SchemaValidator : ISchemaValidator
+{
+    private readonly ISchemaProvider _schemaProvider;
+    private readonly IEnumerable<IFormatValidator> _formatValidators;
+    private readonly ILogger<SchemaValidator> _logger;
+    
+    public SchemaValidator(
+        ISchemaProvider schemaProvider,
+        IEnumerable<IFormatValidator> formatValidators,
+        ILogger<SchemaValidator> logger)
+    {
+        _schemaProvider = schemaProvider;
+        _formatValidators = formatValidators;
+        _logger = logger;
+    }
+    
+    public async Task<SchemaValidationResult> ValidateAsync(
+        JsonNode content, 
+        CancellationToken ct = default)
+    {
+        var schema = await _schemaProvider.GetParsedSchemaAsync(ct);
+        
+        // Configure evaluation options
+        var options = new EvaluationOptions
+        {
+            OutputFormat = OutputFormat.List,
+            RequireFormatValidation = true
+        };
+        
+        // Register custom format validators
+        foreach (var validator in _formatValidators)
+        {
+            options.OnlyKnownFormats = false;
+            // Register validator here based on library used
+        }
+        
+        var result = schema.Evaluate(content, options);
+        
+        if (result.IsValid)
+        {
+            var warnings = CheckUnknownProperties(content, schema);
+            return SchemaValidationResult.Valid() with { Warnings = warnings };
+        }
+        
+        var errors = result.Details
+            .Where(d => !d.IsValid && d.Errors != null)
+            .SelectMany(d => d.Errors!.Select(e => new SchemaError
+            {
+                Path = d.InstanceLocation.ToString(),
+                Message = e.Value,
+                Code = MapErrorCode(e.Key),
+                SchemaPath = d.SchemaLocation.ToString(),
+                Expected = GetExpected(d),
+                Actual = GetActual(d, content)
+            }))
+            .ToList();
+        
+        return SchemaValidationResult.Invalid(errors);
+    }
+    
+    public async Task<SchemaValidationResult> ValidateAsync(
+        string jsonContent, 
+        CancellationToken ct = default)
+    {
+        var node = JsonNode.Parse(jsonContent);
+        if (node == null)
+        {
+            return SchemaValidationResult.Invalid(new[]
+            {
+                new SchemaError
+                {
+                    Path = "",
+                    Message = "Invalid JSON",
+                    Code = "TASK-001"
+                }
+            });
+        }
+        
+        return await ValidateAsync(node, ct);
+    }
+    
+    private static string MapErrorCode(string schemaKeyword) => schemaKeyword switch
+    {
+        "required" => "TASK-002",
+        "type" => "TASK-003",
+        "minimum" or "maximum" or "minLength" or "maxLength" => "TASK-004",
+        "pattern" or "format" => "TASK-005",
+        "enum" => "TASK-003",
+        _ => "TASK-001"
+    };
+    
+    private static string? GetExpected(EvaluationResults detail)
+    {
+        // Extract expected value from schema constraint
+        return null; // Implementation depends on library
+    }
+    
+    private static string? GetActual(EvaluationResults detail, JsonNode root)
+    {
+        // Navigate to actual value and truncate
+        return null; // Implementation depends on library
+    }
+    
+    private IReadOnlyList<SchemaWarning> CheckUnknownProperties(JsonNode content, JsonSchema schema)
+    {
+        var warnings = new List<SchemaWarning>();
+        
+        if (content is JsonObject obj)
+        {
+            var knownProps = new HashSet<string>
+            {
+                "id", "title", "description", "status", "priority",
+                "dependencies", "files", "tags", "metadata", "timeout",
+                "retryLimit", "parentId", "estimatedDuration", "labels", "createdAt"
+            };
+            
+            foreach (var prop in obj)
+            {
+                if (!knownProps.Contains(prop.Key))
+                {
+                    warnings.Add(new SchemaWarning
+                    {
+                        Path = $"/{prop.Key}",
+                        Message = $"Unknown property '{prop.Key}' will be stored in metadata"
+                    });
+                }
+            }
+        }
+        
+        return warnings;
+    }
+}
+```
+
+### Custom Format Validators
+
+```csharp
+// Acode.Application/Services/TaskSpec/IFormatValidator.cs
+namespace Acode.Application.Services.TaskSpec;
+
+/// <summary>
+/// Validates a custom string format.
+/// </summary>
+public interface IFormatValidator
+{
+    /// <summary>Format name in schema.</summary>
+    string FormatName { get; }
+    
+    /// <summary>Validates the value.</summary>
+    bool Validate(string value);
+    
+    /// <summary>Error message on failure.</summary>
+    string ErrorMessage { get; }
+}
+
+// Acode.Application/Services/TaskSpec/Formats/UlidFormatValidator.cs
+namespace Acode.Application.Services.TaskSpec.Formats;
+
+public sealed class UlidFormatValidator : IFormatValidator
+{
+    private static readonly Regex UlidPattern = new(
+        @"^[0-9A-HJKMNP-TV-Z]{26}$",
+        RegexOptions.Compiled,
+        TimeSpan.FromMilliseconds(100));
+    
+    public string FormatName => "ulid";
+    
+    public string ErrorMessage => "Must be a valid 26-character ULID";
+    
+    public bool Validate(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 26)
+            return false;
+        
+        try
+        {
+            return UlidPattern.IsMatch(value);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+}
+
+// Acode.Application/Services/TaskSpec/Formats/FilePathFormatValidator.cs
+namespace Acode.Application.Services.TaskSpec.Formats;
+
+public sealed class FilePathFormatValidator : IFormatValidator
+{
+    public string FormatName => "file-path";
+    
+    public string ErrorMessage => "Must be a valid relative file path (no traversal, no absolute paths)";
+    
+    public bool Validate(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+        
+        // Check for path traversal
+        if (value.Contains(".."))
+            return false;
+        
+        // Check for absolute path
+        if (Path.IsPathRooted(value))
+            return false;
+        
+        // Check for double slashes
+        if (value.Contains("//"))
+            return false;
+        
+        // Check for leading slash
+        if (value.StartsWith("/") || value.StartsWith("\\"))
+            return false;
+        
+        // Check for invalid characters (platform-agnostic)
+        var invalidChars = new[] { '<', '>', ':', '"', '|', '?', '*', '\0' };
+        if (value.Any(c => invalidChars.Contains(c)))
+            return false;
+        
+        return true;
+    }
+}
+
+// Acode.Application/Services/TaskSpec/Formats/TagFormatValidator.cs
+namespace Acode.Application.Services.TaskSpec.Formats;
+
+public sealed class TagFormatValidator : IFormatValidator
+{
+    private static readonly Regex TagPattern = new(
+        @"^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$",
+        RegexOptions.Compiled,
+        TimeSpan.FromMilliseconds(100));
+    
+    public string FormatName => "tag";
+    
+    public string ErrorMessage => "Must be lowercase alphanumeric with optional hyphens (not at start/end)";
+    
+    public bool Validate(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 50)
+            return false;
+        
+        try
+        {
+            return TagPattern.IsMatch(value);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+}
+```
+
+### CLI Export Command
+
+```csharp
+// Acode.Cli/Commands/Schema/SchemaExportCommand.cs
+namespace Acode.Cli.Commands.Schema;
+
+[Command("schema export", Description = "Export JSON schema")]
+public sealed class SchemaExportCommand : ICommand
+{
+    [CommandArgument(0, "<name>", Description = "Schema name (task-spec)")]
+    public string SchemaName { get; init; } = string.Empty;
+    
+    [CommandOption("--output|-o", Description = "Output file path")]
+    public string? OutputPath { get; init; }
+    
+    [CommandOption("--pretty", Description = "Pretty-print JSON")]
+    public bool Pretty { get; init; } = true;
+    
+    public async ValueTask ExecuteAsync(IConsole console)
+    {
+        var schemaProvider = GetSchemaProvider(); // DI
+        
+        if (!SchemaName.Equals("task-spec", StringComparison.OrdinalIgnoreCase))
+        {
+            console.Error.WriteLine($"Unknown schema: {SchemaName}");
+            console.Error.WriteLine("Available: task-spec");
+            Environment.ExitCode = ExitCodes.InvalidArgument;
+            return;
+        }
+        
+        var schema = await schemaProvider.GetSchemaAsync();
+        
+        if (Pretty)
+        {
+            var node = JsonNode.Parse(schema);
+            schema = node!.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        }
+        
+        if (OutputPath != null)
+        {
+            await File.WriteAllTextAsync(OutputPath, schema);
+            console.Output.WriteLine($"Schema exported to: {OutputPath}");
+        }
+        else
+        {
+            console.Output.WriteLine(schema);
+        }
+    }
+}
+```
+
+### Implementation Checklist
+
+- [ ] Create `task-spec.schema.json` file
+- [ ] Embed schema as resource in Core assembly
+- [ ] Define all property schemas with constraints
+- [ ] Define `definitions` for reusable types
+- [ ] Add ULID pattern definition
+- [ ] Add file-path pattern definition
+- [ ] Add tag pattern definition
+- [ ] Add label-key pattern definition
+- [ ] Define `ISchemaProvider` interface
+- [ ] Implement `SchemaProvider` with caching
+- [ ] Define `ISchemaValidator` interface
+- [ ] Implement `SchemaValidator` using Json.Schema.Net
+- [ ] Map schema errors to error codes
+- [ ] Add unknown property warning detection
+- [ ] Define `IFormatValidator` interface
+- [ ] Implement `UlidFormatValidator`
+- [ ] Implement `FilePathFormatValidator`
+- [ ] Implement `TagFormatValidator`
+- [ ] Create `SchemaExportCommand` CLI
+- [ ] Register validators in DI
+- [ ] Write unit tests for validators
+- [ ] Write integration tests for full validation
+
+### Rollout Plan
+
+1. **Phase 1: Schema File** (Day 1)
+   - Create complete JSON schema
+   - Add as embedded resource
+   - Validate schema syntax
+
+2. **Phase 2: Provider** (Day 1)
+   - Implement schema provider
+   - Add caching
+   - Unit test loading
+
+3. **Phase 3: Format Validators** (Day 2)
+   - Implement ULID validator
+   - Implement file-path validator
+   - Implement tag validator
+   - Unit test each
+
+4. **Phase 4: Schema Validator** (Day 2)
+   - Implement validator with Json.Schema.Net
+   - Add error mapping
+   - Add warning detection
+
+5. **Phase 5: CLI** (Day 3)
+   - Export command
+   - Manual testing
+
+6. **Phase 6: Integration** (Day 3)
+   - Wire up DI
+   - IDE integration testing
+   - Documentation
 
 ---
 

@@ -265,67 +265,412 @@ burst:
 
 ## Implementation Prompt
 
-### Interface
+### Part 1: File Structure + Domain Models
+
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Burst/
+│           ├── BurstTrigger.cs
+│           ├── HeuristicType.cs
+│           └── Events/
+│               ├── BurstTriggeredEvent.cs
+│               ├── BurstBlockedEvent.cs
+│               └── BurstCooldownEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Burst/
+│           ├── IBurstHeuristics.cs
+│           ├── IBurstHeuristic.cs
+│           ├── BurstContext.cs
+│           ├── BurstDecision.cs
+│           ├── HeuristicResult.cs
+│           └── BurstOptions.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Burst/
+            ├── BurstHeuristicsEngine.cs
+            ├── BurstCooldownTracker.cs
+            ├── BurstHistoryRecorder.cs
+            └── Heuristics/
+                ├── QueueDepthHeuristic.cs
+                ├── QueueWaitHeuristic.cs
+                ├── QueueGrowthHeuristic.cs
+                ├── CpuUtilizationHeuristic.cs
+                ├── MemoryUtilizationHeuristic.cs
+                ├── WorkerSaturationHeuristic.cs
+                └── PriorityTaskHeuristic.cs
+```
 
 ```csharp
+// src/Acode.Domain/Compute/Burst/BurstTrigger.cs
+namespace Acode.Domain.Compute.Burst;
+
+public enum BurstTrigger
+{
+    QueueDepth,
+    QueueWait,
+    QueueGrowth,
+    CpuUtilization,
+    MemoryUtilization,
+    WorkerSaturation,
+    PriorityTask,
+    TaskStarvation
+}
+
+// src/Acode.Domain/Compute/Burst/HeuristicType.cs
+namespace Acode.Domain.Compute.Burst;
+
+public enum HeuristicType
+{
+    QueueBased,
+    LoadBased,
+    TaskBased
+}
+
+// src/Acode.Domain/Compute/Burst/Events/BurstTriggeredEvent.cs
+namespace Acode.Domain.Compute.Burst.Events;
+
+public sealed record BurstTriggeredEvent(
+    IReadOnlyList<BurstTrigger> Triggers,
+    int TargetInstanceCount,
+    decimal EstimatedCost,
+    TimeSpan EstimatedTimeSaved,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/Compute/Burst/Events/BurstBlockedEvent.cs
+namespace Acode.Domain.Compute.Burst.Events;
+
+public sealed record BurstBlockedEvent(
+    string Reason,
+    bool BlockedByMode,
+    bool BlockedByBudget,
+    bool BlockedByCooldown,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/Compute/Burst/Events/BurstCooldownEvent.cs
+namespace Acode.Domain.Compute.Burst.Events;
+
+public sealed record BurstCooldownEvent(
+    TimeSpan CooldownRemaining,
+    DateTimeOffset CooldownEnds,
+    DateTimeOffset Timestamp) : IDomainEvent;
+```
+
+**End of Task 033 Specification - Part 1/4**
+
+### Part 2: Application Interfaces
+
+```csharp
+// src/Acode.Application/Compute/Burst/BurstContext.cs
+namespace Acode.Application.Compute.Burst;
+
+public sealed record BurstContext
+{
+    public int QueueDepth { get; init; }
+    public TimeSpan OldestTaskWait { get; init; }
+    public double QueueGrowthRate { get; init; } // tasks per minute
+    public double CpuUtilization { get; init; }
+    public double MemoryUtilization { get; init; }
+    public double DiskUtilization { get; init; }
+    public int ActiveWorkers { get; init; }
+    public int TotalWorkers { get; init; }
+    public int RunningCloudInstances { get; init; }
+    public decimal TodaySpend { get; init; }
+    public decimal? DailyBudget { get; init; }
+    public OperatingMode Mode { get; init; }
+    public bool HasHighPriorityTasks { get; init; }
+    public DateTimeOffset? LastBurstTime { get; init; }
+}
+
+// src/Acode.Application/Compute/Burst/HeuristicResult.cs
+namespace Acode.Application.Compute.Burst;
+
+public sealed record HeuristicResult
+{
+    public required BurstTrigger Trigger { get; init; }
+    public bool ShouldTrigger { get; init; }
+    public double Confidence { get; init; } // 0.0 to 1.0
+    public string? Reason { get; init; }
+    public int SuggestedInstances { get; init; } = 1;
+}
+
+// src/Acode.Application/Compute/Burst/BurstDecision.cs
+namespace Acode.Application.Compute.Burst;
+
+public sealed record BurstDecision
+{
+    public bool ShouldBurst { get; init; }
+    public int TargetInstanceCount { get; init; }
+    public IReadOnlyList<string> Reasons { get; init; } = [];
+    public IReadOnlyList<BurstTrigger> ActiveTriggers { get; init; } = [];
+    public decimal EstimatedCost { get; init; }
+    public TimeSpan EstimatedTimeSaved { get; init; }
+    public bool BlockedByMode { get; init; }
+    public bool BlockedByBudget { get; init; }
+    public bool BlockedByCooldown { get; init; }
+    public TimeSpan? CooldownRemaining { get; init; }
+}
+
+// src/Acode.Application/Compute/Burst/BurstOptions.cs
+namespace Acode.Application.Compute.Burst;
+
+public sealed record BurstOptions
+{
+    public bool Enabled { get; init; } = true;
+    public int MaxInstances { get; init; } = 5;
+    public TimeSpan Cooldown { get; init; } = TimeSpan.FromMinutes(5);
+    public decimal? MaxHourlyBudget { get; init; }
+    public double MinRoi { get; init; } = 2.0;
+    public bool UseOrLogic { get; init; } = true; // OR vs AND triggers
+}
+
+// src/Acode.Application/Compute/Burst/IBurstHeuristic.cs
+namespace Acode.Application.Compute.Burst;
+
+public interface IBurstHeuristic
+{
+    string Name { get; }
+    HeuristicType Type { get; }
+    bool Enabled { get; }
+    
+    Task<HeuristicResult> EvaluateAsync(
+        BurstContext context,
+        CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Burst/IBurstHeuristics.cs
+namespace Acode.Application.Compute.Burst;
+
 public interface IBurstHeuristics
 {
     Task<BurstDecision> EvaluateAsync(
         BurstContext context,
         CancellationToken ct = default);
+    
+    IReadOnlyList<IBurstHeuristic> GetEnabledHeuristics();
 }
-
-public record BurstContext(
-    int QueueDepth,
-    TimeSpan OldestTaskWait,
-    double CpuUtilization,
-    double MemoryUtilization,
-    int ActiveWorkers,
-    int TotalWorkers,
-    int RunningCloudInstances,
-    decimal TodaySpend,
-    OperatingMode Mode);
-
-public record BurstDecision(
-    bool ShouldBurst,
-    int TargetInstanceCount,
-    IReadOnlyList<string> Reasons,
-    decimal EstimatedCost,
-    TimeSpan EstimatedTimeSaved,
-    bool BlockedByMode,
-    bool BlockedByBudget,
-    bool BlockedByCooldown);
 ```
 
-### Heuristic Interface
+**End of Task 033 Specification - Part 2/4**
+
+### Part 3: Infrastructure Implementation
 
 ```csharp
-public interface IBurstHeuristic
+// src/Acode.Infrastructure/Compute/Burst/BurstCooldownTracker.cs
+namespace Acode.Infrastructure.Compute.Burst;
+
+public sealed class BurstCooldownTracker
 {
-    string Name { get; }
-    bool Enabled { get; }
-    Task<HeuristicResult> EvaluateAsync(
-        BurstContext context,
-        CancellationToken ct);
+    private DateTimeOffset? _lastBurstTime;
+    private readonly TimeSpan _cooldownPeriod;
+    
+    public BurstCooldownTracker(TimeSpan cooldownPeriod)
+    {
+        _cooldownPeriod = cooldownPeriod;
+    }
+    
+    public void RecordBurst() => _lastBurstTime = DateTimeOffset.UtcNow;
+    
+    public bool IsInCooldown(out TimeSpan remaining)
+    {
+        if (_lastBurstTime == null)
+        {
+            remaining = TimeSpan.Zero;
+            return false;
+        }
+        
+        var elapsed = DateTimeOffset.UtcNow - _lastBurstTime.Value;
+        remaining = _cooldownPeriod - elapsed;
+        return remaining > TimeSpan.Zero;
+    }
 }
 
-public record HeuristicResult(
-    bool ShouldTrigger,
-    double Confidence,
-    string Reason,
-    int SuggestedInstances);
+// src/Acode.Infrastructure/Compute/Burst/Heuristics/QueueDepthHeuristic.cs
+namespace Acode.Infrastructure.Compute.Burst.Heuristics;
+
+public sealed class QueueDepthHeuristic : IBurstHeuristic
+{
+    private readonly int _threshold;
+    
+    public string Name => "queue-depth";
+    public HeuristicType Type => HeuristicType.QueueBased;
+    public bool Enabled { get; }
+    
+    public QueueDepthHeuristic(int threshold = 10, bool enabled = true)
+    {
+        _threshold = threshold;
+        Enabled = enabled;
+    }
+    
+    public Task<HeuristicResult> EvaluateAsync(BurstContext context, CancellationToken ct)
+    {
+        var shouldTrigger = context.QueueDepth > _threshold;
+        var confidence = Math.Min((double)context.QueueDepth / _threshold / 2, 1.0);
+        var instances = (context.QueueDepth / _threshold) + 1;
+        
+        return Task.FromResult(new HeuristicResult
+        {
+            Trigger = BurstTrigger.QueueDepth,
+            ShouldTrigger = shouldTrigger,
+            Confidence = confidence,
+            Reason = shouldTrigger ? $"Queue depth {context.QueueDepth} > threshold {_threshold}" : null,
+            SuggestedInstances = instances
+        });
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Burst/Heuristics/CpuUtilizationHeuristic.cs
+namespace Acode.Infrastructure.Compute.Burst.Heuristics;
+
+public sealed class CpuUtilizationHeuristic : IBurstHeuristic
+{
+    private readonly double _threshold;
+    private readonly TimeSpan _sustainedPeriod;
+    private readonly Queue<(DateTimeOffset Time, double Value)> _samples = new();
+    
+    public string Name => "cpu-utilization";
+    public HeuristicType Type => HeuristicType.LoadBased;
+    public bool Enabled { get; }
+    
+    public CpuUtilizationHeuristic(double threshold = 0.80, TimeSpan? sustainedPeriod = null, bool enabled = true)
+    {
+        _threshold = threshold;
+        _sustainedPeriod = sustainedPeriod ?? TimeSpan.FromMinutes(2);
+        Enabled = enabled;
+    }
+    
+    public Task<HeuristicResult> EvaluateAsync(BurstContext context, CancellationToken ct)
+    {
+        _samples.Enqueue((DateTimeOffset.UtcNow, context.CpuUtilization));
+        PruneSamples();
+        
+        var sustained = IsSustainedHigh();
+        return Task.FromResult(new HeuristicResult
+        {
+            Trigger = BurstTrigger.CpuUtilization,
+            ShouldTrigger = sustained,
+            Confidence = sustained ? context.CpuUtilization : 0.0,
+            Reason = sustained ? $"CPU sustained at {context.CpuUtilization:P0} for {_sustainedPeriod.TotalMinutes} minutes" : null,
+            SuggestedInstances = 1
+        });
+    }
+    
+    private bool IsSustainedHigh() =>
+        _samples.Count >= 2 && _samples.All(s => s.Value >= _threshold);
+}
 ```
 
-### Built-in Heuristics
+**End of Task 033 Specification - Part 3/4**
+
+### Part 4: Burst Engine + Checklist
 
 ```csharp
-public class QueueDepthHeuristic : IBurstHeuristic { }
-public class QueueWaitHeuristic : IBurstHeuristic { }
-public class CpuUtilizationHeuristic : IBurstHeuristic { }
-public class WorkerSaturationHeuristic : IBurstHeuristic { }
-public class PriorityTaskHeuristic : IBurstHeuristic { }
+// src/Acode.Infrastructure/Compute/Burst/BurstHeuristicsEngine.cs
+namespace Acode.Infrastructure.Compute.Burst;
+
+public sealed class BurstHeuristicsEngine : IBurstHeuristics
+{
+    private readonly IEnumerable<IBurstHeuristic> _heuristics;
+    private readonly BurstCooldownTracker _cooldown;
+    private readonly BurstOptions _options;
+    private readonly IEventPublisher _events;
+    private readonly ILogger<BurstHeuristicsEngine> _logger;
+    
+    public async Task<BurstDecision> EvaluateAsync(
+        BurstContext context,
+        CancellationToken ct = default)
+    {
+        // Mode check first
+        if (context.Mode != OperatingMode.Burst)
+        {
+            await _events.PublishAsync(new BurstBlockedEvent("Mode does not allow burst", true, false, false, DateTimeOffset.UtcNow), ct);
+            return new BurstDecision { BlockedByMode = true };
+        }
+        
+        // Cooldown check
+        if (_cooldown.IsInCooldown(out var remaining))
+        {
+            await _events.PublishAsync(new BurstCooldownEvent(remaining, DateTimeOffset.UtcNow + remaining, DateTimeOffset.UtcNow), ct);
+            return new BurstDecision { BlockedByCooldown = true, CooldownRemaining = remaining };
+        }
+        
+        // Budget check
+        if (_options.MaxHourlyBudget.HasValue && context.TodaySpend >= _options.MaxHourlyBudget * 24)
+        {
+            await _events.PublishAsync(new BurstBlockedEvent("Budget exceeded", false, true, false, DateTimeOffset.UtcNow), ct);
+            return new BurstDecision { BlockedByBudget = true };
+        }
+        
+        // Evaluate all heuristics
+        var results = await EvaluateHeuristicsAsync(context, ct);
+        var triggers = results.Where(r => r.ShouldTrigger).ToList();
+        
+        var shouldBurst = _options.UseOrLogic 
+            ? triggers.Any()
+            : triggers.Count == results.Count;
+        
+        if (!shouldBurst)
+            return new BurstDecision { ShouldBurst = false };
+        
+        var instanceCount = Math.Min(
+            triggers.Max(t => t.SuggestedInstances),
+            _options.MaxInstances - context.RunningCloudInstances);
+        
+        var decision = new BurstDecision
+        {
+            ShouldBurst = instanceCount > 0,
+            TargetInstanceCount = instanceCount,
+            Reasons = triggers.Select(t => t.Reason!).ToList(),
+            ActiveTriggers = triggers.Select(t => t.Trigger).ToList(),
+            EstimatedCost = EstimateCost(instanceCount),
+            EstimatedTimeSaved = EstimateTimeSaved(context, instanceCount)
+        };
+        
+        if (decision.ShouldBurst)
+        {
+            _cooldown.RecordBurst();
+            await _events.PublishAsync(new BurstTriggeredEvent(
+                decision.ActiveTriggers, decision.TargetInstanceCount,
+                decision.EstimatedCost, decision.EstimatedTimeSaved, DateTimeOffset.UtcNow), ct);
+        }
+        
+        return decision;
+    }
+    
+    public IReadOnlyList<IBurstHeuristic> GetEnabledHeuristics() =>
+        _heuristics.Where(h => h.Enabled).ToList();
+}
 ```
 
----
+### Implementation Checklist
+
+| Step | Action | Verification |
+|------|--------|--------------|
+| 1 | Create domain enums (BurstTrigger, HeuristicType) | Enums compile |
+| 2 | Add burst events | Event serialization verified |
+| 3 | Define BurstContext, BurstDecision, HeuristicResult | Records compile |
+| 4 | Create IBurstHeuristic, IBurstHeuristics interfaces | Interface contracts clear |
+| 5 | Implement BurstCooldownTracker | Cooldown logic verified |
+| 6 | Implement QueueDepthHeuristic | Threshold triggers correctly |
+| 7 | Implement QueueWaitHeuristic | Wait time triggers correctly |
+| 8 | Implement QueueGrowthHeuristic | Growth rate calculated |
+| 9 | Implement CpuUtilizationHeuristic | Sustained high CPU triggers |
+| 10 | Implement MemoryUtilizationHeuristic | Memory triggers work |
+| 11 | Implement WorkerSaturationHeuristic | All workers busy triggers |
+| 12 | Implement PriorityTaskHeuristic | High priority triggers faster |
+| 13 | Implement BurstHeuristicsEngine | OR/AND logic works |
+| 14 | Add mode compliance | local-only/airgapped block burst |
+| 15 | Add budget enforcement | Over budget blocks burst |
+| 16 | Register all heuristics in DI | All heuristics resolved |
+
+### Rollout Plan
+
+1. **Phase 1**: Implement cooldown tracker and base infrastructure
+2. **Phase 2**: Add queue-based heuristics (depth, wait, growth)
+3. **Phase 3**: Add load-based heuristics (CPU, memory, worker saturation)
+4. **Phase 4**: Build BurstHeuristicsEngine with OR/AND logic
+5. **Phase 5**: Add budget and mode enforcement, integration tests
 
 **End of Task 033 Specification**
