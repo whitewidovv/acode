@@ -680,9 +680,37 @@ public sealed record BundleManifest
     
     public bool IsCompatible(string readerVersion)
     {
-        var bundleMajor = int.Parse(Version.Split('.')[0]);
-        var readerMajor = int.Parse(readerVersion.Split('.')[0]);
+        if (!TryGetMajorVersion(Version, out var bundleMajor))
+        {
+            // If the bundle manifest has an invalid version, treat it as incompatible.
+            return false;
+        }
+
+        if (!TryGetMajorVersion(readerVersion, out var readerMajor))
+        {
+            // If the reader's version is invalid, conservatively treat as incompatible.
+            return false;
+        }
+
         return bundleMajor <= readerMajor;
+    }
+
+    private static bool TryGetMajorVersion(string? version, out int major)
+    {
+        major = 0;
+
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return false;
+        }
+
+        var parts = version.Split('.');
+        if (parts.Length == 0 || string.IsNullOrWhiteSpace(parts[0]))
+        {
+            return false;
+        }
+
+        return int.TryParse(parts[0], out major);
     }
 }
 
