@@ -70,6 +70,34 @@ This task covers crash recovery. Normal queue operations are in Task 026. State 
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **WAL Checkpointing**: SQLite WAL mode provides crash recovery for committed transactions
+2. **Process Restart**: Application can restart and resume after unexpected termination
+3. **File System Integrity**: Underlying file system doesn't corrupt SQLite files
+4. **Heartbeat Mechanism**: Running workers emit periodic heartbeats to detect hangs
+5. **Timeout Configuration**: Heartbeat timeout is configurable (default 60 seconds)
+6. **Single Recovery**: Only one recovery process runs at startup (no concurrent recovery)
+
+### Recovery Scenarios
+
+7. **Orphaned Tasks**: Tasks left in Running state after crash are detected as orphaned
+8. **Recovery Actions**: Orphaned tasks are transitioned to Retry or Failed based on policy
+9. **Idempotent Recovery**: Running recovery multiple times produces same result
+10. **Partial Work**: Partially completed work (uncommitted changes) is discarded on recovery
+11. **Lock Release**: Any held locks are released after crash (SQLite handles this)
+
+### Operational Assumptions
+
+12. **Recovery Time**: Recovery completes within 30 seconds for typical queue sizes (<10K tasks)
+13. **Logging During Recovery**: All recovery actions are logged with detail
+14. **Event Notification**: Recovery start/complete events are emitted for monitoring
+15. **Manual Override**: Administrator can force recovery actions via CLI if needed
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Startup Recovery
@@ -247,6 +275,77 @@ acode worker list --show-heartbeat
 - [ ] AC-013: Events emitted
 - [ ] AC-014: Logging complete
 - [ ] AC-015: Metrics tracked
+
+---
+
+## Best Practices
+
+### Recovery Design
+
+1. **Fail-Safe Defaults**: When in doubt, mark orphaned tasks for retry rather than failure
+2. **Idempotent Recovery**: Running recovery twice should produce same result
+3. **Log Everything**: Recovery actions are critical audit events, log extensively
+4. **Progress Reporting**: Long recovery should emit progress events for monitoring
+
+### Heartbeat Strategy
+
+5. **Reasonable Timeout**: Heartbeat timeout should be 2-3x expected heartbeat interval
+6. **Grace Period**: Allow brief grace period after timeout before declaring orphaned
+7. **Heartbeat Includes Context**: Include worker ID, task ID, and progress in heartbeat
+8. **Separate Heartbeat Table**: Don't update main task record for heartbeats (reduces contention)
+
+### Operational Safety
+
+9. **Block Operations During Recovery**: Don't start new tasks until recovery completes
+10. **Recovery Report**: Generate summary report of all recovery actions taken
+11. **Manual Override**: Provide CLI to force specific recovery action on stuck tasks
+12. **Alerting Integration**: Emit recoverable events for monitoring/alerting systems
+
+---
+
+## Troubleshooting
+
+### Issue: Recovery Takes Too Long
+
+**Symptoms:** Startup blocked for minutes during recovery phase
+
+**Possible Causes:**
+- Large number of orphaned tasks to process
+- Slow database queries for orphan detection
+- Recovery actions triggering slow side effects
+
+**Solutions:**
+1. Add index on (status, lastHeartbeat) for orphan detection query
+2. Process orphaned tasks in batches with progress reporting
+3. Defer non-critical recovery actions to background after startup
+
+### Issue: Tasks Keep Getting Orphaned
+
+**Symptoms:** Same tasks repeatedly appear as orphaned after each restart
+
+**Possible Causes:**
+- Heartbeat timeout too aggressive for task duration
+- Worker not emitting heartbeats during long operations
+- Clock skew between workers and database
+
+**Solutions:**
+1. Increase heartbeat timeout for long-running tasks
+2. Ensure worker emits heartbeat during all phases, not just between tasks
+3. Use database server time for heartbeat timestamp, not local clock
+
+### Issue: Recovery Actions Not Applied
+
+**Symptoms:** Orphaned tasks detected but not recovered
+
+**Possible Causes:**
+- Recovery policy returning "no action" for task type
+- Transaction failing during recovery update
+- Recovery disabled by configuration
+
+**Solutions:**
+1. Review recovery policy configuration for task type
+2. Enable verbose logging to see recovery decision reasoning
+3. Check ACODE_RECOVERY_ENABLED environment variable
 
 ---
 

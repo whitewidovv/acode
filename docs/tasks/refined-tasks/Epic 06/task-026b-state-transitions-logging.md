@@ -69,6 +69,34 @@ This task covers transitions and logging. Schema is in Task 026.a. Crash recover
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **State Machine Library**: Stateless or similar state machine library is available
+2. **Event Infrastructure**: Event emission infrastructure from task-013 is integrated
+3. **Logging Framework**: Structured logging (Serilog) captures transition details
+4. **Atomic Operations**: Database transactions ensure atomic state + history updates
+5. **Timestamp Accuracy**: System clock is accurate for transition timestamp recording
+6. **Actor Identification**: All transitions have identifiable actor (system, user, worker)
+
+### State Model Assumptions
+
+7. **Defined States**: States are: Pending, Running, Succeeded, Failed, Cancelled, Retry
+8. **Transition Guards**: Some transitions require preconditions (guards) to pass
+9. **Transition Actions**: Some transitions trigger side effects (actions)
+10. **No Backward Transitions**: Succeeded/Failed are terminal (no re-running)
+11. **Retry Semantics**: Failed→Retry→Pending is the retry path
+
+### Audit Assumptions
+
+12. **Complete History**: Every transition is recorded, no gaps in audit trail
+13. **History Immutability**: History records are append-only, never modified
+14. **Retention Policy**: History is retained for configurable period (default 90 days)
+15. **Query Capability**: History can be queried by task, time range, or actor
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: State Machine
@@ -244,6 +272,77 @@ queue:
 - [ ] AC-010: Performance targets met
 - [ ] AC-011: Logging complete
 - [ ] AC-012: Metrics tracked
+
+---
+
+## Best Practices
+
+### State Machine Design
+
+1. **Explicit Over Implicit**: Define all valid transitions explicitly in code/config
+2. **Guard Conditions**: Use guards for complex preconditions, not inline checks
+3. **Actions Are Side Effects**: Keep actions idempotent where possible
+4. **Document the Graph**: Maintain visual state diagram in documentation
+
+### Transition Handling
+
+5. **Atomic State+History**: Always update state and history in same transaction
+6. **Include Context**: Transition logs should include reason/actor for debugging
+7. **Emit After Success**: Only emit events after transaction commits
+8. **Handle Failures Gracefully**: Failed transitions should leave system in consistent state
+
+### Audit Trail
+
+9. **Immutable History**: Never update or delete history records
+10. **Timestamp Precision**: Use UTC with millisecond precision for correlation
+11. **Structured Logging**: Use key-value pairs for queryable audit entries
+12. **Retention Policy**: Implement configurable retention with automatic purge
+
+---
+
+## Troubleshooting
+
+### Issue: Transition Silently Fails
+
+**Symptoms:** Task status unchanged after calling Transition, no error thrown
+
+**Possible Causes:**
+- Guard condition returned false
+- Transaction rolled back due to constraint violation
+- Event not firing due to subscriber error
+
+**Solutions:**
+1. Check return value of CanTransition before calling Transition
+2. Enable verbose logging to see guard evaluation results
+3. Wrap Transition in try-catch to surface hidden exceptions
+
+### Issue: History Missing for Some Transitions
+
+**Symptoms:** Gaps in transition history for a task
+
+**Possible Causes:**
+- Direct SQL update bypassing state machine
+- Transaction committed for state but rolled back for history
+- Bug in history insertion code
+
+**Solutions:**
+1. Audit all code paths that modify task status
+2. Verify history insert is in same transaction as status update
+3. Add constraint to enforce history exists for every state change
+
+### Issue: Events Not Firing on Transition
+
+**Symptoms:** Subscribers not receiving state change events
+
+**Possible Causes:**
+- Event emitted before transaction commit (rolled back)
+- Subscriber threw exception, breaking event chain
+- Event type mismatch between emitter and subscriber
+
+**Solutions:**
+1. Move event emission to after-commit hook
+2. Ensure subscriber exceptions don't propagate to emitter
+3. Verify event type/payload matches subscriber expectations
 
 ---
 

@@ -71,6 +71,34 @@ This task covers schema definition. Parsing is in Task 025. CLI is in Task 025.b
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **JSON Schema Draft-07+**: Target runtime supports JSON Schema draft-07 or later
+2. **Schema Validator Available**: NJsonSchema or similar library available for .NET schema validation
+3. **YAML-JSON Equivalence**: YAML and JSON representations are semantically equivalent
+4. **File Extension Detection**: Schema format detection can use file extension (.yaml, .json)
+5. **IDE Integration**: VS Code and other IDEs can consume JSON Schema for autocomplete
+6. **Error Reporting**: Validation errors include JSON Pointer paths to error locations
+
+### Schema Design Assumptions
+
+7. **Strict Mode Default**: Schema validation uses strict mode (no additional properties by default)
+8. **Format Strings**: Custom format strings (ULID, ISO8601) are validated correctly
+9. **Default Values**: Schema defaults are applied during deserialization when fields are missing
+10. **Enum Validation**: Enum values are case-sensitive and exhaustively defined
+11. **Array Constraints**: Array min/max length constraints are enforced
+
+### Integration Assumptions
+
+12. **Export Capability**: Schema can be exported for external tooling and documentation
+13. **Version Evolution**: Schema supports backward-compatible evolution via optional fields
+14. **Nested Schema**: Complex nested structures can reference sub-schemas
+15. **Error Aggregation**: Multiple validation errors are collected and reported together
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Schema Structure
@@ -232,6 +260,77 @@ VS Code users can add to settings:
 - [ ] AC-013: Errors include path
 - [ ] AC-014: Errors include code
 - [ ] AC-015: Schema versioned
+
+---
+
+## Best Practices
+
+### Schema Design
+
+1. **Use Descriptive Field Names**: Field names should be self-documenting (camelCase convention)
+2. **Document Every Field**: Include description for all properties in schema
+3. **Constrain Early**: Define min/max constraints to catch issues at validation time
+4. **Use Enum for Fixed Sets**: Always use enum for fields with known finite values
+
+### Validation Strategy
+
+5. **Collect All Errors**: Don't fail-fast; collect all validation errors for comprehensive feedback
+6. **Include JSON Pointer**: Error paths should use RFC 6901 JSON Pointer syntax
+7. **Suggest Corrections**: Where possible, suggest likely intended values for typos
+8. **Validate Formats Strictly**: Use custom format validators for ULID, ISO8601, etc.
+
+### Schema Evolution
+
+9. **Additive Changes Only**: New versions should only add optional fields (backward compatible)
+10. **Version Schema**: Include $schema and version field for migration support
+11. **Document Breaking Changes**: Maintain changelog for schema evolution decisions
+12. **Provide Migration Tools**: When schema changes, provide automated migration scripts
+
+---
+
+## Troubleshooting
+
+### Issue: Schema Validation Fails on Valid Files
+
+**Symptoms:** Files that look correct fail validation unexpectedly
+
+**Possible Causes:**
+- Schema version mismatch between file and validator
+- Trailing whitespace or BOM characters in YAML
+- Case sensitivity in enum values
+
+**Solutions:**
+1. Check schema version matches file format version
+2. Ensure file encoding is UTF-8 without BOM
+3. Verify enum values match exactly (case-sensitive)
+
+### Issue: Validation Errors Missing Location
+
+**Symptoms:** Errors report problem but don't indicate where in file
+
+**Possible Causes:**
+- YAML parser loses position information on parse
+- Error occurs during post-parse validation
+- Nested schema reference breaks path tracking
+
+**Solutions:**
+1. Enable source position tracking in YAML parser
+2. Implement two-pass validation (syntax then schema)
+3. Include parent path context in nested schema validation
+
+### Issue: Performance Issues with Large Schemas
+
+**Symptoms:** Validation takes >100ms for simple documents
+
+**Possible Causes:**
+- Schema recompiled on every validation
+- Recursive regex patterns in format validators
+- Excessive nested schema references
+
+**Solutions:**
+1. Cache compiled schema validators
+2. Simplify regex patterns; use dedicated validators for complex formats
+3. Flatten schema structure where possible
 
 ---
 

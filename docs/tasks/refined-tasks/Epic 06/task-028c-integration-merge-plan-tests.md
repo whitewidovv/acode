@@ -70,6 +70,34 @@ This task covers integration testing. Unit tests are in individual task specs. M
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Test Framework**: xUnit or similar test framework is available
+2. **Git Access**: Tests can create and manipulate git repositories
+3. **Temp Directories**: Tests use temporary directories for isolation
+4. **Parallel Test Execution**: Tests can run in parallel without interference
+5. **CI Integration**: Tests run in CI pipeline on every commit
+6. **Reasonable Duration**: Each test completes in under 30 seconds
+
+### Fixture Assumptions
+
+7. **Disposable Repos**: Test repositories are created and destroyed per test
+8. **Deterministic Content**: File contents are generated deterministically for reproducibility
+9. **Scenario Coverage**: Tests cover all documented conflict/merge scenarios
+10. **Edge Cases**: Tests include edge cases (empty files, large diffs, binary files)
+11. **Cross-Platform**: Tests pass on Windows, Linux, and macOS
+
+### Quality Assumptions
+
+12. **No Flaky Tests**: Tests are deterministic; no random failures
+13. **Coverage Tracking**: Code coverage is measured and reported
+14. **Assertion Quality**: Tests have meaningful assertions, not just "no exception"
+15. **Documentation**: Each test scenario is documented with expected behavior
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Test Fixtures

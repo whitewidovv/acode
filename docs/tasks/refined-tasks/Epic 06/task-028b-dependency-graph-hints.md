@@ -68,6 +68,34 @@ This task covers dependency hints. Task scheduling is in Task 026. Merge coordin
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Graph Library**: In-memory graph data structure is available (custom or library)
+2. **DAG Requirement**: Dependency graph must be directed acyclic graph (DAG)
+3. **Cycle Detection**: Cycles in dependencies are detected and rejected
+4. **Topological Sort**: Tasks can be ordered via topological sort for execution
+5. **Efficient Traversal**: Graph traversal is O(V+E) for scheduling decisions
+6. **Persistence**: Graph state persists across restarts
+
+### Dependency Types
+
+7. **Explicit Dependencies**: Tasks can declare depends_on relationships
+8. **Implicit Hints**: File overlap creates soft dependency hints (not hard blocks)
+9. **Hint vs Dependency**: Hints affect scheduling priority, not execution blocking
+10. **Bidirectional Hints**: File overlap creates mutual hints between both tasks
+11. **Priority Boosting**: Tasks with more dependents get higher effective priority
+
+### Scheduling Assumptions
+
+12. **Scheduler Integration**: Worker pool uses graph for task selection
+13. **Critical Path**: Longest dependency chain determines minimum completion time
+14. **Parallel Safety**: Independent tasks (no edges) can run in parallel
+15. **Visualization**: Graph can be exported for debugging (DOT format)
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Graph Construction

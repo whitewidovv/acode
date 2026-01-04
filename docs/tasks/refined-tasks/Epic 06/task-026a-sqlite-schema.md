@@ -70,6 +70,34 @@ This task covers SQLite schema only. Queue logic is in Task 026. State transitio
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **SQLite Version**: SQLite 3.35+ is available (required for WAL2, RETURNING clause)
+2. **Migration Framework**: DbUp or similar migration tool is available for schema versioning
+3. **Connection Pooling**: SQLite connection pooling is managed appropriately
+4. **Embedded Database**: SQLite database file is stored in application data directory
+5. **Backup Capability**: File-level backup of SQLite database is sufficient for disaster recovery
+6. **Index Strategy**: B-tree indexes are sufficient for queue query patterns
+
+### Schema Design Assumptions
+
+7. **Normalized Structure**: Tasks table is primary, with foreign key relationships to history/logs
+8. **Text Storage**: ULID, status, and other enums are stored as TEXT (not integers)
+9. **Timestamp Precision**: Timestamps use SQLite datetime with millisecond precision
+10. **Schema Versioning**: Schema version is tracked in metadata table for migrations
+11. **Soft Deletes**: Tasks use soft delete (status=archived) rather than hard DELETE
+
+### Operational Assumptions
+
+12. **Query Patterns**: Most queries are status-based filtering with priority ordering
+13. **Write Patterns**: Enqueue and state transition are the primary write operations
+14. **Vacuuming**: Periodic VACUUM is acceptable for space reclamation
+15. **Concurrent Reads**: Multiple concurrent readers (CLI, dashboard) are supported
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Tasks Table
@@ -256,6 +284,77 @@ SELECT * FROM tasks WHERE status = ?
 - [ ] AC-008: Schema hash tracked
 - [ ] AC-009: Query plans use indexes
 - [ ] AC-010: Documentation complete
+
+---
+
+## Best Practices
+
+### Schema Design
+
+1. **Use TEXT for IDs**: Store ULIDs as TEXT for readability and debugging
+2. **Avoid NULLable Columns**: Use NOT NULL with defaults where possible
+3. **Normalize Appropriately**: Separate history/logs into own tables, linked by task_id
+4. **Document Everything**: Add comments to schema DDL for future maintainers
+
+### Index Strategy
+
+5. **Cover Common Queries**: Create covering indexes for status+priority queries
+6. **Avoid Over-Indexing**: Each index adds write overhead; benchmark before adding
+7. **Use Partial Indexes**: Index only active tasks (WHERE status != 'archived')
+8. **Monitor Query Plans**: Use EXPLAIN QUERY PLAN to verify index usage
+
+### Migration Safety
+
+9. **Version Schema**: Track schema version in metadata table
+10. **Idempotent Migrations**: Migrations should be safe to run multiple times
+11. **Backup Before Migrate**: Always backup database before schema changes
+12. **Test Rollback**: Ensure down migrations work for emergency rollback
+
+---
+
+## Troubleshooting
+
+### Issue: Migration Fails with "table already exists"
+
+**Symptoms:** Schema migration errors on CREATE TABLE statement
+
+**Possible Causes:**
+- Migration was partially applied before crash
+- Schema version tracking out of sync with actual schema
+- Running migration against wrong database file
+
+**Solutions:**
+1. Check schema version in metadata table vs migration number
+2. Use IF NOT EXISTS in CREATE statements for idempotency
+3. Verify ACODE_DB_PATH points to correct database
+
+### Issue: Queries Not Using Indexes
+
+**Symptoms:** Slow queries despite indexes existing
+
+**Possible Causes:**
+- SQLite query planner chose table scan
+- Index on wrong column order for query
+- Statistics out of date after bulk inserts
+
+**Solutions:**
+1. Run EXPLAIN QUERY PLAN to verify index usage
+2. Ensure index column order matches query WHERE clause order
+3. Run ANALYZE to update query planner statistics
+
+### Issue: Database Locked Errors
+
+**Symptoms:** "database is locked" errors during concurrent access
+
+**Possible Causes:**
+- Long-running transaction holding write lock
+- WAL mode not enabled
+- Connection not released after exception
+
+**Solutions:**
+1. Ensure WAL mode: PRAGMA journal_mode=WAL
+2. Keep transactions short; avoid user interaction during transaction
+3. Use connection pooling with proper disposal patterns
 
 ---
 

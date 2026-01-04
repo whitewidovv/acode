@@ -78,6 +78,34 @@ This task covers the core task spec format. Subtask 025.a covers schema details.
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **YAML/JSON Parsing Available**: Standard YAML 1.2 and JSON parsers are available in the .NET ecosystem
+2. **ULID Generation**: ULID library (Ulid.Net or similar) is integrated for unique identifier generation
+3. **Schema Validation**: JSON Schema validation library is available for format enforcement
+4. **Serialization Round-Trip**: Task specs can be serialized/deserialized without data loss
+5. **UTF-8 Encoding**: All task specification files use UTF-8 encoding
+6. **File System Access**: The application has read/write access to task storage directories
+
+### Data Model Assumptions
+
+7. **Enum Stability**: TaskStatus enum values are stable and won't change between versions
+8. **Field Ordering**: Field order in serialized output is deterministic for diff-friendly output
+9. **Nullable Fields**: Optional fields can be null/missing in serialized form
+10. **DateTime Format**: All timestamps use ISO8601 format with timezone information
+11. **ID Uniqueness**: ULIDs provide sufficient uniqueness guarantee across all task instances
+
+### Integration Assumptions
+
+12. **Queue Compatibility**: TaskSpec format is compatible with the queue persistence layer (task-026)
+13. **CLI Integration**: Task specs can be created/modified via CLI commands (task-025b)
+14. **Validation Pipeline**: Schema validation runs before any task is queued for execution
+15. **Migration Support**: Existing task files can be migrated to new schema versions
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Core Structure
@@ -338,6 +366,31 @@ task:
 - [ ] AC-033: Unit tests pass
 - [ ] AC-034: Integration tests pass
 - [ ] AC-035: Coverage >80%
+
+---
+
+## Best Practices
+
+### Task Specification Design
+
+1. **Keep IDs Immutable**: Never modify task IDs after creation; use new tasks for revised work
+2. **Use Descriptive Titles**: Task titles should be action-oriented and specific (e.g., "Implement X" not "X")
+3. **Include Acceptance Criteria**: Every task should have measurable completion criteria in description
+4. **Priority Guidelines**: Use priority 1 sparingly (blockers only), priority 3 as default
+
+### Serialization Practices
+
+5. **Prefer YAML for Humans**: Use YAML for hand-edited files, JSON for machine-generated
+6. **Preserve Field Order**: Maintain consistent field ordering for diff-friendly versioning
+7. **Validate Early**: Run schema validation immediately on parse, before any processing
+8. **Include Schema Version**: Always include schema version for future migration support
+
+### Data Integrity
+
+9. **Timestamp Consistency**: Use UTC for all timestamps, convert to local only for display
+10. **Sanitize User Input**: Validate and sanitize title/description to prevent injection
+11. **Handle Missing Fields**: Always provide sensible defaults for optional fields
+12. **Log Validation Failures**: Record all validation failures for debugging and improvement
 
 ---
 

@@ -264,20 +264,22 @@ Lines are 600-850 (need expansion to 800-1200).
 | task-024c | 1388 | 800+ | N | N | Y | N | N | NEEDS ASSUMP+SEC+TROUBLE+BP |
 
 **After Remediation:**
-| Task | Assump | Secur | Trouble | BestPr | Status |
-|------|--------|-------|---------|--------|--------|
-| task-022 | | | | | |
-| task-022a | | | | | |
-| task-022b | | | | | |
-| task-022c | | | | | |
-| task-023 | | | | | |
-| task-023a | | | | | |
-| task-023b | | | | | |
-| task-023c | | | | | |
-| task-024 | | | | | |
-| task-024a | | | | | |
-| task-024b | | | | | |
-| task-024c | | | | | |
+| Task | Lines | Assump | Secur | Trouble | BestPr | Status |
+|------|-------|--------|-------|---------|--------|--------|
+| task-022 | 1293 | Y | Y | Y | Y | ✅ COMPLETE |
+| task-022a | 1024 | Y | - | Y | Y | ✅ COMPLETE |
+| task-022b | 901 | Y | - | Y | Y | ✅ COMPLETE |
+| task-022c | 983 | Y | - | Y | Y | ✅ COMPLETE |
+| task-023 | 978 | Y | - | Y | Y | ✅ COMPLETE |
+| task-023a | 1606 | Y | - | Y | Y | ✅ COMPLETE |
+| task-023b | 1281 | Y | - | Y | Y | ✅ COMPLETE |
+| task-023c | 1432 | Y | - | Y | Y | ✅ COMPLETE |
+| task-024 | 1098 | Y | - | Y | Y | ✅ COMPLETE |
+| task-024a | 1470 | Y | - | Y | Y | ✅ COMPLETE |
+| task-024b | 1292 | Y | - | Y | Y | ✅ COMPLETE |
+| task-024c | 1486 | Y | - | Y | Y | ✅ COMPLETE |
+
+**Epic 05 Status: ✅ COMPLETE** (12/12 files remediated)
 
 ---
 

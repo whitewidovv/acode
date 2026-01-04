@@ -69,6 +69,34 @@ This task covers local workers only. Docker workers are in Task 027.b. Pool mana
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Process Spawning**: System.Diagnostics.Process is available for worker process management
+2. **Cross-Platform**: Process management works on Windows, Linux, and macOS
+3. **Working Directory**: Worker process has access to repository working directory
+4. **Environment Variables**: Configuration can be passed via environment variables
+5. **Signal Handling**: SIGTERM/SIGINT handling works for graceful shutdown
+6. **Resource Monitoring**: Process memory/CPU can be monitored via OS APIs
+
+### Worker Lifecycle Assumptions
+
+7. **Process Per Worker**: Each worker is a separate OS process for isolation
+8. **Exit Code Semantics**: Exit code 0 = success, non-zero = failure with specific meanings
+9. **Stdout/Stderr Capture**: Worker output is captured for logging and display
+10. **Zombie Prevention**: Proper cleanup prevents zombie processes
+11. **Crash Detection**: Worker crashes are detected and logged
+
+### Worktree Assumptions
+
+12. **One Worktree Per Task**: Each task executes in dedicated git worktree
+13. **Worktree Reuse**: Worktrees can be reused after task completion (configurable)
+14. **Worktree Cleanup**: Orphaned worktrees are cleaned up periodically
+15. **Branch Isolation**: Each worktree has dedicated branch for changes
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Process Management
@@ -237,6 +265,77 @@ acode worker attach worker-abc123
 - [ ] AC-010: Timeout enforced
 - [ ] AC-011: No zombies
 - [ ] AC-012: Cross-platform works
+
+---
+
+## Best Practices
+
+### Process Management
+
+1. **Capture All Output**: Always redirect both stdout and stderr
+2. **Exit Code Semantics**: Define clear meaning for different exit codes
+3. **Timeout Enforcement**: Kill workers that exceed maximum execution time
+4. **Zombie Prevention**: Ensure wait/dispose pattern prevents zombie processes
+
+### Cross-Platform Compatibility
+
+5. **Abstract OS Specifics**: Wrap platform-specific code in abstraction layer
+6. **Test All Platforms**: CI should test on Windows, Linux, and macOS
+7. **Path Handling**: Use Path.Combine, not string concatenation
+8. **Signal Handling**: Handle SIGTERM (Unix) and CTRL_C_EVENT (Windows)
+
+### Worktree Integration
+
+9. **One Task Per Worktree**: Never share worktree between concurrent tasks
+10. **Clean Before Reuse**: Reset worktree to known state before reusing
+11. **Worktree Naming**: Use task ID in worktree name for traceability
+12. **Branch Per Task**: Each task gets unique branch for isolation
+
+---
+
+## Troubleshooting
+
+### Issue: Zombie Processes After Crash
+
+**Symptoms:** Worker processes remain after parent terminates
+
+**Possible Causes:**
+- Parent crashed without calling Kill/Dispose
+- Process tree not properly terminated
+- Platform-specific cleanup not triggered
+
+**Solutions:**
+1. Use process groups (Unix) or job objects (Windows) for tree kill
+2. Implement orphan process detection on startup
+3. Ensure finally blocks or using statements dispose processes
+
+### Issue: Worker Hangs During Git Operations
+
+**Symptoms:** Worker process unresponsive, consuming no CPU
+
+**Possible Causes:**
+- Git waiting for credentials (stdin blocked)
+- File lock held by another process
+- Network timeout waiting for remote
+
+**Solutions:**
+1. Configure GIT_TERMINAL_PROMPT=0 to fail instead of wait
+2. Use git credential helper or pre-configured SSH keys
+3. Set GIT_SSH_COMMAND with connection timeout
+
+### Issue: Cross-Platform Path Failures
+
+**Symptoms:** Works on Windows but fails on Linux (or vice versa)
+
+**Possible Causes:**
+- Hardcoded path separators (/ vs \)
+- Case sensitivity differences
+- Different temp directory locations
+
+**Solutions:**
+1. Use Path.Combine and Path.DirectorySeparatorChar
+2. Normalize case for all file comparisons on case-insensitive systems
+3. Use Path.GetTempPath() instead of hardcoded paths
 
 ---
 

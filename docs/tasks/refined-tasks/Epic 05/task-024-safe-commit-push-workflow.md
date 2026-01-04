@@ -67,6 +67,33 @@ This task defines the workflow orchestration. Subtasks cover specific components
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git operations available** - Task 022 provides commit/push
+2. **Verification pipeline ready** - Task 024.a provides pre-commit checks
+3. **Message validation ready** - Task 024.b provides message rules
+4. **Push gates ready** - Task 024.c provides push gating
+5. **Command execution available** - Task 018 for running checks
+
+### Workflow Assumptions
+
+6. **Sequential execution** - Verify before commit, gate before push
+7. **Blocking by default** - Failures block the operation
+8. **Skip requires explicit flag** - No silent bypass of checks
+9. **All results captured** - Success and failure recorded
+10. **Cancellation supported** - User can abort at any point
+
+### Integration Assumptions
+
+11. **Event emission** - Workflow events published for monitoring
+12. **Status queryable** - Can check workflow state
+13. **Logging complete** - All steps logged for debugging
+14. **Error context preserved** - Failures include actionable info
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-020: Workflow Orchestration
@@ -188,6 +215,77 @@ acode push --skip-gate
 - [ ] AC-008: Configuration respected
 - [ ] AC-009: Timeout enforced
 - [ ] AC-010: Events emitted
+
+---
+
+## Best Practices
+
+### Workflow Design
+
+1. **Clear state machine** - Well-defined states and transitions
+2. **Idempotent steps** - Safe to retry from any state
+3. **Checkpoints saved** - Resume from last successful step
+4. **Timeout at each level** - Step, phase, and workflow timeouts
+
+### Verification
+
+5. **Fail fast by default** - Stop on first error unless configured otherwise
+6. **Clear failure reporting** - Show what failed and why
+7. **Actionable suggestions** - Help user fix issues
+8. **Skip with caution** - Require explicit flag and log warning
+
+### Safety
+
+9. **Never bypass silently** - All skips are logged
+10. **Confirm destructive actions** - Force push, skip checks require confirmation
+11. **Preserve evidence** - Save logs even on success
+12. **Rollback capability** - Can undo partial workflows
+
+---
+
+## Troubleshooting
+
+### Issue: Workflow stuck in pending state
+
+**Symptoms:** Workflow doesn't complete, no success or failure
+
+**Causes:**
+- Step hanging without timeout
+- External dependency not responding
+- Deadlock in step execution
+
+**Solutions:**
+1. Check workflow status for current step
+2. Verify step timeouts are configured
+3. Cancel and retry the workflow
+
+### Issue: Verification always fails
+
+**Symptoms:** Every commit attempt blocked by verification
+
+**Causes:**
+- Verification step misconfigured
+- Build or test genuinely failing
+- Environment issue (missing tools)
+
+**Solutions:**
+1. Run verification step manually to debug
+2. Check step output for specific errors
+3. Verify tools are installed and in PATH
+
+### Issue: Skip flag not working
+
+**Symptoms:** Can't bypass verification even with --skip
+
+**Causes:**
+- Configuration blocks skip entirely
+- Wrong flag syntax
+- Skip disabled for this workflow
+
+**Solutions:**
+1. Check allowSkip config setting
+2. Use correct flag: --skip-verification
+3. Review security policy for skip permissions
 
 ---
 

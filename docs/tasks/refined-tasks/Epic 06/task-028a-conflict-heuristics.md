@@ -68,6 +68,34 @@ This task covers detection heuristics. Merge execution is in Task 028. Dependenc
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git Diff Parsing**: Git diff output can be parsed reliably for line ranges
+2. **Line Granularity**: Line-level conflict detection is sufficient (not character-level)
+3. **Text Files Only**: Binary file conflicts are detected but not analyzed
+4. **Hunk-Based Analysis**: Git diff hunks provide context for overlap detection
+5. **UTF-8 Text**: Source files are UTF-8 encoded for consistent line handling
+6. **Reasonable File Sizes**: Files under 100KB for efficient in-memory analysis
+
+### Heuristic Assumptions
+
+7. **Overlap = Risk**: Overlapping line ranges indicate potential conflict
+8. **Proximity Matters**: Adjacent line changes (within N lines) are higher risk
+9. **Scope Awareness**: Changes to same function/class are higher risk
+10. **File Type Rules**: Some file types (e.g., package.json) always conflict
+11. **Severity Levels**: Low/Medium/High/Critical severity classifications
+
+### Integration Assumptions
+
+12. **Pre-Merge Check**: Heuristics run before merge attempt for early warning
+13. **Configurable Thresholds**: Overlap thresholds are configurable per project
+14. **False Positive Acceptance**: Some false positives acceptable to avoid missed conflicts
+15. **Human Escalation**: High-severity conflicts escalate to human review
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Line-Level Analysis

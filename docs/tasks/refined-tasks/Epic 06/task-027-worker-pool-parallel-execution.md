@@ -72,6 +72,34 @@ This task covers pool management. Local workers are in Task 027.a. Docker worker
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Multi-Core System**: Target systems have multiple CPU cores for parallel execution
+2. **Process Isolation**: Each worker runs in isolated process for stability and resource control
+3. **Shared Queue Access**: All workers can access the shared task queue via database
+4. **Git Worktree Support**: Git worktree feature is available for task isolation (task-023)
+5. **Cancellation Tokens**: .NET CancellationToken pattern is used for graceful shutdown
+6. **Resource Limits**: Memory and CPU limits can be enforced per worker
+
+### Pool Management Assumptions
+
+7. **Configurable Size**: Worker pool size is configurable (default: CPU core count)
+8. **Dynamic Scaling**: Pool can scale workers up/down based on queue depth
+9. **Health Monitoring**: Worker health is monitored via heartbeat mechanism
+10. **Restart Policy**: Failed workers are automatically restarted based on policy
+11. **Graceful Shutdown**: Pool shutdown waits for in-progress tasks to complete
+
+### Integration Assumptions
+
+12. **Queue Dependency**: Task queue (task-026) provides work items for workers
+13. **Event System**: Worker events integrate with event bus (task-013)
+14. **Log Aggregation**: Worker logs are collected and multiplexed (task-027c)
+15. **CLI Control**: Worker pool is controllable via CLI commands (task-025b)
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Pool Management
@@ -259,6 +287,77 @@ Resources: CPU 45%, Memory 1.2GB
 - [ ] AC-013: Metrics tracked
 - [ ] AC-014: CLI commands work
 - [ ] AC-015: Documentation complete
+
+---
+
+## Best Practices
+
+### Pool Design
+
+1. **Interface-First**: Define IWorkerPool before implementation for testability
+2. **Bounded Pools**: Always set maximum worker count to prevent resource exhaustion
+3. **Graceful Shutdown**: Default stop behavior should wait for in-progress work
+4. **Health Heartbeats**: Workers should emit regular heartbeats for monitoring
+
+### Resource Management
+
+5. **Per-Worker Limits**: Enforce memory/CPU limits per worker to prevent runaway tasks
+6. **Pool-Level Limits**: Total pool resource usage should be bounded
+7. **Backpressure**: Stop dequeuing when all workers are busy
+8. **Cleanup Hooks**: Always register cleanup for worktrees, temp files, etc.
+
+### Observability
+
+9. **Emit Worker Events**: Start, stop, task-assigned, task-completed events
+10. **Track Metrics**: Worker utilization, queue depth, task duration
+11. **Structured Logging**: Include worker ID in all log messages
+12. **Health Endpoint**: Provide health check for monitoring systems
+
+---
+
+## Troubleshooting
+
+### Issue: Workers Not Processing Tasks
+
+**Symptoms:** Queue has pending tasks but workers are idle
+
+**Possible Causes:**
+- Pool not started or stopped unexpectedly
+- Workers blocked waiting for resources
+- Task preconditions not met (dependencies)
+
+**Solutions:**
+1. Check pool status: `acode pool status`
+2. Verify worker health via heartbeat logs
+3. Check task dependencies are satisfied
+
+### Issue: High Memory Usage
+
+**Symptoms:** System memory exhausted when running many workers
+
+**Possible Causes:**
+- Too many workers for available memory
+- Memory limits not enforced per worker
+- Memory leak in worker code
+
+**Solutions:**
+1. Reduce worker count: `acode pool set-size N`
+2. Configure per-worker memory limits
+3. Monitor individual worker memory over time
+
+### Issue: Orphaned Worktrees Accumulating
+
+**Symptoms:** Disk space consumed by many unused worktree directories
+
+**Possible Causes:**
+- Cleanup not running after task completion
+- Crash before cleanup executed
+- Worktree reuse disabled but cleanup not aggressive
+
+**Solutions:**
+1. Run manual cleanup: `acode worktree cleanup`
+2. Enable aggressive cleanup policy
+3. Check crash recovery is cleaning up orphaned worktrees
 
 ---
 

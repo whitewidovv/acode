@@ -73,6 +73,34 @@ This task covers CLI commands only. Task spec format is in Task 025. Schema is i
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **CLI Framework**: System.CommandLine or similar CLI framework is available
+2. **Terminal Support**: Standard terminal features (ANSI colors, Unicode) are available
+3. **stdin Piping**: CLI can read task specifications from stdin for scripting
+4. **JSON Output Mode**: Machine-readable JSON output is supported via --json flag
+5. **Exit Codes**: Standard Unix-style exit codes (0=success, 1=error, 2=usage) are used
+6. **Tab Completion**: Shell completion scripts can be generated for bash/zsh/PowerShell
+
+### Command Assumptions
+
+7. **CRUD Operations**: All basic CRUD operations are exposed via CLI subcommands
+8. **Filter Syntax**: List filtering uses consistent syntax (--status, --priority, etc.)
+9. **ID Resolution**: Task IDs can be specified as full ULID or unique prefix
+10. **Confirmation Prompts**: Destructive operations require confirmation or --force flag
+11. **Pagination**: List output supports pagination for large task sets
+
+### Integration Assumptions
+
+12. **Queue Access**: CLI commands interact directly with queue persistence layer
+13. **Validation Integration**: add/edit commands run schema validation before persistence
+14. **Signal Handling**: cancel command properly signals running workers to stop
+15. **Concurrent Access**: CLI operations handle concurrent access safely
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: add Command
@@ -300,6 +328,77 @@ ID                          TITLE                STATUS    PRIORITY
 - [ ] AC-018: Help is complete
 - [ ] AC-019: Tab completion works
 - [ ] AC-020: Errors are clear
+
+---
+
+## Best Practices
+
+### Command Design
+
+1. **Follow POSIX Conventions**: Use single-letter flags (-v) and long form (--verbose)
+2. **Provide Defaults**: Every optional parameter should have a sensible default
+3. **Support Scripting**: Always provide --json and --quiet modes for automation
+4. **Consistent Exit Codes**: Use 0=success, 1=error, 2=usage error consistently
+
+### User Experience
+
+5. **Confirm Destructive Actions**: cancel requires confirmation unless --force specified
+6. **Show Progress**: Long-running operations should show progress indicators
+7. **Helpful Errors**: Include suggestions ("Did you mean...?") for common mistakes
+8. **Complete Help Text**: Every command and flag must have help documentation
+
+### Integration
+
+9. **Atomic Operations**: Commands either succeed completely or fail with no side effects
+10. **Idempotent Where Possible**: retry on already-running task is a no-op, not an error
+11. **Concurrent Safety**: Multiple CLI invocations don't corrupt shared state
+12. **Audit Trail**: All mutations are logged with timestamp and user context
+
+---
+
+## Troubleshooting
+
+### Issue: Task Add Fails with Validation Error
+
+**Symptoms:** `acode task add` rejects a task file with cryptic validation message
+
+**Possible Causes:**
+- Missing required field in task specification
+- Invalid field value (wrong type or format)
+- Schema version mismatch
+
+**Solutions:**
+1. Use `acode task validate <file>` for detailed validation output
+2. Check task file against schema documentation
+3. Verify ULID format for ID field (26 uppercase alphanumeric)
+
+### Issue: List Command Shows No Results
+
+**Symptoms:** `acode task list` returns empty when tasks exist
+
+**Possible Causes:**
+- Filter is too restrictive (e.g., --status=running with no running tasks)
+- Working in wrong repository/directory
+- Database connection issue
+
+**Solutions:**
+1. Run `acode task list --all` to see all tasks regardless of status
+2. Verify current directory is within acode-managed repository
+3. Check `acode status` for database connectivity
+
+### Issue: Cancel Command Doesn't Stop Task
+
+**Symptoms:** `acode task cancel <id>` returns success but task keeps running
+
+**Possible Causes:**
+- Worker ignoring cancellation signal
+- Task in non-cancellable phase (committing)
+- Wrong task ID specified (prefix collision)
+
+**Solutions:**
+1. Use full ULID instead of prefix for unambiguous cancel
+2. Check task status with `acode task show <id>` for current state
+3. Use --force flag to forcefully terminate if stuck
 
 ---
 

@@ -43,6 +43,33 @@ This task covers push gating and error handling. Pre-commit verification is in 0
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git remote access** - Can query remote refs
+2. **Operating mode known** - Task 001 provides mode context
+3. **Network available** - For remote checks (unless airgapped)
+4. **Push operations ready** - Task 022.c provides push
+5. **Pre-commit results available** - Can check if verification passed
+
+### Gate Assumptions
+
+6. **Gates are independent** - Each gate evaluates separately
+7. **All gates must pass** - By default, all required
+8. **Gates can be disabled** - Individual gates configurable
+9. **Order is deterministic** - Same gates run same order
+10. **Fast gates first** - Local checks before network checks
+
+### Failure Handling Assumptions
+
+11. **Retry on transient** - Network failures get retry
+12. **No retry on auth** - Authentication failures are final
+13. **Clear failure reasons** - User knows why push blocked
+14. **Suggested actions** - Help user resolve issues
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Gate Evaluation
@@ -185,6 +212,77 @@ Suggested fix:
 - [ ] AC-008: Recovery suggestions shown
 - [ ] AC-009: Configuration respected
 - [ ] AC-010: Credentials not logged
+
+---
+
+## Best Practices
+
+### Gate Design
+
+1. **Fast gates first** - Local checks before network
+2. **Independent evaluation** - Gates don't depend on each other
+3. **Clear pass/fail** - No ambiguous states
+4. **Meaningful names** - Gate names explain what they check
+
+### Failure Handling
+
+5. **Classify errors** - Transient vs permanent failures
+6. **Retry transient** - Network issues deserve retry
+7. **No retry auth** - Authentication failures are final
+8. **Suggest recovery** - Tell user how to fix
+
+### Security
+
+9. **Never log credentials** - Redact all auth info
+10. **Respect mode restrictions** - Enforce operating mode rules
+11. **Audit all pushes** - Log push attempts and results
+12. **Rate limit retries** - Prevent abuse of retry mechanism
+
+---
+
+## Troubleshooting
+
+### Issue: Push always retrying
+
+**Symptoms:** Push keeps retrying even after many attempts
+
+**Causes:**
+- Error incorrectly classified as transient
+- Max retries not configured
+- Retry logic bug
+
+**Solutions:**
+1. Check error classification logic
+2. Set maxRetries configuration
+3. Review retry decision logging
+
+### Issue: Non-fast-forward not detected
+
+**Symptoms:** Push fails on remote but gate didn't catch it
+
+**Causes:**
+- Race condition with remote changes
+- Gate check stale
+- Branch tracking not set up
+
+**Solutions:**
+1. Fetch before gate evaluation
+2. Re-evaluate gate just before push
+3. Set up proper branch tracking
+
+### Issue: Mode gate false positive
+
+**Symptoms:** Push blocked in valid mode
+
+**Causes:**
+- Mode detection incorrect
+- Gate config wrong
+- Network check failing in local-only
+
+**Solutions:**
+1. Verify current operating mode
+2. Check mode gate configuration
+3. Ensure network gates skip in local-only
 
 ---
 

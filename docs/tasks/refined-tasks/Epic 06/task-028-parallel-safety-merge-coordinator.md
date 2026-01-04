@@ -70,6 +70,34 @@ This task covers merge coordination. Conflict heuristics are in Task 028.a. Depe
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git Integration**: Git command-line tools are available for merge operations
+2. **Worktree Isolation**: Each task operates in isolated worktree (task-023)
+3. **Branch Strategy**: Each task creates changes on dedicated branch
+4. **Merge Destination**: All tasks merge to same target branch (configurable)
+5. **Sequential Merging**: Only one merge operation executes at a time
+6. **Conflict Detection**: Git's built-in conflict detection is sufficient
+
+### Coordination Assumptions
+
+7. **First-Complete First-Merge**: Task that completes first gets merge priority
+8. **Blocking on Conflict**: Conflicting merges block until resolved or aborted
+9. **Retry After Rebase**: Failed merges can retry after rebase to current head
+10. **Rollback Capability**: Failed merge is automatically rolled back
+11. **Lock Mechanism**: Merge lock prevents concurrent merge attempts
+
+### Integration Assumptions
+
+12. **Worker Pool Integration**: Workers notify coordinator on task completion
+13. **Event Emission**: Merge events are emitted for monitoring (task-013)
+14. **State Persistence**: Pending merge queue persists across restarts
+15. **CLI Control**: Merge operations are controllable via CLI commands
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Merge Coordinator
