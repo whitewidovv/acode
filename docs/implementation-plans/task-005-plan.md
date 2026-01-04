@@ -1,8 +1,9 @@
 # Task 005 Implementation Plan: Ollama Provider Adapter
 
-## Status: In Progress
+## Status: In Progress (Task 005a Complete)
 
 **Branch**: `feature/task-005-ollama-provider-adapter`
+**Commits**: 8 commits, 143 tests passing (64 for Task 005)
 
 ## Overview
 
@@ -264,28 +265,20 @@ Infrastructure Layer (Acode.Infrastructure):
 ## Completion Tracking
 
 ### Completed
-✅ Task 005a-1: Ollama model types (34 tests passing)
-   - OllamaRequest, OllamaMessage, OllamaOptions
-   - OllamaTool, OllamaFunction, OllamaToolCall
-   - OllamaResponse, OllamaStreamChunk
-   - Committed: 3eb92ba
 
-✅ Task 005a-2: Request serialization (17 tests passing)
-   - OllamaRequestMapper: ChatRequest → OllamaRequest
-   - Maps messages, model parameters, tools
-   - MessageRole enum → lowercase string
-   - ModelParameters → OllamaOptions
-   - ToolDefinition → OllamaTool
-   - Committed: 5923e9d
+✅ Task 005a-1: Ollama model types (34 tests) - Commit: 3eb92ba
+✅ Task 005a-2: Request serialization (17 tests) - Commit: 5923e9d
+✅ Task 005a-3: Response parsing (12 tests) - Commit: 13f74f1
+✅ Task 005a-4: HTTP client (6 tests) - Commit: e2a45fc
+✅ Task 005a-5: NDJSON stream reading (5 tests) - Commit: 07ee069
+✅ Task 005a-6: Delta parsing (8 tests) - Commit: 80b5a42
+
+**Task 005a COMPLETE**: All 6 subtasks done, 64 tests passing, 143 total Infrastructure tests
 
 ### In Progress
-🔄 Task 005a-3: Response parsing
+Ready to start Task 005 parent (Core Provider) or Task 005b (Tool calling)
 
 ### Remaining
-- Task 005a-3: Response parsing
-- Task 005a-4: HTTP client
-- Task 005a-5: NDJSON stream reading
-- Task 005a-6: Delta parsing
 - Task 005b-1: Tool call extraction
 - Task 005b-2: JSON repair
 - Task 005b-3: Retry mechanism
