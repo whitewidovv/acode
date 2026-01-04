@@ -264,10 +264,14 @@ Infrastructure Layer (Acode.Infrastructure):
 ## Completion Tracking
 
 ### Completed
-(None yet)
+✅ Task 005a-1: Ollama model types (34 tests passing)
+   - OllamaRequest, OllamaMessage, OllamaOptions
+   - OllamaTool, OllamaFunction, OllamaToolCall
+   - OllamaResponse, OllamaStreamChunk
+   - Committed: 3eb92ba
 
 ### In Progress
-- Task 005a-1: Creating Ollama model types
+🔄 Task 005a-2: Request serialization
 
 ### Remaining
 - Task 005a-2: Request serialization

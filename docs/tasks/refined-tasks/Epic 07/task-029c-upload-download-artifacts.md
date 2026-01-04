@@ -30,16 +30,54 @@ This task covers file transfer. Execution is in 029.b. Workspace preparation is 
 
 ### Integration Points
 
-- Task 029: Part of target interface
-- Task 029.a: Artifacts may be part of workspace
-- Task 027: Workers retrieve artifacts
+| Component | Integration Type | Description |
+|-----------|-----------------|-------------|
+| Task 029 IComputeTarget | Parent | TransferArtifactsAsync is part of target interface |
+| Task 029.a Workspace | Prerequisite | Artifacts may be transferred as part of preparation |
+| Task 027 Workers | Consumer | Workers retrieve artifacts after task completion |
+| Task 030 SSH Target | Override | Uses SCP/SFTP for remote transfers |
+| Task 031 EC2 Target | Override | Uses S3 or SSH for cloud transfers |
+| ITransferService | Interface | Main contract for transfer logic |
+| IProgressReporter | Callback | User-provided progress reporting |
 
 ### Failure Modes
 
-- Transfer timeout → Retry
-- Checksum mismatch → Re-transfer
-- Disk full → Error with cleanup
-- Permission denied → Clear error
+| Failure Type | Detection | Recovery | User Impact |
+|--------------|-----------|----------|-------------|
+| Transfer timeout | Timer expiration | Retry with resume | Delayed completion |
+| Checksum mismatch | Hash comparison | Re-transfer entire file | Automatic retry |
+| Disk full (remote) | IOException | Error with space needed | Must free space |
+| Disk full (local) | IOException | Cleanup partial, error | Must free space |
+| Permission denied | Access exception | Clear error with path | Fix permissions |
+| File not found | FileNotFound | Clear error with path | Fix source path |
+| Network interruption | Connection error | Retry with resume | Automatic recovery |
+| Path too long | PathTooLong | Truncate or error | Shorten path |
+
+---
+
+## Assumptions
+
+1. **Target Ready**: Compute target is provisioned and accessible for file operations
+2. **Sufficient Space**: Disk space checked before transfer (not mid-transfer)
+3. **Network Available**: For remote targets, network connectivity exists (respecting mode)
+4. **Hash Support**: SHA256 hashing available on all platforms
+5. **Streaming Support**: Target supports chunked/streaming file writes
+6. **Path Compatibility**: Path separators handled (Unix ↔ Windows)
+7. **File Handle Limits**: System file handle limits sufficient for parallel transfers
+8. **Time Synchronization**: Clocks synchronized for timestamp preservation
+
+---
+
+## Security Considerations
+
+1. **Path Validation**: All paths validated to prevent directory traversal attacks
+2. **Content Scanning**: Optional malware scanning hook for downloaded artifacts
+3. **Secure Transfer**: Remote transfers use encrypted channels (SSH/TLS)
+4. **Permission Preservation**: Permissions not blindly copied (could escalate privileges)
+5. **Sensitive Content**: Artifacts marked sensitive excluded from logs
+6. **Checksum Verification**: All transfers verified to prevent corruption/tampering
+7. **Temporary File Security**: Temp files created with restricted permissions
+8. **Audit Trail**: All transfers logged with source, destination, size, checksum
 
 ---
 
@@ -68,99 +106,139 @@ This task covers file transfer. Execution is in 029.b. Workspace preparation is 
 
 ## Functional Requirements
 
-### FR-001 to FR-030: Upload
+### Upload Operations (FR-029C-01 to FR-029C-30)
 
-- FR-001: `UploadAsync` MUST be defined
-- FR-002: Upload MUST accept local path
-- FR-003: Upload MUST accept remote path
-- FR-004: Single file MUST work
-- FR-005: Directory MUST work
-- FR-006: Directory MUST be recursive
-- FR-007: Glob patterns MUST work
-- FR-008: Hidden files MUST be optional
-- FR-009: Default: exclude hidden
-- FR-010: Symlinks MUST follow by default
-- FR-011: Symlink handling MUST be configurable
-- FR-012: Transfer MUST be streaming
-- FR-013: Chunk size MUST be configurable
-- FR-014: Default chunk: 64KB
-- FR-015: Progress MUST be reported
-- FR-016: Progress: bytes transferred
-- FR-017: Progress: percent complete
-- FR-018: Progress: transfer rate
-- FR-019: Checksum MUST be computed
-- FR-020: Checksum: SHA256
-- FR-021: Checksum MUST be verified
-- FR-022: Mismatch MUST retry
-- FR-023: Max retries MUST be configurable
-- FR-024: Default retries: 3
-- FR-025: Timeout MUST be enforced
-- FR-026: Default timeout: file-size based
-- FR-027: Overwrite MUST be configurable
-- FR-028: Default: overwrite
-- FR-029: Preserve timestamps MUST be optional
-- FR-030: Preserve permissions MUST be optional
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029C-01 | `UploadAsync(TransferRequest, CancellationToken)` MUST be defined | Must Have |
+| FR-029C-02 | TransferRequest MUST include local source path | Must Have |
+| FR-029C-03 | TransferRequest MUST include remote destination path | Must Have |
+| FR-029C-04 | Single file upload MUST be supported | Must Have |
+| FR-029C-05 | Directory upload MUST be supported | Must Have |
+| FR-029C-06 | Directory upload MUST be recursive by default | Must Have |
+| FR-029C-07 | Glob patterns MUST be supported for file selection | Should Have |
+| FR-029C-08 | Hidden files MUST be configurable (default: exclude) | Should Have |
+| FR-029C-09 | Symlinks MUST follow by default | Should Have |
+| FR-029C-10 | Symlink behavior MUST be configurable (follow/copy/skip) | Should Have |
+| FR-029C-11 | Transfer MUST use streaming (not buffering entire file) | Must Have |
+| FR-029C-12 | Chunk size MUST be configurable | Should Have |
+| FR-029C-13 | Default chunk size: 64KB | Should Have |
+| FR-029C-14 | Progress MUST be reported during transfer | Must Have |
+| FR-029C-15 | Progress MUST include bytes transferred | Must Have |
+| FR-029C-16 | Progress MUST include percent complete | Must Have |
+| FR-029C-17 | Progress MUST include current transfer rate (bytes/sec) | Should Have |
+| FR-029C-18 | Progress MUST include estimated time remaining | Should Have |
+| FR-029C-19 | SHA256 checksum MUST be computed during transfer | Must Have |
+| FR-029C-20 | Checksum MUST be verified after transfer | Must Have |
+| FR-029C-21 | Checksum mismatch MUST trigger retry | Must Have |
+| FR-029C-22 | Maximum retries MUST be configurable (default: 3) | Should Have |
+| FR-029C-23 | Timeout MUST be enforced per transfer | Must Have |
+| FR-029C-24 | Default timeout MUST be file-size based (1min + 1min/100MB) | Should Have |
+| FR-029C-25 | Overwrite behavior MUST be configurable | Should Have |
+| FR-029C-26 | Default overwrite: replace existing files | Should Have |
+| FR-029C-27 | Skip existing option MUST be available | Should Have |
+| FR-029C-28 | Error on existing option MUST be available | Should Have |
+| FR-029C-29 | Preserve timestamps MUST be optional (default: true) | Should Have |
+| FR-029C-30 | Preserve permissions MUST be optional (default: false) | Should Have |
 
-### FR-031 to FR-055: Download
+### Download Operations (FR-029C-31 to FR-029C-55)
 
-- FR-031: `DownloadAsync` MUST be defined
-- FR-032: Download MUST accept remote path
-- FR-033: Download MUST accept local path
-- FR-034: Single file MUST work
-- FR-035: Directory MUST work
-- FR-036: Glob patterns MUST work
-- FR-037: Streaming MUST be used
-- FR-038: Progress MUST be reported
-- FR-039: Checksum MUST be verified
-- FR-040: Mismatch MUST retry
-- FR-041: Timeout MUST be enforced
-- FR-042: Local directory MUST be created
-- FR-043: Parent directories MUST be created
-- FR-044: Existing files MAY be overwritten
-- FR-045: Overwrite MUST be configurable
-- FR-046: Resume MUST be supported
-- FR-047: Resume uses partial file
-- FR-048: Resume verifies ranges
-- FR-049: Non-resumable falls back
-- FR-050: Temp file MUST be used
-- FR-051: Atomic move on complete
-- FR-052: Cleanup on failure
-- FR-053: Download result MUST include paths
-- FR-054: Result MUST include sizes
-- FR-055: Result MUST include checksums
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029C-31 | `DownloadAsync(TransferRequest, CancellationToken)` MUST be defined | Must Have |
+| FR-029C-32 | Download MUST accept remote source path | Must Have |
+| FR-029C-33 | Download MUST accept local destination path | Must Have |
+| FR-029C-34 | Single file download MUST be supported | Must Have |
+| FR-029C-35 | Directory download MUST be supported | Must Have |
+| FR-029C-36 | Glob patterns MUST work for remote file selection | Should Have |
+| FR-029C-37 | Streaming MUST be used (no full buffering) | Must Have |
+| FR-029C-38 | Progress MUST be reported | Must Have |
+| FR-029C-39 | Checksum MUST be verified after download | Must Have |
+| FR-029C-40 | Checksum mismatch MUST retry transfer | Must Have |
+| FR-029C-41 | Timeout MUST be enforced | Must Have |
+| FR-029C-42 | Local directory MUST be created if not exists | Must Have |
+| FR-029C-43 | Parent directories MUST be created as needed | Must Have |
+| FR-029C-44 | Existing files MAY be overwritten (configurable) | Should Have |
+| FR-029C-45 | Resume MUST be supported for partial downloads | Should Have |
+| FR-029C-46 | Resume MUST use existing partial file | Should Have |
+| FR-029C-47 | Resume MUST verify range checksums | Should Have |
+| FR-029C-48 | Non-resumable transfers MUST fall back to full download | Must Have |
+| FR-029C-49 | Temporary file MUST be used during download | Must Have |
+| FR-029C-50 | Atomic rename on completion MUST be used | Must Have |
+| FR-029C-51 | Failed download MUST cleanup temp files | Must Have |
+| FR-029C-52 | TransferResult MUST include all downloaded paths | Must Have |
+| FR-029C-53 | TransferResult MUST include file sizes | Must Have |
+| FR-029C-54 | TransferResult MUST include checksums | Must Have |
+| FR-029C-55 | TransferResult MUST include transfer duration | Must Have |
 
-### FR-056 to FR-070: Batch Operations
+### Batch Operations (FR-029C-56 to FR-029C-70)
 
-- FR-056: Batch upload MUST work
-- FR-057: Batch accepts file list
-- FR-058: Parallel transfer MUST be optional
-- FR-059: Default: parallel
-- FR-060: Parallelism MUST be configurable
-- FR-061: Default parallelism: 4
-- FR-062: Per-file progress MUST work
-- FR-063: Total progress MUST work
-- FR-064: Partial failure MUST be handled
-- FR-065: Partial success MUST be reported
-- FR-066: Batch download MUST work
-- FR-067: Same parallel rules apply
-- FR-068: Manifest MUST be available
-- FR-069: Manifest lists all transfers
-- FR-070: Manifest includes success/failure
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029C-56 | Batch upload MUST accept list of file pairs | Must Have |
+| FR-029C-57 | Batch MUST support mixed files and directories | Should Have |
+| FR-029C-58 | Parallel transfer MUST be optional (default: true) | Should Have |
+| FR-029C-59 | Parallelism MUST be configurable (default: 4) | Should Have |
+| FR-029C-60 | Per-file progress MUST be available | Should Have |
+| FR-029C-61 | Total progress MUST aggregate all transfers | Must Have |
+| FR-029C-62 | Partial failure MUST be handled gracefully | Must Have |
+| FR-029C-63 | Successful transfers MUST complete even if some fail | Should Have |
+| FR-029C-64 | Batch result MUST report success and failures separately | Must Have |
+| FR-029C-65 | Batch download MUST work similarly | Must Have |
+| FR-029C-66 | Same parallelism rules apply to downloads | Should Have |
+| FR-029C-67 | Manifest file MUST be generatable | Should Have |
+| FR-029C-68 | Manifest MUST list all transfers with status | Should Have |
+| FR-029C-69 | Manifest MUST include checksums | Should Have |
+| FR-029C-70 | Manifest MUST be JSON format | Should Have |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: 1GB file MUST transfer in <5min
-- NFR-002: Memory MUST be bounded
-- NFR-003: Network interruption MUST retry
-- NFR-004: Progress MUST update every 1s
-- NFR-005: 100 parallel transfers MUST work
-- NFR-006: No data corruption
-- NFR-007: Atomic file placement
-- NFR-008: Cleanup on failure
-- NFR-009: Cross-platform paths
-- NFR-010: Structured logging
+### Performance (NFR-029C-01 to NFR-029C-10)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029C-01 | 1GB file transfer time | <5 minutes on LAN | Should Have |
+| NFR-029C-02 | Transfer throughput minimum | 50MB/s on local, 10MB/s on SSH | Should Have |
+| NFR-029C-03 | Memory usage per transfer | <10MB (regardless of file size) | Must Have |
+| NFR-029C-04 | Parallel transfers supported | 100 concurrent | Should Have |
+| NFR-029C-05 | Progress update frequency | Every 1 second | Should Have |
+| NFR-029C-06 | Small file overhead | <10ms per file | Should Have |
+| NFR-029C-07 | Batch of 1000 small files | <60 seconds | Should Have |
+| NFR-029C-08 | Checksum computation overhead | <5% of transfer time | Should Have |
+| NFR-029C-09 | Resume overhead | <1 second | Should Have |
+| NFR-029C-10 | Directory enumeration (10K files) | <5 seconds | Should Have |
+
+### Reliability (NFR-029C-11 to NFR-029C-20)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029C-11 | Data corruption rate | 0% (checksum verified) | Must Have |
+| NFR-029C-12 | Network interruption recovery | Automatic resume | Should Have |
+| NFR-029C-13 | Atomic file placement | No partial files visible | Must Have |
+| NFR-029C-14 | Temp file cleanup on failure | 100% | Must Have |
+| NFR-029C-15 | Retry success rate (transient failures) | 95%+ | Should Have |
+| NFR-029C-16 | Concurrent access safety | No corruption | Must Have |
+| NFR-029C-17 | Path handling cross-platform | Windows ↔ Unix | Must Have |
+| NFR-029C-18 | Special character handling | All valid filenames | Should Have |
+| NFR-029C-19 | Long path support | 4096 chars on Unix, 260+ on Windows | Should Have |
+| NFR-029C-20 | Cancellation cleanup | All temp files removed | Must Have |
+
+### Observability (NFR-029C-21 to NFR-029C-30)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029C-21 | Transfer start log | Info level with source/dest | Must Have |
+| NFR-029C-22 | Transfer complete log | Info level with size/duration | Must Have |
+| NFR-029C-23 | Transfer failure log | Error level with reason | Must Have |
+| NFR-029C-24 | Retry log | Warning level | Should Have |
+| NFR-029C-25 | Progress log (large files) | Debug level every 10% | Should Have |
+| NFR-029C-26 | Checksum log | Debug level | Should Have |
+| NFR-029C-27 | Structured logging format | JSON-compatible | Should Have |
+| NFR-029C-28 | TargetId in all logs | Correlation | Must Have |
+| NFR-029C-29 | Metric: transfer_bytes_total | Counter | Should Have |
+| NFR-029C-30 | Metric: transfer_duration_seconds | Histogram | Should Have |
 
 ---
 
@@ -218,34 +296,222 @@ await target.DownloadAsync(
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: Upload single file works
-- [ ] AC-002: Upload directory works
-- [ ] AC-003: Download single file works
-- [ ] AC-004: Download directory works
-- [ ] AC-005: Streaming works
-- [ ] AC-006: Checksum verifies
-- [ ] AC-007: Progress reports
-- [ ] AC-008: Resume works
-- [ ] AC-009: Batch works
-- [ ] AC-010: Errors handled
+### Upload Operations (AC-029C-01 to AC-029C-20)
+
+- [ ] AC-029C-01: `IArtifactTransfer` interface defined in Application layer
+- [ ] AC-029C-02: `UploadAsync` method accepts TransferRequest and CancellationToken
+- [ ] AC-029C-03: TransferRequest includes source path, destination path, options
+- [ ] AC-029C-04: Single file upload works correctly
+- [ ] AC-029C-05: Directory upload works recursively
+- [ ] AC-029C-06: Glob patterns filter files correctly
+- [ ] AC-029C-07: Hidden files excluded by default
+- [ ] AC-029C-08: Symlinks followed by default
+- [ ] AC-029C-09: Transfer uses streaming (bounded memory)
+- [ ] AC-029C-10: Chunk size configurable
+- [ ] AC-029C-11: Progress reported every 1 second
+- [ ] AC-029C-12: Progress includes bytes, percent, rate, ETA
+- [ ] AC-029C-13: SHA256 checksum computed during transfer
+- [ ] AC-029C-14: Checksum verified after transfer completes
+- [ ] AC-029C-15: Checksum mismatch triggers automatic retry
+- [ ] AC-029C-16: Maximum retries respected (default 3)
+- [ ] AC-029C-17: Timeout enforced per transfer
+- [ ] AC-029C-18: Overwrite mode works (default: replace)
+- [ ] AC-029C-19: Timestamps preserved when configured
+- [ ] AC-029C-20: Upload returns TransferResult with details
+
+### Download Operations (AC-029C-21 to AC-029C-40)
+
+- [ ] AC-029C-21: `DownloadAsync` method accepts TransferRequest and CancellationToken
+- [ ] AC-029C-22: Single file download works correctly
+- [ ] AC-029C-23: Directory download works recursively
+- [ ] AC-029C-24: Remote glob patterns work
+- [ ] AC-029C-25: Streaming used (bounded memory)
+- [ ] AC-029C-26: Progress reported during download
+- [ ] AC-029C-27: Checksum verified after download
+- [ ] AC-029C-28: Mismatch triggers retry
+- [ ] AC-029C-29: Timeout enforced
+- [ ] AC-029C-30: Local directory created if not exists
+- [ ] AC-029C-31: Parent directories created as needed
+- [ ] AC-029C-32: Overwrite configurable
+- [ ] AC-029C-33: Resume supported for interrupted downloads
+- [ ] AC-029C-34: Resume uses partial file and range requests
+- [ ] AC-029C-35: Non-resumable falls back to full download
+- [ ] AC-029C-36: Temporary file used during download
+- [ ] AC-029C-37: Atomic rename on completion
+- [ ] AC-029C-38: Failed download cleans up temp files
+- [ ] AC-029C-39: Result includes all paths, sizes, checksums
+- [ ] AC-029C-40: Result includes total duration
+
+### Batch Operations (AC-029C-41 to AC-029C-50)
+
+- [ ] AC-029C-41: Batch upload accepts list of file pairs
+- [ ] AC-029C-42: Batch processes in parallel (configurable)
+- [ ] AC-029C-43: Default parallelism is 4
+- [ ] AC-029C-44: Per-file progress available
+- [ ] AC-029C-45: Total progress aggregates all transfers
+- [ ] AC-029C-46: Partial failure doesn't stop other transfers
+- [ ] AC-029C-47: Result separates successes and failures
+- [ ] AC-029C-48: Batch download works similarly
+- [ ] AC-029C-49: Manifest file generatable as JSON
+- [ ] AC-029C-50: Manifest includes all transfer details
+
+### Reliability and Cleanup (AC-029C-51 to AC-029C-60)
+
+- [ ] AC-029C-51: No data corruption (verified by checksum)
+- [ ] AC-029C-52: Network interruption handled with retry
+- [ ] AC-029C-53: Temp files cleaned up on any failure
+- [ ] AC-029C-54: Cancellation cleans up resources
+- [ ] AC-029C-55: File handles properly closed
+- [ ] AC-029C-56: Memory stays bounded for large files
+- [ ] AC-029C-57: Cross-platform path handling works
+- [ ] AC-029C-58: Special characters in filenames work
+- [ ] AC-029C-59: Long paths handled correctly
+- [ ] AC-029C-60: Concurrent transfers don't interfere
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Upload Build Artifacts to Remote Target
+
+**Persona:** Developer collecting build outputs
+
+**Steps:**
+1. Build project locally generating bin/Release folder
+2. Execute upload: `target.UploadAsync("./bin/Release/", "/workspace/artifacts/")`
+3. Observe progress: "Uploading 45 files (256MB)..."
+4. Observe progress updates every second
+5. Observe completion: "Upload complete in 12s, checksum verified"
+6. Verify files exist on remote target
+
+**Verification:**
+- [ ] All files transferred
+- [ ] Progress updates accurate
+- [ ] Checksums verified
+- [ ] No orphan temp files
+
+### Scenario 2: Download Test Results After Remote Execution
+
+**Persona:** Developer retrieving test outputs
+
+**Steps:**
+1. Execute tests on remote target
+2. Execute download: `target.DownloadAsync("/workspace/TestResults/", "./results/")`
+3. Observe progress during download
+4. Verify local files match remote
+5. Check checksums in result
+
+**Verification:**
+- [ ] All files downloaded
+- [ ] Checksums match
+- [ ] Timestamps preserved (if configured)
+
+### Scenario 3: Resume Interrupted Large File Transfer
+
+**Persona:** Developer on unstable network
+
+**Steps:**
+1. Start upload of 1GB file
+2. Simulate network interruption at 50%
+3. Observe retry with resume
+4. Transfer continues from 50%
+5. Complete successfully
+
+**Verification:**
+- [ ] Resume starts from partial point
+- [ ] Total time less than full re-transfer
+- [ ] Final checksum correct
+
+### Scenario 4: Batch Transfer with Partial Failure
+
+**Persona:** Developer uploading multiple artifacts
+
+**Steps:**
+1. Upload 10 files, one has permission error
+2. Observe: 9 succeed, 1 fails
+3. Result shows which failed and why
+4. Successful files are intact
+
+**Verification:**
+- [ ] Partial failure reported correctly
+- [ ] Successful transfers complete
+- [ ] Error message is actionable
+
+### Scenario 5: Large File Memory Stability
+
+**Persona:** Developer transferring 10GB file
+
+**Steps:**
+1. Upload 10GB file
+2. Monitor memory usage during transfer
+3. Memory stays under 50MB
+4. Transfer completes successfully
+
+**Verification:**
+- [ ] Memory bounded
+- [ ] No out-of-memory errors
+- [ ] Streaming working correctly
+
+### Scenario 6: Cancellation During Transfer
+
+**Persona:** Developer cancelling wrong transfer
+
+**Steps:**
+1. Start large upload
+2. Cancel at 25%
+3. Observe cleanup: "Cancelling... cleaning up temp files"
+4. No partial files on remote
+5. No temp files locally
+
+**Verification:**
+- [ ] Cancellation responsive
+- [ ] All temp files cleaned
+- [ ] No orphan data
 
 ---
 
 ## Testing Requirements
 
-### Unit Tests
+### Unit Tests (UT-029C-01 to UT-029C-20)
 
-- [ ] UT-001: Checksum calculation
-- [ ] UT-002: Progress reporting
-- [ ] UT-003: Retry logic
-- [ ] UT-004: Path handling
+- [ ] UT-029C-01: SHA256 checksum calculated correctly
+- [ ] UT-029C-02: Progress calculation accurate
+- [ ] UT-029C-03: Transfer rate calculation correct
+- [ ] UT-029C-04: ETA estimation reasonable
+- [ ] UT-029C-05: Retry logic respects max retries
+- [ ] UT-029C-06: Exponential backoff timing correct
+- [ ] UT-029C-07: Path normalization Unix → Windows
+- [ ] UT-029C-08: Path normalization Windows → Unix
+- [ ] UT-029C-09: Glob pattern matching works
+- [ ] UT-029C-10: Hidden file detection works
+- [ ] UT-029C-11: Symlink detection works
+- [ ] UT-029C-12: TransferResult serializes to JSON
+- [ ] UT-029C-13: Manifest generation works
+- [ ] UT-029C-14: Temp file naming unique
+- [ ] UT-029C-15: Atomic rename works
+- [ ] UT-029C-16: Cleanup removes all temp files
+- [ ] UT-029C-17: Parallel transfer coordination
+- [ ] UT-029C-18: Partial failure aggregation
+- [ ] UT-029C-19: Cancellation propagation
+- [ ] UT-029C-20: Events contain correct data
 
-### Integration Tests
+### Integration Tests (IT-029C-01 to IT-029C-15)
 
-- [ ] IT-001: Large file transfer
-- [ ] IT-002: Directory transfer
-- [ ] IT-003: Batch parallel
-- [ ] IT-004: Resume after interrupt
+- [ ] IT-029C-01: Upload single file end-to-end
+- [ ] IT-029C-02: Upload directory end-to-end
+- [ ] IT-029C-03: Download single file end-to-end
+- [ ] IT-029C-04: Download directory end-to-end
+- [ ] IT-029C-05: Large file (1GB) transfer
+- [ ] IT-029C-06: Batch upload with parallelism
+- [ ] IT-029C-07: Batch download with parallelism
+- [ ] IT-029C-08: Resume after network interruption
+- [ ] IT-029C-09: Checksum mismatch retry
+- [ ] IT-029C-10: Timeout handling
+- [ ] IT-029C-11: Cancellation cleanup
+- [ ] IT-029C-12: Cross-platform path handling
+- [ ] IT-029C-13: Special characters in filenames
+- [ ] IT-029C-14: Memory stable during large transfers
+- [ ] IT-029C-15: 100 concurrent transfers
 
 ---
 
