@@ -243,60 +243,83 @@ jobs:
 
 ## Implementation Prompt
 
-### Interface
+### Part 1: File Structure + Domain Models
 
-```csharp
-public interface ICiTemplateGenerator
-{
-    Task<CiWorkflow> GenerateAsync(
-        CiTemplateRequest request,
-        CancellationToken ct = default);
-    
-    IReadOnlyList<string> SupportedPlatforms { get; }
-    IReadOnlyList<string> SupportedStacks { get; }
-    
-    Task<ValidationResult> ValidateAsync(
-        CiWorkflow workflow,
-        CancellationToken ct = default);
-}
-
-public record CiTemplateRequest(
-    string Platform,
-    string Stack,
-    string ProjectPath,
-    CiOptions Options = null);
-
-public record CiOptions(
-    string Name = null,
-    IReadOnlyList<string> Branches = null,
-    IReadOnlyList<string> PathFilters = null,
-    bool IncludeMatrix = false,
-    string Runner = null,
-    IReadOnlyDictionary<string, string> Variables = null);
-
-public record CiWorkflow(
-    string Name,
-    string Filename,
-    string Content,
-    IReadOnlyList<string> Triggers,
-    IReadOnlyList<CiJob> Jobs);
-
-public record CiJob(
-    string Id,
-    string Name,
-    string Runner,
-    IReadOnlyList<string> Steps,
-    IReadOnlyList<string> Dependencies);
+```
+src/
+├── Acode.Domain/
+│   └── CiCd/
+│       └── Templates/
+│           ├── CiPlatform.cs
+│           ├── TechStack.cs
+│           └── Events/
+│               ├── WorkflowGeneratedEvent.cs
+│               └── WorkflowValidationFailedEvent.cs
+├── Acode.Application/
+│   └── CiCd/
+│       └── Templates/
+│           ├── ICiTemplateGenerator.cs
+│           ├── ICiPlatformProvider.cs
+│           ├── ICiPlatformRegistry.cs
+│           ├── CiTemplateRequest.cs
+│           ├── CiOptions.cs
+│           ├── CiWorkflow.cs
+│           └── CiJob.cs
+└── Acode.Infrastructure/
+    └── CiCd/
+        └── Templates/
+            ├── CiTemplateGenerator.cs
+            ├── CiPlatformRegistry.cs
+            ├── YamlValidator.cs
+            └── Providers/
+                └── GitHubActionsProvider.cs
 ```
 
-### Registry
-
 ```csharp
-public interface ICiPlatformRegistry
+// src/Acode.Domain/CiCd/Templates/CiPlatform.cs
+namespace Acode.Domain.CiCd.Templates;
+
+public enum CiPlatform
 {
-    void Register(ICiPlatformProvider provider);
-    ICiPlatformProvider Get(string platform);
+    GitHubActions,
+    GitLabCi,
+    AzureDevOps,
+    Jenkins
 }
+
+// src/Acode.Domain/CiCd/Templates/TechStack.cs
+namespace Acode.Domain.CiCd.Templates;
+
+public enum TechStack
+{
+    DotNet,
+    Node,
+    Python,
+    Java,
+    Go,
+    Rust
+}
+
+// src/Acode.Domain/CiCd/Templates/Events/WorkflowGeneratedEvent.cs
+namespace Acode.Domain.CiCd.Templates.Events;
+
+public sealed record WorkflowGeneratedEvent(
+    string WorkflowName,
+    CiPlatform Platform,
+    TechStack Stack,
+    string OutputPath,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/CiCd/Templates/Events/WorkflowValidationFailedEvent.cs
+namespace Acode.Domain.CiCd.Templates.Events;
+
+public sealed record WorkflowValidationFailedEvent(
+    string WorkflowName,
+    IReadOnlyList<string> Errors,
+    DateTimeOffset Timestamp) : IDomainEvent;
+```
+
+**End of Task 034 Specification - Part 1/3**
 
 public interface ICiPlatformProvider
 {

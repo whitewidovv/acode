@@ -273,9 +273,100 @@ burst:
 
 ## Implementation Prompt
 
-### Interface
+### Part 1: File Structure + Domain Models
+
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Burst/
+│           └── Triggers/
+│               └── Events/
+│                   ├── TriggerFiredEvent.cs
+│                   └── TriggerResetEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Burst/
+│           └── Triggers/
+│               ├── IBurstTrigger.cs
+│               ├── TriggerContext.cs
+│               ├── TriggerSignal.cs
+│               ├── QueueDepthOptions.cs
+│               ├── QueueWaitOptions.cs
+│               ├── CpuOptions.cs
+│               ├── SaturationOptions.cs
+│               └── PriorityOptions.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Burst/
+            └── Triggers/
+                ├── QueueDepthTrigger.cs
+                ├── QueueWaitTrigger.cs
+                ├── CpuUtilizationTrigger.cs
+                ├── WorkerSaturationTrigger.cs
+                ├── PriorityTaskTrigger.cs
+                └── Sampling/
+                    ├── CpuSampler.cs
+                    └── MovingAverageCalculator.cs
+```
 
 ```csharp
+// src/Acode.Domain/Compute/Burst/Triggers/Events/TriggerFiredEvent.cs
+namespace Acode.Domain.Compute.Burst.Triggers.Events;
+
+public sealed record TriggerFiredEvent(
+    string TriggerName,
+    double Confidence,
+    string Reason,
+    int SuggestedScale,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/Compute/Burst/Triggers/Events/TriggerResetEvent.cs
+namespace Acode.Domain.Compute.Burst.Triggers.Events;
+
+public sealed record TriggerResetEvent(
+    string TriggerName,
+    string ResetReason,
+    DateTimeOffset Timestamp) : IDomainEvent;
+```
+
+**End of Task 033.a Specification - Part 1/3**
+
+### Part 2: Application Interfaces + Options
+
+```csharp
+// src/Acode.Application/Compute/Burst/Triggers/TriggerContext.cs
+namespace Acode.Application.Compute.Burst.Triggers;
+
+public sealed record TriggerContext
+{
+    public int QueueDepth { get; init; }
+    public TimeSpan OldestTaskWait { get; init; }
+    public TimeSpan AverageTaskWait { get; init; }
+    public TimeSpan P95TaskWait { get; init; }
+    public IReadOnlyList<QueuedTask> QueuedTasks { get; init; } = [];
+    public double CpuUtilization { get; init; }
+    public double MemoryUtilization { get; init; }
+    public int ActiveWorkers { get; init; }
+    public int TotalWorkers { get; init; }
+    public IReadOnlyList<WorkerStatus> WorkerStatuses { get; init; } = [];
+}
+
+// src/Acode.Application/Compute/Burst/Triggers/TriggerSignal.cs
+namespace Acode.Application.Compute.Burst.Triggers;
+
+public sealed record TriggerSignal
+{
+    public bool Triggered { get; init; }
+    public double Confidence { get; init; }
+    public string? Reason { get; init; }
+    public int SuggestedScale { get; init; } = 1;
+    public IReadOnlyDictionary<string, object> Metadata { get; init; } = new Dictionary<string, object>();
+}
+
+// src/Acode.Application/Compute/Burst/Triggers/IBurstTrigger.cs
+namespace Acode.Application.Compute.Burst.Triggers;
+
 public interface IBurstTrigger
 {
     string Name { get; }
@@ -283,57 +374,203 @@ public interface IBurstTrigger
     
     Task<TriggerSignal> EvaluateAsync(
         TriggerContext context,
-        CancellationToken ct);
+        CancellationToken ct = default);
 }
 
-public record TriggerContext(
-    int QueueDepth,
-    TimeSpan OldestTaskWait,
-    TimeSpan AverageTaskWait,
-    IReadOnlyList<QueuedTask> QueuedTasks,
-    double CpuUtilization,
-    double MemoryUtilization,
-    int ActiveWorkers,
-    int TotalWorkers,
-    IReadOnlyList<WorkerStatus> WorkerStatuses);
+// src/Acode.Application/Compute/Burst/Triggers/QueueDepthOptions.cs
+namespace Acode.Application.Compute.Burst.Triggers;
 
-public record TriggerSignal(
-    bool Triggered,
-    double Confidence,
-    string Reason,
-    int SuggestedScale,
-    IReadOnlyDictionary<string, object> Metadata);
+public sealed record QueueDepthOptions
+{
+    public bool Enabled { get; init; } = true;
+    public int Threshold { get; init; } = 10;
+    public int MaxScale { get; init; } = 5;
+    public int SampleCount { get; init; } = 3;
+}
+
+// src/Acode.Application/Compute/Burst/Triggers/QueueWaitOptions.cs
+namespace Acode.Application.Compute.Burst.Triggers;
+
+public sealed record QueueWaitOptions
+{
+    public bool Enabled { get; init; } = true;
+    public TimeSpan Threshold { get; init; } = TimeSpan.FromMinutes(5);
+    public string Metric { get; init; } = "oldest"; // oldest | average | p95
+    public double PriorityMultiplier { get; init; } = 2.0;
+}
+
+// src/Acode.Application/Compute/Burst/Triggers/CpuOptions.cs
+namespace Acode.Application.Compute.Burst.Triggers;
+
+public sealed record CpuOptions
+{
+    public bool Enabled { get; init; } = true;
+    public double Threshold { get; init; } = 0.80;
+    public TimeSpan SustainedPeriod { get; init; } = TimeSpan.FromMinutes(2);
+    public TimeSpan SampleInterval { get; init; } = TimeSpan.FromSeconds(10);
+}
+
+// src/Acode.Application/Compute/Burst/Triggers/SaturationOptions.cs
+namespace Acode.Application.Compute.Burst.Triggers;
+
+public sealed record SaturationOptions
+{
+    public bool Enabled { get; init; } = true;
+    public int QueuePerWorker { get; init; } = 3;
+    public TimeSpan SustainedPeriod { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan GracePeriod { get; init; } = TimeSpan.FromSeconds(10);
+}
+
+// src/Acode.Application/Compute/Burst/Triggers/PriorityOptions.cs
+namespace Acode.Application.Compute.Burst.Triggers;
+
+public sealed record PriorityOptions
+{
+    public bool Enabled { get; init; } = true;
+    public TimeSpan P0Threshold { get; init; } = TimeSpan.FromMinutes(1);
+    public TimeSpan P1Threshold { get; init; } = TimeSpan.FromMinutes(3);
+}
 ```
 
-### Implementations
+**End of Task 033.a Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation + Checklist
 
 ```csharp
-public class QueueDepthTrigger : IBurstTrigger
+// src/Acode.Infrastructure/Compute/Burst/Triggers/QueueDepthTrigger.cs
+namespace Acode.Infrastructure.Compute.Burst.Triggers;
+
+public sealed class QueueDepthTrigger : IBurstTrigger
 {
-    public QueueDepthTrigger(QueueDepthOptions options);
+    private readonly QueueDepthOptions _options;
+    private readonly MovingAverageCalculator _smoother;
+    
+    public string Name => "queue-depth";
+    public bool Enabled => _options.Enabled;
+    
+    public QueueDepthTrigger(QueueDepthOptions options)
+    {
+        _options = options;
+        _smoother = new MovingAverageCalculator(_options.SampleCount);
+    }
+    
+    public Task<TriggerSignal> EvaluateAsync(TriggerContext context, CancellationToken ct)
+    {
+        var smoothedDepth = _smoother.Add(context.QueueDepth);
+        var triggered = smoothedDepth > _options.Threshold;
+        var confidence = Math.Min(smoothedDepth / (_options.Threshold * 2.0), 1.0);
+        var scale = Math.Min((int)Math.Ceiling(smoothedDepth / context.TotalWorkers), _options.MaxScale);
+        
+        return Task.FromResult(new TriggerSignal
+        {
+            Triggered = triggered,
+            Confidence = confidence,
+            Reason = triggered ? $"Queue depth {smoothedDepth:F0} > threshold {_options.Threshold}" : null,
+            SuggestedScale = scale,
+            Metadata = new Dictionary<string, object> { ["smoothedDepth"] = smoothedDepth }
+        });
+    }
 }
 
-public class QueueWaitTrigger : IBurstTrigger
+// src/Acode.Infrastructure/Compute/Burst/Triggers/CpuUtilizationTrigger.cs
+namespace Acode.Infrastructure.Compute.Burst.Triggers;
+
+public sealed class CpuUtilizationTrigger : IBurstTrigger
 {
-    public QueueWaitTrigger(QueueWaitOptions options);
+    private readonly CpuOptions _options;
+    private readonly Queue<(DateTimeOffset Time, double Value)> _samples = new();
+    
+    public string Name => "cpu-utilization";
+    public bool Enabled => _options.Enabled;
+    
+    public Task<TriggerSignal> EvaluateAsync(TriggerContext context, CancellationToken ct)
+    {
+        _samples.Enqueue((DateTimeOffset.UtcNow, context.CpuUtilization));
+        PruneSamples();
+        
+        var sustained = IsSustainedAboveThreshold();
+        return Task.FromResult(new TriggerSignal
+        {
+            Triggered = sustained,
+            Confidence = sustained ? context.CpuUtilization : 0.0,
+            Reason = sustained 
+                ? $"CPU at {context.CpuUtilization:P0} for {_options.SustainedPeriod.TotalMinutes} minutes" 
+                : null,
+            SuggestedScale = sustained ? (int)Math.Ceiling((context.CpuUtilization - 0.6) / 0.2) : 0
+        });
+    }
+    
+    private bool IsSustainedAboveThreshold()
+    {
+        if (_samples.Count < 2) return false;
+        var window = DateTimeOffset.UtcNow - _options.SustainedPeriod;
+        return _samples.Where(s => s.Time >= window).All(s => s.Value >= _options.Threshold);
+    }
+    
+    private void PruneSamples()
+    {
+        var cutoff = DateTimeOffset.UtcNow - _options.SustainedPeriod - TimeSpan.FromMinutes(1);
+        while (_samples.Count > 0 && _samples.Peek().Time < cutoff)
+            _samples.Dequeue();
+    }
 }
 
-public class CpuUtilizationTrigger : IBurstTrigger
-{
-    public CpuUtilizationTrigger(CpuOptions options);
-}
+// src/Acode.Infrastructure/Compute/Burst/Triggers/PriorityTaskTrigger.cs
+namespace Acode.Infrastructure.Compute.Burst.Triggers;
 
-public class WorkerSaturationTrigger : IBurstTrigger
+public sealed class PriorityTaskTrigger : IBurstTrigger
 {
-    public WorkerSaturationTrigger(SaturationOptions options);
-}
-
-public class PriorityTaskTrigger : IBurstTrigger
-{
-    public PriorityTaskTrigger(PriorityOptions options);
+    private readonly PriorityOptions _options;
+    
+    public string Name => "priority-task";
+    public bool Enabled => _options.Enabled;
+    
+    public Task<TriggerSignal> EvaluateAsync(TriggerContext context, CancellationToken ct)
+    {
+        var p0Tasks = context.QueuedTasks.Where(t => t.Priority == 0).ToList();
+        var p1Tasks = context.QueuedTasks.Where(t => t.Priority == 1).ToList();
+        
+        var p0Waiting = p0Tasks.Any(t => t.WaitTime >= _options.P0Threshold);
+        var p1Waiting = p1Tasks.Any(t => t.WaitTime >= _options.P1Threshold);
+        
+        return Task.FromResult(new TriggerSignal
+        {
+            Triggered = p0Waiting || p1Waiting,
+            Confidence = p0Waiting ? 1.0 : (p1Waiting ? 0.8 : 0.0),
+            Reason = p0Waiting 
+                ? $"P0 task waiting {p0Tasks.Max(t => t.WaitTime).TotalMinutes:F1} minutes"
+                : (p1Waiting ? $"P1 task waiting {p1Tasks.Max(t => t.WaitTime).TotalMinutes:F1} minutes" : null),
+            SuggestedScale = 1
+        });
+    }
 }
 ```
 
----
+### Implementation Checklist
+
+| Step | Action | Verification |
+|------|--------|--------------|
+| 1 | Create trigger events | Event serialization verified |
+| 2 | Define TriggerContext, TriggerSignal | Records compile |
+| 3 | Define all options records | Options compile |
+| 4 | Create IBurstTrigger interface | Interface contract clear |
+| 5 | Implement MovingAverageCalculator | Smoothing verified |
+| 6 | Implement QueueDepthTrigger | Threshold fires correctly |
+| 7 | Implement QueueWaitTrigger | Wait time calculated |
+| 8 | Implement CpuUtilizationTrigger | Sustained period works |
+| 9 | Implement WorkerSaturationTrigger | All-busy detection works |
+| 10 | Implement PriorityTaskTrigger | P0/P1 thresholds work |
+| 11 | Add confidence scoring | Confidence 0.0-1.0 |
+| 12 | Add scale calculation | Scale within limits |
+| 13 | Register triggers in DI | All triggers resolved |
+| 14 | Performance verify <10ms | Benchmark passes |
+
+### Rollout Plan
+
+1. **Phase 1**: Implement trigger interface and sampling utilities
+2. **Phase 2**: Add queue-based triggers (depth, wait)
+3. **Phase 3**: Add load-based triggers (CPU, memory)
+4. **Phase 4**: Add WorkerSaturationTrigger
+5. **Phase 5**: Add PriorityTaskTrigger and integration tests
 
 **End of Task 033.a Specification**

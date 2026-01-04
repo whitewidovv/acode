@@ -264,72 +264,284 @@ acode run --placement-strategy local-first --no-fallback
 
 ## Implementation Prompt
 
-### Strategies
+### Part 1: File Structure + Domain Models
+
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Placement/
+│           └── Strategies/
+│               └── Events/
+│                   ├── StrategySelectedEvent.cs
+│                   └── StrategyFallbackEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Placement/
+│           └── Strategies/
+│               ├── IPlacementStrategyRegistry.cs
+│               ├── AutoStrategyOptions.cs
+│               ├── LocalFirstOptions.cs
+│               ├── CloudFirstOptions.cs
+│               ├── CostOptimizedOptions.cs
+│               └── PerformanceOptions.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Placement/
+            └── Strategies/
+                ├── PlacementStrategyRegistry.cs
+                ├── AutoPlacementStrategy.cs
+                ├── LocalFirstStrategy.cs
+                ├── CloudFirstStrategy.cs
+                ├── CostOptimizedStrategy.cs
+                └── PerformanceStrategy.cs
+```
 
 ```csharp
-public class AutoPlacementStrategy : IPlacementStrategy
+// src/Acode.Domain/Compute/Placement/Strategies/Events/StrategySelectedEvent.cs
+namespace Acode.Domain.Compute.Placement.Strategies.Events;
+
+public sealed record StrategySelectedEvent(
+    string StrategyName,
+    string SelectedTargetId,
+    double Score,
+    int CandidatesEvaluated,
+    TimeSpan Duration,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/Compute/Placement/Strategies/Events/StrategyFallbackEvent.cs
+namespace Acode.Domain.Compute.Placement.Strategies.Events;
+
+public sealed record StrategyFallbackEvent(
+    string OriginalStrategy,
+    string FallbackStrategy,
+    string Reason,
+    DateTimeOffset Timestamp) : IDomainEvent;
+```
+
+**End of Task 032.c Specification - Part 1/3**
+
+### Part 2: Application Interfaces + Options
+
+```csharp
+// src/Acode.Application/Compute/Placement/Strategies/AutoStrategyOptions.cs
+namespace Acode.Application.Compute.Placement.Strategies;
+
+public sealed record AutoStrategyOptions
 {
+    public double CapabilityWeight { get; init; } = 0.4;
+    public double CostWeight { get; init; } = 0.3;
+    public double LocalityWeight { get; init; } = 0.3;
+    public double LocalBonus { get; init; } = 0.1;
+}
+
+// src/Acode.Application/Compute/Placement/Strategies/LocalFirstOptions.cs
+namespace Acode.Application.Compute.Placement.Strategies;
+
+public sealed record LocalFirstOptions
+{
+    public bool AllowFallback { get; init; } = true;
+    public TimeSpan LocalTimeout { get; init; } = TimeSpan.FromMinutes(5);
+    public int QueueThreshold { get; init; } = 10;
+}
+
+// src/Acode.Application/Compute/Placement/Strategies/CloudFirstOptions.cs
+namespace Acode.Application.Compute.Placement.Strategies;
+
+public sealed record CloudFirstOptions
+{
+    public bool AllowLocalFallback { get; init; } = true;
+    public TimeSpan CloudTimeout { get; init; } = TimeSpan.FromMinutes(10);
+    public decimal? MaxBudget { get; init; }
+    public IReadOnlyList<string> PreferredInstanceTypes { get; init; } = [];
+    public IReadOnlyList<string> PreferredRegions { get; init; } = [];
+}
+
+// src/Acode.Application/Compute/Placement/Strategies/CostOptimizedOptions.cs
+namespace Acode.Application.Compute.Placement.Strategies;
+
+public sealed record CostOptimizedOptions
+{
+    public bool PreferSpot { get; init; } = true;
+    public double MinCapabilityScore { get; init; } = 0.5;
+    public decimal? MaxHourlyRate { get; init; }
+    public bool ConsiderTimeEstimate { get; init; } = true;
+}
+
+// src/Acode.Application/Compute/Placement/Strategies/PerformanceOptions.cs
+namespace Acode.Application.Compute.Placement.Strategies;
+
+public sealed record PerformanceOptions
+{
+    public double CpuWeight { get; init; } = 1.0;
+    public double MemoryWeight { get; init; } = 1.0;
+    public double GpuWeight { get; init; } = 2.0;
+    public double StorageWeight { get; init; } = 0.5;
+    public decimal? MaxBudget { get; init; }
+}
+
+// src/Acode.Application/Compute/Placement/Strategies/IPlacementStrategyRegistry.cs
+namespace Acode.Application.Compute.Placement.Strategies;
+
+public interface IPlacementStrategyRegistry
+{
+    void Register(IPlacementStrategy strategy);
+    IPlacementStrategy? Get(string name);
+    IReadOnlyList<IPlacementStrategy> GetAll();
+    IPlacementStrategy GetDefault();
+}
+```
+
+**End of Task 032.c Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation + Checklist
+
+```csharp
+// src/Acode.Infrastructure/Compute/Placement/Strategies/AutoPlacementStrategy.cs
+namespace Acode.Infrastructure.Compute.Placement.Strategies;
+
+public sealed class AutoPlacementStrategy : IPlacementStrategy
+{
+    private readonly AutoStrategyOptions _options;
+    private readonly ICapabilityMatcher _matcher;
+    
     public string Name => "auto";
     
     public Task<double> ScoreAsync(
         IComputeTarget target,
         TaskRequirements requirements,
         TargetCapabilities capabilities,
-        CancellationToken ct);
+        CancellationToken ct)
+    {
+        var matchResult = _matcher.Match(requirements, capabilities);
+        if (!matchResult.Passed) return Task.FromResult(0.0);
+        
+        var capScore = matchResult.Score * _options.CapabilityWeight;
+        var costScore = CalculateCostScore(target, capabilities) * _options.CostWeight;
+        var localScore = (capabilities.IsLocal ? 1.0 : 0.5) * _options.LocalityWeight;
+        var bonus = capabilities.IsLocal ? _options.LocalBonus : 0.0;
+        
+        return Task.FromResult(Math.Min(capScore + costScore + localScore + bonus, 1.0));
+    }
+    
+    public bool CanHandle(TaskRequirements requirements) => true;
 }
 
-public class LocalFirstStrategy : IPlacementStrategy
+// src/Acode.Infrastructure/Compute/Placement/Strategies/LocalFirstStrategy.cs
+namespace Acode.Infrastructure.Compute.Placement.Strategies;
+
+public sealed class LocalFirstStrategy : IPlacementStrategy
 {
+    private readonly LocalFirstOptions _options;
+    private readonly ICapabilityMatcher _matcher;
+    
     public string Name => "local-first";
+    
+    public Task<double> ScoreAsync(
+        IComputeTarget target,
+        TaskRequirements requirements,
+        TargetCapabilities capabilities,
+        CancellationToken ct)
+    {
+        var matchResult = _matcher.Match(requirements, capabilities);
+        if (!matchResult.Passed) return Task.FromResult(0.0);
+        
+        var baseScore = capabilities.IsLocal ? 1.0 : (_options.AllowFallback ? 0.5 : 0.0);
+        return Task.FromResult(baseScore * matchResult.Score);
+    }
+    
+    public bool CanHandle(TaskRequirements requirements) => true;
 }
 
-public class CloudFirstStrategy : IPlacementStrategy
-{
-    public string Name => "cloud-first";
-}
+// src/Acode.Infrastructure/Compute/Placement/Strategies/CostOptimizedStrategy.cs
+namespace Acode.Infrastructure.Compute.Placement.Strategies;
 
-public class CostOptimizedStrategy : IPlacementStrategy
+public sealed class CostOptimizedStrategy : IPlacementStrategy
 {
+    private readonly CostOptimizedOptions _options;
+    private readonly ICapabilityMatcher _matcher;
+    
     public string Name => "cost-optimized";
+    
+    public Task<double> ScoreAsync(
+        IComputeTarget target,
+        TaskRequirements requirements,
+        TargetCapabilities capabilities,
+        CancellationToken ct)
+    {
+        var matchResult = _matcher.Match(requirements, capabilities);
+        if (matchResult.Score < _options.MinCapabilityScore) return Task.FromResult(0.0);
+        
+        // Local is free
+        if (capabilities.IsLocal) return Task.FromResult(1.0);
+        
+        // Score inversely with cost
+        var hourlyRate = capabilities.HourlyRate ?? 1.0m;
+        if (_options.MaxHourlyRate.HasValue && hourlyRate > _options.MaxHourlyRate)
+            return Task.FromResult(0.0);
+        
+        var costScore = 1.0 - (double)(hourlyRate / 10m);
+        return Task.FromResult(Math.Max(costScore, 0.1));
+    }
+    
+    public bool CanHandle(TaskRequirements requirements) => true;
 }
 
-public class PerformanceStrategy : IPlacementStrategy
-{
-    public string Name => "performance";
-}
+// Additional: CloudFirstStrategy, PerformanceStrategy follow similar patterns
 ```
 
 ### Strategy Registry
 
 ```csharp
-public interface IPlacementStrategyRegistry
+// src/Acode.Infrastructure/Compute/Placement/Strategies/PlacementStrategyRegistry.cs
+namespace Acode.Infrastructure.Compute.Placement.Strategies;
+
+public sealed class PlacementStrategyRegistry : IPlacementStrategyRegistry
 {
-    void Register(IPlacementStrategy strategy);
-    IPlacementStrategy Get(string name);
-    IReadOnlyList<IPlacementStrategy> GetAll();
+    private readonly Dictionary<string, IPlacementStrategy> _strategies = new(StringComparer.OrdinalIgnoreCase);
+    
+    public PlacementStrategyRegistry(IEnumerable<IPlacementStrategy> strategies)
+    {
+        foreach (var s in strategies)
+            _strategies[s.Name] = s;
+    }
+    
+    public IPlacementStrategy? Get(string name) => 
+        _strategies.GetValueOrDefault(name);
+    
+    public IReadOnlyList<IPlacementStrategy> GetAll() => 
+        _strategies.Values.ToList();
+    
+    public IPlacementStrategy GetDefault() => 
+        _strategies["auto"];
 }
 ```
 
-### Strategy Options
+### Implementation Checklist
 
-```csharp
-public record AutoStrategyOptions(
-    double CapabilityWeight = 0.4,
-    double CostWeight = 0.3,
-    double LocalityWeight = 0.3,
-    double LocalBonus = 0.1);
+| Step | Action | Verification |
+|------|--------|--------------|
+| 1 | Create strategy events | Event serialization verified |
+| 2 | Define all options records | Records compile |
+| 3 | Create IPlacementStrategyRegistry | Interface contract clear |
+| 4 | Implement AutoPlacementStrategy | Balanced scoring verified |
+| 5 | Implement LocalFirstStrategy | Local targets preferred |
+| 6 | Implement CloudFirstStrategy | Cloud targets preferred |
+| 7 | Implement CostOptimizedStrategy | Cheapest viable selected |
+| 8 | Implement PerformanceStrategy | Highest spec selected |
+| 9 | Implement PlacementStrategyRegistry | All strategies registered |
+| 10 | Add mode compliance checks | local-only blocks cloud |
+| 11 | Add fallback logic | Graceful degradation works |
+| 12 | Register in DI | All strategies resolved |
+| 13 | Add metrics per strategy | Strategy metrics emitted |
+| 14 | Performance verify <50ms | Benchmark passes |
 
-public record LocalFirstOptions(
-    bool AllowFallback = true,
-    TimeSpan LocalTimeout = default,
-    int QueueThreshold = 10);
+### Rollout Plan
 
-public record CostOptimizedOptions(
-    bool PreferSpot = true,
-    double MinCapabilityScore = 0.5,
-    decimal? MaxHourlyRate = null);
-```
-
----
+1. **Phase 1**: Implement registry and AutoPlacementStrategy
+2. **Phase 2**: Add LocalFirstStrategy with fallback
+3. **Phase 3**: Add CloudFirstStrategy with budget limits
+4. **Phase 4**: Add CostOptimizedStrategy with spot preference
+5. **Phase 5**: Add PerformanceStrategy and integration tests
 
 **End of Task 032.c Specification**

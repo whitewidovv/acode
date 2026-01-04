@@ -251,73 +251,353 @@ targets:
 
 ## Implementation Prompt
 
-### Interface
+### Part 1: File Structure + Domain Models
+
+```
+src/
+├── Acode.Domain/
+│   └── Compute/
+│       └── Discovery/
+│           ├── CapabilityType.cs
+│           ├── ProbeResult.cs
+│           └── Events/
+│               ├── DiscoveryCompletedEvent.cs
+│               └── ProbeFailedEvent.cs
+├── Acode.Application/
+│   └── Compute/
+│       └── Discovery/
+│           ├── ICapabilityDiscovery.cs
+│           ├── ICapabilityProbe.cs
+│           ├── DiscoveryOptions.cs
+│           ├── TargetCapabilities.cs
+│           ├── HardwareCapabilities.cs
+│           ├── SoftwareCapabilities.cs
+│           └── GpuCapabilities.cs
+└── Acode.Infrastructure/
+    └── Compute/
+        └── Discovery/
+            ├── CapabilityDiscoveryService.cs
+            ├── CapabilityCache.cs
+            ├── ProbeRegistry.cs
+            └── Probes/
+                ├── CpuCountProbe.cs
+                ├── MemoryProbe.cs
+                ├── DiskProbe.cs
+                ├── GpuProbe.cs
+                ├── OsProbe.cs
+                └── ToolVersionProbe.cs
+```
 
 ```csharp
+// src/Acode.Domain/Compute/Discovery/CapabilityType.cs
+namespace Acode.Domain.Compute.Discovery;
+
+public enum CapabilityType
+{
+    Hardware,
+    Software,
+    Resource,
+    Custom
+}
+
+// src/Acode.Domain/Compute/Discovery/ProbeResult.cs
+namespace Acode.Domain.Compute.Discovery;
+
+public sealed record ProbeResult
+{
+    public required string ProbeName { get; init; }
+    public required bool Success { get; init; }
+    public object? Value { get; init; }
+    public string? ErrorMessage { get; init; }
+    public TimeSpan Duration { get; init; }
+    public CapabilityType Type { get; init; }
+}
+
+// src/Acode.Domain/Compute/Discovery/Events/DiscoveryCompletedEvent.cs
+namespace Acode.Domain.Compute.Discovery.Events;
+
+public sealed record DiscoveryCompletedEvent(
+    string TargetId,
+    int ProbesRun,
+    int ProbesSucceeded,
+    TimeSpan TotalDuration,
+    DateTimeOffset Timestamp) : IDomainEvent;
+
+// src/Acode.Domain/Compute/Discovery/Events/ProbeFailedEvent.cs
+namespace Acode.Domain.Compute.Discovery.Events;
+
+public sealed record ProbeFailedEvent(
+    string TargetId,
+    string ProbeName,
+    string ErrorMessage,
+    DateTimeOffset Timestamp) : IDomainEvent;
+```
+
+**End of Task 032.a Specification - Part 1/3**
+
+### Part 2: Application Interfaces
+
+```csharp
+// src/Acode.Application/Compute/Discovery/DiscoveryOptions.cs
+namespace Acode.Application.Compute.Discovery;
+
+public sealed record DiscoveryOptions
+{
+    public bool ForceRefresh { get; init; } = false;
+    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(60);
+    public IReadOnlyList<string> ToolsToProbe { get; init; } = ["git", "docker", "python3", "node", "dotnet"];
+    public bool IncludeGpu { get; init; } = true;
+    public bool ParallelProbes { get; init; } = true;
+}
+
+// src/Acode.Application/Compute/Discovery/GpuCapabilities.cs
+namespace Acode.Application.Compute.Discovery;
+
+public sealed record GpuCapabilities
+{
+    public bool Present { get; init; }
+    public int Count { get; init; }
+    public string? Type { get; init; } // nvidia, amd, intel
+    public string? Model { get; init; }
+    public long VramBytes { get; init; }
+    public string? DriverVersion { get; init; }
+    public string? CudaVersion { get; init; }
+}
+
+// src/Acode.Application/Compute/Discovery/HardwareCapabilities.cs
+namespace Acode.Application.Compute.Discovery;
+
+public sealed record HardwareCapabilities
+{
+    public int CpuCount { get; init; }
+    public string? CpuModel { get; init; }
+    public long MemoryBytes { get; init; }
+    public long MemoryAvailableBytes { get; init; }
+    public long DiskBytes { get; init; }
+    public long DiskAvailableBytes { get; init; }
+    public string Architecture { get; init; } = "x64";
+    public GpuCapabilities? Gpu { get; init; }
+}
+
+// src/Acode.Application/Compute/Discovery/SoftwareCapabilities.cs
+namespace Acode.Application.Compute.Discovery;
+
+public sealed record SoftwareCapabilities
+{
+    public required string OsName { get; init; }
+    public required string OsVersion { get; init; }
+    public string? Shell { get; init; }
+    public IReadOnlyDictionary<string, string> ToolVersions { get; init; } = new Dictionary<string, string>();
+    public IReadOnlyList<string> PackageManagers { get; init; } = [];
+    public bool DockerAvailable { get; init; }
+    public bool DockerRunning { get; init; }
+}
+
+// src/Acode.Application/Compute/Discovery/TargetCapabilities.cs
+namespace Acode.Application.Compute.Discovery;
+
+public sealed record TargetCapabilities
+{
+    public required string TargetId { get; init; }
+    public DateTimeOffset DiscoveredAt { get; init; }
+    public required HardwareCapabilities Hardware { get; init; }
+    public required SoftwareCapabilities Software { get; init; }
+    public IReadOnlyDictionary<string, object> Custom { get; init; } = new Dictionary<string, object>();
+    public bool IsPartial { get; init; }
+    public IReadOnlyList<string> FailedProbes { get; init; } = [];
+}
+
+// src/Acode.Application/Compute/Discovery/ICapabilityProbe.cs
+namespace Acode.Application.Compute.Discovery;
+
+public interface ICapabilityProbe
+{
+    string Name { get; }
+    CapabilityType Type { get; }
+    
+    Task<ProbeResult> ProbeAsync(
+        IComputeTarget target,
+        CancellationToken ct = default);
+}
+
+// src/Acode.Application/Compute/Discovery/ICapabilityDiscovery.cs
+namespace Acode.Application.Compute.Discovery;
+
 public interface ICapabilityDiscovery
 {
     Task<TargetCapabilities> DiscoverAsync(
         IComputeTarget target,
-        DiscoveryOptions options = null,
+        DiscoveryOptions? options = null,
         CancellationToken ct = default);
     
-    Task InvalidateCacheAsync(string targetId);
-    TargetCapabilities GetCached(string targetId);
+    Task InvalidateCacheAsync(string targetId, CancellationToken ct = default);
+    
+    TargetCapabilities? GetCached(string targetId);
+    
+    Task<IReadOnlyList<ProbeResult>> RunProbesAsync(
+        IComputeTarget target,
+        IReadOnlyList<string> probeNames,
+        CancellationToken ct = default);
 }
-
-public record DiscoveryOptions(
-    bool ForceRefresh = false,
-    TimeSpan? Timeout = null,
-    IReadOnlyList<string> ToolsToProbe = null);
-
-public record TargetCapabilities(
-    string TargetId,
-    DateTime DiscoveredAt,
-    HardwareCapabilities Hardware,
-    SoftwareCapabilities Software,
-    IReadOnlyDictionary<string, object> Custom);
-
-public record HardwareCapabilities(
-    int CpuCount,
-    string CpuModel,
-    long MemoryBytes,
-    long DiskBytes,
-    string Architecture,
-    GpuCapabilities Gpu = null);
-
-public record GpuCapabilities(
-    bool Present,
-    int Count,
-    string Type,
-    string Model,
-    long VramBytes,
-    string DriverVersion,
-    string CudaVersion);
-
-public record SoftwareCapabilities(
-    string OsName,
-    string OsVersion,
-    string Shell,
-    IReadOnlyDictionary<string, string> ToolVersions);
 ```
 
-### Probe Registry
+**End of Task 032.a Specification - Part 2/3**
+
+### Part 3: Infrastructure Implementation + Checklist
 
 ```csharp
-public interface ICapabilityProbe
+// src/Acode.Infrastructure/Compute/Discovery/CapabilityCache.cs
+namespace Acode.Infrastructure.Compute.Discovery;
+
+public sealed class CapabilityCache
 {
-    string CapabilityName { get; }
-    Task<object> ProbeAsync(
-        IComputeTarget target,
-        CancellationToken ct);
+    private readonly ConcurrentDictionary<string, CacheEntry> _cache = new();
+    private readonly TimeSpan _defaultTtl;
+    
+    public CapabilityCache(TimeSpan? defaultTtl = null)
+    {
+        _defaultTtl = defaultTtl ?? TimeSpan.FromMinutes(5);
+    }
+    
+    public TargetCapabilities? Get(string targetId)
+    {
+        if (_cache.TryGetValue(targetId, out var entry) && !entry.IsExpired)
+            return entry.Capabilities;
+        return null;
+    }
+    
+    public void Set(string targetId, TargetCapabilities caps, TimeSpan? ttl = null)
+    {
+        _cache[targetId] = new CacheEntry(caps, ttl ?? _defaultTtl);
+    }
+    
+    public void Invalidate(string targetId) => _cache.TryRemove(targetId, out _);
+    
+    private sealed record CacheEntry(TargetCapabilities Capabilities, TimeSpan Ttl)
+    {
+        private readonly DateTimeOffset _created = DateTimeOffset.UtcNow;
+        public bool IsExpired => DateTimeOffset.UtcNow - _created > Ttl;
+    }
 }
 
-public class CpuCountProbe : ICapabilityProbe { }
-public class MemoryProbe : ICapabilityProbe { }
-public class GpuProbe : ICapabilityProbe { }
-public class ToolVersionProbe : ICapabilityProbe { }
+// src/Acode.Infrastructure/Compute/Discovery/Probes/CpuCountProbe.cs
+namespace Acode.Infrastructure.Compute.Discovery.Probes;
+
+public sealed class CpuCountProbe : ICapabilityProbe
+{
+    public string Name => "cpu.count";
+    public CapabilityType Type => CapabilityType.Hardware;
+    
+    public async Task<ProbeResult> ProbeAsync(IComputeTarget target, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var cmd = target.Os == "windows" 
+                ? "wmic cpu get NumberOfCores" 
+                : "nproc";
+            var result = await target.ExecuteAsync(cmd, ct);
+            var count = ParseCpuCount(result.Output, target.Os);
+            return new ProbeResult { ProbeName = Name, Success = true, Value = count, Duration = sw.Elapsed, Type = Type };
+        }
+        catch (Exception ex)
+        {
+            return new ProbeResult { ProbeName = Name, Success = false, ErrorMessage = ex.Message, Duration = sw.Elapsed, Type = Type };
+        }
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Discovery/Probes/GpuProbe.cs
+namespace Acode.Infrastructure.Compute.Discovery.Probes;
+
+public sealed class GpuProbe : ICapabilityProbe
+{
+    public string Name => "gpu";
+    public CapabilityType Type => CapabilityType.Hardware;
+    
+    public async Task<ProbeResult> ProbeAsync(IComputeTarget target, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var result = await target.ExecuteAsync("nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader", ct);
+            if (result.ExitCode != 0)
+                return new ProbeResult { ProbeName = Name, Success = true, Value = new GpuCapabilities { Present = false }, Duration = sw.Elapsed, Type = Type };
+            
+            var gpu = ParseNvidiaSmi(result.Output);
+            return new ProbeResult { ProbeName = Name, Success = true, Value = gpu, Duration = sw.Elapsed, Type = Type };
+        }
+        catch
+        {
+            return new ProbeResult { ProbeName = Name, Success = true, Value = new GpuCapabilities { Present = false }, Duration = sw.Elapsed, Type = Type };
+        }
+    }
+}
+
+// src/Acode.Infrastructure/Compute/Discovery/CapabilityDiscoveryService.cs
+namespace Acode.Infrastructure.Compute.Discovery;
+
+public sealed class CapabilityDiscoveryService : ICapabilityDiscovery
+{
+    private readonly IEnumerable<ICapabilityProbe> _probes;
+    private readonly CapabilityCache _cache;
+    private readonly IEventPublisher _events;
+    private readonly ILogger<CapabilityDiscoveryService> _logger;
+    
+    public async Task<TargetCapabilities> DiscoverAsync(
+        IComputeTarget target,
+        DiscoveryOptions? options = null,
+        CancellationToken ct = default)
+    {
+        options ??= new DiscoveryOptions();
+        
+        if (!options.ForceRefresh)
+        {
+            var cached = _cache.Get(target.Id);
+            if (cached != null) return cached;
+        }
+        
+        var sw = Stopwatch.StartNew();
+        var results = options.ParallelProbes
+            ? await RunParallelAsync(target, ct)
+            : await RunSequentialAsync(target, ct);
+        
+        var caps = BuildCapabilities(target.Id, results);
+        _cache.Set(target.Id, caps);
+        
+        await _events.PublishAsync(new DiscoveryCompletedEvent(
+            target.Id, results.Count, results.Count(r => r.Success), sw.Elapsed, DateTimeOffset.UtcNow), ct);
+        
+        return caps;
+    }
+}
 ```
 
----
+### Implementation Checklist
+
+| Step | Action | Verification |
+|------|--------|--------------|
+| 1 | Create domain models (CapabilityType, ProbeResult) | Unit tests pass |
+| 2 | Add discovery events | Event serialization verified |
+| 3 | Define DiscoveryOptions, capability records | Records compile |
+| 4 | Create ICapabilityProbe, ICapabilityDiscovery | Interface contracts clear |
+| 5 | Implement CapabilityCache with TTL | Cache expiry verified |
+| 6 | Implement CpuCountProbe (Linux/Windows/macOS) | Cross-platform tested |
+| 7 | Implement MemoryProbe | Memory parsing verified |
+| 8 | Implement DiskProbe | Disk space accurate |
+| 9 | Implement GpuProbe | nvidia-smi parsing verified |
+| 10 | Implement OsProbe | OS detection works |
+| 11 | Implement ToolVersionProbe | Tool versions extracted |
+| 12 | Implement CapabilityDiscoveryService | End-to-end discovery works |
+| 13 | Add parallel probe execution | Concurrent probes run |
+| 14 | Register probes in DI | All probes resolved |
+
+### Rollout Plan
+
+1. **Phase 1**: Implement cache and probe infrastructure
+2. **Phase 2**: Add hardware probes (CPU, memory, disk)
+3. **Phase 3**: Add GPU probe with nvidia-smi
+4. **Phase 4**: Add software probes (OS, tools)
+5. **Phase 5**: Integration test with local and SSH targets
 
 **End of Task 032.a Specification**
