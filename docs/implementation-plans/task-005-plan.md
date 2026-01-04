@@ -270,11 +270,18 @@ Infrastructure Layer (Acode.Infrastructure):
    - OllamaResponse, OllamaStreamChunk
    - Committed: 3eb92ba
 
+✅ Task 005a-2: Request serialization (17 tests passing)
+   - OllamaRequestMapper: ChatRequest → OllamaRequest
+   - Maps messages, model parameters, tools
+   - MessageRole enum → lowercase string
+   - ModelParameters → OllamaOptions
+   - ToolDefinition → OllamaTool
+   - Committed: 5923e9d
+
 ### In Progress
-🔄 Task 005a-2: Request serialization
+🔄 Task 005a-3: Response parsing
 
 ### Remaining
-- Task 005a-2: Request serialization
 - Task 005a-3: Response parsing
 - Task 005a-4: HTTP client
 - Task 005a-5: NDJSON stream reading

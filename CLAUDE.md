@@ -6,6 +6,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is the **Agentic Coding Bot (Acode)** project - a locally-hosted, privacy-first AI-powered coding assistant. The repository contains both comprehensive task specifications and the implementation codebase for building a system that operates entirely within the user's infrastructure.
 
+## CRITICAL: Autonomous Work and Asynchronous Communication
+
+**MOST IMPORTANT PRINCIPLE: Work autonomously until context runs dangerously low (<5k tokens remaining).**
+
+### DO NOT Stop to Report Progress
+
+- **DO NOT** stop work to give status updates, milestone announcements, or progress reports
+- **DO NOT** ask for permission to continue after each commit
+- **DO NOT** wait for user acknowledgment between subtasks
+- **DO NOT** waste tokens on progress summaries mid-session
+
+### Instead: Work Continuously and Update Documentation
+
+When you feel the need to announce progress:
+1. **Update `docs/PROGRESS_NOTES.md`** with your milestone (user reads asynchronously)
+2. **Update implementation plan** (`docs/implementation-plans/task-XXX-plan.md`) with progress
+3. **Continue working** on the next subtask immediately
+
+### Only Stop When:
+
+1. **Context is dangerously low** (<5k tokens remaining)
+2. **Task is fully complete** (all subtasks done, audit passed, PR created)
+3. **You encounter a blocker** requiring user decision
+
+### When Stopping (Low Context Only):
+
+1. Update `docs/implementation-plans/task-XXX-plan.md` with detailed progress
+2. Update `docs/PROGRESS_NOTES.md` with summary
+3. Commit all work with descriptive message
+4. Push to feature branch
+5. Report: "Context low. X tokens remaining. Updated implementation plan. Ready to resume in next session."
+
+### Efficient Token Usage
+
+- Progress tracking happens in files (implementation plans, PROGRESS_NOTES.md)
+- User monitors progress asynchronously by reading these files
+- Stopping mid-flow to report wastes tokens and breaks momentum
+- Autonomous work until completion or <5k tokens is the expected behavior
+
 ## Core Working Principles
 
 **CRITICAL: Read these principles before starting ANY work.**

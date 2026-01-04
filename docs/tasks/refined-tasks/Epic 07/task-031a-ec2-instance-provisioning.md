@@ -30,16 +30,54 @@ This task covers EC2 instance creation. SSH is delegated to Task 030. Terminatio
 
 ### Integration Points
 
-- Task 031: Part of EC2 target
-- Task 030: SSH connection after provision
-- Task 029.a: Workspace preparation
+| Component | Interface | Data Flow | Notes |
+|-----------|-----------|-----------|-------|
+| Task 031 EC2 Target | IEc2Target | Provisioning request in, instance ID out | Parent container |
+| Task 030 SSH | ISshConnection | SSH access after provision | Connection layer |
+| Task 029.a Workspace | IPrepareWorkspace | Workspace setup after SSH | Preparation |
+| AWS SDK EC2 | IAmazonEC2 | All EC2 API calls | Cloud provider |
+| AWS SDK STS | IAmazonSTS | Credential validation | Auth |
+| Key Pair Manager | IEc2KeyPairManager | Key creation/import | Security |
+| AMI Resolver | IEc2AmiResolver | AMI lookup by pattern | Image selection |
 
 ### Failure Modes
 
-- Quota exceeded → Error with guidance
-- AMI not found → Error with suggestion
-- Subnet full → Try different AZ
-- Key pair missing → Create temp or error
+| Failure | Detection | Recovery | User Impact |
+|---------|-----------|----------|-------------|
+| Quota exceeded | InsufficientInstanceCapacity error | Report with quota increase link | Cannot provision |
+| AMI not found | InvalidAMIID error | Suggest valid AMIs | Configuration issue |
+| Subnet full | Capacity error | Try different AZ | AZ failover |
+| Key pair missing | InvalidKeyPair.NotFound | Create temp key pair | Auto-recovery |
+| Spot not fulfilled | Timeout or insufficient capacity | Fall back to on-demand | Higher cost |
+| Instance fails readiness | SSH unreachable after timeout | Terminate and retry | Delayed start |
+| UserData script fails | Instance not ready | Report console output | Debugging needed |
+| Security group invalid | InvalidGroup.NotFound | Report with details | Config fix needed |
+
+---
+
+## Assumptions
+
+1. **AWS SDK**: Implementation uses AWS SDK for .NET v3
+2. **IAM Permissions**: Caller has ec2:RunInstances, ec2:DescribeInstances, ec2:CreateKeyPair permissions
+3. **VPC Setup**: Subnets and security groups pre-configured
+4. **AMI Availability**: Target AMIs exist and are accessible
+5. **SSH Port**: Security group allows port 22 from source
+6. **IMDSv2**: All instances use IMDSv2 (token required)
+7. **Default VPC**: Falls back to default VPC if not specified
+8. **Region Config**: AWS region is configured in environment or config
+
+---
+
+## Security Considerations
+
+1. **Key Material Handling**: Private keys MUST be stored with 600 permissions, deleted after use
+2. **IMDSv2 Enforcement**: All instances MUST require IMDSv2 (no fallback to v1)
+3. **Tagging Security**: Tags MUST NOT contain sensitive data
+4. **UserData Secrets**: UserData MUST NOT contain plaintext secrets (use SSM/Secrets Manager)
+5. **Security Group Scope**: Security groups MUST use least-privilege ingress rules
+6. **IAM Role Scope**: Instance profiles MUST have minimum required permissions
+7. **API Credentials**: AWS credentials MUST NOT be logged
+8. **Console Output**: SSH fingerprint verification MUST use GetConsoleOutput for security
 
 ---
 
@@ -69,107 +107,140 @@ This task covers EC2 instance creation. SSH is delegated to Task 030. Terminatio
 
 ## Functional Requirements
 
-### FR-001 to FR-020: RunInstances
+### RunInstances API
 
-- FR-001: `RunInstances` MUST be called
-- FR-002: ImageId MUST be specified
-- FR-003: InstanceType MUST be specified
-- FR-004: MinCount = MaxCount = 1
-- FR-005: KeyName MUST be specified
-- FR-006: SubnetId MUST be specified
-- FR-007: SecurityGroupIds MUST be specified
-- FR-008: IamInstanceProfile MUST be optional
-- FR-009: UserData MUST be optional
-- FR-010: UserData MUST be base64 encoded
-- FR-011: TagSpecifications MUST be set
-- FR-012: Required tag: acode=true
-- FR-013: Required tag: acode-session-id
-- FR-014: Required tag: acode-timestamp
-- FR-015: Custom tags MUST merge
-- FR-016: BlockDeviceMappings MUST be set
-- FR-017: EBS volume size configurable
-- FR-018: EBS volume type: gp3
-- FR-019: DeleteOnTermination = true
-- FR-020: IMDSv2 MUST be enforced
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031A-01 | `RunInstances` API MUST be called via AWS SDK | P0 |
+| FR-031A-02 | `ImageId` MUST be specified (resolved or explicit) | P0 |
+| FR-031A-03 | `InstanceType` MUST be specified and validated | P0 |
+| FR-031A-04 | `MinCount = MaxCount = 1` for single instance launch | P0 |
+| FR-031A-05 | `KeyName` MUST be specified for SSH access | P0 |
+| FR-031A-06 | `SubnetId` MUST be specified for VPC placement | P0 |
+| FR-031A-07 | `SecurityGroupIds` MUST be specified (array) | P0 |
+| FR-031A-08 | `IamInstanceProfile` MUST be optional (ARN or name) | P1 |
+| FR-031A-09 | `UserData` MUST be optional (bootstrap script) | P1 |
+| FR-031A-10 | UserData MUST be base64 encoded before submission | P1 |
+| FR-031A-11 | `TagSpecifications` MUST be set for instance and volumes | P0 |
+| FR-031A-12 | Required tag: `acode=true` for identification | P0 |
+| FR-031A-13 | Required tag: `acode-session-id={sessionId}` | P0 |
+| FR-031A-14 | Required tag: `acode-timestamp={ISO8601}` | P0 |
+| FR-031A-15 | Custom tags MUST merge with required tags | P1 |
+| FR-031A-16 | `BlockDeviceMappings` MUST be set for root volume | P0 |
+| FR-031A-17 | EBS volume size MUST be configurable (default 30GB) | P1 |
+| FR-031A-18 | EBS volume type MUST be gp3 | P0 |
+| FR-031A-19 | `DeleteOnTermination = true` MUST be set | P0 |
+| FR-031A-20 | IMDSv2 MUST be enforced via `MetadataOptions.HttpTokens=required` | P0 |
 
-### FR-021 to FR-040: Spot Instances
+### Spot Instances
 
-- FR-021: Spot request MUST be optional
-- FR-022: InstanceMarketOptions MUST be set
-- FR-023: SpotInstanceType = one-time
-- FR-024: MaxPrice MUST be configurable
-- FR-025: Default: on-demand price
-- FR-026: Spot request timeout MUST exist
-- FR-027: Default timeout: 5 minutes
-- FR-028: Spot fulfillment MUST be waited
-- FR-029: Spot failure MUST fallback
-- FR-030: Fallback to on-demand MUST be optional
-- FR-031: Default: fallback enabled
-- FR-032: Spot interruption notice MUST be handled
-- FR-033: 2-minute warning via metadata
-- FR-034: Interruption callback MUST exist
-- FR-035: Graceful shutdown on interruption
-- FR-036: Spot savings MUST be logged
-- FR-037: Spot availability MUST be checked
-- FR-038: SpotPlacementScores API MUST be used
-- FR-039: Best AZ MUST be selected
-- FR-040: Spot history MUST inform decisions
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031A-21 | Spot instance request MUST be optional via config | P1 |
+| FR-031A-22 | `InstanceMarketOptions` MUST be set for spot | P1 |
+| FR-031A-23 | `SpotInstanceType = one-time` for immediate launch | P1 |
+| FR-031A-24 | `MaxPrice` MUST be configurable ($/hour) | P1 |
+| FR-031A-25 | Default MaxPrice = on-demand price (no cap) | P1 |
+| FR-031A-26 | Spot request timeout MUST exist (default 5 min) | P1 |
+| FR-031A-27 | Spot fulfillment MUST be waited with polling | P1 |
+| FR-031A-28 | Spot failure MUST trigger fallback evaluation | P1 |
+| FR-031A-29 | Fallback to on-demand MUST be optional (default true) | P1 |
+| FR-031A-30 | Spot interruption 2-minute warning MUST be handled | P2 |
+| FR-031A-31 | Interruption callback MUST trigger graceful shutdown | P2 |
+| FR-031A-32 | Spot savings MUST be logged (vs on-demand price) | P2 |
+| FR-031A-33 | `SpotPlacementScores` API MUST inform AZ selection | P2 |
+| FR-031A-34 | Best AZ MUST be selected based on spot availability | P2 |
+| FR-031A-35 | Spot price history MUST be queryable for decisions | P2 |
 
-### FR-041 to FR-060: Instance Readiness
+### Instance Readiness
 
-- FR-041: Instance state MUST be polled
-- FR-042: Wait for running state
-- FR-043: Poll interval: 5 seconds
-- FR-044: Max poll time: 5 minutes
-- FR-045: DescribeInstances MUST be used
-- FR-046: InstanceStatuses MUST be checked
-- FR-047: System status MUST be ok
-- FR-048: Instance status MUST be ok
-- FR-049: Public IP MUST be obtained
-- FR-050: SSH port MUST be reachable
-- FR-051: SSH check MUST retry
-- FR-052: Max SSH retries: 30
-- FR-053: Retry interval: 10 seconds
-- FR-054: SSH fingerprint MUST be verified
-- FR-055: Fingerprint from console output
-- FR-056: GetConsoleOutput API MUST be used
-- FR-057: Readiness callback MUST exist
-- FR-058: Readiness timeout MUST exist
-- FR-059: Timeout MUST cleanup instance
-- FR-060: Cleanup MUST terminate instance
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031A-36 | Instance state MUST be polled via `DescribeInstances` | P0 |
+| FR-031A-37 | Wait for `running` state before SSH check | P0 |
+| FR-031A-38 | Poll interval MUST be 5 seconds | P0 |
+| FR-031A-39 | Max poll time MUST be 5 minutes for state check | P0 |
+| FR-031A-40 | `DescribeInstanceStatus` MUST verify health | P0 |
+| FR-031A-41 | System status MUST be `ok` before ready | P0 |
+| FR-031A-42 | Instance status MUST be `ok` before ready | P0 |
+| FR-031A-43 | Public IP MUST be obtained from instance metadata | P0 |
+| FR-031A-44 | SSH port 22 MUST be reachable before ready | P0 |
+| FR-031A-45 | SSH check MUST retry with backoff | P0 |
+| FR-031A-46 | Max SSH retries MUST be 30 | P0 |
+| FR-031A-47 | SSH retry interval MUST be 10 seconds | P0 |
+| FR-031A-48 | SSH fingerprint MUST be verified from console output | P1 |
+| FR-031A-49 | `GetConsoleOutput` API MUST be used for fingerprint | P1 |
+| FR-031A-50 | Readiness callback MUST be invoked on success | P1 |
+| FR-031A-51 | Readiness timeout MUST trigger cleanup | P0 |
+| FR-031A-52 | Cleanup MUST terminate instance on timeout | P0 |
 
-### FR-061 to FR-075: Key Pair Management
+### Key Pair Management
 
-- FR-061: Existing key pair MUST work
-- FR-062: Key pair name from config
-- FR-063: Auto key pair MUST be optional
-- FR-064: Auto: create temp key pair
-- FR-065: CreateKeyPair API MUST be used
-- FR-066: Key material MUST be stored securely
-- FR-067: Key MUST be written to temp file
-- FR-068: File permissions: 600
-- FR-069: Key path MUST be tracked
-- FR-070: Temp key MUST be deleted on teardown
-- FR-071: DeleteKeyPair API MUST be used
-- FR-072: Key naming: acode-{session-id}
-- FR-073: Import existing key MUST work
-- FR-074: ImportKeyPair API MUST be used
-- FR-075: ED25519 and RSA MUST be supported
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031A-53 | Existing key pair MUST work via `KeyName` config | P0 |
+| FR-031A-54 | Key pair name MUST be resolved from config | P0 |
+| FR-031A-55 | Auto key pair creation MUST be optional | P1 |
+| FR-031A-56 | Auto mode: create temp key pair | P1 |
+| FR-031A-57 | `CreateKeyPair` API MUST be used for temp keys | P1 |
+| FR-031A-58 | Key material MUST be stored securely (memory only) | P0 |
+| FR-031A-59 | Key MUST be written to temp file with 600 permissions | P0 |
+| FR-031A-60 | Key file path MUST be tracked for cleanup | P0 |
+| FR-031A-61 | Temp key MUST be deleted on teardown | P0 |
+| FR-031A-62 | `DeleteKeyPair` API MUST be used for cleanup | P1 |
+| FR-031A-63 | Key naming: `acode-{session-id}` format | P1 |
+| FR-031A-64 | Import existing public key MUST work | P2 |
+| FR-031A-65 | `ImportKeyPair` API MUST be used for import | P2 |
+| FR-031A-66 | ED25519 and RSA key types MUST be supported | P1 |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Provision in <3 minutes
-- NFR-002: SSH ready in <2 minutes after running
-- NFR-003: API retries with backoff
-- NFR-004: No orphan instances on failure
-- NFR-005: Secrets not logged
-- NFR-006: Key material secured
-- NFR-007: Structured logging
-- NFR-008: Metrics on provision time
-- NFR-009: IAM least privilege
-- NFR-010: Idempotent on retry
+### Performance Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031A-01 | Total provisioning time (launch to SSH ready) | <3 minutes | P0 |
+| NFR-031A-02 | SSH readiness after running state | <2 minutes | P0 |
+| NFR-031A-03 | RunInstances API call latency | <5 seconds | P1 |
+| NFR-031A-04 | State polling efficiency | Minimal API calls | P1 |
+| NFR-031A-05 | Spot request fulfillment timeout | 5 minutes default | P1 |
+| NFR-031A-06 | Key pair creation time | <2 seconds | P1 |
+| NFR-031A-07 | Console output retrieval time | <10 seconds | P2 |
+| NFR-031A-08 | AZ selection decision time | <5 seconds | P2 |
+| NFR-031A-09 | Cleanup on failure | <30 seconds | P0 |
+| NFR-031A-10 | Parallel provisioning support | 5 instances | P2 |
+
+### Reliability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031A-11 | API retries with exponential backoff | 3 retries | P0 |
+| NFR-031A-12 | No orphan instances on failure | 100% cleanup | P0 |
+| NFR-031A-13 | Idempotent on retry (same session ID) | Detect existing | P1 |
+| NFR-031A-14 | Spot fallback success rate | 100% when enabled | P0 |
+| NFR-031A-15 | SSH fingerprint verification accuracy | 100% match | P1 |
+| NFR-031A-16 | Key pair cleanup on teardown | 100% deleted | P0 |
+| NFR-031A-17 | Graceful handling of quota errors | Clear error message | P0 |
+| NFR-031A-18 | Recovery from transient AWS errors | Auto-retry | P0 |
+| NFR-031A-19 | Instance tagging consistency | All required tags | P0 |
+| NFR-031A-20 | EBS volume configuration accuracy | Exact match to config | P0 |
+
+### Observability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031A-21 | Structured logging for all phases | JSON with correlation ID | P0 |
+| NFR-031A-22 | Secrets not logged (keys, credentials) | Zero exposure | P0 |
+| NFR-031A-23 | Key material secured in memory | Encrypted or zeroed | P0 |
+| NFR-031A-24 | Metrics for provisioning duration | Histogram | P1 |
+| NFR-031A-25 | Metrics for spot vs on-demand usage | Counter | P1 |
+| NFR-031A-26 | Metrics for failure reasons | Counter by type | P1 |
+| NFR-031A-27 | IAM least privilege documentation | Documented permissions | P0 |
+| NFR-031A-28 | Cost tracking per instance | Logged on termination | P2 |
+| NFR-031A-29 | Phase progress reporting | Event-based | P1 |
+| NFR-031A-30 | AWS API call tracing | X-Ray compatible | P2 |
 
 ---
 
@@ -217,16 +288,171 @@ ec2Target:
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: RunInstances works
-- [ ] AC-002: Tags are set
-- [ ] AC-003: EBS configured
-- [ ] AC-004: Instance reaches running
-- [ ] AC-005: SSH is reachable
-- [ ] AC-006: Spot instances work
-- [ ] AC-007: Spot fallback works
-- [ ] AC-008: Auto key pair works
-- [ ] AC-009: Timeout cleanup works
-- [ ] AC-010: UserData works
+### RunInstances API
+- [ ] AC-001: `RunInstances` successfully launches instance
+- [ ] AC-002: ImageId is correctly specified
+- [ ] AC-003: InstanceType matches configuration
+- [ ] AC-004: MinCount = MaxCount = 1
+- [ ] AC-005: KeyName is attached to instance
+- [ ] AC-006: SubnetId places instance correctly
+- [ ] AC-007: SecurityGroupIds are applied
+- [ ] AC-008: IamInstanceProfile attached when specified
+- [ ] AC-009: UserData executed on boot
+- [ ] AC-010: UserData is base64 encoded
+
+### Tagging and Configuration
+- [ ] AC-011: `acode=true` tag present
+- [ ] AC-012: `acode-session-id` tag present
+- [ ] AC-013: `acode-timestamp` tag present
+- [ ] AC-014: Custom tags merged correctly
+- [ ] AC-015: EBS root volume created with gp3
+- [ ] AC-016: EBS volume size matches config
+- [ ] AC-017: DeleteOnTermination = true
+- [ ] AC-018: IMDSv2 enforced (HttpTokens=required)
+
+### Spot Instances
+- [ ] AC-019: Spot instance launches when configured
+- [ ] AC-020: MaxPrice respected in spot request
+- [ ] AC-021: Spot timeout triggers fallback
+- [ ] AC-022: Fallback to on-demand works
+- [ ] AC-023: Spot interruption warning handled
+- [ ] AC-024: Spot savings logged
+- [ ] AC-025: SpotPlacementScores informs AZ selection
+
+### Instance Readiness
+- [ ] AC-026: Instance state polled correctly
+- [ ] AC-027: Running state detected
+- [ ] AC-028: System status verified as ok
+- [ ] AC-029: Instance status verified as ok
+- [ ] AC-030: Public IP obtained
+- [ ] AC-031: SSH port 22 reachable
+- [ ] AC-032: SSH retries with backoff
+- [ ] AC-033: SSH fingerprint verified from console
+- [ ] AC-034: Readiness callback invoked
+- [ ] AC-035: Timeout cleanup terminates instance
+
+### Key Pair Management
+- [ ] AC-036: Existing key pair works
+- [ ] AC-037: Auto key pair created
+- [ ] AC-038: CreateKeyPair API used correctly
+- [ ] AC-039: Key material stored with 600 permissions
+- [ ] AC-040: Key file path tracked
+- [ ] AC-041: Temp key deleted on teardown
+- [ ] AC-042: DeleteKeyPair API called
+- [ ] AC-043: Key naming follows pattern
+- [ ] AC-044: ImportKeyPair works
+- [ ] AC-045: ED25519 keys supported
+- [ ] AC-046: RSA keys supported
+
+### Error Handling and Cleanup
+- [ ] AC-047: Quota exceeded error handled gracefully
+- [ ] AC-048: AMI not found error reported
+- [ ] AC-049: Invalid security group error reported
+- [ ] AC-050: No orphan instances on any failure
+- [ ] AC-051: API retries on transient errors
+- [ ] AC-052: Idempotent on retry (same session)
+- [ ] AC-053: All credentials excluded from logs
+- [ ] AC-054: Phase progress reported via events
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Developer Provisions EC2 for Build
+**Persona:** Developer needing cloud compute  
+**Preconditions:** AWS credentials configured, VPC/subnet exist  
+**Steps:**
+1. Configure EC2 target with t3.medium
+2. Trigger provisioning
+3. Wait for SSH ready
+4. Execute build commands
+
+**Verification Checklist:**
+- [ ] Instance launches within 30 seconds
+- [ ] Running state achieved
+- [ ] SSH accessible within 3 minutes
+- [ ] All required tags present
+- [ ] UserData executed if specified
+
+### Scenario 2: Spot Instance with Fallback
+**Persona:** Cost-conscious developer  
+**Preconditions:** Spot capacity limited in region  
+**Steps:**
+1. Configure spot instance with $0.01 max
+2. Observe spot request timeout
+3. Verify fallback to on-demand
+4. Check savings logging
+
+**Verification Checklist:**
+- [ ] Spot request submitted
+- [ ] Timeout detected after 5 minutes
+- [ ] Fallback to on-demand triggered
+- [ ] Instance launches successfully
+- [ ] Fallback event logged
+
+### Scenario 3: Auto Key Pair Creation
+**Persona:** New user without existing keys  
+**Preconditions:** No key pairs in AWS account  
+**Steps:**
+1. Enable auto key pair creation
+2. Provision instance
+3. Verify SSH works
+4. Teardown and verify cleanup
+
+**Verification Checklist:**
+- [ ] Key pair created with acode-{session} name
+- [ ] Key file written with 600 permissions
+- [ ] SSH connects successfully
+- [ ] Key pair deleted on teardown
+- [ ] Key file deleted locally
+
+### Scenario 4: Provisioning Failure Cleanup
+**Persona:** Developer hitting quota  
+**Preconditions:** Instance quota exceeded  
+**Steps:**
+1. Attempt provisioning
+2. Observe quota error
+3. Verify no orphan resources
+4. Check error message quality
+
+**Verification Checklist:**
+- [ ] InsufficientInstanceCapacity error detected
+- [ ] No instance left running
+- [ ] No key pairs orphaned
+- [ ] Error message includes quota increase link
+- [ ] Cleanup completed within 30 seconds
+
+### Scenario 5: UserData Bootstrap Script
+**Persona:** DevOps setting up custom image  
+**Preconditions:** Instance with Docker required  
+**Steps:**
+1. Configure UserData with docker install
+2. Provision instance
+3. Wait for SSH ready
+4. Verify docker running
+
+**Verification Checklist:**
+- [ ] UserData base64 encoded correctly
+- [ ] Instance boots with UserData
+- [ ] Script executes on first boot
+- [ ] Docker installed and running
+- [ ] Console output shows script
+
+### Scenario 6: SSH Fingerprint Verification
+**Persona:** Security-conscious developer  
+**Preconditions:** First connection to new instance  
+**Steps:**
+1. Provision instance
+2. Retrieve console output
+3. Extract SSH fingerprint
+4. Verify fingerprint on connect
+
+**Verification Checklist:**
+- [ ] GetConsoleOutput API called
+- [ ] SSH fingerprint extracted
+- [ ] Fingerprint matches on connect
+- [ ] Warning if fingerprint mismatch
+- [ ] Connection established securely
 
 ---
 
@@ -234,17 +460,43 @@ ec2Target:
 
 ### Unit Tests
 
-- [ ] UT-001: Request building
-- [ ] UT-002: Tag generation
-- [ ] UT-003: Spot config
-- [ ] UT-004: Readiness logic
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| UT-031A-01 | RunInstances request building | FR-031A-01 |
+| UT-031A-02 | Tag generation with required tags | FR-031A-11-15 |
+| UT-031A-03 | Spot instance options configuration | FR-031A-21-24 |
+| UT-031A-04 | Readiness polling logic | FR-031A-36-42 |
+| UT-031A-05 | SSH retry backoff calculation | FR-031A-45-47 |
+| UT-031A-06 | Console output fingerprint extraction | FR-031A-48-49 |
+| UT-031A-07 | UserData base64 encoding | FR-031A-10 |
+| UT-031A-08 | Key pair naming pattern | FR-031A-63 |
+| UT-031A-09 | EBS volume configuration | FR-031A-16-19 |
+| UT-031A-10 | IMDSv2 metadata options | FR-031A-20 |
+| UT-031A-11 | Spot fallback decision logic | FR-031A-28-29 |
+| UT-031A-12 | Timeout cleanup trigger | FR-031A-51-52 |
+| UT-031A-13 | Error message formatting | NFR-031A-17 |
+| UT-031A-14 | API retry policy | NFR-031A-11 |
+| UT-031A-15 | Idempotency detection | NFR-031A-13 |
 
 ### Integration Tests
 
-- [ ] IT-001: Real EC2 launch
-- [ ] IT-002: Spot instance launch
-- [ ] IT-003: Auto key pair
-- [ ] IT-004: UserData execution
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| IT-031A-01 | Real EC2 instance launch | E2E provisioning |
+| IT-031A-02 | Spot instance launch | FR-031A-21 |
+| IT-031A-03 | Spot fallback to on-demand | FR-031A-29 |
+| IT-031A-04 | Auto key pair creation | FR-031A-55-62 |
+| IT-031A-05 | UserData execution | FR-031A-09-10 |
+| IT-031A-06 | SSH fingerprint verification | FR-031A-48-49 |
+| IT-031A-07 | Provisioning timeout cleanup | FR-031A-51-52 |
+| IT-031A-08 | Quota exceeded handling | NFR-031A-17 |
+| IT-031A-09 | Total provisioning time | NFR-031A-01 |
+| IT-031A-10 | Orphan prevention on failure | NFR-031A-12 |
+| IT-031A-11 | Multiple AZ failover | FR-031A-33-34 |
+| IT-031A-12 | Key pair cleanup on teardown | FR-031A-61-62 |
+| IT-031A-13 | All required tags present | FR-031A-11-14 |
+| IT-031A-14 | IAM instance profile attachment | FR-031A-08 |
+| IT-031A-15 | Security group application | FR-031A-07 |
 
 ---
 

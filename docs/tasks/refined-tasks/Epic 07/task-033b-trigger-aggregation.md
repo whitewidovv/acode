@@ -30,16 +30,54 @@ This task covers signal combination. Trigger evaluation is in 033.a. Cooldown is
 
 ### Integration Points
 
-- Task 033: Part of heuristics engine
-- Task 033.a: Receives trigger signals
-- Task 033.c: Passes to rate limiter
+| Component | Interface | Data Flow | Notes |
+|-----------|-----------|-----------|-------|
+| Task 033 Burst Engine | ITriggerAggregator | Signals → Decision | Aggregation within engine |
+| Task 033.a Triggers | TriggerSignal[] | Signals → Aggregator | Input from all triggers |
+| Task 033.c Rate Limiter | AggregatedDecision | Decision → Limiter | Output to cooldown check |
+| Configuration | AggregationOptions | Config → Aggregator | Strategy and weights |
+| Aggregator Registry | IAggregatorRegistry | Strategy → Aggregator | Lookup by strategy name |
+| Metrics System | IMetrics | Stats → Metrics | Aggregation telemetry |
+| Event System | IEventPublisher | Events → Subscribers | Completion events |
 
 ### Failure Modes
 
-- No signals → No burst
-- All triggers disabled → No burst
-- Aggregator error → Log and default to no burst
-- Mixed signals → Apply strategy
+| Failure | Detection | Recovery | User Impact |
+|---------|-----------|----------|-------------|
+| No signals | Empty list | Return no burst | Conservative behavior |
+| All triggers disabled | No enabled signals | Return no burst | Conservative behavior |
+| Aggregator exception | Catch in engine | Default to no burst | Safe fallback |
+| Mixed signals | Ambiguous result | Apply strategy strictly | Expected behavior |
+| Invalid quorum | Quorum > count | Warn and cap at count | Degraded accuracy |
+| Zero total weight | All weights 0 | Return no burst | Conservative behavior |
+| Unknown strategy | Lookup fails | Use default (OR) | Fallback behavior |
+| Concurrent aggregation | Race condition | Thread-safe design | No issue |
+
+---
+
+## Assumptions
+
+1. All trigger signals are available before aggregation begins
+2. Trigger signals include confidence scores between 0.0 and 1.0
+3. Trigger signals include suggested scale values
+4. Aggregation strategies are mutually exclusive (only one active)
+5. Weights can be configured per-trigger in agent-config.yml
+6. Quorum can be specified as absolute count or percentage
+7. Percentage quorum rounds up (50% of 3 = 2)
+8. Aggregation is synchronous and fast (<5ms)
+
+---
+
+## Security Considerations
+
+1. Aggregated decisions MUST NOT expose internal scoring details externally
+2. Weight configuration MUST be validated for reasonable ranges
+3. Strategy selection MUST NOT allow injection attacks
+4. Aggregation logs MUST NOT include sensitive trigger data
+5. Custom aggregators MUST be sandboxed
+6. Decision events MUST be logged for audit
+7. Denial-of-service via weight manipulation MUST be prevented
+8. Registry access MUST be thread-safe
 
 ---
 
@@ -68,110 +106,154 @@ This task covers signal combination. Trigger evaluation is in 033.a. Cooldown is
 
 ## Functional Requirements
 
-### FR-001 to FR-015: Aggregator Interface
+### Aggregator Interface
 
-- FR-001: `ITriggerAggregator` MUST exist
-- FR-002: `AggregateAsync` MUST return decision
-- FR-003: Input: list of signals
-- FR-004: Output: aggregated decision
-- FR-005: Decision MUST include burst flag
-- FR-006: Decision MUST include confidence
-- FR-007: Decision MUST include scale
-- FR-008: Decision MUST include reasons
-- FR-009: Aggregator MUST be configurable
-- FR-010: Strategy MUST be selectable
-- FR-011: Default strategy: OR
-- FR-012: Aggregator MUST be pluggable
-- FR-013: Custom aggregators MUST work
-- FR-014: Aggregator MUST log
-- FR-015: Aggregator MUST emit metrics
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033B-01 | `ITriggerAggregator` interface MUST exist | P0 |
+| FR-033B-02 | `Aggregate` MUST return `AggregatedDecision` | P0 |
+| FR-033B-03 | Input: list of `TriggerSignal` from all triggers | P0 |
+| FR-033B-04 | Output: combined decision with burst flag | P0 |
+| FR-033B-05 | Decision MUST include shouldBurst boolean | P0 |
+| FR-033B-06 | Decision MUST include aggregated confidence | P0 |
+| FR-033B-07 | Decision MUST include suggested scale | P0 |
+| FR-033B-08 | Decision MUST include combined reasons list | P0 |
+| FR-033B-09 | Aggregator MUST accept configuration options | P0 |
+| FR-033B-10 | Strategy MUST be selectable at runtime | P1 |
+| FR-033B-11 | Default strategy: OR (any trigger fires) | P0 |
+| FR-033B-12 | Aggregator MUST be pluggable via DI | P1 |
+| FR-033B-13 | Custom aggregators MUST be registerable | P2 |
+| FR-033B-14 | Aggregator MUST log aggregation decisions | P1 |
+| FR-033B-15 | Aggregator MUST emit completion metrics | P1 |
 
-### FR-016 to FR-030: OR Aggregation
+### OR Aggregation
 
-- FR-016: `OrAggregator` MUST exist
-- FR-017: Any trigger MUST burst
-- FR-018: Single fired = burst
-- FR-019: Confidence: max of all
-- FR-020: Scale: max of all
-- FR-021: Reasons: all triggered
-- FR-022: No triggers = no burst
-- FR-023: All disabled = no burst
-- FR-024: Threshold MUST be optional
-- FR-025: Confidence threshold
-- FR-026: Default threshold: 0.0
-- FR-027: Below threshold MUST skip
-- FR-028: OR MUST short-circuit
-- FR-029: Stop on first high confidence
-- FR-030: High confidence: >= 0.9
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033B-16 | `OrAggregator` MUST exist | P0 |
+| FR-033B-17 | Any single trigger MUST cause burst | P0 |
+| FR-033B-18 | One trigger fired = shouldBurst true | P0 |
+| FR-033B-19 | Confidence: maximum of all fired | P0 |
+| FR-033B-20 | Scale: maximum of all fired | P0 |
+| FR-033B-21 | Reasons: all triggered reasons included | P0 |
+| FR-033B-22 | No triggers fired = no burst | P0 |
+| FR-033B-23 | All triggers disabled = no burst | P0 |
+| FR-033B-24 | Confidence threshold MAY filter weak signals | P1 |
+| FR-033B-25 | Signals below threshold MUST be skipped | P1 |
+| FR-033B-26 | Default threshold: 0.0 (no filtering) | P1 |
+| FR-033B-27 | Below threshold signals still counted | P1 |
+| FR-033B-28 | OR MAY short-circuit on high confidence | P2 |
+| FR-033B-29 | Stop evaluation on first >= 0.9 confidence | P2 |
+| FR-033B-30 | High confidence: configurable threshold | P2 |
 
-### FR-031 to FR-045: AND Aggregation
+### AND Aggregation
 
-- FR-031: `AndAggregator` MUST exist
-- FR-032: All triggers MUST fire
-- FR-033: Any not fired = no burst
-- FR-034: Confidence: min of all
-- FR-035: Scale: average of all
-- FR-036: Reasons: all reasons
-- FR-037: No triggers = no burst
-- FR-038: Disabled triggers MUST skip
-- FR-039: Only enabled count
-- FR-040: Partial AND MUST be optional
-- FR-041: Require N of M triggers
-- FR-042: Default: all required
-- FR-043: Configurable N
-- FR-044: Example: 3 of 5
-- FR-045: AND MUST evaluate all
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033B-31 | `AndAggregator` MUST exist | P0 |
+| FR-033B-32 | All triggers MUST fire for burst | P0 |
+| FR-033B-33 | Any trigger not fired = no burst | P0 |
+| FR-033B-34 | Confidence: minimum of all fired | P0 |
+| FR-033B-35 | Scale: average of all fired (rounded) | P0 |
+| FR-033B-36 | Reasons: all reasons combined | P0 |
+| FR-033B-37 | No triggers = no burst | P0 |
+| FR-033B-38 | Disabled triggers MUST be excluded | P0 |
+| FR-033B-39 | Only enabled triggers count for "all" | P0 |
+| FR-033B-40 | Partial AND MAY be supported | P1 |
+| FR-033B-41 | Require N of M triggers (configurable) | P1 |
+| FR-033B-42 | Default: all enabled required | P0 |
+| FR-033B-43 | N MUST be configurable | P1 |
+| FR-033B-44 | Example: 3 of 5 triggers required | P1 |
+| FR-033B-45 | AND MUST evaluate all triggers (no short-circuit) | P0 |
 
-### FR-046 to FR-060: Weighted Aggregation
+### Weighted Aggregation
 
-- FR-046: `WeightedAggregator` MUST exist
-- FR-047: Triggers MUST have weights
-- FR-048: Weight: 0.0 to 1.0
-- FR-049: Default weight: 1.0
-- FR-050: Score = sum(confidence × weight)
-- FR-051: Normalized by sum of weights
-- FR-052: Threshold MUST apply
-- FR-053: Default threshold: 0.5
-- FR-054: Above threshold = burst
-- FR-055: Confidence = score
-- FR-056: Scale = weighted average
-- FR-057: Weights MUST be configurable
-- FR-058: Per-trigger weight config
-- FR-059: Disabled triggers weight 0
-- FR-060: Zero total weight = no burst
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033B-46 | `WeightedAggregator` MUST exist | P0 |
+| FR-033B-47 | Each trigger MUST have configurable weight | P0 |
+| FR-033B-48 | Weight range: 0.0 to 1.0 | P0 |
+| FR-033B-49 | Default weight: 1.0 (equal weighting) | P0 |
+| FR-033B-50 | Score = sum(confidence × weight) / sum(weights) | P0 |
+| FR-033B-51 | Normalized score between 0.0 and 1.0 | P0 |
+| FR-033B-52 | Threshold MUST be configurable | P0 |
+| FR-033B-53 | Default threshold: 0.5 | P0 |
+| FR-033B-54 | Score >= threshold = shouldBurst true | P0 |
+| FR-033B-55 | Confidence = normalized score | P0 |
+| FR-033B-56 | Scale = weighted average of suggested scales | P1 |
+| FR-033B-57 | Weights MUST be configurable per-trigger | P0 |
+| FR-033B-58 | Configuration in agent-config.yml | P0 |
+| FR-033B-59 | Disabled triggers MUST have weight 0 | P0 |
+| FR-033B-60 | Zero total weight = no burst | P0 |
 
-### FR-061 to FR-075: Quorum Aggregation
+### Quorum Aggregation
 
-- FR-061: `QuorumAggregator` MUST exist
-- FR-062: Quorum count MUST be configurable
-- FR-063: Default quorum: 2
-- FR-064: At least N triggers MUST fire
-- FR-065: Fired count >= quorum = burst
-- FR-066: Confidence: average of fired
-- FR-067: Scale: max of fired
-- FR-068: Reasons: fired triggers only
-- FR-069: Quorum MUST be validated
-- FR-070: Quorum <= enabled count
-- FR-071: Invalid quorum MUST warn
-- FR-072: Fallback to available count
-- FR-073: Percentage quorum MUST work
-- FR-074: Example: 50% of triggers
-- FR-075: Percentage rounds up
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-033B-61 | `QuorumAggregator` MUST exist | P1 |
+| FR-033B-62 | Quorum count MUST be configurable | P1 |
+| FR-033B-63 | Default quorum: 2 triggers | P1 |
+| FR-033B-64 | At least N triggers MUST fire for burst | P1 |
+| FR-033B-65 | Fired count >= quorum = shouldBurst true | P1 |
+| FR-033B-66 | Confidence: average of fired triggers | P1 |
+| FR-033B-67 | Scale: maximum of fired triggers | P1 |
+| FR-033B-68 | Reasons: only fired triggers included | P1 |
+| FR-033B-69 | Quorum MUST be validated against count | P1 |
+| FR-033B-70 | Quorum cannot exceed enabled trigger count | P1 |
+| FR-033B-71 | Invalid quorum MUST log warning | P1 |
+| FR-033B-72 | Fallback: cap quorum at available count | P1 |
+| FR-033B-73 | Percentage quorum MUST be supported | P1 |
+| FR-033B-74 | Example: 50% of triggers = burst | P1 |
+| FR-033B-75 | Percentage rounds up (50% of 3 = 2) | P1 |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Aggregation <5ms
-- NFR-002: Memory efficient
-- NFR-003: Deterministic
-- NFR-004: Thread-safe
-- NFR-005: Clear decision trail
-- NFR-006: Structured logging
-- NFR-007: Metrics on strategy
-- NFR-008: Easy to test
-- NFR-009: Configurable
-- NFR-010: No side effects
+### Performance
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-033B-01 | Aggregation time | <5ms | P0 |
+| NFR-033B-02 | Memory per aggregation | <1KB | P1 |
+| NFR-033B-03 | Signal iteration | O(n) | P0 |
+| NFR-033B-04 | Concurrent aggregation | Thread-safe | P0 |
+| NFR-033B-05 | Registry lookup | O(1) | P0 |
+| NFR-033B-06 | Weight calculation | O(n) | P0 |
+| NFR-033B-07 | Short-circuit optimization | Optional | P2 |
+| NFR-033B-08 | Strategy initialization | <10ms | P1 |
+| NFR-033B-09 | Config parsing | <5ms | P1 |
+| NFR-033B-10 | Metric emission | <1ms | P1 |
+
+### Reliability
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-033B-11 | Deterministic results | Same input = same output | P0 |
+| NFR-033B-12 | No side effects | Pure function | P0 |
+| NFR-033B-13 | Exception safety | Catch and handle | P0 |
+| NFR-033B-14 | Empty signal handling | Return no burst | P0 |
+| NFR-033B-15 | Invalid quorum handling | Cap at max | P1 |
+| NFR-033B-16 | Zero weight handling | Return no burst | P0 |
+| NFR-033B-17 | Null signal filtering | Skip nulls | P0 |
+| NFR-033B-18 | Strategy not found | Use default | P0 |
+| NFR-033B-19 | Concurrent registration | Thread-safe | P1 |
+| NFR-033B-20 | Recovery from errors | Log and continue | P0 |
+
+### Observability
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-033B-21 | Structured logging | All aggregations | P0 |
+| NFR-033B-22 | Strategy usage metric | Counter by strategy | P1 |
+| NFR-033B-23 | Triggers fired metric | Counter | P1 |
+| NFR-033B-24 | Confidence distribution | Histogram | P2 |
+| NFR-033B-25 | AggregationCompletedEvent | Published | P1 |
+| NFR-033B-26 | Decision trace | Debug level | P2 |
+| NFR-033B-27 | Weight configuration logging | On startup | P1 |
+| NFR-033B-28 | Trace correlation | Request ID | P1 |
+| NFR-033B-29 | Strategy selection logging | Info level | P1 |
+| NFR-033B-30 | Performance trace | Duration logged | P1 |
 
 ---
 
@@ -224,16 +306,159 @@ burst:
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: OR aggregation works
-- [ ] AC-002: AND aggregation works
-- [ ] AC-003: Weighted works
-- [ ] AC-004: Quorum works
-- [ ] AC-005: Confidence calculates
-- [ ] AC-006: Scale aggregates
-- [ ] AC-007: Reasons collect
-- [ ] AC-008: Configuration works
-- [ ] AC-009: Metrics emit
-- [ ] AC-010: Logging complete
+### Aggregator Interface
+- [ ] AC-001: `ITriggerAggregator` interface exists
+- [ ] AC-002: `Aggregate` returns `AggregatedDecision`
+- [ ] AC-003: Decision includes shouldBurst boolean
+- [ ] AC-004: Decision includes confidence 0.0-1.0
+- [ ] AC-005: Decision includes suggested scale
+- [ ] AC-006: Decision includes combined reasons
+- [ ] AC-007: Registry resolves aggregators by strategy
+- [ ] AC-008: Default strategy is OR
+
+### OR Aggregation
+- [ ] AC-009: One trigger fired = burst
+- [ ] AC-010: Multiple triggers fired = burst
+- [ ] AC-011: No triggers fired = no burst
+- [ ] AC-012: Confidence = max of fired
+- [ ] AC-013: Scale = max of fired
+- [ ] AC-014: All fired reasons collected
+- [ ] AC-015: Confidence threshold filtering works
+
+### AND Aggregation
+- [ ] AC-016: All triggers fired = burst
+- [ ] AC-017: Any trigger not fired = no burst
+- [ ] AC-018: Disabled triggers excluded
+- [ ] AC-019: Confidence = min of all
+- [ ] AC-020: Scale = average (rounded)
+- [ ] AC-021: All reasons combined
+- [ ] AC-022: Partial AND (N of M) works
+
+### Weighted Aggregation
+- [ ] AC-023: Weights per trigger applied
+- [ ] AC-024: Default weight = 1.0
+- [ ] AC-025: Score normalized 0.0-1.0
+- [ ] AC-026: Threshold 0.5 default
+- [ ] AC-027: Above threshold = burst
+- [ ] AC-028: Disabled triggers weight 0
+- [ ] AC-029: Zero total weight = no burst
+- [ ] AC-030: Reasons include weights
+
+### Quorum Aggregation
+- [ ] AC-031: Quorum count configurable
+- [ ] AC-032: Default quorum = 2
+- [ ] AC-033: Fired >= quorum = burst
+- [ ] AC-034: Confidence = average of fired
+- [ ] AC-035: Scale = max of fired
+- [ ] AC-036: Percentage quorum works
+- [ ] AC-037: 50% of 3 = 2 (rounds up)
+- [ ] AC-038: Invalid quorum logged
+
+### Observability
+- [ ] AC-039: AggregationCompletedEvent published
+- [ ] AC-040: Strategy usage logged
+- [ ] AC-041: Triggers fired counted
+- [ ] AC-042: Decision trace available
+- [ ] AC-043: Metrics by strategy
+- [ ] AC-044: Weight config logged on startup
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: OR Aggregation Single Trigger
+**Persona:** Developer with queue spike  
+**Preconditions:** OR strategy, only queue depth fires  
+**Steps:**
+1. Queue 15 tasks (depth trigger fires)
+2. Other triggers not firing
+3. Check aggregated decision
+4. Verify burst occurs
+
+**Verification Checklist:**
+- [ ] Single trigger detected
+- [ ] OR logic returns burst=true
+- [ ] Confidence = depth trigger confidence
+- [ ] Scale = depth trigger scale
+
+### Scenario 2: AND Aggregation All Required
+**Persona:** Operations with conservative settings  
+**Preconditions:** AND strategy, 3 of 4 triggers fire  
+**Steps:**
+1. Queue depth fires
+2. CPU fires
+3. Worker saturation fires
+4. Priority does NOT fire
+5. Check decision
+
+**Verification Checklist:**
+- [ ] 3 of 4 triggers fired
+- [ ] AND requires all 4
+- [ ] Decision = no burst
+- [ ] Reason: "Priority trigger not fired"
+
+### Scenario 3: Weighted Score Threshold
+**Persona:** Developer with balanced approach  
+**Preconditions:** Weighted strategy, threshold 0.5  
+**Steps:**
+1. Queue depth fires (conf 0.7, weight 1.0)
+2. CPU does not fire
+3. Worker fires (conf 0.9, weight 0.9)
+4. Calculate score
+5. Check if >= 0.5
+
+**Verification Checklist:**
+- [ ] Score = (0.7×1.0 + 0.9×0.9) / (1.0+0.9) = 0.79
+- [ ] Score 0.79 >= 0.5
+- [ ] Burst = true
+- [ ] Confidence = 0.79
+
+### Scenario 4: Quorum 2 of 5
+**Persona:** Operations with flexible policy  
+**Preconditions:** Quorum strategy, quorum=2  
+**Steps:**
+1. 5 triggers enabled
+2. Queue depth fires
+3. CPU fires
+4. Others do not fire
+5. Check decision
+
+**Verification Checklist:**
+- [ ] 2 triggers fired
+- [ ] 2 >= quorum 2
+- [ ] Burst = true
+- [ ] Confidence = average of 2
+
+### Scenario 5: Percentage Quorum
+**Persona:** Developer with dynamic triggers  
+**Preconditions:** Quorum 50%, 5 triggers enabled  
+**Steps:**
+1. 50% of 5 = 3 (rounded up)
+2. 2 triggers fire
+3. Decision = no burst
+4. 3 triggers fire
+5. Decision = burst
+
+**Verification Checklist:**
+- [ ] 50% of 5 = 2.5 → 3
+- [ ] 2 < 3: no burst
+- [ ] 3 >= 3: burst
+- [ ] Rounding up verified
+
+### Scenario 6: Strategy Selection at Runtime
+**Persona:** Developer switching strategies  
+**Preconditions:** Config has weighted, CLI overrides to OR  
+**Steps:**
+1. Config file: strategy=weighted
+2. Run with --burst-strategy or
+3. Check OR strategy used
+4. Verify override logged
+
+**Verification Checklist:**
+- [ ] CLI overrides config
+- [ ] OR strategy selected
+- [ ] Override logged
+- [ ] Correct aggregation behavior
 
 ---
 
@@ -241,17 +466,43 @@ burst:
 
 ### Unit Tests
 
-- [ ] UT-001: OR logic
-- [ ] UT-002: AND logic
-- [ ] UT-003: Weighted scoring
-- [ ] UT-004: Quorum counting
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| UT-033B-01 | OR single trigger fires | FR-033B-18 |
+| UT-033B-02 | OR multiple triggers fires | FR-033B-17 |
+| UT-033B-03 | OR no triggers = no burst | FR-033B-22 |
+| UT-033B-04 | OR confidence = max | FR-033B-19 |
+| UT-033B-05 | AND all triggers required | FR-033B-32 |
+| UT-033B-06 | AND any missing = no burst | FR-033B-33 |
+| UT-033B-07 | AND disabled excluded | FR-033B-38 |
+| UT-033B-08 | Weighted score calculation | FR-033B-50 |
+| UT-033B-09 | Weighted threshold enforcement | FR-033B-54 |
+| UT-033B-10 | Weighted zero weight handling | FR-033B-60 |
+| UT-033B-11 | Quorum count enforcement | FR-033B-65 |
+| UT-033B-12 | Quorum percentage rounding | FR-033B-75 |
+| UT-033B-13 | Quorum invalid validation | FR-033B-70 |
+| UT-033B-14 | Registry lookup by strategy | NFR-033B-05 |
+| UT-033B-15 | Deterministic results | NFR-033B-11 |
 
 ### Integration Tests
 
-- [ ] IT-001: Full aggregation
-- [ ] IT-002: Mixed signals
-- [ ] IT-003: Edge cases
-- [ ] IT-004: Configuration
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| IT-033B-01 | Full aggregation pipeline | E2E |
+| IT-033B-02 | Mixed signals all strategies | Multiple |
+| IT-033B-03 | Edge case: empty signals | NFR-033B-14 |
+| IT-033B-04 | Edge case: all disabled | FR-033B-23 |
+| IT-033B-05 | Configuration from yaml | FR-033B-58 |
+| IT-033B-06 | Runtime strategy override | Scenario 6 |
+| IT-033B-07 | Event publishing | NFR-033B-25 |
+| IT-033B-08 | Metrics emission | NFR-033B-22 |
+| IT-033B-09 | Performance <5ms | NFR-033B-01 |
+| IT-033B-10 | Thread safety | NFR-033B-04 |
+| IT-033B-11 | Custom aggregator registration | FR-033B-13 |
+| IT-033B-12 | Logging completeness | NFR-033B-21 |
+| IT-033B-13 | Short-circuit optimization | FR-033B-28 |
+| IT-033B-14 | Partial AND (N of M) | FR-033B-41 |
+| IT-033B-15 | Weight configuration reload | Dynamic |
 
 ---
 

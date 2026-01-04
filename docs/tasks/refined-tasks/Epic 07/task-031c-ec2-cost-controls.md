@@ -30,16 +30,54 @@ This task covers EC2 cost controls. Instance management is in 031.b. Burst heuri
 
 ### Integration Points
 
-- Task 031.b: Tracks running instances
-- Task 033: Heuristics consider cost
-- Task 009: Config stores limits
+| Component | Interface | Data Flow | Notes |
+|-----------|-----------|-----------|-------|
+| Task 031.b Instance Management | IEc2InstanceManager | Running instance list | Cost calculation input |
+| Task 033 Heuristics | IBurstHeuristics | Cost data for decisions | Decision factor |
+| Task 009 Config | IConfiguration | Budget limits | Settings source |
+| AWS Pricing API | AWSPricing (optional) | Instance type rates | Live pricing |
+| Static Rate Table | JSON file | Fallback pricing data | Offline pricing |
+| Webhook Service | HttpClient | Alert notifications | External notify |
+| Cost History Store | ICostRepository | Historical cost data | Persistence |
 
 ### Failure Modes
 
-- Cost API unavailable → Use estimates
-- Limit exceeded → Block new instances
-- Alert fails → Log warning
-- Orphan found → Auto-terminate
+| Failure | Detection | Recovery | User Impact |
+|---------|-----------|----------|-------------|
+| Cost API unavailable | API timeout/error | Use static rate table | Estimates only |
+| Limit exceeded | Pre-launch check | Block new instances | Launch prevented |
+| Alert webhook fails | HTTP error | Log warning, retry | Notification delayed |
+| Orphan found | Tag scan | Auto-terminate | Cost leak stopped |
+| Rate table outdated | Age check | Warn and use | Inaccurate estimates |
+| History storage fails | DB error | Log to file fallback | History incomplete |
+| Budget bypass attempted | Flag check | Require explicit flag | Intentional override |
+| Time zone mismatch | UTC enforcement | All times UTC | Consistent periods |
+
+---
+
+## Assumptions
+
+1. **Pricing Source**: AWS pricing API or static rate table available
+2. **USD Currency**: All costs in USD (no currency conversion)
+3. **UTC Time Zones**: All time periods use UTC for consistency
+4. **Instance Metadata**: Instance type and launch time available
+5. **Spot Pricing**: Spot rates approximated or fetched from API
+6. **EBS Costing**: EBS included in cost calculation (GB-month)
+7. **Immediate Termination**: Hard limit terminates within 1 minute
+8. **History Retention**: 90 days of cost history retained
+
+---
+
+## Security Considerations
+
+1. **Budget Bypass Audit**: All `--allow-over-budget` usages MUST be logged
+2. **Webhook Security**: Webhook URLs MUST use HTTPS
+3. **Cost Data Privacy**: Cost data MUST NOT expose to unauthorized users
+4. **Limit Modification Auth**: Budget changes MUST be authorized
+5. **Orphan Cleanup Auth**: Only admin can trigger orphan cleanup
+6. **Export Sensitivity**: CSV exports MUST NOT include secrets
+7. **Alert Rate Limiting**: Alerts MUST NOT spam (once per threshold)
+8. **Hard Limit Safety**: Hard limit MUST confirm before terminating
 
 ---
 
@@ -69,107 +107,149 @@ This task covers EC2 cost controls. Instance management is in 031.b. Burst heuri
 
 ## Functional Requirements
 
-### FR-001 to FR-020: Cost Tracking
+### Cost Tracking
 
-- FR-001: Hourly rate MUST be known
-- FR-002: Rate from pricing API
-- FR-003: Rate from static table fallback
-- FR-004: Rate table MUST be updatable
-- FR-005: Rate includes instance type
-- FR-006: Rate includes region
-- FR-007: Rate includes spot vs on-demand
-- FR-008: Running time MUST be tracked
-- FR-009: Start time from launch
-- FR-010: End time from terminate
-- FR-011: Running cost MUST calculate
-- FR-012: Cost = hours × rate
-- FR-013: Partial hours rounded up
-- FR-014: Total cost MUST accumulate
-- FR-015: Cost per session MUST be tracked
-- FR-016: Cost history MUST persist
-- FR-017: Cost MUST be queryable
-- FR-018: Query by session, date, total
-- FR-019: Cost MUST include EBS
-- FR-020: EBS rate per GB-month
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031C-01 | Hourly rate MUST be known for each instance type | P0 |
+| FR-031C-02 | Rate MUST be fetched from AWS Pricing API when available | P1 |
+| FR-031C-03 | Rate MUST fall back to static table when API unavailable | P0 |
+| FR-031C-04 | Static rate table MUST be updatable without code change | P0 |
+| FR-031C-05 | Rate MUST include instance type variation | P0 |
+| FR-031C-06 | Rate MUST include region variation | P0 |
+| FR-031C-07 | Rate MUST differentiate spot vs on-demand | P1 |
+| FR-031C-08 | Running time MUST be tracked per instance | P0 |
+| FR-031C-09 | Start time MUST be recorded at launch | P0 |
+| FR-031C-10 | End time MUST be recorded at terminate | P0 |
+| FR-031C-11 | Running cost MUST be calculated in real-time | P0 |
+| FR-031C-12 | Cost formula: `hours × hourly_rate` | P0 |
+| FR-031C-13 | Partial hours MUST be rounded up (AWS billing model) | P0 |
+| FR-031C-14 | Total cost MUST accumulate across instances | P0 |
+| FR-031C-15 | Cost per session MUST be tracked | P0 |
+| FR-031C-16 | Cost history MUST persist to storage | P0 |
+| FR-031C-17 | Cost MUST be queryable via API | P0 |
+| FR-031C-18 | Query by session, date range, or total | P0 |
+| FR-031C-19 | Cost MUST include EBS storage costs | P1 |
+| FR-031C-20 | EBS rate calculated as GB × hours × (monthly rate / 720) | P1 |
 
-### FR-021 to FR-040: Budget Limits
+### Budget Limits
 
-- FR-021: Budget MUST be configurable
-- FR-022: Budget per session MUST work
-- FR-023: Budget per day MUST work
-- FR-024: Budget per month MUST work
-- FR-025: Default: no limit
-- FR-026: Limit reached MUST block
-- FR-027: Block new instance launch
-- FR-028: Running instances MAY continue
-- FR-029: Hard limit MUST terminate
-- FR-030: Hard limit terminates running
-- FR-031: Soft limit MUST alert only
-- FR-032: Limit type configurable
-- FR-033: Default: soft limit
-- FR-034: Limit check before launch
-- FR-035: Estimated cost MUST be checked
-- FR-036: Estimate includes max runtime
-- FR-037: Max runtime configurable
-- FR-038: Default max runtime: 4 hours
-- FR-039: Limit bypass MUST require flag
-- FR-040: --allow-over-budget flag
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031C-21 | Budget MUST be configurable in agent-config.yml | P0 |
+| FR-031C-22 | Budget per session MUST work | P0 |
+| FR-031C-23 | Budget per day MUST work | P0 |
+| FR-031C-24 | Budget per month MUST work | P0 |
+| FR-031C-25 | Default MUST be no limit (unlimited) | P0 |
+| FR-031C-26 | Limit reached MUST block new launches | P0 |
+| FR-031C-27 | Block MUST prevent `RunInstances` call | P0 |
+| FR-031C-28 | Running instances MAY continue when soft limit | P0 |
+| FR-031C-29 | Hard limit MUST terminate running instances | P1 |
+| FR-031C-30 | Hard limit terminates all session instances | P1 |
+| FR-031C-31 | Soft limit MUST only alert (no termination) | P0 |
+| FR-031C-32 | Limit type MUST be configurable (soft/hard) | P0 |
+| FR-031C-33 | Default limit type MUST be soft | P0 |
+| FR-031C-34 | Limit check MUST occur before launch | P0 |
+| FR-031C-35 | Estimated cost MUST be checked against limit | P0 |
+| FR-031C-36 | Estimate MUST include max runtime | P0 |
+| FR-031C-37 | Max runtime MUST be configurable (default 4h) | P0 |
+| FR-031C-38 | Limit bypass MUST require explicit flag | P1 |
+| FR-031C-39 | `--allow-over-budget` flag MUST be logged | P0 |
+| FR-031C-40 | Bypass MUST be audit-logged | P0 |
 
-### FR-041 to FR-060: Alerts
+### Alerts
 
-- FR-041: Alert thresholds MUST be configurable
-- FR-042: Default thresholds: 50%, 80%, 100%
-- FR-043: Alert at threshold reached
-- FR-044: Alert via callback
-- FR-045: Alert via log warning
-- FR-046: Alert via webhook optional
-- FR-047: Webhook URL configurable
-- FR-048: Alert content MUST include details
-- FR-049: Details: current cost, limit, percent
-- FR-050: Details: running instances
-- FR-051: Details: estimated remaining
-- FR-052: Alert MUST not repeat
-- FR-053: Alert once per threshold
-- FR-054: Reset on new period
-- FR-055: Daily reset at midnight UTC
-- FR-056: Monthly reset at month start
-- FR-057: Alert history MUST be logged
-- FR-058: CLI MUST show alerts
-- FR-059: `acode cost alerts` command
-- FR-060: Alert suppression MUST be optional
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031C-41 | Alert thresholds MUST be configurable | P0 |
+| FR-031C-42 | Default thresholds: 50%, 80%, 100% of budget | P0 |
+| FR-031C-43 | Alert MUST trigger when threshold reached | P0 |
+| FR-031C-44 | Alert MUST invoke callback | P0 |
+| FR-031C-45 | Alert MUST log at warning level | P0 |
+| FR-031C-46 | Alert via webhook MUST be optional | P1 |
+| FR-031C-47 | Webhook URL MUST be configurable | P1 |
+| FR-031C-48 | Alert content MUST include current cost | P0 |
+| FR-031C-49 | Alert content MUST include limit and percent | P0 |
+| FR-031C-50 | Alert content MUST include running instance count | P0 |
+| FR-031C-51 | Alert content MUST include estimated remaining | P1 |
+| FR-031C-52 | Alert MUST NOT repeat (once per threshold) | P0 |
+| FR-031C-53 | Alert state MUST reset on new period | P0 |
+| FR-031C-54 | Daily reset at midnight UTC | P0 |
+| FR-031C-55 | Monthly reset at month start UTC | P0 |
+| FR-031C-56 | Alert history MUST be logged | P1 |
+| FR-031C-57 | CLI MUST show alert history | P1 |
+| FR-031C-58 | `acode cost alerts` command MUST work | P1 |
+| FR-031C-59 | Alert suppression MUST be optional | P2 |
+| FR-031C-60 | Suppression via `--quiet` flag | P2 |
 
-### FR-061 to FR-075: Cost Visibility
+### Cost Visibility
 
-- FR-061: Current cost MUST be queryable
-- FR-062: CLI command: `acode cost show`
-- FR-063: Show current session cost
-- FR-064: Show daily cost
-- FR-065: Show monthly cost
-- FR-066: Show running instances
-- FR-067: Show hourly burn rate
-- FR-068: Estimate MUST be available
-- FR-069: Estimate to session end
-- FR-070: Estimate to max runtime
-- FR-071: Cost breakdown MUST work
-- FR-072: Breakdown by instance type
-- FR-073: Breakdown by task
-- FR-074: Breakdown by day
-- FR-075: Export to CSV MUST work
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031C-61 | Current cost MUST be queryable | P0 |
+| FR-031C-62 | CLI command: `acode cost show` | P0 |
+| FR-031C-63 | Show current session cost | P0 |
+| FR-031C-64 | Show daily cost | P0 |
+| FR-031C-65 | Show monthly cost | P0 |
+| FR-031C-66 | Show running instances | P0 |
+| FR-031C-67 | Show hourly burn rate | P0 |
+| FR-031C-68 | Estimate to session end MUST be available | P0 |
+| FR-031C-69 | Estimate to max runtime MUST be available | P0 |
+| FR-031C-70 | Cost breakdown MUST work | P1 |
+| FR-031C-71 | Breakdown by instance type | P1 |
+| FR-031C-72 | Breakdown by task/session | P1 |
+| FR-031C-73 | Breakdown by day | P1 |
+| FR-031C-74 | Export to CSV MUST work | P1 |
+| FR-031C-75 | `acode cost export --format csv` | P1 |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Cost calculation in <100ms
-- NFR-002: Cost accuracy ±5%
-- NFR-003: Alert latency <1 minute
-- NFR-004: Cost history retained 90 days
-- NFR-005: No orphan cost accumulation
-- NFR-006: Structured logging
-- NFR-007: Metrics on spending
-- NFR-008: Audit trail
-- NFR-009: Timezone handling
-- NFR-010: Currency: USD only
+### Performance Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031C-01 | Cost calculation time | <100ms | P0 |
+| NFR-031C-02 | Cost accuracy vs AWS bill | ±5% | P0 |
+| NFR-031C-03 | Alert delivery latency | <1 minute | P0 |
+| NFR-031C-04 | Cost query response time | <500ms | P1 |
+| NFR-031C-05 | Budget check before launch | <100ms | P0 |
+| NFR-031C-06 | Webhook delivery time | <5 seconds | P1 |
+| NFR-031C-07 | CSV export time (1000 records) | <10 seconds | P2 |
+| NFR-031C-08 | Rate table lookup time | <10ms | P1 |
+| NFR-031C-09 | Hard limit termination | <1 minute | P0 |
+| NFR-031C-10 | History query (90 days) | <5 seconds | P2 |
+
+### Reliability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031C-11 | Cost history retention | 90 days | P0 |
+| NFR-031C-12 | No orphan cost accumulation | Zero orphan cost | P0 |
+| NFR-031C-13 | Alert delivery reliability | 99.9% | P0 |
+| NFR-031C-14 | Budget enforcement reliability | 100% blocked | P0 |
+| NFR-031C-15 | Rate table fallback | Always available | P0 |
+| NFR-031C-16 | Cost calculation consistency | Same result on retry | P0 |
+| NFR-031C-17 | Period boundary handling | Correct UTC reset | P0 |
+| NFR-031C-18 | History persistence | Survives restart | P0 |
+| NFR-031C-19 | Hard limit enforcement | 100% terminated | P0 |
+| NFR-031C-20 | Bypass flag audit | 100% logged | P0 |
+
+### Observability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031C-21 | Structured logging for all cost events | JSON format | P0 |
+| NFR-031C-22 | Metrics for spending rate | Histogram | P1 |
+| NFR-031C-23 | Audit trail for budget bypasses | Full history | P0 |
+| NFR-031C-24 | Timezone handling | All UTC | P0 |
+| NFR-031C-25 | Currency display | USD only | P0 |
+| NFR-031C-26 | Cost breakdown metrics | By type/session | P1 |
+| NFR-031C-27 | Alert event logging | Each alert logged | P0 |
+| NFR-031C-28 | Budget limit logging | Changes logged | P1 |
+| NFR-031C-29 | Estimate accuracy tracking | Actual vs estimate | P2 |
+| NFR-031C-30 | Rate table version logging | Source tracked | P1 |
 
 ---
 
@@ -227,16 +307,175 @@ Estimated Session Total: $4.68 (at 4h max)
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: Hourly rate tracked
-- [ ] AC-002: Running cost calculated
-- [ ] AC-003: Session cost tracked
-- [ ] AC-004: Budget limits work
-- [ ] AC-005: Hard limit terminates
-- [ ] AC-006: Alerts trigger
-- [ ] AC-007: CLI shows costs
-- [ ] AC-008: History persists
-- [ ] AC-009: Export works
-- [ ] AC-010: Orphan cost prevented
+### Cost Tracking
+- [ ] AC-001: Hourly rate known for instance types
+- [ ] AC-002: Pricing API fetches rates when available
+- [ ] AC-003: Static table fallback works
+- [ ] AC-004: Rate includes instance type variation
+- [ ] AC-005: Rate includes region variation
+- [ ] AC-006: Spot vs on-demand rates differentiated
+- [ ] AC-007: Running time tracked per instance
+- [ ] AC-008: Start/end times recorded
+- [ ] AC-009: Running cost calculates correctly
+- [ ] AC-010: Partial hours rounded up
+- [ ] AC-011: Total cost accumulates
+- [ ] AC-012: Session cost tracked
+- [ ] AC-013: Cost history persists
+- [ ] AC-014: Cost queryable by session/date/total
+- [ ] AC-015: EBS costs included
+
+### Budget Limits
+- [ ] AC-016: Budget configurable in config
+- [ ] AC-017: Per-session budget works
+- [ ] AC-018: Per-day budget works
+- [ ] AC-019: Per-month budget works
+- [ ] AC-020: Default is no limit
+- [ ] AC-021: Limit reached blocks new launches
+- [ ] AC-022: Running instances continue (soft limit)
+- [ ] AC-023: Hard limit terminates running instances
+- [ ] AC-024: Soft limit only alerts
+- [ ] AC-025: Limit type configurable
+- [ ] AC-026: Pre-launch limit check works
+- [ ] AC-027: Estimated cost checked
+- [ ] AC-028: Max runtime estimate included
+- [ ] AC-029: --allow-over-budget bypasses limit
+- [ ] AC-030: Bypass is audit-logged
+
+### Alerts
+- [ ] AC-031: Alert thresholds configurable
+- [ ] AC-032: Default thresholds: 50%, 80%, 100%
+- [ ] AC-033: Alert triggers at threshold
+- [ ] AC-034: Callback invoked on alert
+- [ ] AC-035: Log warning written
+- [ ] AC-036: Webhook delivery works
+- [ ] AC-037: Alert content includes details
+- [ ] AC-038: No repeat alerts (once per threshold)
+- [ ] AC-039: Daily reset at midnight UTC
+- [ ] AC-040: Monthly reset at month start
+- [ ] AC-041: Alert history logged
+- [ ] AC-042: CLI shows alert history
+
+### Cost Visibility
+- [ ] AC-043: Current cost queryable
+- [ ] AC-044: `acode cost show` works
+- [ ] AC-045: Session cost displayed
+- [ ] AC-046: Daily cost displayed
+- [ ] AC-047: Monthly cost displayed
+- [ ] AC-048: Running instances listed
+- [ ] AC-049: Hourly burn rate shown
+- [ ] AC-050: Estimate to session end works
+- [ ] AC-051: Estimate to max runtime works
+- [ ] AC-052: Breakdown by instance type works
+- [ ] AC-053: Breakdown by day works
+- [ ] AC-054: CSV export works
+
+### Reliability
+- [ ] AC-055: Cost accuracy within ±5%
+- [ ] AC-056: 90 days history retained
+- [ ] AC-057: No orphan cost accumulation
+- [ ] AC-058: Alert latency <1 minute
+- [ ] AC-059: All times in UTC
+- [ ] AC-060: Currency shows as USD
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Developer Monitors Session Costs
+**Persona:** Cost-conscious developer  
+**Preconditions:** EC2 instance running for 2 hours  
+**Steps:**
+1. Run `acode cost show`
+2. View session cost breakdown
+3. Check burn rate
+4. Estimate remaining time
+
+**Verification Checklist:**
+- [ ] Session cost accurate to ±5%
+- [ ] Instance type and runtime displayed
+- [ ] Burn rate shows $/hour
+- [ ] Estimate calculates correctly
+- [ ] EBS costs included
+
+### Scenario 2: Budget Limit Blocks Launch
+**Persona:** Developer with $10 session budget  
+**Preconditions:** Already spent $9.50 this session  
+**Steps:**
+1. Attempt to launch new instance
+2. Pre-launch check runs
+3. Block with clear message
+4. View cost breakdown
+
+**Verification Checklist:**
+- [ ] Pre-launch check executes
+- [ ] Limit exceeded detected
+- [ ] Clear error message shown
+- [ ] Current cost vs limit displayed
+- [ ] --allow-over-budget option mentioned
+
+### Scenario 3: Soft Limit Alert at 80%
+**Persona:** DevOps monitoring costs  
+**Preconditions:** $50/day budget, $40 spent  
+**Steps:**
+1. Session continues running
+2. 80% threshold reached
+3. Alert triggered
+4. Webhook notification sent
+
+**Verification Checklist:**
+- [ ] 80% threshold detected
+- [ ] Warning logged
+- [ ] Callback invoked
+- [ ] Webhook sent with details
+- [ ] Alert not repeated on next check
+
+### Scenario 4: Hard Limit Terminates Instances
+**Persona:** Admin with strict budget  
+**Preconditions:** Hard limit configured, budget exceeded  
+**Steps:**
+1. Running cost exceeds hard limit
+2. Termination triggered
+3. All session instances terminated
+4. Cleanup verified
+
+**Verification Checklist:**
+- [ ] Hard limit detected
+- [ ] Termination initiated within 1 minute
+- [ ] All session instances terminated
+- [ ] User notified of termination
+- [ ] Final cost recorded
+
+### Scenario 5: Cost History Export
+**Persona:** Finance team member  
+**Preconditions:** 30 days of cost history exists  
+**Steps:**
+1. Run `acode cost export --format csv`
+2. Export last 30 days
+3. Open in spreadsheet
+4. Analyze by day/type
+
+**Verification Checklist:**
+- [ ] CSV generated successfully
+- [ ] All 30 days included
+- [ ] Breakdown by instance type
+- [ ] Breakdown by day
+- [ ] Totals calculate correctly
+
+### Scenario 6: Bypass Budget with Flag
+**Persona:** Developer needing urgent compute  
+**Preconditions:** Budget exceeded, urgent need  
+**Steps:**
+1. Attempt launch (blocked)
+2. Retry with --allow-over-budget
+3. Launch succeeds
+4. Audit log captured
+
+**Verification Checklist:**
+- [ ] Normal launch blocked
+- [ ] Flag allows bypass
+- [ ] Instance launches
+- [ ] Bypass logged with reason
+- [ ] Audit trail includes user/time
 
 ---
 
@@ -244,17 +483,43 @@ Estimated Session Total: $4.68 (at 4h max)
 
 ### Unit Tests
 
-- [ ] UT-001: Cost calculation
-- [ ] UT-002: Budget checking
-- [ ] UT-003: Alert thresholds
-- [ ] UT-004: Time rounding
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| UT-031C-01 | Cost calculation formula | FR-031C-12 |
+| UT-031C-02 | Partial hour rounding | FR-031C-13 |
+| UT-031C-03 | Budget checking logic | FR-031C-26-27 |
+| UT-031C-04 | Alert threshold detection | FR-031C-43 |
+| UT-031C-05 | Alert deduplication | FR-031C-52 |
+| UT-031C-06 | Period reset logic (daily) | FR-031C-54 |
+| UT-031C-07 | Period reset logic (monthly) | FR-031C-55 |
+| UT-031C-08 | Rate table lookup | FR-031C-03 |
+| UT-031C-09 | EBS cost calculation | FR-031C-20 |
+| UT-031C-10 | Spot rate differentiation | FR-031C-07 |
+| UT-031C-11 | Estimate calculation | FR-031C-35-36 |
+| UT-031C-12 | CSV export formatting | FR-031C-74 |
+| UT-031C-13 | Hard limit detection | FR-031C-29 |
+| UT-031C-14 | Bypass flag handling | FR-031C-38-40 |
+| UT-031C-15 | UTC time handling | NFR-031C-24 |
 
 ### Integration Tests
 
-- [ ] IT-001: Real cost tracking
-- [ ] IT-002: Budget enforcement
-- [ ] IT-003: Alert webhook
-- [ ] IT-004: CLI commands
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| IT-031C-01 | Real cost tracking E2E | FR-031C-01-18 |
+| IT-031C-02 | Budget enforcement | FR-031C-26-27 |
+| IT-031C-03 | Alert webhook delivery | FR-031C-46-47 |
+| IT-031C-04 | CLI cost commands | FR-031C-62-75 |
+| IT-031C-05 | Hard limit termination | FR-031C-29-30 |
+| IT-031C-06 | Pricing API integration | FR-031C-02 |
+| IT-031C-07 | Rate table fallback | FR-031C-03 |
+| IT-031C-08 | Cost history persistence | FR-031C-16 |
+| IT-031C-09 | CSV export E2E | FR-031C-74 |
+| IT-031C-10 | Cost accuracy vs AWS | NFR-031C-02 |
+| IT-031C-11 | 90-day history retention | NFR-031C-11 |
+| IT-031C-12 | Alert latency check | NFR-031C-03 |
+| IT-031C-13 | Period boundary handling | FR-031C-54-55 |
+| IT-031C-14 | Bypass audit logging | FR-031C-40 |
+| IT-031C-15 | Orphan cost prevention | NFR-031C-12 |
 
 ---
 

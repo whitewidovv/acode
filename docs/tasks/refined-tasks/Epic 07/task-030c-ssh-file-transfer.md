@@ -30,16 +30,54 @@ This task covers SFTP operations. Connection management is in 030.a. Command exe
 
 ### Integration Points
 
-- Task 029.c: Implements artifact interface
-- Task 030.a: Uses SFTP channel from pool
-- Task 027: Workers transfer files
+| Component | Interface | Data Flow | Notes |
+|-----------|-----------|-----------|-------|
+| Task 029.c ITransferArtifacts | Implements interface | Files in/out | Core abstraction |
+| Task 030.a Connection Pool | ISshConnectionPool | SFTP channels from pool | Reuses connections |
+| Task 027 Worker Orchestration | IWorker.Upload/Download | Worker triggers transfers | Primary consumer |
+| SSH.NET SFTP | SftpClient | SFTP protocol ops | Transport layer |
+| Local File System | System.IO | Local read/write | Source/dest |
+| Progress Reporting | IProgress<TransferProgress> | Real-time progress | UI feedback |
+| Checksum Service | sha256sum (remote) | Verification hashes | Integrity check |
 
 ### Failure Modes
 
-- Transfer timeout → Retry
-- Disk full → Error
-- Permission denied → Error
-- Connection lost → Resume
+| Failure | Detection | Recovery | User Impact |
+|---------|-----------|----------|-------------|
+| Transfer timeout | Timer expiry | Retry with resume | Delayed completion |
+| Remote disk full | SFTP error code | Report error, cleanup temp | Transfer fails |
+| Permission denied | SFTP error code | Report with path details | Auth issue |
+| Connection lost | Channel disconnect | Resume from last offset | Minimal re-transfer |
+| Checksum mismatch | Hash comparison | Delete and retry | Retry required |
+| SFTP not available | Subsystem failure | Fall back to SCP | Degraded mode |
+| Temp file orphan | Cleanup check | Delete on startup | Disk usage |
+| Concurrent access | File lock error | Queue or fail | Serialization |
+
+---
+
+## Assumptions
+
+1. **SSH.NET Library**: Implementation uses SSH.NET (Renci) SFTP subsystem
+2. **SFTP Availability**: Most SSH servers have SFTP subsystem enabled
+3. **Remote Shell**: sha256sum available for checksum verification
+4. **Encoding**: UTF-8 for file paths, binary for content
+5. **Temp Space**: Remote has sufficient temp space for atomic writes
+6. **Permissions**: User has write permission in target directories
+7. **File Sizes**: Support files from bytes to 10GB
+8. **Network**: Variable quality network (resume support critical)
+
+---
+
+## Security Considerations
+
+1. **Path Traversal Prevention**: Remote paths MUST be validated against traversal attacks
+2. **Symlink Safety**: Symlink following MUST be configurable (off by default)
+3. **Permission Preservation**: Don't escalate permissions beyond source
+4. **Temp File Permissions**: Temp files MUST have restricted permissions
+5. **Credential Isolation**: SFTP credentials from connection, never in file ops
+6. **Audit Trail**: All transfers MUST be logged with source/dest
+7. **Checksum Logging**: Verification results MUST be logged
+8. **Size Limits**: Max transfer size MUST be configurable to prevent abuse
 
 ---
 
@@ -68,112 +106,149 @@ This task covers SFTP operations. Connection management is in 030.a. Command exe
 
 ## Functional Requirements
 
-### FR-001 to FR-020: SFTP Operations
+### SFTP Channel Operations
 
-- FR-001: SFTP subsystem MUST be used
-- FR-002: SFTP channel from connection pool
-- FR-003: Multiple channels MUST work
-- FR-004: Channel reuse MUST work
-- FR-005: `OpenSftp()` MUST return channel
-- FR-006: Channel MUST implement IDisposable
-- FR-007: Stat MUST work
-- FR-008: Stat returns file info
-- FR-009: Exists MUST work
-- FR-010: IsDirectory MUST work
-- FR-011: IsFile MUST work
-- FR-012: ListDirectory MUST work
-- FR-013: Recursive listing MUST work
-- FR-014: MakeDirectory MUST work
-- FR-015: MakeDirectory MUST be recursive
-- FR-016: Delete MUST work
-- FR-017: Rename MUST work
-- FR-018: Chmod MUST work
-- FR-019: Chown MUST work (if permitted)
-- FR-020: Readlink MUST work
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030C-01 | SFTP subsystem MUST be used via SSH.NET `SftpClient` | P0 |
+| FR-030C-02 | SFTP channel MUST be acquired from connection pool | P0 |
+| FR-030C-03 | Multiple concurrent SFTP channels MUST work | P0 |
+| FR-030C-04 | Channel reuse MUST work for sequential operations | P0 |
+| FR-030C-05 | `OpenSftpAsync()` MUST return `ISftpChannel` wrapper | P0 |
+| FR-030C-06 | Channel MUST implement `IAsyncDisposable` | P0 |
+| FR-030C-07 | `StatAsync` MUST return file metadata | P0 |
+| FR-030C-08 | Stat MUST return size, modified time, permissions | P0 |
+| FR-030C-09 | `ExistsAsync` MUST check file/directory existence | P0 |
+| FR-030C-10 | `IsDirectoryAsync` MUST detect directory type | P1 |
+| FR-030C-11 | `IsFileAsync` MUST detect regular file type | P1 |
+| FR-030C-12 | `ListDirectoryAsync` MUST enumerate entries | P0 |
+| FR-030C-13 | Recursive listing MUST work via flag | P1 |
+| FR-030C-14 | `CreateDirectoryAsync` MUST create single directory | P0 |
+| FR-030C-15 | CreateDirectory MUST support recursive creation | P0 |
+| FR-030C-16 | `DeleteAsync` MUST remove file or empty directory | P0 |
+| FR-030C-17 | `RenameAsync` MUST move/rename files | P0 |
+| FR-030C-18 | `ChmodAsync` MUST set permissions | P1 |
+| FR-030C-19 | `ChownAsync` MUST set owner (if permitted) | P2 |
+| FR-030C-20 | `ReadLinkAsync` MUST resolve symbolic links | P2 |
 
-### FR-021 to FR-045: Upload
+### Upload Operations
 
-- FR-021: `UploadAsync` MUST work via SFTP
-- FR-022: Single file MUST work
-- FR-023: Directory MUST work
-- FR-024: Recursive MUST work
-- FR-025: Glob patterns MUST work
-- FR-026: Streaming MUST work
-- FR-027: Chunk size configurable
-- FR-028: Default chunk: 64KB
-- FR-029: Progress callback MUST work
-- FR-030: Progress: bytes, percent, rate
-- FR-031: Timeout MUST apply
-- FR-032: Resume MUST work
-- FR-033: Resume checks existing size
-- FR-034: Resume appends remainder
-- FR-035: Overwrite MUST be configurable
-- FR-036: Default: overwrite
-- FR-037: Preserve timestamps MUST work
-- FR-038: Preserve permissions MUST work
-- FR-039: Preserve owner MUST be optional
-- FR-040: Create parent dirs MUST work
-- FR-041: Temp file MUST be used
-- FR-042: Atomic rename on complete
-- FR-043: Cleanup on failure
-- FR-044: Checksum verification MUST work
-- FR-045: Post-upload stat MUST verify
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030C-21 | `UploadAsync` MUST transfer files via SFTP | P0 |
+| FR-030C-22 | Single file upload MUST work | P0 |
+| FR-030C-23 | Directory upload MUST work | P0 |
+| FR-030C-24 | Recursive directory upload MUST work | P0 |
+| FR-030C-25 | Glob patterns MUST be supported for source selection | P1 |
+| FR-030C-26 | Streaming upload MUST avoid loading entire file in memory | P0 |
+| FR-030C-27 | Chunk size MUST be configurable (default 64KB) | P1 |
+| FR-030C-28 | Progress callback MUST be invocable via `IProgress<T>` | P0 |
+| FR-030C-29 | Progress MUST include bytes transferred, percent, rate | P0 |
+| FR-030C-30 | Upload timeout MUST be configurable | P0 |
+| FR-030C-31 | Resume MUST be supported for interrupted transfers | P0 |
+| FR-030C-32 | Resume MUST check existing remote file size | P0 |
+| FR-030C-33 | Resume MUST append remainder only | P0 |
+| FR-030C-34 | Overwrite behavior MUST be configurable (default: overwrite) | P0 |
+| FR-030C-35 | Preserve timestamps MUST be supported | P1 |
+| FR-030C-36 | Preserve permissions MUST be supported | P1 |
+| FR-030C-37 | Preserve owner MUST be optional (off by default) | P2 |
+| FR-030C-38 | Create parent directories MUST be automatic | P0 |
+| FR-030C-39 | Temp file MUST be used during transfer | P0 |
+| FR-030C-40 | Atomic rename on completion MUST be performed | P0 |
+| FR-030C-41 | Temp file cleanup MUST occur on failure | P0 |
+| FR-030C-42 | Checksum verification MUST be optional | P1 |
+| FR-030C-43 | Post-upload stat MUST verify file size | P1 |
 
-### FR-046 to FR-070: Download
+### Download Operations
 
-- FR-046: `DownloadAsync` MUST work via SFTP
-- FR-047: Single file MUST work
-- FR-048: Directory MUST work
-- FR-049: Recursive MUST work
-- FR-050: Glob patterns MUST work
-- FR-051: Streaming MUST work
-- FR-052: Progress MUST report
-- FR-053: Timeout MUST apply
-- FR-054: Resume MUST work
-- FR-055: Resume checks local size
-- FR-056: Resume seeks to offset
-- FR-057: Overwrite MUST be configurable
-- FR-058: Preserve timestamps MUST work
-- FR-059: Preserve permissions MUST work
-- FR-060: Create parent dirs MUST work
-- FR-061: Temp file MUST be used
-- FR-062: Atomic move on complete
-- FR-063: Cleanup on failure
-- FR-064: Checksum verification MUST work
-- FR-065: Remote checksum via command
-- FR-066: sha256sum MUST be used
-- FR-067: Fallback to no-verify
-- FR-068: Batch download MUST work
-- FR-069: Parallel downloads MUST work
-- FR-070: Parallelism configurable
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030C-44 | `DownloadAsync` MUST transfer files via SFTP | P0 |
+| FR-030C-45 | Single file download MUST work | P0 |
+| FR-030C-46 | Directory download MUST work | P0 |
+| FR-030C-47 | Recursive directory download MUST work | P0 |
+| FR-030C-48 | Glob patterns MUST be supported for source selection | P1 |
+| FR-030C-49 | Streaming download MUST avoid memory issues | P0 |
+| FR-030C-50 | Progress callback MUST report download progress | P0 |
+| FR-030C-51 | Download timeout MUST be configurable | P0 |
+| FR-030C-52 | Resume MUST be supported for interrupted downloads | P0 |
+| FR-030C-53 | Resume MUST check local file size and seek remote | P0 |
+| FR-030C-54 | Overwrite behavior MUST be configurable | P0 |
+| FR-030C-55 | Preserve timestamps MUST be supported | P1 |
+| FR-030C-56 | Preserve permissions MUST be supported | P1 |
+| FR-030C-57 | Create parent directories MUST be automatic | P0 |
+| FR-030C-58 | Temp file MUST be used during download | P0 |
+| FR-030C-59 | Atomic move on completion MUST be performed | P0 |
+| FR-030C-60 | Temp file cleanup MUST occur on failure | P0 |
+| FR-030C-61 | Checksum verification MUST use remote sha256sum | P1 |
+| FR-030C-62 | Fallback to no-verify if sha256sum unavailable | P1 |
+| FR-030C-63 | Batch download MUST be supported | P1 |
+| FR-030C-64 | Parallel downloads MUST be supported | P1 |
+| FR-030C-65 | Parallelism MUST be configurable (default 4) | P1 |
 
-### FR-071 to FR-080: SCP Fallback
+### SCP Fallback
 
-- FR-071: SCP MUST be fallback
-- FR-072: SCP when SFTP unavailable
-- FR-073: SCP via exec channel
-- FR-074: SCP single file works
-- FR-075: SCP directory works
-- FR-076: SCP recursive works
-- FR-077: SCP preserves permissions
-- FR-078: SCP progress MUST work
-- FR-079: SCP timeout MUST work
-- FR-080: Auto-detect SFTP availability
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-030C-66 | SCP MUST be available as fallback | P1 |
+| FR-030C-67 | SCP MUST be used when SFTP subsystem unavailable | P1 |
+| FR-030C-68 | SCP MUST use exec channel with scp command | P1 |
+| FR-030C-69 | SCP single file transfer MUST work | P1 |
+| FR-030C-70 | SCP directory transfer MUST work | P1 |
+| FR-030C-71 | SCP recursive transfer MUST work | P1 |
+| FR-030C-72 | SCP MUST preserve permissions with -p flag | P2 |
+| FR-030C-73 | SCP progress MUST be reported | P2 |
+| FR-030C-74 | SCP timeout MUST be enforced | P1 |
+| FR-030C-75 | Auto-detection of SFTP availability MUST work | P1 |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: 1GB file in <5 minutes
-- NFR-002: Memory bounded during transfer
-- NFR-003: 10 parallel transfers
-- NFR-004: Progress update every 1s
-- NFR-005: Resume saves bandwidth
-- NFR-006: No data corruption
-- NFR-007: Atomic file placement
-- NFR-008: Structured logging
-- NFR-009: Metrics on transfers
-- NFR-010: Network interruption handled
+### Performance Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030C-01 | Large file transfer throughput (1GB) | <5 minutes on 100Mbps | P0 |
+| NFR-030C-02 | Memory usage during transfer | Bounded to chunk size | P0 |
+| NFR-030C-03 | Parallel transfer capacity | 10 simultaneous | P0 |
+| NFR-030C-04 | Progress update frequency | Every 1 second | P1 |
+| NFR-030C-05 | Resume efficiency (bandwidth saved) | Only transfers remainder | P0 |
+| NFR-030C-06 | Small file latency (single file <1KB) | <100ms | P1 |
+| NFR-030C-07 | Directory listing latency (1000 files) | <2s | P1 |
+| NFR-030C-08 | Channel acquisition time | <50ms | P1 |
+| NFR-030C-09 | Checksum verification time (1GB) | <30s | P2 |
+| NFR-030C-10 | Batch operation throughput | 100 files/second | P2 |
+
+### Reliability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030C-11 | Data corruption prevention | Zero corruption | P0 |
+| NFR-030C-12 | Atomic file placement (no partial files) | 100% atomic | P0 |
+| NFR-030C-13 | Network interruption recovery | Resume from last offset | P0 |
+| NFR-030C-14 | Temp file cleanup on failure | 100% cleanup | P0 |
+| NFR-030C-15 | Thread safety for concurrent transfers | Zero race conditions | P0 |
+| NFR-030C-16 | Checksum match rate | 100% when verified | P0 |
+| NFR-030C-17 | SCP fallback success rate | 95% when SFTP fails | P1 |
+| NFR-030C-18 | Permission preservation accuracy | Exact match | P1 |
+| NFR-030C-19 | Timestamp preservation accuracy | ±1 second | P2 |
+| NFR-030C-20 | Symlink handling safety | Configurable follow/skip | P1 |
+
+### Observability Requirements
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-030C-21 | Structured logging for all transfers | JSON with correlation ID | P0 |
+| NFR-030C-22 | Metrics for transfer count/size | Per-operation counters | P1 |
+| NFR-030C-23 | Metrics for transfer duration | Histogram buckets | P1 |
+| NFR-030C-24 | Metrics for failure rate | Counter by error type | P1 |
+| NFR-030C-25 | Metrics for resume usage | Resume vs full transfers | P2 |
+| NFR-030C-26 | Progress observable via IProgress<T> | Real-time updates | P0 |
+| NFR-030C-27 | Transfer completion events | Event stream | P1 |
+| NFR-030C-28 | Bandwidth utilization metrics | Bytes/second | P2 |
+| NFR-030C-29 | Error categorization | Typed exception codes | P1 |
+| NFR-030C-30 | Checksum verification logging | Success/failure logged | P1 |
 
 ---
 
@@ -233,16 +308,170 @@ sftp:
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: SFTP channel works
-- [ ] AC-002: Upload single file
-- [ ] AC-003: Upload directory
-- [ ] AC-004: Download single file
-- [ ] AC-005: Download directory
-- [ ] AC-006: Progress reports
-- [ ] AC-007: Resume works
-- [ ] AC-008: Permissions preserved
-- [ ] AC-009: Checksum verifies
-- [ ] AC-010: SCP fallback works
+### SFTP Channel Operations
+- [ ] AC-001: SFTP channel opens successfully from pool
+- [ ] AC-002: Multiple concurrent channels work
+- [ ] AC-003: Channel reuse works for sequential operations
+- [ ] AC-004: `StatAsync` returns correct file metadata
+- [ ] AC-005: `ExistsAsync` correctly detects existence
+- [ ] AC-006: `ListDirectoryAsync` enumerates all entries
+- [ ] AC-007: Recursive listing works
+- [ ] AC-008: `CreateDirectoryAsync` creates directories
+- [ ] AC-009: Recursive directory creation works
+- [ ] AC-010: `DeleteAsync` removes files and directories
+
+### Upload Operations
+- [ ] AC-011: Single file upload works
+- [ ] AC-012: Directory upload works
+- [ ] AC-013: Recursive directory upload works
+- [ ] AC-014: Glob pattern selection works
+- [ ] AC-015: Streaming upload doesn't exhaust memory
+- [ ] AC-016: Chunk size is configurable
+- [ ] AC-017: Progress callback reports correctly
+- [ ] AC-018: Progress includes bytes, percent, rate
+- [ ] AC-019: Timeout is enforced
+- [ ] AC-020: Resume works for interrupted upload
+- [ ] AC-021: Resume appends only remainder
+- [ ] AC-022: Overwrite behavior is configurable
+- [ ] AC-023: Timestamps are preserved when enabled
+- [ ] AC-024: Permissions are preserved when enabled
+- [ ] AC-025: Parent directories created automatically
+- [ ] AC-026: Temp file used during transfer
+- [ ] AC-027: Atomic rename on completion
+- [ ] AC-028: Temp file cleaned up on failure
+- [ ] AC-029: Checksum verification works
+
+### Download Operations
+- [ ] AC-030: Single file download works
+- [ ] AC-031: Directory download works
+- [ ] AC-032: Recursive directory download works
+- [ ] AC-033: Glob pattern selection works
+- [ ] AC-034: Streaming download doesn't exhaust memory
+- [ ] AC-035: Progress callback reports correctly
+- [ ] AC-036: Timeout is enforced
+- [ ] AC-037: Resume works for interrupted download
+- [ ] AC-038: Resume seeks to correct offset
+- [ ] AC-039: Timestamps are preserved
+- [ ] AC-040: Permissions are preserved
+- [ ] AC-041: Temp file used during download
+- [ ] AC-042: Atomic move on completion
+- [ ] AC-043: Checksum verification uses sha256sum
+- [ ] AC-044: Fallback to no-verify when sha256sum unavailable
+- [ ] AC-045: Batch download works
+- [ ] AC-046: Parallel downloads work
+- [ ] AC-047: Parallelism is configurable
+
+### SCP Fallback
+- [ ] AC-048: SCP detected when SFTP unavailable
+- [ ] AC-049: SCP single file transfer works
+- [ ] AC-050: SCP directory transfer works
+- [ ] AC-051: SCP recursive transfer works
+- [ ] AC-052: SCP preserves permissions
+- [ ] AC-053: SCP progress is reported
+- [ ] AC-054: SCP timeout is enforced
+
+### Reliability and Performance
+- [ ] AC-055: 1GB file transfers in <5 minutes
+- [ ] AC-056: Memory bounded during large transfer
+- [ ] AC-057: 10 parallel transfers work
+- [ ] AC-058: No data corruption in any transfer
+- [ ] AC-059: Atomic file placement (no partial files visible)
+- [ ] AC-060: Thread-safe under concurrent operations
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Developer Uploads Build Artifacts
+**Persona:** Developer deploying code to remote server  
+**Preconditions:** SSH target connected, local build completed  
+**Steps:**
+1. Upload build.zip (500MB) to remote
+2. Observe progress reporting
+3. Verify checksum on completion
+4. Check file permissions
+
+**Verification Checklist:**
+- [ ] Progress shows bytes, percent, rate
+- [ ] Transfer completes in reasonable time
+- [ ] Checksum matches
+- [ ] Permissions preserved
+- [ ] No temp files left behind
+
+### Scenario 2: CI Downloads Test Results
+**Persona:** CI system retrieving artifacts  
+**Preconditions:** Tests completed on remote  
+**Steps:**
+1. Download test-results/ directory recursively
+2. Verify all files received
+3. Check timestamps preserved
+4. Process results locally
+
+**Verification Checklist:**
+- [ ] All files downloaded
+- [ ] Directory structure preserved
+- [ ] Timestamps match remote (±1s)
+- [ ] No corruption in files
+
+### Scenario 3: Resume After Network Failure
+**Persona:** Developer on unstable connection  
+**Preconditions:** Large file (2GB) transfer in progress  
+**Steps:**
+1. Start upload of large file
+2. Simulate network disconnect at 50%
+3. Reconnect and resume
+4. Verify completed file
+
+**Verification Checklist:**
+- [ ] Resume detects existing partial file
+- [ ] Only remaining 50% transferred
+- [ ] Final file checksum correct
+- [ ] No duplicate data transferred
+
+### Scenario 4: Parallel Directory Sync
+**Persona:** DevOps syncing multiple directories  
+**Preconditions:** 4 parallel transfer capacity  
+**Steps:**
+1. Download 100 files from remote
+2. Verify parallel transfers used
+3. Check all files complete
+4. Verify no corruption
+
+**Verification Checklist:**
+- [ ] Multiple transfers run simultaneously
+- [ ] All 100 files downloaded
+- [ ] No file corruption
+- [ ] Total time < sequential time
+
+### Scenario 5: SCP Fallback on Legacy Server
+**Persona:** Developer connecting to old SSH server  
+**Preconditions:** Server has SFTP disabled  
+**Steps:**
+1. Attempt upload via SFTP
+2. Observe fallback to SCP
+3. Verify transfer completes
+4. Check file integrity
+
+**Verification Checklist:**
+- [ ] SFTP unavailability detected
+- [ ] SCP fallback activated
+- [ ] Transfer completes successfully
+- [ ] Log shows fallback reason
+
+### Scenario 6: Large Directory with Permissions
+**Persona:** Admin migrating application  
+**Preconditions:** Source directory with 1000 files  
+**Steps:**
+1. Upload directory with permissions preserved
+2. Verify all files transferred
+3. Check permissions match source
+4. Verify executable flags preserved
+
+**Verification Checklist:**
+- [ ] All 1000 files uploaded
+- [ ] Permissions match source exactly
+- [ ] Executable bits preserved
+- [ ] Timestamps preserved
 
 ---
 
@@ -250,17 +479,43 @@ sftp:
 
 ### Unit Tests
 
-- [ ] UT-001: Path handling
-- [ ] UT-002: Progress calculation
-- [ ] UT-003: Resume logic
-- [ ] UT-004: Checksum verification
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| UT-030C-01 | Path validation rejects traversal | Security |
+| UT-030C-02 | Progress calculation is accurate | FR-030C-29 |
+| UT-030C-03 | Resume offset calculation | FR-030C-32 |
+| UT-030C-04 | Checksum comparison logic | FR-030C-42 |
+| UT-030C-05 | Glob pattern matching | FR-030C-25 |
+| UT-030C-06 | Chunk size configuration | FR-030C-27 |
+| UT-030C-07 | Temp file naming | FR-030C-39 |
+| UT-030C-08 | Atomic rename logic | FR-030C-40 |
+| UT-030C-09 | Permission preservation mapping | FR-030C-36 |
+| UT-030C-10 | Timestamp preservation mapping | FR-030C-35 |
+| UT-030C-11 | SCP command building | FR-030C-68 |
+| UT-030C-12 | SFTP availability detection | FR-030C-75 |
+| UT-030C-13 | Parallel transfer semaphore | FR-030C-65 |
+| UT-030C-14 | Error code mapping | NFR-030C-29 |
+| UT-030C-15 | Symlink handling configuration | NFR-030C-20 |
 
 ### Integration Tests
 
-- [ ] IT-001: Real SFTP transfer
-- [ ] IT-002: Large file transfer
-- [ ] IT-003: Directory recursion
-- [ ] IT-004: Resume after interrupt
+| ID | Test Case | Validates |
+|----|-----------|-----------|
+| IT-030C-01 | Real SFTP single file upload | FR-030C-22 |
+| IT-030C-02 | Real SFTP single file download | FR-030C-45 |
+| IT-030C-03 | Large file transfer (1GB) | NFR-030C-01 |
+| IT-030C-04 | Directory recursive upload | FR-030C-24 |
+| IT-030C-05 | Directory recursive download | FR-030C-47 |
+| IT-030C-06 | Resume after interrupt (upload) | FR-030C-31 |
+| IT-030C-07 | Resume after interrupt (download) | FR-030C-52 |
+| IT-030C-08 | Parallel transfers (4 concurrent) | NFR-030C-03 |
+| IT-030C-09 | Checksum verification E2E | FR-030C-61 |
+| IT-030C-10 | Permission preservation E2E | NFR-030C-18 |
+| IT-030C-11 | SCP fallback when SFTP disabled | FR-030C-67 |
+| IT-030C-12 | Atomic rename visibility | NFR-030C-12 |
+| IT-030C-13 | Memory bounded during large transfer | NFR-030C-02 |
+| IT-030C-14 | 100 file batch operation | NFR-030C-10 |
+| IT-030C-15 | Progress reporting accuracy | FR-030C-29 |
 
 ---
 
