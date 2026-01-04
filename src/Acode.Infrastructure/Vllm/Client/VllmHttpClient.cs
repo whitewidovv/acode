@@ -1,0 +1,235 @@
+using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
+using Acode.Infrastructure.Vllm.Exceptions;
+using Acode.Infrastructure.Vllm.Models;
+using Acode.Infrastructure.Vllm.Serialization;
+
+namespace Acode.Infrastructure.Vllm.Client;
+
+/// <summary>
+/// HTTP client for vLLM /v1/chat/completions endpoint with SSE streaming support.
+/// </summary>
+public sealed class VllmHttpClient : IDisposable
+{
+    private readonly VllmClientConfiguration _config;
+    private readonly HttpClient _httpClient;
+    private bool _disposed;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VllmHttpClient"/> class.
+    /// </summary>
+    /// <param name="config">Client configuration.</param>
+    public VllmHttpClient(VllmClientConfiguration config)
+    {
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+        _config.Validate();
+
+        var handler = new SocketsHttpHandler
+        {
+            MaxConnectionsPerServer = _config.MaxConnections,
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(_config.IdleTimeoutSeconds),
+            PooledConnectionLifetime = TimeSpan.FromSeconds(_config.ConnectionLifetimeSeconds),
+            ConnectTimeout = TimeSpan.FromSeconds(_config.ConnectTimeoutSeconds)
+        };
+
+        _httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri(_config.Endpoint),
+            Timeout = TimeSpan.FromSeconds(_config.RequestTimeoutSeconds)
+        };
+
+        if (!string.IsNullOrEmpty(_config.ApiKey))
+        {
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _config.ApiKey);
+        }
+
+        _httpClient.DefaultRequestHeaders.Accept.Add(
+            new MediaTypeWithQualityHeaderValue("application/json"));
+    }
+
+    /// <summary>
+    /// Sends a non-streaming request to vLLM.
+    /// </summary>
+    /// <param name="request">The request payload.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The response.</returns>
+    /// <exception cref="VllmConnectionException">Connection failed.</exception>
+    /// <exception cref="VllmTimeoutException">Request timed out.</exception>
+    /// <exception cref="VllmRequestException">Invalid request (4xx).</exception>
+    /// <exception cref="VllmServerException">Server error (5xx).</exception>
+    public async Task<VllmResponse> SendRequestAsync(
+        VllmRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var json = VllmRequestSerializer.Serialize(request);
+            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.PostAsync(
+                "/v1/chat/completions",
+                content,
+                cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                ThrowForStatusCode(response.StatusCode, errorContent);
+            }
+
+            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken)
+                .ConfigureAwait(false);
+            return VllmRequestSerializer.DeserializeResponse(responseJson);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new VllmConnectionException(
+                $"Failed to connect to vLLM at {_config.Endpoint}: {ex.Message}",
+                ex);
+        }
+        catch (TaskCanceledException ex) when (ex.CancellationToken == cancellationToken)
+        {
+            throw;
+        }
+        catch (TaskCanceledException ex)
+        {
+            throw new VllmTimeoutException(
+                $"Request to vLLM timed out after {_config.RequestTimeoutSeconds}s",
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// Streams a request to vLLM using Server-Sent Events (SSE).
+    /// </summary>
+    /// <param name="request">The request payload.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Async enumerable of stream chunks.</returns>
+    /// <exception cref="VllmConnectionException">Connection failed.</exception>
+    /// <exception cref="VllmTimeoutException">Request timed out.</exception>
+    public async IAsyncEnumerable<VllmStreamChunk> StreamRequestAsync(
+        VllmRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        request.Stream = true;
+
+        var json = VllmRequestSerializer.Serialize(request);
+        var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+        var requestMessage = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions")
+        {
+            Content = content
+        };
+
+        HttpResponseMessage? response = null;
+        Stream? stream = null;
+        StreamReader? reader = null;
+
+        try
+        {
+            response = await _httpClient.SendAsync(
+                requestMessage,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new VllmConnectionException(
+                $"Failed to connect to vLLM at {_config.Endpoint}: {ex.Message}",
+                ex);
+        }
+        catch (TaskCanceledException ex) when (ex.CancellationToken == cancellationToken)
+        {
+            throw;
+        }
+        catch (TaskCanceledException ex)
+        {
+            throw new VllmTimeoutException(
+                $"Streaming request to vLLM timed out after {_config.StreamingReadTimeoutSeconds}s",
+                ex);
+        }
+
+        try
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                ThrowForStatusCode(response.StatusCode, errorContent);
+            }
+
+            stream = await response.Content.ReadAsStreamAsync(cancellationToken)
+                .ConfigureAwait(false);
+            reader = new StreamReader(stream);
+
+            while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                if (line.StartsWith("data: ", StringComparison.Ordinal))
+                {
+                    var data = line["data: ".Length..];
+
+                    if (data == "[DONE]")
+                    {
+                        break;
+                    }
+
+                    var chunk = VllmRequestSerializer.DeserializeStreamChunk(data);
+                    yield return chunk;
+                }
+            }
+        }
+        finally
+        {
+            reader?.Dispose();
+            stream?.Dispose();
+            response?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Disposes the HTTP client.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _httpClient.Dispose();
+        _disposed = true;
+    }
+
+    private static void ThrowForStatusCode(System.Net.HttpStatusCode statusCode, string errorContent)
+    {
+        var message = $"vLLM returned {(int)statusCode}: {errorContent}";
+
+        switch ((int)statusCode)
+        {
+            case 401:
+            case 403:
+                throw new VllmAuthException(message);
+            case 404:
+                throw new VllmModelNotFoundException(message);
+            case 429:
+                throw new VllmRateLimitException(message);
+            case >= 400 and < 500:
+                throw new VllmRequestException(message);
+            case >= 500:
+                throw new VllmServerException(message);
+            default:
+                throw new VllmException("ACODE-VLM-999", message);
+        }
+    }
+}
