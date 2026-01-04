@@ -114,11 +114,95 @@ Implemented `OllamaDeltaMapper` static class to convert stream chunks to deltas:
 
 ---
 
+#### ✅ Task 005-1: OllamaConfiguration (18 tests passing)
+**Commit**: f78b51b
+
+Implemented OllamaConfiguration record with validation:
+- BaseUrl (defaults to http://localhost:11434)
+- DefaultModel (defaults to llama3.2:latest)
+- RequestTimeoutSeconds (defaults to 120)
+- HealthCheckTimeoutSeconds (defaults to 5)
+- MaxRetries (defaults to 3)
+- EnableRetry (defaults to true)
+- Computed properties: RequestTimeout, HealthCheckTimeout (TimeSpan)
+- Validates all parameters on construction
+- Supports `with` expressions for immutability
+
+**Tests**: 18 tests covering all validation scenarios and defaults
+
+---
+
+#### ✅ Task 005-2: Core Exception Types (13 tests passing)
+**Commit**: 0a8ff4f
+
+Implemented complete Ollama exception hierarchy:
+- `OllamaException` (base class with error codes)
+- `OllamaConnectionException` (ACODE-OLM-001)
+- `OllamaTimeoutException` (ACODE-OLM-002)
+- `OllamaRequestException` (ACODE-OLM-003)
+- `OllamaServerException` (ACODE-OLM-004) with StatusCode property
+- `OllamaParseException` (ACODE-OLM-005) with InvalidJson property
+
+All exceptions follow ACODE-OLM-XXX error code format.
+
+**Tests**: 13 tests covering all exception types and hierarchy
+
+---
+
+#### ✅ Task 005-4: Health Checking (7 tests passing)
+**Commit**: 6155540
+
+Implemented OllamaHealthChecker class:
+- Calls /api/tags endpoint to verify server health
+- Returns true on 200 OK, false on any error
+- Never throws exceptions (FR-005-057)
+- Supports cancellation
+- Measures response time
+
+Test helpers:
+- `ThrowingHttpMessageHandler` for exception testing
+- `DelayingHttpMessageHandler` for timeout testing
+
+**Tests**: 7 tests covering all health check scenarios
+
+---
+
+#### ✅ Task 005-5: OllamaProvider Core (8 tests passing)
+**Commit**: 7224302
+
+Implemented OllamaProvider class implementing IModelProvider:
+- `ProviderName` returns "ollama"
+- `Capabilities` declares streaming, tools, system messages support
+- `ChatAsync` implements non-streaming chat completion
+  - Maps ChatRequest → OllamaRequest using OllamaRequestMapper
+  - Maps OllamaResponse → ChatResponse using OllamaResponseMapper
+  - Proper exception handling (5xx → OllamaServerException, connection → OllamaConnectionException)
+  - Timeout detection with OllamaTimeoutException
+- `IsHealthyAsync` delegates to OllamaHealthChecker
+- `GetSupportedModels` returns common Ollama models (llama3.x, qwen2.5, mistral, gemma2, etc.)
+- `StreamChatAsync` placeholder (will implement in Task 005-6)
+
+Uses all components built in Task 005a (HTTP client, request/response mappers, stream reader, delta mapper).
+
+**Tests**: 8 tests covering constructor, simple chat, model parameters, error handling, health checks
+
+---
+
 ### Currently Working On
 
-**Task 005a completed!** All 6 subtasks done with 64 tests passing.
+**Task 005a and core infrastructure completed!**
+- Task 005a: 64 tests (HTTP communication and streaming)
+- Task 005-1, 005-2, 005-4, 005-5: 46 tests (configuration, exceptions, health, core provider)
+- **Total: 110 tests passing**
 
-Next up: Task 005b (Tool call parsing), Task 005 (Core Provider), Task 005c (Setup docs).
+**Completed 12 commits** so far on feature branch.
+
+Next up:
+- Task 005-6: StreamChatAsync implementation
+- Task 005-7: Model management (if needed)
+- Task 005-8: DI registration
+- Task 005b: Tool call parsing
+- Task 005c: Setup docs and smoke tests
 
 ---
 
