@@ -577,6 +577,31 @@ By Kind:
 
 ---
 
+## Best Practices
+
+### Index Design
+
+1. **Separate storage from extraction** - Index format independent of language parsers
+2. **Support incremental updates** - Only re-extract changed files
+3. **Include relationships** - Store call graphs, inheritance, not just symbols
+4. **Version the schema** - Allow index format evolution with migration
+
+### Query Optimization
+
+5. **Index by multiple keys** - Name, file, type for fast lookups
+6. **Support prefix queries** - Find symbols starting with pattern
+7. **Fuzzy matching optional** - Exact match fast, fuzzy if needed
+8. **Limit result sets** - Pagination for large result sets
+
+### Scalability
+
+9. **Handle large codebases** - Tested with 100K+ files
+10. **Background building** - Don't block user operations
+11. **Memory bounded** - Stream processing for large files
+12. **Parallel extraction** - Utilize multiple cores for parsing
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

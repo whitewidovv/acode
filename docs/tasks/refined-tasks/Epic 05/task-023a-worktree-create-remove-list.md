@@ -63,6 +63,33 @@ This task covers the Git worktree operations. Task mapping is in 023.b. Cleanup 
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git 2.20+** - Git version supports worktree features used
+2. **Filesystem support** - Filesystem supports git worktree operations
+3. **Sufficient disk space** - Space available for worktree creation
+4. **Write permissions** - Agent has write access to worktree directory
+5. **Single repository** - Worktrees for one git repository at a time
+
+### Operational Assumptions
+
+6. **Branch per worktree** - Each worktree has its own branch
+7. **Unique paths** - No path collisions between worktrees
+8. **Git index available** - Main repo .git directory accessible
+9. **No conflicting locks** - Git index not locked during operations
+10. **Worktree directory writable** - .acode/worktrees/ exists and is writable
+
+### Integration Assumptions
+
+11. **Task IDs unique** - Task IDs can be used for path generation
+12. **Mapping service available** - Task 023.b provides persistence
+13. **CLI integration** - Commands integrate with acode CLI framework
+14. **Event emission** - Worktree events can be published
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Create Operation
@@ -193,6 +220,75 @@ acode worktree remove .acode/worktrees/task-123 --delete-branch
 - [ ] AC-008: Stale detection works
 - [ ] AC-009: Prune removes stale entries
 - [ ] AC-010: CLI commands work
+
+---
+
+## Best Practices
+
+### Creation
+
+1. **Validate path first** - Check path is valid and writable
+2. **Generate unique names** - Include task ID in path and branch
+3. **Create branch atomically** - Worktree and branch in one operation
+4. **Log creation details** - Record path, branch, timestamp
+
+### Removal
+
+5. **Check for changes** - Warn if uncommitted work exists
+6. **Remove branch too** - Clean up associated branch
+7. **Force only with confirmation** - Explicit flag required
+8. **Handle missing gracefully** - Already-removed is not error
+
+### Listing
+
+9. **Include status** - Show if worktree is valid/stale
+10. **Show linked branch** - Display branch for each worktree
+11. **Format consistently** - JSON and human-readable options
+12. **Mark stale entries** - Highlight worktrees that need prune
+
+---
+
+## Troubleshooting
+
+### Issue: Worktree creation fails
+
+**Symptoms:** "fatal: already exists" or permission errors
+
+**Causes:**
+- Path already exists (stale worktree)
+- Insufficient permissions
+- Disk space exhausted
+
+**Solutions:**
+1. Run `git worktree prune` to clean stale entries
+2. Check directory permissions
+3. Verify disk space availability
+
+### Issue: Worktree removal fails
+
+**Symptoms:** "not a valid worktree" or path errors
+
+**Causes:**
+- Worktree already removed from filesystem
+- Git metadata out of sync
+- Branch still checked out elsewhere
+
+**Solutions:**
+1. Run `git worktree prune` to sync metadata
+2. Check if worktree exists in `.git/worktrees/`
+3. Use `git worktree remove --force` for manual cleanup
+
+### Issue: List shows stale worktrees
+
+**Symptoms:** Worktrees listed but paths don't exist
+
+**Causes:**
+- Directory deleted without git worktree remove
+- Interrupted operation left partial state
+
+**Solutions:**
+1. Run `git worktree prune` to remove stale entries
+2. Check `.git/worktrees/` for orphaned entries
 
 ---
 

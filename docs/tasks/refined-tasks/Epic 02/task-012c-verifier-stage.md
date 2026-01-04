@@ -75,6 +75,39 @@ The following items are explicitly excluded from Task 012.c:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Verification checks are defined per step type
+- ASM-002: Assertions have pass/fail outcomes
+- ASM-003: Test execution results are parseable
+- ASM-004: Lint and build tools are available locally
+- ASM-005: Verification scope is limited to current step changes
+
+### Behavioral Assumptions
+
+- ASM-006: Verification runs after each step execution
+- ASM-007: Failed verification triggers re-planning or retry
+- ASM-008: Verification results inform reviewer stage
+- ASM-009: Partial passes (warnings) allow continuation
+- ASM-010: Critical failures halt the loop
+
+### Dependency Assumptions
+
+- ASM-011: Task 012 orchestrator provides IStage contract
+- ASM-012: Task 012.b executor provides step results to verify
+- ASM-013: Build/test tooling exists in workspace
+- ASM-014: Session state tracks verification outcomes
+
+### Quality Assumptions
+
+- ASM-015: Verification covers correctness, not style
+- ASM-016: Test coverage is informative, not enforced
+- ASM-017: Verification is fast (< 30s typical)
+
+---
+
 ## Functional Requirements
 
 ### Stage Lifecycle

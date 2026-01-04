@@ -440,6 +440,31 @@ git push  # Enter credentials once
 
 ---
 
+## Best Practices
+
+### Git Integration
+
+1. **Use porcelain output** - Parse --porcelain or --format for reliable parsing
+2. **Handle all git versions** - Test with git 2.20+ for compatibility
+3. **Never parse human output** - Human-readable output changes between versions
+4. **Escape paths correctly** - Handle spaces, quotes, unicode in file paths
+
+### Error Handling
+
+5. **Capture stderr** - Git errors go to stderr; always capture both streams
+6. **Parse exit codes** - Non-zero exit means failure; code indicates type
+7. **Provide context** - Include file path and operation in error messages
+8. **Retry on lock** - Git index.lock may be temporary; retry once
+
+### Security
+
+9. **Sanitize paths** - Validate paths don't escape repository
+10. **No credentials in logs** - Never log authentication tokens
+11. **Respect gitignore** - Honor ignore rules in all operations
+12. **Audit sensitive operations** - Log commits, pushes for audit trail
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

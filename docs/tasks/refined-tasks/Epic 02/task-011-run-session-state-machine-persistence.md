@@ -75,6 +75,40 @@ The following items are explicitly excluded from Task 011:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: UUID v7 generation is available for time-ordered unique identifiers
+- ASM-002: State machine patterns can be implemented with finite state automaton semantics
+- ASM-003: DateTimeOffset provides sufficient precision for timestamp ordering
+- ASM-004: JSON serialization is available for event payloads and metadata
+- ASM-005: Event sourcing patterns can be applied for state history
+- ASM-006: Lock mechanisms are available for session exclusivity
+
+### Environmental Assumptions
+
+- ASM-007: Single-machine execution is the primary deployment model
+- ASM-008: File system or database storage is available for persistence
+- ASM-009: Process interruption (SIGINT, crash) can occur at any point
+- ASM-010: System clock is reasonably accurate for timestamp ordering
+
+### Dependency Assumptions
+
+- ASM-011: Task 010 CLI provides command infrastructure for session commands
+- ASM-012: Task 011.a entity model is defined before implementation
+- ASM-013: Task 011.b persistence layer handles actual storage
+- ASM-014: Task 011.c resume behavior builds on session state
+
+### Behavioral Assumptions
+
+- ASM-015: State transitions are atomic and observable
+- ASM-016: Invalid state transitions are programming errors, not user errors
+- ASM-017: Session state must be recoverable after process restart
+- ASM-018: Event history provides complete audit trail
+
+---
+
 ## Functional Requirements
 
 ### Session Lifecycle

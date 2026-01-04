@@ -73,6 +73,38 @@ The following items are explicitly excluded from Task 049.b:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: CLI commands follow established conventions from Task 010
+- ASM-002: CRUD operations map to standard CLI verbs (new, list, show, delete)
+- ASM-003: Command output supports both human-readable and JSON formats
+- ASM-004: Pagination handles large chat/message lists
+- ASM-005: Commands are atomic (succeed or fail completely)
+
+### Behavioral Assumptions
+
+- ASM-006: Users interact with chats primarily via CLI
+- ASM-007: Chat switching changes active context for subsequent operations
+- ASM-008: Delete requires confirmation or --force flag
+- ASM-009: List shows summary, show provides full details
+- ASM-010: Search integrates with chat commands
+
+### Dependency Assumptions
+
+- ASM-011: Task 049.a data model is available
+- ASM-012: Task 010 CLI framework provides command infrastructure
+- ASM-013: Task 010.b JSONL mode applies to chat commands
+
+### UX Assumptions
+
+- ASM-014: Commands are discoverable via --help
+- ASM-015: Error messages explain what went wrong
+- ASM-016: Common operations require minimal typing
+
+---
+
 ## Functional Requirements
 
 ### Create Command
@@ -449,6 +481,67 @@ chat:
 
 - [ ] AC-030: Shows active
 - [ ] AC-031: Shows binding
+
+---
+
+## Best Practices
+
+### Command Design
+
+- **BP-001: Consistent verb usage** - Use new/create, list, show, delete consistently
+- **BP-002: Sensible defaults** - Commands should work with minimal arguments
+- **BP-003: Confirmation for destructive actions** - Require --force or confirmation for delete
+- **BP-004: Clear output** - Success messages should confirm what was done
+
+### Error Handling
+
+- **BP-005: Specific error messages** - "Chat 'abc123' not found" not just "Not found"
+- **BP-006: Exit codes** - Use distinct exit codes for different errors
+- **BP-007: Suggestions for recovery** - Tell users how to fix the problem
+- **BP-008: Log errors with context** - Include enough detail for debugging
+
+### API Design
+
+- **BP-009: Validate early** - Check inputs before starting operations
+- **BP-010: Return meaningful results** - Include created/modified entity in response
+- **BP-011: Support filtering** - Allow list commands to filter results
+- **BP-012: Paginate by default** - Don't return unbounded lists
+
+---
+
+## Troubleshooting
+
+### Command Not Recognized
+
+**Symptom:** `acode chat <subcommand>` says unknown command.
+
+**Cause:** Typo in command name or missing registration.
+
+**Solution:**
+1. Check `acode chat --help` for available commands
+2. Verify spelling of subcommand
+
+### Chat Creation Fails
+
+**Symptom:** `acode chat new` returns error.
+
+**Cause:** Database error or invalid name.
+
+**Solution:**
+1. Check database connectivity
+2. Verify chat name doesn't contain invalid characters
+3. Check disk space
+
+### List Returns Empty
+
+**Symptom:** `acode chat list` shows no chats when some should exist.
+
+**Cause:** Filter too restrictive or wrong workspace.
+
+**Solution:**
+1. Remove filters and try again
+2. Verify you're in correct workspace
+3. Check if chats were deleted
 
 ---
 

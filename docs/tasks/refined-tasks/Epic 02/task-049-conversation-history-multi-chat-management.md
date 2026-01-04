@@ -72,6 +72,39 @@ The following items are explicitly excluded from Task 049:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Conversations are stored locally in workspace database
+- ASM-002: Each chat has a unique identifier (ULID for time-ordering)
+- ASM-003: Messages are append-only within a chat
+- ASM-004: Chat metadata is queryable and filterable
+- ASM-005: Storage format supports efficient retrieval
+
+### Behavioral Assumptions
+
+- ASM-006: Users manage multiple concurrent chats for different tasks
+- ASM-007: Active chat is determined by current context (worktree, session)
+- ASM-008: Chat history persists across CLI sessions
+- ASM-009: Chat switching is fast and seamless
+- ASM-010: Old chats remain accessible until explicitly deleted
+
+### Dependency Assumptions
+
+- ASM-011: Task 011 session model integrates with chat context
+- ASM-012: Task 050 workspace database provides storage
+- ASM-013: Task 010 CLI provides chat management commands
+- ASM-014: Tasks 049.a-f implement component details
+
+### Design Assumptions
+
+- ASM-015: Chat contains messages, messages contain content
+- ASM-016: Linear conversation model (no branching)
+- ASM-017: Single-user context for all chats
+
+---
+
 ## Functional Requirements
 
 ### Chat Management
@@ -414,6 +447,79 @@ $ acode chat export --all > all_chats.json
 - [ ] AC-028: Search works
 - [ ] AC-029: Filters work
 - [ ] AC-030: Full-text works
+
+---
+
+## Best Practices
+
+### Chat Management
+
+- **BP-001: Descriptive chat names** - Use meaningful names that describe the task or context
+- **BP-002: One chat per task** - Keep conversations focused on a single objective
+- **BP-003: Regular archiving** - Archive completed chats to reduce clutter
+- **BP-004: Use worktree binding** - Bind chats to worktrees for context association
+
+### Message Handling
+
+- **BP-005: Append-only design** - Never modify existing messages, only add new ones
+- **BP-006: Structured content** - Use consistent message formats for parsing
+- **BP-007: Metadata for context** - Store additional context as message metadata
+- **BP-008: Limit message size** - Keep messages under 100KB for performance
+
+### Performance
+
+- **BP-009: Paginate large histories** - Don't load entire chat history at once
+- **BP-010: Index for search** - Ensure search indexes are maintained
+- **BP-011: Lazy loading** - Load message content on demand
+- **BP-012: Background sync** - Sync operations shouldn't block user interaction
+
+---
+
+## Troubleshooting
+
+### Chat Not Found
+
+**Symptom:** `acode chat open <id>` returns "Chat not found".
+
+**Cause:** Chat ID is incorrect, or chat was deleted.
+
+**Solution:**
+1. List all chats with `acode chat list`
+2. Verify the chat ID exists
+3. Check if chat was deleted (search in deleted chats if available)
+
+### Slow Chat Loading
+
+**Symptom:** Opening a chat with many messages is slow.
+
+**Cause:** Large chat history loading synchronously.
+
+**Solution:**
+1. Paginate message loading
+2. Archive old portions of conversation
+3. Check database performance
+
+### Search Returns No Results
+
+**Symptom:** Search for known content returns empty.
+
+**Cause:** Search index not updated or query syntax issue.
+
+**Solution:**
+1. Verify search index is current
+2. Try simpler search terms
+3. Check if content was redacted
+
+### Active Chat Mismatch
+
+**Symptom:** Commands operate on wrong chat.
+
+**Cause:** Active chat context not set correctly.
+
+**Solution:**
+1. Check current active chat with `acode chat current`
+2. Switch to correct chat with `acode chat open`
+3. Verify worktree binding if applicable
 
 ---
 

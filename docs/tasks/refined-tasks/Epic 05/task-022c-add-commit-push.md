@@ -269,6 +269,77 @@ $ acode git push
 
 ---
 
+## Best Practices
+
+### Staging (Add)
+
+1. **Use pathspec carefully** - Verify what will be added before add
+2. **Handle ignored files** - Don't add files matching .gitignore
+3. **Support partial add** - Allow staging specific hunks
+4. **Detect binary files** - Handle binary files appropriately
+
+### Commit
+
+5. **Validate message format** - Check against project conventions
+6. **Include scope** - Message should reference task or area
+7. **Atomic commits** - One logical change per commit
+8. **Sign commits optionally** - Support GPG signing when configured
+
+### Push
+
+9. **Dry-run first** - Preview what would be pushed
+10. **Handle rejection** - Explain fetch/rebase needed if rejected
+11. **Respect mode restrictions** - No push in local-only or airgapped
+12. **Retry on transient failure** - Network issues may be temporary
+
+---
+
+## Troubleshooting
+
+### Issue: Push rejected (non-fast-forward)
+
+**Symptoms:** Remote rejected push with "non-fast-forward" error
+
+**Causes:**
+- Remote has commits not in local branch
+- Another user pushed to same branch
+- Branch was force-pushed remotely
+
+**Solutions:**
+1. Pull or fetch and rebase: `git pull --rebase`
+2. If intentional, use force push with care: `git push --force-with-lease`
+3. Check branch protection rules on remote
+
+### Issue: Commit message validation failed
+
+**Symptoms:** Commit rejected due to message format
+
+**Causes:**
+- Missing required prefix (feat:, fix:, etc.)
+- Message too short or missing body
+- Invalid ticket reference format
+
+**Solutions:**
+1. Review commit message rules in agent-config.yml
+2. Amend commit with correct message: `git commit --amend`
+3. Check project's CONTRIBUTING.md for format
+
+### Issue: Authentication failure on push
+
+**Symptoms:** "Authentication failed" or "Permission denied"
+
+**Causes:**
+- Expired credentials
+- SSH key not loaded
+- Insufficient permissions on remote
+
+**Solutions:**
+1. Refresh authentication: `git credential reject` then retry
+2. Check SSH agent: `ssh-add -l`
+3. Verify repository access permissions
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

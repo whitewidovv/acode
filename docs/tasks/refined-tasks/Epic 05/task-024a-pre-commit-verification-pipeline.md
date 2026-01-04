@@ -41,6 +41,33 @@ This task covers the verification pipeline execution. Message validation is in 0
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Command runner available** - Task 018 executes verification steps
+2. **Language runners ready** - Task 019 for build/test if needed
+3. **Configuration loaded** - Steps defined in agent-config.yml
+4. **Process execution works** - Can spawn and monitor child processes
+5. **Output capture works** - Task 018.a captures stdout/stderr
+
+### Pipeline Assumptions
+
+6. **Steps are commands** - Each step is a shell command
+7. **Exit code is truth** - 0 = pass, non-zero = fail
+8. **Order matters** - Steps run in configured sequence
+9. **Timeout enforced** - Long-running steps killed
+10. **Output truncated** - Very long output capped
+
+### Operational Assumptions
+
+11. **Working directory set** - Steps run from repo root
+12. **Environment controlled** - Custom env vars passed
+13. **Cancellation propagated** - Cancel aborts current step
+14. **Results aggregated** - Pipeline reports overall status
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Pipeline Execution
@@ -162,6 +189,77 @@ workflow:
 - [ ] AC-008: Custom commands work
 - [ ] AC-009: Results aggregated
 - [ ] AC-010: Events emitted
+
+---
+
+## Best Practices
+
+### Pipeline Configuration
+
+1. **Start simple** - Begin with minimal verification, add as needed
+2. **Order by speed** - Fast checks (lint) before slow checks (test)
+3. **Fail fast for dev** - Stop on first failure during development
+4. **Full run for CI** - Run all steps to catch all issues
+
+### Step Design
+
+5. **Single responsibility** - One check per step
+6. **Exit codes matter** - 0 = success, non-zero = failure
+7. **Meaningful output** - Help user understand failures
+8. **Timeout appropriately** - Different steps need different limits
+
+### Performance
+
+9. **Cache when possible** - Reuse previous results if inputs unchanged
+10. **Parallel when safe** - Independent steps can run concurrently
+11. **Incremental checks** - Only verify changed files when possible
+12. **Skip unchanged** - Don't re-run checks if nothing changed
+
+---
+
+## Troubleshooting
+
+### Issue: Step times out unexpectedly
+
+**Symptoms:** Step killed before completing
+
+**Causes:**
+- Timeout too short for step type
+- Step has infinite loop or hang
+- System under heavy load
+
+**Solutions:**
+1. Increase timeout for slow steps
+2. Run step manually to identify hang
+3. Check system resources during execution
+
+### Issue: Step output not captured
+
+**Symptoms:** Step fails but no output shown
+
+**Causes:**
+- Output going to wrong stream
+- Buffering issue
+- Process crashing before flush
+
+**Solutions:**
+1. Verify command outputs to stdout/stderr
+2. Add flush commands to scripts
+3. Check for segfaults or crashes
+
+### Issue: Wrong exit code returned
+
+**Symptoms:** Step reports success when it should fail
+
+**Causes:**
+- Script swallows errors
+- Last command succeeds masking earlier failure
+- Tool returns 0 even on warnings
+
+**Solutions:**
+1. Add `set -e` to shell scripts
+2. Check tool's exit code behavior
+3. Add explicit exit code check in step
 
 ---
 

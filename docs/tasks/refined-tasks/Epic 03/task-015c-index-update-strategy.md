@@ -422,6 +422,31 @@ index:
 
 ---
 
+## Best Practices
+
+### Change Detection
+
+1. **Use file timestamps** - Compare mtime for quick change detection
+2. **Hash for verification** - Confirm changes with content hash if needed
+3. **Batch changes** - Coalesce rapid file changes before re-indexing
+4. **Debounce updates** - Wait for activity to settle before index update
+
+### Update Efficiency
+
+5. **Incremental updates only** - Never re-index unchanged files
+6. **Prioritize active files** - Index recently modified files first
+7. **Background processing** - Update index in low-priority background thread
+8. **Checkpoint progress** - Resume interrupted updates from checkpoint
+
+### User Experience
+
+9. **Show progress honestly** - Accurate file counts and ETA
+10. **Allow cancellation** - User can stop long-running updates
+11. **Report completion** - Notify when index is up-to-date
+12. **Explain skipped files** - Log why files were not indexed (ignored, binary, etc.)
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

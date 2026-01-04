@@ -791,6 +791,31 @@ Runners normalize errors into a consistent format:
 
 ---
 
+## Best Practices
+
+### Runner Design
+
+1. **Consistent interface** - All runners implement same ILanguageRunner interface
+2. **Detect automatically** - Auto-detect project type from file patterns
+3. **Allow override** - User can force specific runner via config
+4. **Fail gracefully** - Clear error when no runner matches
+
+### Language-Specific
+
+5. **.NET: Use SDK commands** - Prefer `dotnet` CLI over MSBuild directly
+6. **.NET: Handle multi-targeting** - Support projects targeting multiple frameworks
+7. **Node: Detect package manager** - npm, yarn, pnpm based on lock files
+8. **Node: Handle ESM/CJS** - Support both module systems
+
+### Execution
+
+9. **Stream output** - Show build/test output in real-time
+10. **Parse results** - Extract structured results from test output
+11. **Handle partial failures** - Some tests passing, some failing
+12. **Timeout appropriately** - Build timeouts differ from test timeouts
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

@@ -73,6 +73,38 @@ The following items are explicitly excluded from Task 049.a:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Entity Framework Core provides ORM capabilities
+- ASM-002: ULID provides time-ordered unique identifiers
+- ASM-003: JSON stores extensible metadata and content
+- ASM-004: Database supports efficient queries on chat/message tables
+- ASM-005: Soft delete pattern enables recovery
+
+### Data Model Assumptions
+
+- ASM-006: Chat is the root aggregate for conversations
+- ASM-007: Message belongs to exactly one Chat
+- ASM-008: Message content is immutable after creation
+- ASM-009: Role enum (User, Assistant, System) is fixed
+- ASM-010: Timestamps are stored as UTC DateTimeOffset
+
+### Dependency Assumptions
+
+- ASM-011: Task 050 workspace database provides infrastructure
+- ASM-012: Task 049 main defines overall chat management requirements
+- ASM-013: Task 011.b persistence patterns are followed
+
+### Storage Assumptions
+
+- ASM-014: Message content size is bounded (< 100KB typical)
+- ASM-015: Attachments stored as references, not inline
+- ASM-016: Unit of work pattern manages transactions
+
+---
+
 ## Functional Requirements
 
 ### Chat Entity
@@ -447,6 +479,68 @@ Rolling back 004_add_token_tracking... done.
 - [ ] AC-029: Auto-apply on start
 - [ ] AC-030: Version tracked
 - [ ] AC-031: Rollback works
+
+---
+
+## Best Practices
+
+### Entity Design
+
+- **BP-001: Immutable core properties** - ID, creation timestamp, and core content should never change
+- **BP-002: Use ULIDs for ordering** - ULIDs provide time-ordering benefits over random UUIDs
+- **BP-003: Nullable metadata** - Allow null metadata to avoid empty JSON objects
+- **BP-004: Consistent timestamp handling** - Always use UTC DateTimeOffset
+
+### Storage Patterns
+
+- **BP-005: Repository pattern** - Abstract storage behind interfaces for testability
+- **BP-006: Unit of work** - Group related operations in transactions
+- **BP-007: Soft delete first** - Use soft delete before permanent deletion
+- **BP-008: Eager loading awareness** - Be intentional about navigation property loading
+
+### Data Integrity
+
+- **BP-009: Validate on write** - Check data constraints before persisting
+- **BP-010: Foreign key integrity** - Maintain referential integrity in database
+- **BP-011: Index frequently queried fields** - ChatId, CreatedAt, Role
+- **BP-012: Handle orphaned records** - Clean up messages when chats are deleted
+
+---
+
+## Troubleshooting
+
+### Entity Validation Errors
+
+**Symptom:** Save operation fails with validation error.
+
+**Cause:** Entity properties don't meet constraints.
+
+**Solution:**
+1. Check required properties are set
+2. Verify string lengths are within limits
+3. Ensure foreign keys reference valid records
+
+### Navigation Property Null
+
+**Symptom:** Accessing Chat.Messages returns null.
+
+**Cause:** Lazy loading not enabled or collection not included in query.
+
+**Solution:**
+1. Use Include() in query
+2. Enable lazy loading if appropriate
+3. Check if collection was properly initialized
+
+### Concurrency Conflicts
+
+**Symptom:** Save fails with concurrency exception.
+
+**Cause:** Another process modified the same record.
+
+**Solution:**
+1. Reload entity from database
+2. Merge changes appropriately
+3. Retry the operation
 
 ---
 

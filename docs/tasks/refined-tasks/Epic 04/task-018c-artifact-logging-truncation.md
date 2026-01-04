@@ -622,6 +622,31 @@ acode artifacts stats
 
 ---
 
+## Best Practices
+
+### Artifact Management
+
+1. **Generate unique IDs** - Use UUIDs or similar for artifact identification
+2. **Store metadata separately** - Keep artifact index lightweight for queries
+3. **Compress before storage** - Reduce disk usage for large artifacts
+4. **Set retention policies** - Automatically clean up old artifacts
+
+### Truncation Strategy
+
+5. **Keep both ends** - Preserve beginning and end of large outputs
+6. **Indicate truncation** - Clearly mark where content was truncated
+7. **Preserve full content optionally** - Offer full artifact for detailed inspection
+8. **Base limits on tokens, not bytes** - Token count matters for LLM context
+
+### Logging
+
+9. **Structured logging always** - JSON format for machine parsing
+10. **Include correlation IDs** - Link logs to runs, sessions, tasks
+11. **Log sizes and counts** - Help identify abnormal outputs
+12. **Rotate log files** - Prevent unbounded growth
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

@@ -515,6 +515,31 @@ acode commands --show build
 
 ---
 
+## Best Practices
+
+### Contract Integration
+
+1. **Load contract early** - Parse agent-config.yml at startup
+2. **Validate commands** - Check command definitions are complete
+3. **Allow reload** - Hot-reload contract without restart
+4. **Cache parsed contract** - Don't re-parse on every invocation
+
+### Command Resolution
+
+5. **Priority order** - Contract commands override built-in defaults
+6. **Merge configurations** - Combine contract and runtime options
+7. **Template variables** - Support {{project}}, {{framework}} substitution
+8. **Validate before execute** - Check command requirements are met
+
+### Execution
+
+9. **Respect working directory** - Run in specified directory
+10. **Apply timeout** - Use contract-specified or default timeout
+11. **Environment merging** - Contract env + runtime env + inherited
+12. **Log contract source** - Record which contract command was used
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

@@ -2,6 +2,8 @@ using Acode.Application.Configuration;
 using Acode.Application.Inference;
 using Acode.Infrastructure.Configuration;
 using Acode.Infrastructure.Ollama;
+using Acode.Infrastructure.Vllm;
+using Acode.Infrastructure.Vllm.Client;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Acode.Infrastructure.DependencyInjection;
@@ -68,6 +70,30 @@ public static class ServiceCollectionExtensions
             var httpClient = httpClientFactory.CreateClient("Ollama");
             return new OllamaProvider(httpClient, config);
         });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers vLLM provider with the DI container.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Optional vLLM client configuration. Uses defaults if null.</param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection AddVllmProvider(
+        this IServiceCollection services,
+        VllmClientConfiguration? configuration = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var config = configuration ?? new VllmClientConfiguration();
+        config.Validate();
+
+        // Register configuration as singleton
+        services.AddSingleton(config);
+
+        // Register VllmProvider as IModelProvider
+        services.AddSingleton<IModelProvider, VllmProvider>();
 
         return services;
     }

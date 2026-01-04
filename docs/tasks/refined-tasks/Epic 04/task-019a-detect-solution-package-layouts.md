@@ -625,6 +625,31 @@ Summary:
 
 ---
 
+## Best Practices
+
+### Detection Strategy
+
+1. **Check common patterns first** - .sln, package.json in expected locations
+2. **Recurse with limits** - Don't traverse entire filesystem
+3. **Respect ignores** - Skip node_modules, bin, obj directories
+4. **Cache results** - Store detection results for repeated queries
+
+### Layout Analysis
+
+5. **Parse solution files** - Extract project references from .sln
+6. **Analyze package.json** - Detect workspaces, monorepo patterns
+7. **Identify test projects** - Recognize test frameworks and patterns
+8. **Map dependencies** - Build internal dependency graph
+
+### User Experience
+
+9. **Show clear summary** - What was detected and where
+10. **Handle ambiguity** - When multiple layouts possible, ask user
+11. **Suggest actions** - What commands are available for detected layout
+12. **Support manual override** - Config can specify layout if auto-detect fails
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

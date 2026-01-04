@@ -395,6 +395,31 @@ acode git log --limit 50
 
 ---
 
+## Best Practices
+
+### Status Operations
+
+1. **Use porcelain v1/v2** - Stable parsing format for status
+2. **Handle staged vs unstaged** - Track both index and working tree changes
+3. **Detect renames** - Include rename detection for accurate status
+4. **Batch status checks** - One status call, not per-file
+
+### Diff Operations
+
+5. **Use unified diff format** - Standard patch format for interoperability
+6. **Include context lines** - 3 lines of context by default
+7. **Handle binary files** - Detect and skip binary content
+8. **Support filtering** - Allow diff for specific files or paths
+
+### Log Operations
+
+9. **Use structured format** - --format= with delimiters for parsing
+10. **Limit by default** - Don't fetch entire history without limit
+11. **Include author and date** - Essential metadata for commits
+12. **Support range queries** - Allow rev1..rev2 syntax
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

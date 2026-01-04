@@ -70,6 +70,34 @@ This task covers Docker workers. Local workers are in Task 027.a. Pool managemen
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Docker Available**: Docker Desktop or Docker Engine is installed and running
+2. **Docker API Access**: Application can communicate with Docker daemon via API
+3. **Linux Containers**: Default container mode is Linux containers (most common)
+4. **Image Pull**: Worker container images can be pulled from Docker Hub or local registry
+5. **Bind Mounts**: Host directories can be bind-mounted into containers
+6. **Resource Limits**: Docker cgroups enforce memory/CPU limits
+
+### Container Lifecycle Assumptions
+
+7. **Ephemeral Containers**: Containers are created per-task and removed after completion
+8. **Network Isolation**: Containers have limited network access (configurable)
+9. **Volume Persistence**: Repository data is mounted, not copied into container
+10. **Exit Code Mapping**: Container exit codes map to task success/failure
+11. **Log Streaming**: Container logs stream in real-time during execution
+
+### Fallback Assumptions
+
+12. **Graceful Degradation**: If Docker unavailable, fallback to local process workers
+13. **Feature Detection**: Docker availability is checked at startup
+14. **Configuration Override**: Users can force local-only or Docker-only mode
+15. **Performance Tradeoff**: Container startup overhead is acceptable for isolation benefits
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Container Management
@@ -245,6 +273,77 @@ docker ps --filter "label=acode.worker=true"
 - [ ] AC-010: Security enforced
 - [ ] AC-011: Metrics tracked
 - [ ] AC-012: Cross-platform works
+
+---
+
+## Best Practices
+
+### Container Configuration
+
+1. **Minimal Base Image**: Use slim/alpine images to reduce attack surface
+2. **Pinned Versions**: Use specific image tags, not :latest in production
+3. **Resource Limits**: Always set memory and CPU limits on containers
+4. **No Privileged Mode**: Never run containers with --privileged flag
+
+### Security
+
+5. **Read-Only Root**: Mount container root filesystem as read-only
+6. **Drop Capabilities**: Drop all capabilities except those required
+7. **Non-Root User**: Run container processes as non-root user
+8. **Network Restrictions**: Limit network access to required endpoints only
+
+### Lifecycle Management
+
+9. **Unique Container Names**: Include task ID in container name for traceability
+10. **Force Remove on Cleanup**: Use --force to remove stuck containers
+11. **Log Streaming**: Stream logs in real-time rather than after completion
+12. **Health Checks**: Define container health checks for monitoring
+
+---
+
+## Troubleshooting
+
+### Issue: Docker Not Available
+
+**Symptoms:** "Docker daemon not running" or connection refused errors
+
+**Possible Causes:**
+- Docker Desktop not running (Windows/macOS)
+- Docker daemon not started (Linux)
+- Docker socket permissions incorrect
+
+**Solutions:**
+1. Start Docker Desktop or `sudo systemctl start docker`
+2. Add user to docker group: `sudo usermod -aG docker $USER`
+3. Verify with `docker ps` before running acode
+
+### Issue: Container Startup Slow
+
+**Symptoms:** 10+ seconds delay before task starts executing
+
+**Possible Causes:**
+- Image not cached locally (pulling on each start)
+- Large image size
+- Slow volume mount initialization
+
+**Solutions:**
+1. Pre-pull images: `docker pull acode-worker:latest`
+2. Use smaller base images (alpine vs ubuntu)
+3. Use named volumes instead of bind mounts for performance
+
+### Issue: Container Runs Out of Memory
+
+**Symptoms:** Container killed with OOMKilled status
+
+**Possible Causes:**
+- Memory limit too low for task requirements
+- Memory leak in task execution
+- Large files loaded into memory
+
+**Solutions:**
+1. Increase container memory limit in configuration
+2. Monitor memory usage to identify leak patterns
+3. Use streaming for large file processing
 
 ---
 

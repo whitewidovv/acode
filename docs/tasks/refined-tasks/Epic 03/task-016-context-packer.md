@@ -600,6 +600,31 @@ Chunks:
 
 ---
 
+## Best Practices
+
+### Context Selection
+
+1. **Relevance over recency** - Prioritize content relevant to task over most recent
+2. **Include dependencies** - Add imports, type definitions for selected code
+3. **Preserve logical units** - Don't split functions or classes mid-definition
+4. **Add sufficient context** - Include surrounding code for understanding
+
+### Token Management
+
+5. **Count tokens accurately** - Use proper tokenizer for target model
+6. **Leave headroom** - Reserve tokens for response in budget
+7. **Prioritize ruthlessly** - Better to include less with more context
+8. **Report budget usage** - Show how tokens were allocated
+
+### Output Formatting
+
+9. **Add clear boundaries** - Mark start/end of each code section
+10. **Include file paths** - Always show source file and line numbers
+11. **Consistent structure** - Same format across all context types
+12. **Avoid duplication** - Same content should appear only once
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

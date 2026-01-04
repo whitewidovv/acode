@@ -583,6 +583,31 @@ acode config show
 
 ---
 
+## Best Practices
+
+### Policy Definition
+
+1. **Deny by default** - Explicitly allow, don't explicitly deny
+2. **Least privilege** - Grant minimum permissions required
+3. **Mode-based policies** - Different rules for local-only vs burst mode
+4. **Document all policies** - Clear explanation of what each policy does
+
+### Enforcement
+
+5. **Validate at container creation** - Reject invalid configurations
+6. **Runtime monitoring** - Detect policy violations during execution
+7. **Fail secure** - On error, deny rather than allow
+8. **Log all decisions** - Audit trail for policy enforcement
+
+### User Experience
+
+9. **Clear error messages** - Explain why operation was blocked
+10. **Suggest remediation** - How to adjust policy if needed
+11. **Preview mode** - Show what would be blocked without blocking
+12. **Override with confirmation** - Allow bypass with explicit acknowledgment
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

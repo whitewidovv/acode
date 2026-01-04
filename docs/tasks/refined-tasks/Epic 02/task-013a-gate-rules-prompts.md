@@ -75,6 +75,38 @@ The following items are explicitly excluded from Task 013.a:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Rules are expressed in YAML configuration format
+- ASM-002: Rule matching uses glob patterns for file paths
+- ASM-003: Rule evaluation is fast (< 10ms per operation)
+- ASM-004: Built-in rules provide sensible defaults
+- ASM-005: Prompt text is customizable per rule
+
+### Behavioral Assumptions
+
+- ASM-006: First matching rule determines the outcome
+- ASM-007: Rules are evaluated in definition order
+- ASM-008: No matching rule means operation is allowed
+- ASM-009: Prompts include enough context for informed decisions
+- ASM-010: Users can understand prompt text without technical expertise
+
+### Dependency Assumptions
+
+- ASM-011: Task 013 gate framework calls rule evaluation
+- ASM-012: Task 002 config provides rule storage in .agent/config.yml
+- ASM-013: Task 010 CLI provides prompt display
+
+### Configuration Assumptions
+
+- ASM-014: Default rules are reasonable for most users
+- ASM-015: Custom rules are opt-in, not required
+- ASM-016: Rule precedence is clear and documented
+
+---
+
 ## Functional Requirements
 
 ### Rule Definition

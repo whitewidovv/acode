@@ -58,6 +58,33 @@ This task covers database persistence only. Worktree operations are in 023.a. Cl
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **SQLite database available** - Workspace database from Task 050
+2. **Schema applied** - Migration creates worktree_mappings table
+3. **Unique constraints** - One mapping per task, one per path
+4. **Transaction support** - Atomic operations for consistency
+5. **Index support** - Database indexes for efficient queries
+
+### Data Assumptions
+
+6. **Task IDs stable** - Task IDs don't change during lifecycle
+7. **Paths absolute** - Worktree paths stored as absolute paths
+8. **Timestamps UTC** - All times stored as UTC
+9. **Reasonable scale** - <1000 mappings per workspace typical
+10. **No external sync** - Single-process database access
+
+### Integration Assumptions
+
+11. **Worktree service calls mapping** - Task 023.a uses this for persistence
+12. **Cleanup queries mappings** - Task 023.c queries for cleanup candidates
+13. **Reconciliation possible** - Can sync DB with filesystem state
+14. **Error propagation** - DB errors surface to callers
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-020: Core Operations
@@ -170,6 +197,75 @@ var mapping = await _mappingService.GetMappingByPathAsync("/path/to/worktree");
 - [ ] AC-008: Reconciliation works
 - [ ] AC-009: Orphan detection works
 - [ ] AC-010: Performance benchmarks met
+
+---
+
+## Best Practices
+
+### Data Model
+
+1. **Index by task ID** - Fast lookup by task
+2. **Index by path** - Fast lookup by worktree path
+3. **Store creation time** - Track when mapping created
+4. **Store last access** - Know when worktree was used
+
+### Consistency
+
+5. **Transactional updates** - Create/delete atomically
+6. **Reconcile periodically** - Sync DB with filesystem
+7. **Handle orphans** - Mappings for deleted worktrees
+8. **Handle duplicates** - Prevent same task/path mapped twice
+
+### Query Optimization
+
+9. **Use prepared statements** - Avoid SQL injection, improve perf
+10. **Batch queries** - Load multiple mappings at once
+11. **Cache hot paths** - Frequently accessed mappings in memory
+12. **Log slow queries** - Identify performance issues
+
+---
+
+## Troubleshooting
+
+### Issue: Mapping not found for task
+
+**Symptoms:** GetMappingByTask returns null for active task
+
+**Causes:**
+- Worktree created but mapping not persisted
+- Transaction rolled back
+- Wrong task ID used
+
+**Solutions:**
+1. Check if worktree exists on filesystem
+2. Run reconciliation to sync state
+3. Verify task ID format matches
+
+### Issue: Duplicate mapping error
+
+**Symptoms:** "UNIQUE constraint failed" on create
+
+**Causes:**
+- Task already has a worktree
+- Path already mapped to another task
+
+**Solutions:**
+1. Query existing mapping for task first
+2. Delete old mapping if intentional replacement
+3. Use different path for new worktree
+
+### Issue: Orphaned mappings accumulate
+
+**Symptoms:** Mappings in DB for non-existent worktrees
+
+**Causes:**
+- Worktrees deleted without updating DB
+- Crash during removal operation
+
+**Solutions:**
+1. Run reconciliation: `acode worktree reconcile`
+2. Implement startup reconciliation
+3. Schedule periodic cleanup
 
 ---
 

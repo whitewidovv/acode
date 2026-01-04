@@ -1,10 +1,12 @@
-# Task 006.b: Structured Outputs Enforcement Integration
+# Task 007.e: Structured Outputs Enforcement Integration
 
-**Priority:** P1 – High Priority  
-**Tier:** Core Infrastructure  
-**Complexity:** 13 (Fibonacci points)  
-**Phase:** Foundation  
-**Dependencies:** Task 006, Task 006.a, Task 007 (Tool Schema Registry), Task 004.a, Task 001, Task 002  
+**Priority:** P1 – High Priority
+**Tier:** Core Infrastructure
+**Complexity:** 13 (Fibonacci points)
+**Phase:** Foundation
+**Dependencies:** Task 007, Task 007.a, Task 007.b, Task 007.c, Task 007.d, Task 006, Task 006.a, Task 004.a, Task 001, Task 002
+
+**Note:** This task was originally 006.b but moved to 007.e due to dependency on IToolSchemaRegistry (Task 007). vLLM's structured output enforcement requires tool schema definitions, which are provided by Task 007. The move was approved by the user on 2026-01-04 during Task 006 implementation planning.  
 
 ---
 

@@ -39,6 +39,33 @@ This task covers message validation only. Pre-commit verification is in 024.a. P
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Configuration available** - Message rules in agent-config.yml
+2. **Regex support** - .NET regex for pattern matching
+3. **UTF-8 handling** - Unicode in messages supported
+4. **Line parsing** - Can extract subject line from message
+
+### Rule Assumptions
+
+5. **Subject line is first line** - Separated by blank line from body
+6. **Length counts characters** - Not bytes
+7. **Pattern is optional** - Can allow any message format
+8. **Conventional commits supported** - Standard format available
+9. **Issue references parsed** - Can extract #123 style refs
+10. **Scope is optional** - Only checked if requireScope true
+
+### Validation Assumptions
+
+11. **Synchronous validation** - Fast enough to not need async
+12. **Clear error messages** - Explain what's wrong and how to fix
+13. **Multiple rules** - All configured rules checked
+14. **First failure reported** - Or all failures, configurable
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Validation Rules
@@ -174,6 +201,77 @@ Commit message validation failed:
 - [ ] AC-008: Custom patterns work
 - [ ] AC-009: Configuration respected
 - [ ] AC-010: Performance <10ms
+
+---
+
+## Best Practices
+
+### Message Format
+
+1. **Subject line concise** - Under 72 characters
+2. **Imperative mood** - "Add feature" not "Added feature"
+3. **Separate subject and body** - Blank line between
+4. **Explain why, not what** - Body explains reasoning
+
+### Validation Rules
+
+5. **Start permissive** - Don't over-constrain initially
+6. **Conventional commits optional** - Only if team uses them
+7. **Issue reference flexible** - Support multiple formats
+8. **Provide examples** - Show valid message format
+
+### Error Handling
+
+9. **Clear error messages** - Explain what's wrong
+10. **Show expected format** - Example of valid message
+11. **Highlight specific issue** - Point to exact problem
+12. **Suggest fix** - How to correct the message
+
+---
+
+## Troubleshooting
+
+### Issue: Valid message rejected
+
+**Symptoms:** Message that looks correct is rejected
+
+**Causes:**
+- Hidden characters (non-breaking space, etc.)
+- Line ending issues (CRLF vs LF)
+- Pattern too strict
+
+**Solutions:**
+1. Check for hidden characters in message
+2. Normalize line endings
+3. Review and relax pattern if needed
+
+### Issue: Pattern matching too slow
+
+**Symptoms:** Validation takes noticeable time
+
+**Causes:**
+- Catastrophic regex backtracking
+- Very long message with complex pattern
+- Multiple patterns evaluated
+
+**Solutions:**
+1. Simplify regex pattern
+2. Add length check before pattern
+3. Use possessive quantifiers if available
+
+### Issue: Issue reference not detected
+
+**Symptoms:** #123 in message but "missing issue reference" error
+
+**Causes:**
+- Reference pattern mismatch
+- Reference in wrong location
+- Unicode number characters used
+
+**Solutions:**
+1. Check issuePattern configuration
+2. Verify reference is in checked location
+3. Use ASCII digits only
 
 ---
 

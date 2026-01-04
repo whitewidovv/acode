@@ -75,6 +75,40 @@ The following items are explicitly excluded from Task 011.b:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: SQLite 3.35+ is available for WAL mode and JSON support
+- ASM-002: PostgreSQL 14+ is available for remote tier deployment
+- ASM-003: Entity Framework Core supports both SQLite and PostgreSQL providers
+- ASM-004: Connection strings can be configured via environment or config file
+- ASM-005: Transaction isolation levels are configurable per database
+- ASM-006: Database migrations can be applied automatically on startup
+
+### Environmental Assumptions
+
+- ASM-007: SQLite database file location (.agent/workspace.db) is writable
+- ASM-008: Network connectivity exists when PostgreSQL tier is configured
+- ASM-009: Sufficient disk space exists for database growth
+- ASM-010: Concurrent access from single process is the primary pattern
+
+### Dependency Assumptions
+
+- ASM-011: Task 011.a entity model defines what needs to be persisted
+- ASM-012: Task 050 workspace database provides shared infrastructure
+- ASM-013: Configuration system provides database connection settings
+
+### Reliability Assumptions
+
+- ASM-014: SQLite WAL mode provides crash recovery
+- ASM-015: PostgreSQL transactions provide ACID guarantees
+- ASM-016: Connection pooling is handled by the database provider
+- ASM-017: Transient failures are retryable with exponential backoff
+- ASM-018: Schema migrations are backwards-compatible
+
+---
+
 ## Functional Requirements
 
 ### SQLite Storage

@@ -831,6 +831,31 @@ acode runs optimize
 
 ---
 
+## Best Practices
+
+### Artifact Collection
+
+1. **Collect selectively** - Don't store everything; focus on relevant outputs
+2. **Compress artifacts** - Reduce storage requirements
+3. **Unique identifiers** - Every artifact has traceable ID
+4. **Retain metadata** - Store source, timestamp, size alongside content
+
+### Run Inspection
+
+5. **Query by multiple criteria** - Filter by date, status, task type
+6. **Paginate results** - Handle large run histories efficiently
+7. **Structured output** - JSON format for automation
+8. **Human-readable option** - Pretty output for manual inspection
+
+### Storage Management
+
+9. **Retention policies** - Auto-delete old runs and artifacts
+10. **Size limits per run** - Prevent individual runs from consuming all storage
+11. **Cleanup on failure** - Remove partial artifacts on failed runs
+12. **Export for archival** - Bundle runs for long-term storage
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

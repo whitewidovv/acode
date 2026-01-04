@@ -73,6 +73,38 @@ The following items are explicitly excluded from Task 049.f:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Outbox pattern ensures reliable message delivery
+- ASM-002: PostgreSQL is the remote sync target
+- ASM-003: Network failures are transient and recoverable
+- ASM-004: Conflict resolution uses last-write-wins
+- ASM-005: Sync is bidirectional (up and down)
+
+### Behavioral Assumptions
+
+- ASM-006: Sync is opt-in, not required for local operation
+- ASM-007: Users tolerate eventual consistency
+- ASM-008: Sync happens in background, non-blocking
+- ASM-009: Sync status is visible to users
+- ASM-010: Manual sync trigger is available
+
+### Dependency Assumptions
+
+- ASM-011: Task 049.a data model is sync-compatible
+- ASM-012: Task 011.b provides SQLite and PostgreSQL access
+- ASM-013: Task 002 config stores sync settings
+
+### Reliability Assumptions
+
+- ASM-014: Outbox survives process restarts
+- ASM-015: Failed syncs retry with exponential backoff
+- ASM-016: Sync conflicts are logged for debugging
+
+---
+
 ## Functional Requirements
 
 ### Outbox Pattern
@@ -411,6 +443,68 @@ Chat: chat_abc123 "Feature: Auth"
 
 - [ ] AC-024: Queue depth tracked
 - [ ] AC-025: Lag tracked
+
+---
+
+## Best Practices
+
+### Outbox Pattern
+
+- **BP-001: Atomic writes** - Write to outbox in same transaction as source data
+- **BP-002: Ordered processing** - Process outbox in sequence for consistency
+- **BP-003: Idempotent messages** - Design for safe retry
+- **BP-004: Batch processing** - Group small changes for efficiency
+
+### Sync Strategy
+
+- **BP-005: Conflict resolution** - Use last-write-wins with timestamp comparison
+- **BP-006: Partial sync support** - Continue from last successful point
+- **BP-007: Sync status visibility** - Show users sync state and errors
+- **BP-008: Manual sync option** - Allow forcing immediate sync
+
+### Error Handling
+
+- **BP-009: Exponential backoff** - Increase delay between retries
+- **BP-010: Dead letter handling** - Move permanently failed items aside
+- **BP-011: Alert on failures** - Notify users of persistent sync issues
+- **BP-012: Health monitoring** - Track queue depth and sync lag
+
+---
+
+## Troubleshooting
+
+### Sync Stuck
+
+**Symptom:** Changes not appearing in remote database.
+
+**Cause:** Sync job stuck or network issue.
+
+**Solution:**
+1. Check sync status command
+2. Verify network connectivity
+3. Check for authentication errors
+
+### Conflict Errors
+
+**Symptom:** Sync reports conflict that can't be resolved.
+
+**Cause:** Same record modified in both databases.
+
+**Solution:**
+1. Review conflict details in logs
+2. Apply last-write-wins manually if needed
+3. Check for clock skew between systems
+
+### Outbox Growing
+
+**Symptom:** Outbox table has many pending items.
+
+**Cause:** Sync not keeping up or remote unavailable.
+
+**Solution:**
+1. Check sync job is running
+2. Verify remote database accessibility
+3. Review error logs for failures
 
 ---
 

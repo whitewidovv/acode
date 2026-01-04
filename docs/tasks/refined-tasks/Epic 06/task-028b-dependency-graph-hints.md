@@ -68,6 +68,34 @@ This task covers dependency hints. Task scheduling is in Task 026. Merge coordin
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Graph Library**: In-memory graph data structure is available (custom or library)
+2. **DAG Requirement**: Dependency graph must be directed acyclic graph (DAG)
+3. **Cycle Detection**: Cycles in dependencies are detected and rejected
+4. **Topological Sort**: Tasks can be ordered via topological sort for execution
+5. **Efficient Traversal**: Graph traversal is O(V+E) for scheduling decisions
+6. **Persistence**: Graph state persists across restarts
+
+### Dependency Types
+
+7. **Explicit Dependencies**: Tasks can declare depends_on relationships
+8. **Implicit Hints**: File overlap creates soft dependency hints (not hard blocks)
+9. **Hint vs Dependency**: Hints affect scheduling priority, not execution blocking
+10. **Bidirectional Hints**: File overlap creates mutual hints between both tasks
+11. **Priority Boosting**: Tasks with more dependents get higher effective priority
+
+### Scheduling Assumptions
+
+12. **Scheduler Integration**: Worker pool uses graph for task selection
+13. **Critical Path**: Longest dependency chain determines minimum completion time
+14. **Parallel Safety**: Independent tasks (no edges) can run in parallel
+15. **Visualization**: Graph can be exported for debugging (DOT format)
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Graph Construction
@@ -251,6 +279,77 @@ files:
 - [ ] AC-010: Events emitted
 - [ ] AC-011: CLI commands work
 - [ ] AC-012: DOT export works
+
+---
+
+## Best Practices
+
+### Graph Design
+
+1. **DAG Enforcement**: Always validate no cycles before adding edges
+2. **Immutable Nodes**: Once added, task nodes should not be modified
+3. **Edge Semantics**: Clearly distinguish hard dependencies from soft hints
+4. **Incremental Updates**: Support adding tasks without rebuilding entire graph
+
+### Hint Generation
+
+5. **File Overlap Only**: Generate hints based on actual file overlap, not guesses
+6. **Bidirectional Hints**: If A overlaps B, both A→B and B→A hints exist
+7. **Hint Decay**: Old hints may become stale; consider TTL for hints
+8. **Don't Over-Hint**: Too many hints defeats the purpose; prioritize high-overlap
+
+### Scheduling Integration
+
+9. **Respect Hard Dependencies**: Never schedule task before its dependencies
+10. **Hints Affect Priority**: Tasks with hints should schedule cautiously
+11. **Critical Path First**: Prioritize tasks on critical path for faster completion
+12. **Visualize for Debugging**: Provide DOT export for graph visualization
+
+---
+
+## Troubleshooting
+
+### Issue: Cycle Detected in Dependencies
+
+**Symptoms:** "Circular dependency detected" error when adding task
+
+**Possible Causes:**
+- Explicit circular depends_on declarations
+- File overlap hints creating apparent cycle
+- Task A depends on B which depends on A
+
+**Solutions:**
+1. Review depends_on declarations in task specs
+2. Hints don't create cycles; check if hints wrongly treated as dependencies
+3. Refactor tasks to break circular relationship
+
+### Issue: Tasks Running Out of Order
+
+**Symptoms:** Dependent task starts before its dependency completes
+
+**Possible Causes:**
+- Dependency not registered in graph
+- Scheduler not consulting graph
+- Race condition in status check
+
+**Solutions:**
+1. Verify dependency appears in graph: `acode graph show <task-id>`
+2. Check scheduler logs for task selection reasoning
+3. Ensure atomic check-and-dequeue operation
+
+### Issue: Graph Export Empty or Malformed
+
+**Symptoms:** DOT export produces empty or unparseable output
+
+**Possible Causes:**
+- No tasks in graph
+- Special characters in task IDs/titles not escaped
+- Newlines in labels breaking DOT syntax
+
+**Solutions:**
+1. Verify tasks exist: `acode task list`
+2. Escape special characters in DOT output
+3. Truncate or sanitize task titles for labels
 
 ---
 

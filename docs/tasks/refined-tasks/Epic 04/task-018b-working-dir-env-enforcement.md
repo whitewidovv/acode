@@ -506,6 +506,31 @@ acode exec "dotnet build" --env-mode merge
 
 ---
 
+## Best Practices
+
+### Working Directory
+
+1. **Validate before execution** - Ensure directory exists and is accessible
+2. **Use absolute paths** - Resolve relative paths before spawning process
+3. **Preserve original for logging** - Show user-specified path in logs, resolved path in debug
+4. **Handle symbolic links** - Resolve symlinks consistently
+
+### Environment Variables
+
+5. **Inherit selectively** - Start with clean env, add specific variables
+6. **Redact secrets in logs** - Never log values of secret environment variables
+7. **Validate required variables** - Fail fast if required env vars missing
+8. **Document special variables** - Explain agent-injected variables in docs
+
+### Security
+
+9. **Sanitize PATH** - Don't inherit potentially malicious PATH entries
+10. **Block dangerous variables** - Prevent LD_PRELOAD and similar on Linux
+11. **Audit env changes** - Log what environment was set for each execution
+12. **Enforce sandbox boundaries** - Env vars respect current operating mode
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

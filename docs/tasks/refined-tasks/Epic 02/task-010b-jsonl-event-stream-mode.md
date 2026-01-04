@@ -75,6 +75,42 @@ The following items are explicitly excluded from Task 010.b:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: System.Text.Json is available for JSON serialization with high performance
+- ASM-002: Console output can be reliably flushed after each line for real-time streaming
+- ASM-003: Stdout and stderr can be independently controlled and buffered
+- ASM-004: Console.IsOutputRedirected accurately detects piped output
+- ASM-005: JSON serialization can handle all .NET types used in events
+- ASM-006: Timestamps can be generated with millisecond precision
+
+### Environmental Assumptions
+
+- ASM-007: Consumers can parse JSONL format (one JSON object per line)
+- ASM-008: Pipe buffers are large enough for typical event sizes (< 4KB per event)
+- ASM-009: Consumers process events in real-time or have sufficient buffering
+- ASM-010: UTF-8 encoding is supported by all consumers
+- ASM-011: Newline character is LF (\n) for cross-platform compatibility
+
+### Dependency Assumptions
+
+- ASM-012: Task 010 CLI Framework provides the --json flag handling
+- ASM-013: Task 010.a command routing is complete for command identification
+- ASM-014: All subsystems (model, file, orchestrator) emit events through a central event bus
+- ASM-015: Event schemas are defined and versioned before implementation
+
+### Consumer Assumptions
+
+- ASM-016: Consumers understand JSON Lines format (vs. JSON array)
+- ASM-017: Consumers can handle events arriving out of order in edge cases
+- ASM-018: Consumers implement appropriate timeout handling for long operations
+- ASM-019: Consumers filter events by type rather than parsing all content
+- ASM-020: Consumers expect UTC timestamps and handle timezone conversion
+
+---
+
 ## Functional Requirements
 
 ### JSONL Output Mode

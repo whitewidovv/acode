@@ -73,6 +73,39 @@ The following items are explicitly excluded from Task 013:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Approval gates integrate at operation level (before tool execution)
+- ASM-002: Gate decisions are synchronous - execution waits for response
+- ASM-003: stdin is available for interactive approval input
+- ASM-004: Approval prompts can display operation context clearly
+- ASM-005: Gate framework supports multiple operation types
+
+### Behavioral Assumptions
+
+- ASM-006: Users make informed decisions based on displayed context
+- ASM-007: Approve/Deny are the only valid responses (no partial approval)
+- ASM-008: Denial halts the current operation but not the entire session
+- ASM-009: Timeout on approval request results in implicit denial
+- ASM-010: Gates can be bypassed only via explicit --yes flag
+
+### Dependency Assumptions
+
+- ASM-011: Task 012.b executor triggers approval gates
+- ASM-012: Task 013.a provides rule definitions for when gates apply
+- ASM-013: Task 013.b persists approval decisions
+- ASM-014: Task 010 CLI provides interactive prompt primitives
+
+### Safety Assumptions
+
+- ASM-015: High-risk operations always require approval by default
+- ASM-016: File deletion, command execution are high-risk categories
+- ASM-017: Users understand implications of approval decisions
+
+---
+
 ## Functional Requirements
 
 ### Gate Architecture

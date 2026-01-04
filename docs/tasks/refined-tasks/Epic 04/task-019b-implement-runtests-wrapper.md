@@ -693,6 +693,31 @@ The wrapper automatically detects the test framework:
 
 ---
 
+## Best Practices
+
+### Test Execution
+
+1. **Run all tests by default** - Filter only when explicitly requested
+2. **Parallel when safe** - Enable parallel test execution for speed
+3. **Isolate test runs** - Prevent test pollution between runs
+4. **Timeout per test** - Prevent hung tests from blocking everything
+
+### Result Parsing
+
+5. **Use structured formats** - TRX for .NET, JSON for Jest
+6. **Handle all outcomes** - Pass, fail, skip, inconclusive
+7. **Include timing** - Track duration per test for optimization
+8. **Preserve stack traces** - Full error details for debugging
+
+### Coverage Collection
+
+9. **Optional by default** - Coverage has performance cost
+10. **Standard formats** - Cobertura, Istanbul for tooling compatibility
+11. **Report summary** - Show line and branch coverage percentages
+12. **Store coverage files** - Keep for trend analysis
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

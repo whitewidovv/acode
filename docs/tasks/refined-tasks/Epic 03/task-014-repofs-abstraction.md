@@ -921,6 +921,31 @@ Docker socket: /var/run/docker.sock connected
 
 ---
 
+## Best Practices
+
+### Interface Design
+
+1. **Keep interfaces minimal** - IRepoFS exposes only essential operations; avoid bloated interfaces
+2. **Use async everywhere** - All I/O operations return Task/ValueTask for scalability
+3. **Accept cancellation tokens** - Every operation accepts CancellationToken for cooperative cancellation
+4. **Return structured results** - Use Result<T> pattern over exceptions for expected failures
+
+### Path Handling
+
+5. **Normalize all paths** - Convert to forward slashes and relative paths at API boundary
+6. **Validate path escapes** - Reject paths containing .. that escape workspace root
+7. **Handle case sensitivity** - Abstract platform differences in path comparison
+8. **Preserve original paths** - Store normalized and original paths for user-facing output
+
+### Implementation Strategy
+
+9. **Composition over inheritance** - Use decorator pattern for caching, logging, tracing
+10. **Test via interface** - Write tests against IRepoFS; swap implementations freely
+11. **Fail fast on invalid input** - Validate paths before I/O; throw ArgumentException early
+12. **Log operations contextually** - Include path, operation, timing in structured logs
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

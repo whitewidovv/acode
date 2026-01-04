@@ -74,6 +74,34 @@ This task covers queue persistence and transitions. SQLite schema is in Task 026
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **SQLite Availability**: Microsoft.Data.Sqlite is available for queue persistence
+2. **WAL Mode Support**: SQLite WAL mode is enabled for concurrent read/write performance
+3. **File System Reliability**: Local file system provides ACID guarantees with WAL mode
+4. **Single Writer**: Only one process writes to queue at a time (worker pool is single-host)
+5. **Memory Constraints**: Queue can hold metadata for 10,000+ tasks in memory
+6. **Transaction Support**: SQLite transactions are used for atomic state changes
+
+### State Machine Assumptions
+
+7. **Finite States**: All possible task states are pre-defined and enumerable
+8. **Valid Transitions**: State machine defines allowed transitions as directed graph
+9. **Atomic Transitions**: State changes are atomic (no partial transitions)
+10. **Transition Logging**: All state transitions are recorded in audit log
+11. **Event Emission**: State changes trigger observable events for subscribers
+
+### Integration Assumptions
+
+12. **Task Spec Compatibility**: TaskSpec from task-025 is the unit of work in queue
+13. **Worker Pool Integration**: Worker pool (task-027) dequeues and processes tasks
+14. **CLI Access**: CLI commands (task-025b) can query and modify queue state
+15. **Crash Recovery**: System can recover queue state after unexpected termination
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Queue Operations
@@ -252,6 +280,77 @@ queue:
 - [ ] AC-013: Events emitted
 - [ ] AC-014: Logging complete
 - [ ] AC-015: Performance targets met
+
+---
+
+## Best Practices
+
+### Queue Design
+
+1. **Interface-First**: Define ITaskQueue interface before implementation for testability
+2. **Async All The Way**: All queue operations should be async to avoid blocking
+3. **Bounded Queue**: Consider memory-bounded queue with backpressure for safety
+4. **Priority Ordering**: Always dequeue highest priority tasks first (priority queue semantics)
+
+### Persistence Strategy
+
+5. **Write-Ahead Logging**: Use SQLite WAL mode for concurrent reads during writes
+6. **Batch Writes**: Batch multiple enqueue operations in single transaction when possible
+7. **Index Strategically**: Index status+priority for efficient dequeue queries
+8. **Checkpoint Regularly**: Configure WAL checkpointing to prevent unbounded WAL growth
+
+### State Integrity
+
+9. **Validate Transitions**: Always validate state transitions against allowed graph
+10. **Atomic Updates**: State change + history insert in single transaction
+11. **Emit After Commit**: Only emit events after transaction commits successfully
+12. **Log Everything**: Include before/after state in transition logs for debugging
+
+---
+
+## Troubleshooting
+
+### Issue: Queue Operations Slow Under Load
+
+**Symptoms:** Enqueue/dequeue taking >100ms with many tasks
+
+**Possible Causes:**
+- Missing indexes on frequently queried columns
+- WAL file grown too large without checkpointing
+- Lock contention from concurrent CLI access
+
+**Solutions:**
+1. Add composite index on (status, priority, createdAt)
+2. Configure automatic WAL checkpointing (PRAGMA wal_checkpoint)
+3. Use connection pooling with appropriate timeouts
+
+### Issue: Tasks Stuck in Running State
+
+**Symptoms:** Tasks show Running status but no worker is processing them
+
+**Possible Causes:**
+- Previous worker crashed without cleanup
+- Heartbeat mechanism not detecting stale workers
+- Recovery process not running on startup
+
+**Solutions:**
+1. Run manual recovery: `acode queue recover`
+2. Check heartbeat timeout configuration (default 60s)
+3. Verify recovery runs on application startup
+
+### Issue: State Transition Rejected
+
+**Symptoms:** Transition fails with "invalid transition" error
+
+**Possible Causes:**
+- Attempting transition not in allowed graph
+- Guard condition not satisfied
+- Task already in terminal state
+
+**Solutions:**
+1. Review state machine diagram for allowed transitions
+2. Check guard condition requirements in logs
+3. Use `acode task show <id>` to verify current state
 
 ---
 

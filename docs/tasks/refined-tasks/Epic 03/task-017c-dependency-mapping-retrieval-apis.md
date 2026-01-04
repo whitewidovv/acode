@@ -457,6 +457,31 @@ var path = await dependencyService.FindPathAsync(fromId, toId);
 
 ---
 
+## Best Practices
+
+### Dependency Model
+
+1. **Explicit relationship types** - calls, extends, implements, imports, uses
+2. **Bidirectional navigation** - Query both "depends on" and "depended by"
+3. **Transitive closure** - Compute full dependency chains when needed
+4. **Handle cycles** - Circular dependencies don't break analysis
+
+### API Design
+
+5. **Consistent response format** - Same structure for all dependency queries
+6. **Depth control** - Allow specifying how deep to traverse
+7. **Filter by type** - Query specific relationship types only
+8. **Pagination for large results** - Don't return unbounded lists
+
+### Performance
+
+9. **Pre-compute common queries** - Cache frequently accessed dependency paths
+10. **Lazy loading** - Load full details on demand, not upfront
+11. **Index for traversal** - Optimize storage for graph queries
+12. **Bound traversal depth** - Prevent runaway recursive queries
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

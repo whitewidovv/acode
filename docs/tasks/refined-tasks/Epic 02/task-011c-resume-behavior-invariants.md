@@ -73,6 +73,41 @@ The following items are explicitly excluded from Task 011.c:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Session state is fully serialized and persisted before interruption
+- ASM-002: Event history provides sufficient context for state reconstruction
+- ASM-003: File system state at resume time may differ from interruption time
+- ASM-004: Model availability at resume may differ from original run
+- ASM-005: Process memory state is NOT preserved across restart
+
+### Behavioral Assumptions
+
+- ASM-006: Users expect resume to continue from last completed step
+- ASM-007: In-progress steps should be re-executed, not continued mid-step
+- ASM-008: Resume must validate current state matches expected state
+- ASM-009: Resume failures should provide clear remediation guidance
+- ASM-010: Lock acquisition prevents concurrent resume attempts
+
+### Dependency Assumptions
+
+- ASM-011: Task 011 main provides state machine and session model
+- ASM-012: Task 011.a provides entity structures for session data
+- ASM-013: Task 011.b provides persistence layer for state loading
+- ASM-014: Task 010 CLI provides resume command infrastructure
+
+### Invariant Assumptions
+
+- ASM-015: Session ID is immutable across resume
+- ASM-016: Completed steps are not re-executed
+- ASM-017: Event history is append-only during resume
+- ASM-018: Configuration changes between runs are detected and handled
+- ASM-019: Resume preserves original task description
+
+---
+
 ## Functional Requirements
 
 ### Resume Initiation

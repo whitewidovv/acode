@@ -71,6 +71,38 @@ The following items are explicitly excluded from Task 049.d:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: SQLite FTS5 or similar provides full-text indexing
+- ASM-002: Index updates are near real-time (< 1s delay)
+- ASM-003: Search queries use standard syntax (term AND/OR)
+- ASM-004: Ranking uses relevance scoring
+- ASM-005: Index size is proportional to content size
+
+### Behavioral Assumptions
+
+- ASM-006: Users search for specific terms or phrases
+- ASM-007: Search results show relevant context snippets
+- ASM-008: Filters narrow results (date, chat, sender)
+- ASM-009: Search is fast (< 100ms for typical queries)
+- ASM-010: Empty results provide suggestions
+
+### Dependency Assumptions
+
+- ASM-011: Task 049.a data model provides indexable content
+- ASM-012: Task 050 database supports FTS extensions
+- ASM-013: Task 049.b provides search CLI command
+
+### Indexing Assumptions
+
+- ASM-014: Messages are indexed on creation
+- ASM-015: Index rebuilds are rare but supported
+- ASM-016: Stop words are configurable
+
+---
+
 ## Functional Requirements
 
 ### Index Structure
@@ -404,6 +436,68 @@ search:
 - [ ] AC-023: `search` works
 - [ ] AC-024: Filters work
 - [ ] AC-025: JSON output
+
+---
+
+## Best Practices
+
+### Index Management
+
+- **BP-001: Index incrementally** - Update index on message creation, not full rebuilds
+- **BP-002: Background indexing** - Don't block writes while indexing
+- **BP-003: Monitor index size** - Track growth and set alerts for abnormal expansion
+- **BP-004: Periodic optimization** - Schedule index optimization during low activity
+
+### Search Design
+
+- **BP-005: Simple query syntax** - Support intuitive search without special characters
+- **BP-006: Highlight matches** - Show matching terms in result snippets
+- **BP-007: Relevance ranking** - Sort by relevance, not just recency
+- **BP-008: Faceted filtering** - Enable filtering by chat, date, sender
+
+### Performance
+
+- **BP-009: Query timeout** - Prevent runaway queries from blocking system
+- **BP-010: Result limits** - Cap results per page for responsiveness
+- **BP-011: Index caching** - Cache frequently accessed index segments
+- **BP-012: Async search** - Support cancellation for long queries
+
+---
+
+## Troubleshooting
+
+### Index Corruption
+
+**Symptom:** Search returns errors or incorrect results.
+
+**Cause:** Index became corrupted due to crash or incomplete write.
+
+**Solution:**
+1. Rebuild index from source data
+2. Check for disk errors
+3. Review crash logs
+
+### Search Performance Degraded
+
+**Symptom:** Searches take much longer than expected.
+
+**Cause:** Index needs optimization or query is too broad.
+
+**Solution:**
+1. Run index optimization
+2. Add more specific terms to query
+3. Check database performance
+
+### Results Missing Known Content
+
+**Symptom:** Search doesn't find content you know exists.
+
+**Cause:** Content not indexed yet or stop words removed.
+
+**Solution:**
+1. Wait for index update
+2. Try different search terms
+3. Check if content was redacted
 
 ---
 

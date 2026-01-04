@@ -70,6 +70,34 @@ This task covers log aggregation and display. Worker execution is in Task 027.a 
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Terminal Capabilities**: Terminal supports ANSI escape codes for colors and positioning
+2. **Spectre.Console**: Spectre.Console library is available for rich terminal UI
+3. **Async Streams**: IAsyncEnumerable is used for streaming log data
+4. **Buffer Management**: Ring buffers prevent unbounded memory growth
+5. **Thread Safety**: Log aggregation handles concurrent writes from multiple workers
+6. **Timestamp Precision**: Log timestamps have millisecond precision for ordering
+
+### Display Assumptions
+
+7. **Multi-Panel Layout**: Dashboard can show multiple worker logs simultaneously
+8. **Color Coding**: Each worker has distinct color for visual separation
+9. **Scroll Support**: User can scroll through log history within panel
+10. **Filter Capability**: Logs can be filtered by level, worker, or pattern
+11. **Keyboard Navigation**: Dashboard supports keyboard shortcuts for navigation
+
+### Integration Assumptions
+
+12. **Worker Integration**: Workers emit structured log events (not just raw text)
+13. **Log Levels**: Standard log levels (Debug, Info, Warning, Error) are used
+14. **Export Capability**: Aggregated logs can be exported to file
+15. **Real-Time Updates**: Dashboard updates in real-time as workers produce output
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Log Multiplexing
@@ -261,6 +289,77 @@ acode worker logs --since 1h --export logs.json
 - [ ] AC-010: Export works
 - [ ] AC-011: Performance OK
 - [ ] AC-012: Cross-platform works
+
+---
+
+## Best Practices
+
+### Log Aggregation
+
+1. **Bounded Buffers**: Use ring buffers to prevent unbounded memory growth
+2. **Timestamp Ordering**: Order multiplexed logs by timestamp, not arrival order
+3. **Source Tagging**: Every log line should include worker/task source tag
+4. **Structured Format**: Prefer structured logs (JSON) over plain text
+
+### Display Design
+
+5. **Consistent Colors**: Assign consistent color per worker for visual continuity
+6. **Responsive Layout**: Adjust panel sizes based on terminal dimensions
+7. **Status Bar**: Show aggregate status (tasks running, queue depth) in status bar
+8. **Focus Mode**: Allow focusing on single worker with fullscreen view
+
+### Performance
+
+9. **Throttle Updates**: Don't redraw faster than 30fps (human perception limit)
+10. **Virtualize Long Lists**: Don't render offscreen log lines
+11. **Async Rendering**: UI thread shouldn't block on log processing
+12. **Efficient Scrolling**: Use line-based scrolling, not pixel-based
+
+---
+
+## Troubleshooting
+
+### Issue: Dashboard Flickering
+
+**Symptoms:** Visible flashing/tearing during log updates
+
+**Possible Causes:**
+- Redrawing too frequently (every log line)
+- Not using double buffering
+- Terminal doesn't support ANSI clear sequences
+
+**Solutions:**
+1. Batch updates into 30fps refresh cycle
+2. Use Spectre.Console's live display with double buffering
+3. Detect terminal capabilities and fall back to simpler rendering
+
+### Issue: Logs Out of Order
+
+**Symptoms:** Log messages appear in wrong chronological order
+
+**Possible Causes:**
+- Network latency between workers and aggregator
+- Clock skew between worker processes
+- Timestamp precision insufficient for high-frequency logs
+
+**Solutions:**
+1. Use sequence numbers in addition to timestamps
+2. Allow configurable reordering window (e.g., 100ms)
+3. Ensure all workers use same time source
+
+### Issue: High CPU Usage in Dashboard
+
+**Symptoms:** Dashboard process consuming excessive CPU
+
+**Possible Causes:**
+- Tight polling loop without sleep
+- Complex regex filtering on every log line
+- Unnecessary full redraws
+
+**Solutions:**
+1. Use async/await with proper cancellation, not busy loops
+2. Pre-compile regex patterns, cache filter results
+3. Implement incremental/dirty rectangle rendering
 
 ---
 

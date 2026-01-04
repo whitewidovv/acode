@@ -451,6 +451,31 @@ acode symbols extract src/ --stats
 
 ---
 
+## Best Practices
+
+### Tree-sitter Integration
+
+1. **Robust parsing** - Tree-sitter handles syntax errors gracefully
+2. **Grammar maintenance** - Keep JavaScript/TypeScript grammars updated
+3. **Efficient queries** - Use tree-sitter queries for pattern matching
+4. **Language detection** - Distinguish JS, TS, JSX, TSX correctly
+
+### JavaScript/TypeScript Specifics
+
+5. **Handle module systems** - CommonJS, ESM, AMD imports
+6. **Extract JSDoc comments** - Use for type inference in JS
+7. **Track exports** - Named, default, and re-exports
+8. **Handle dynamic patterns** - Best-effort for computed properties
+
+### Performance
+
+9. **Process pools** - Worker processes for parallel parsing
+10. **Skip node_modules** - Ignore by default, opt-in for specific packages
+11. **Graceful shutdown** - Clean up worker processes properly
+12. **Incremental updates** - Only re-parse changed files
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

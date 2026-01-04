@@ -70,6 +70,34 @@ This task covers integration testing. Unit tests are in individual task specs. M
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Test Framework**: xUnit or similar test framework is available
+2. **Git Access**: Tests can create and manipulate git repositories
+3. **Temp Directories**: Tests use temporary directories for isolation
+4. **Parallel Test Execution**: Tests can run in parallel without interference
+5. **CI Integration**: Tests run in CI pipeline on every commit
+6. **Reasonable Duration**: Each test completes in under 30 seconds
+
+### Fixture Assumptions
+
+7. **Disposable Repos**: Test repositories are created and destroyed per test
+8. **Deterministic Content**: File contents are generated deterministically for reproducibility
+9. **Scenario Coverage**: Tests cover all documented conflict/merge scenarios
+10. **Edge Cases**: Tests include edge cases (empty files, large diffs, binary files)
+11. **Cross-Platform**: Tests pass on Windows, Linux, and macOS
+
+### Quality Assumptions
+
+12. **No Flaky Tests**: Tests are deterministic; no random failures
+13. **Coverage Tracking**: Code coverage is measured and reported
+14. **Assertion Quality**: Tests have meaningful assertions, not just "no exception"
+15. **Documentation**: Each test scenario is documented with expected behavior
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Test Fixtures
@@ -247,6 +275,77 @@ public async Task CleanParallelMerge_DifferentFiles_BothMerge()
 - [ ] AC-010: Tests run in CI
 - [ ] AC-011: Coverage tracked
 - [ ] AC-012: No flaky tests
+
+---
+
+## Best Practices
+
+### Test Design
+
+1. **One Scenario Per Test**: Each test covers exactly one merge scenario
+2. **Descriptive Names**: Test names describe scenario (e.g., TestMerge_SameFileDifferentLines_Succeeds)
+3. **Arrange-Act-Assert**: Clear separation of setup, execution, and verification
+4. **Cleanup on Failure**: Tests clean up even when assertions fail
+
+### Fixture Management
+
+5. **Fresh Repo Per Test**: Never share repository state between tests
+6. **Deterministic Content**: Use fixed strings, not random data
+7. **Minimal Fixtures**: Create only what's needed for the scenario
+8. **Document Scenarios**: Each test has comment explaining what it's testing
+
+### CI Integration
+
+9. **Fast Feedback**: Keep total test suite under 5 minutes
+10. **Parallel Safe**: Tests can run in parallel without interference
+11. **Retry Flaky Tests**: CI should retry failed tests once before failing build
+12. **Coverage Gates**: Block merge if coverage drops below threshold
+
+---
+
+## Troubleshooting
+
+### Issue: Tests Fail on CI but Pass Locally
+
+**Symptoms:** Consistent local pass, consistent CI failure
+
+**Possible Causes:**
+- Environment differences (git version, line endings)
+- Timing differences (slower CI machines)
+- Missing dependencies in CI environment
+
+**Solutions:**
+1. Match CI git version locally
+2. Avoid timing-sensitive tests; use explicit waits
+3. Document all CI dependencies in setup script
+
+### Issue: Flaky Test Failures
+
+**Symptoms:** Same test sometimes passes, sometimes fails
+
+**Possible Causes:**
+- Shared state between tests (not isolated)
+- Timing race conditions
+- File system timing issues (flush delays)
+
+**Solutions:**
+1. Ensure each test uses fresh temp directory
+2. Add explicit synchronization points
+3. Flush file operations before assertions
+
+### Issue: Tests Too Slow
+
+**Symptoms:** Integration test suite takes >10 minutes
+
+**Possible Causes:**
+- Too many full repository creations
+- Unnecessary git operations in setup
+- Sequential execution when parallel possible
+
+**Solutions:**
+1. Use minimal git operations (init, not clone)
+2. Share read-only fixtures where safe
+3. Enable parallel test execution in CI
 
 ---
 

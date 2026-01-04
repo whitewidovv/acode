@@ -469,6 +469,31 @@ $ acode run "Add error handling to the API controller"
 
 ---
 
+## Best Practices
+
+### Atomicity
+
+1. **Write to temp first** - Write changes to temp file, then atomic rename
+2. **Verify before commit** - Validate patch applied correctly before replacing original
+3. **Keep backup until success** - Don't delete backup until new file confirmed written
+4. **Use transactions conceptually** - Apply all changes or none; no partial states
+
+### Rollback Strategy
+
+5. **Journal changes** - Record each modification for potential undo
+6. **Restore original content** - Keep original bytes until patch fully applied
+7. **Handle rollback failures** - If rollback fails, enter safe mode and report
+8. **Clean up temp files** - Remove all temp/backup files on success
+
+### Patch Validation
+
+9. **Parse before apply** - Validate patch syntax completely before modifying files
+10. **Check context matches** - Verify context lines match actual file content
+11. **Handle fuzzy matching** - Allow configurable line offset tolerance
+12. **Report conflicts clearly** - Show expected vs actual content when patches fail
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

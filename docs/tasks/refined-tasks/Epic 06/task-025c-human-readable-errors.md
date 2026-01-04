@@ -69,6 +69,34 @@ This task covers error formatting only. Error generation is in Tasks 025 and 025
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Terminal Capabilities**: Terminal supports ANSI escape codes for color output
+2. **Fallback Rendering**: Plain text fallback available for non-ANSI terminals
+3. **Source Access**: Source files can be read for context snippet extraction
+4. **Screen Width**: Terminal width can be detected for proper formatting
+5. **Unicode Support**: Terminal can render Unicode characters (arrows, checkmarks)
+6. **Diagnostic Patterns**: Common error patterns from compilers (rustc, gcc) inform design
+
+### Error Model Assumptions
+
+7. **Error Codes**: All errors have unique, stable error codes (e.g., TASK-001)
+8. **Severity Levels**: Three severity levels: Error, Warning, Info
+9. **Context Lines**: Source context shows 2-3 lines around error location
+10. **Caret Positioning**: Column-accurate caret (^) positioning for error location
+11. **Suggestion System**: Errors can include actionable fix suggestions
+
+### Integration Assumptions
+
+12. **Validation Errors**: Schema validation errors are mapped to human-readable format
+13. **Stack Trace Filtering**: Internal stack frames are filtered from user-facing output
+14. **Log Correlation**: Errors include correlation IDs for log matching
+15. **Accessibility**: Output is compatible with screen readers (no emoji-only indicators)
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Error Structure
@@ -279,6 +307,77 @@ Summary: 3 errors, 1 warning - validation failed
 - [ ] AC-013: Fallback works
 - [ ] AC-014: Screen reader OK
 - [ ] AC-015: Documentation URL works
+
+---
+
+## Best Practices
+
+### Error Message Design
+
+1. **Lead with What**: Start with what went wrong, not what triggered it
+2. **Be Specific**: "Field 'priority' must be 1-5, got 7" not "Invalid value"
+3. **Actionable Suggestions**: Always include what user can do to fix the issue
+4. **Avoid Jargon**: Use user-facing terms, not internal class/method names
+
+### Formatting Guidelines
+
+5. **Consistent Color Scheme**: Error=red, warning=yellow, info=blue, success=green
+6. **Source Context**: Show 2-3 lines around error with line numbers
+7. **Caret Positioning**: Use ^ to point to exact error column when known
+8. **Truncate Long Values**: Show first/last 50 chars of long strings with ellipsis
+
+### Error Infrastructure
+
+9. **Stable Error Codes**: Error codes (TASK-001) never change meaning once released
+10. **Documentation Links**: Include URL to error documentation for complex issues
+11. **Redact Secrets**: Never include passwords, tokens, or keys in error output
+12. **Aggregate Related**: Group multiple related errors under single heading
+
+---
+
+## Troubleshooting
+
+### Issue: Colors Not Displaying
+
+**Symptoms:** Error output shows ANSI escape codes instead of colors
+
+**Possible Causes:**
+- Terminal doesn't support ANSI escape sequences
+- NO_COLOR environment variable is set
+- Output is being piped/redirected
+
+**Solutions:**
+1. Set TERM environment variable appropriately (xterm-256color)
+2. Unset NO_COLOR if color output is desired
+3. Use --color=always to force color even when piped
+
+### Issue: Context Snippet Not Showing
+
+**Symptoms:** Error messages don't include source code context
+
+**Possible Causes:**
+- Source file not accessible (deleted, moved, permissions)
+- Error occurred before file was parsed (network error)
+- Context extraction disabled for performance
+
+**Solutions:**
+1. Verify source file exists at reported path
+2. Check file read permissions for acode process
+3. Enable verbose mode (--verbose) for additional context
+
+### Issue: Screen Reader Reads Formatting Characters
+
+**Symptoms:** Accessibility tools read "dash dash dash" or escape sequences
+
+**Possible Causes:**
+- ANSI codes not stripped for accessibility output
+- Unicode box-drawing characters confusing reader
+- Missing aria labels or semantic structure
+
+**Solutions:**
+1. Set --no-color and --plain-text for accessibility mode
+2. Configure ACODE_ACCESSIBLE=1 environment variable
+3. File accessibility bug report with specific screen reader version
 
 ---
 

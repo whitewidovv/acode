@@ -70,6 +70,34 @@ This task covers merge coordination. Conflict heuristics are in Task 028.a. Depe
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git Integration**: Git command-line tools are available for merge operations
+2. **Worktree Isolation**: Each task operates in isolated worktree (task-023)
+3. **Branch Strategy**: Each task creates changes on dedicated branch
+4. **Merge Destination**: All tasks merge to same target branch (configurable)
+5. **Sequential Merging**: Only one merge operation executes at a time
+6. **Conflict Detection**: Git's built-in conflict detection is sufficient
+
+### Coordination Assumptions
+
+7. **First-Complete First-Merge**: Task that completes first gets merge priority
+8. **Blocking on Conflict**: Conflicting merges block until resolved or aborted
+9. **Retry After Rebase**: Failed merges can retry after rebase to current head
+10. **Rollback Capability**: Failed merge is automatically rolled back
+11. **Lock Mechanism**: Merge lock prevents concurrent merge attempts
+
+### Integration Assumptions
+
+12. **Worker Pool Integration**: Workers notify coordinator on task completion
+13. **Event Emission**: Merge events are emitted for monitoring (task-013)
+14. **State Persistence**: Pending merge queue persists across restarts
+15. **CLI Control**: Merge operations are controllable via CLI commands
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-030: Merge Coordinator
@@ -262,6 +290,77 @@ Approve? [y/N]
 - [ ] AC-010: Cleanup works
 - [ ] AC-011: Events emitted
 - [ ] AC-012: Metrics tracked
+
+---
+
+## Best Practices
+
+### Merge Strategy
+
+1. **First-Complete Priority**: Always merge first-completed task first for fairness
+2. **Fast-Forward When Possible**: Prefer fast-forward merges to reduce conflict risk
+3. **Atomic Merges**: Each merge is atomic; no partial merges left in repository
+4. **Clean State Requirement**: Verify target branch is clean before merge attempt
+
+### Conflict Handling
+
+5. **Early Detection**: Run conflict heuristics before attempting merge
+6. **Automatic Rebase**: Offer automatic rebase for simple divergence
+7. **Clear Error Messages**: Conflict errors should include file list and line ranges
+8. **Human Escalation**: Unresolvable conflicts escalate to human intervention
+
+### Operational Safety
+
+9. **Merge Lock**: Hold exclusive lock during merge to prevent races
+10. **Transaction Semantics**: Failed merge rolls back completely
+11. **Audit Trail**: Log all merge attempts, successes, and failures
+12. **Verification Step**: Run tests after merge before pushing
+
+---
+
+## Troubleshooting
+
+### Issue: Merge Stuck in Pending State
+
+**Symptoms:** Completed task not merging, shows pending status indefinitely
+
+**Possible Causes:**
+- Merge lock held by previous failed operation
+- Conflict detected but not reported clearly
+- Coordinator not processing completion event
+
+**Solutions:**
+1. Check merge lock status: `acode merge status`
+2. Force release lock if stale: `acode merge unlock --force`
+3. Review coordinator logs for stuck task ID
+
+### Issue: Merge Succeeds but Changes Not Visible
+
+**Symptoms:** Merge reported success but target branch unchanged
+
+**Possible Causes:**
+- Merge was empty (no changes from target)
+- Fast-forward to already-present commit
+- Push step failed after merge
+
+**Solutions:**
+1. Check git log for merge commit
+2. Verify task branch had changes vs target
+3. Check push step logs for errors
+
+### Issue: Frequent Conflicts Between Tasks
+
+**Symptoms:** Many tasks fail merge due to conflicts with each other
+
+**Possible Causes:**
+- Tasks modifying same files concurrently
+- Missing dependency hints in graph
+- Task granularity too coarse
+
+**Solutions:**
+1. Review conflict heuristics thresholds
+2. Add explicit dependencies for related tasks
+3. Break large tasks into smaller, focused units
 
 ---
 
