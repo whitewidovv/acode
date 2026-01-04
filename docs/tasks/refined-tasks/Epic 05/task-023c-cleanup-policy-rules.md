@@ -199,6 +199,76 @@ Protected worktrees are never auto-removed:
 
 ---
 
+## Best Practices
+
+### Policy Configuration
+
+1. **Reasonable defaults** - 7 days age, 10 max worktrees
+2. **Allow override** - Per-workspace configuration
+3. **Document policies** - Explain what each setting does
+4. **Validate settings** - Reject invalid configurations
+
+### Execution Safety
+
+5. **Never clean active tasks** - Running tasks always protected
+6. **Check uncommitted changes** - Warn before cleaning dirty worktrees
+7. **Dry-run by default** - Show what would be cleaned first
+8. **Require confirmation** - For force cleanup of uncommitted
+
+### Monitoring
+
+9. **Log all cleanups** - Track what was removed and why
+10. **Report savings** - Show disk space reclaimed
+11. **Alert on failures** - Notify if cleanup fails
+12. **Track retention stats** - How many worktrees cleaned over time
+
+---
+
+## Troubleshooting
+
+### Issue: Cleanup not running
+
+**Symptoms:** Old worktrees accumulating despite policy
+
+**Causes:**
+- Scheduled cleanup not configured
+- Policy settings too permissive
+- All worktrees are protected
+
+**Solutions:**
+1. Check cleanup schedule in config
+2. Review maxAgeDays and maxWorktrees settings
+3. Verify tasks are being marked complete
+
+### Issue: Unexpected worktree cleanup
+
+**Symptoms:** Active worktree was removed
+
+**Causes:**
+- Task not properly marked as active
+- Mapping out of sync
+- Force cleanup used incorrectly
+
+**Solutions:**
+1. Verify task status tracking is working
+2. Check worktree-task mapping consistency
+3. Review cleanup logs for details
+
+### Issue: Cleanup fails on uncommitted changes
+
+**Symptoms:** Worktrees not cleaned due to changes
+
+**Causes:**
+- Abandoned worktrees with uncommitted work
+- Tasks crashed without committing
+
+**Solutions:**
+1. Use `--force` to clean regardless (with caution)
+2. Investigate why work was not committed
+3. Consider auto-stash before cleanup
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

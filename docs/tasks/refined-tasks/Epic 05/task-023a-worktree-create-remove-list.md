@@ -223,6 +223,75 @@ acode worktree remove .acode/worktrees/task-123 --delete-branch
 
 ---
 
+## Best Practices
+
+### Creation
+
+1. **Validate path first** - Check path is valid and writable
+2. **Generate unique names** - Include task ID in path and branch
+3. **Create branch atomically** - Worktree and branch in one operation
+4. **Log creation details** - Record path, branch, timestamp
+
+### Removal
+
+5. **Check for changes** - Warn if uncommitted work exists
+6. **Remove branch too** - Clean up associated branch
+7. **Force only with confirmation** - Explicit flag required
+8. **Handle missing gracefully** - Already-removed is not error
+
+### Listing
+
+9. **Include status** - Show if worktree is valid/stale
+10. **Show linked branch** - Display branch for each worktree
+11. **Format consistently** - JSON and human-readable options
+12. **Mark stale entries** - Highlight worktrees that need prune
+
+---
+
+## Troubleshooting
+
+### Issue: Worktree creation fails
+
+**Symptoms:** "fatal: already exists" or permission errors
+
+**Causes:**
+- Path already exists (stale worktree)
+- Insufficient permissions
+- Disk space exhausted
+
+**Solutions:**
+1. Run `git worktree prune` to clean stale entries
+2. Check directory permissions
+3. Verify disk space availability
+
+### Issue: Worktree removal fails
+
+**Symptoms:** "not a valid worktree" or path errors
+
+**Causes:**
+- Worktree already removed from filesystem
+- Git metadata out of sync
+- Branch still checked out elsewhere
+
+**Solutions:**
+1. Run `git worktree prune` to sync metadata
+2. Check if worktree exists in `.git/worktrees/`
+3. Use `git worktree remove --force` for manual cleanup
+
+### Issue: List shows stale worktrees
+
+**Symptoms:** Worktrees listed but paths don't exist
+
+**Causes:**
+- Directory deleted without git worktree remove
+- Interrupted operation left partial state
+
+**Solutions:**
+1. Run `git worktree prune` to remove stale entries
+2. Check `.git/worktrees/` for orphaned entries
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

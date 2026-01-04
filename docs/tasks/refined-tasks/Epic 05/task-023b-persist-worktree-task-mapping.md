@@ -200,6 +200,75 @@ var mapping = await _mappingService.GetMappingByPathAsync("/path/to/worktree");
 
 ---
 
+## Best Practices
+
+### Data Model
+
+1. **Index by task ID** - Fast lookup by task
+2. **Index by path** - Fast lookup by worktree path
+3. **Store creation time** - Track when mapping created
+4. **Store last access** - Know when worktree was used
+
+### Consistency
+
+5. **Transactional updates** - Create/delete atomically
+6. **Reconcile periodically** - Sync DB with filesystem
+7. **Handle orphans** - Mappings for deleted worktrees
+8. **Handle duplicates** - Prevent same task/path mapped twice
+
+### Query Optimization
+
+9. **Use prepared statements** - Avoid SQL injection, improve perf
+10. **Batch queries** - Load multiple mappings at once
+11. **Cache hot paths** - Frequently accessed mappings in memory
+12. **Log slow queries** - Identify performance issues
+
+---
+
+## Troubleshooting
+
+### Issue: Mapping not found for task
+
+**Symptoms:** GetMappingByTask returns null for active task
+
+**Causes:**
+- Worktree created but mapping not persisted
+- Transaction rolled back
+- Wrong task ID used
+
+**Solutions:**
+1. Check if worktree exists on filesystem
+2. Run reconciliation to sync state
+3. Verify task ID format matches
+
+### Issue: Duplicate mapping error
+
+**Symptoms:** "UNIQUE constraint failed" on create
+
+**Causes:**
+- Task already has a worktree
+- Path already mapped to another task
+
+**Solutions:**
+1. Query existing mapping for task first
+2. Delete old mapping if intentional replacement
+3. Use different path for new worktree
+
+### Issue: Orphaned mappings accumulate
+
+**Symptoms:** Mappings in DB for non-existent worktrees
+
+**Causes:**
+- Worktrees deleted without updating DB
+- Crash during removal operation
+
+**Solutions:**
+1. Run reconciliation: `acode worktree reconcile`
+2. Implement startup reconciliation
+3. Schedule periodic cleanup
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
