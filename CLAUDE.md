@@ -82,15 +82,49 @@ When you feel the need to announce progress:
 - `src/Acode.Application/Foo/Bar.cs` → `tests/Acode.Application.Tests/Foo/BarTests.cs`
 - `src/Acode.Infrastructure/Foo/Bar.cs` → `tests/Acode.Infrastructure.Tests/Foo/BarTests.cs`
 
-### 3. Mandatory Audit Before PR
+### 3. Subtask Completion is MANDATORY (Hard Rule)
+
+**CRITICAL: A task is NOT complete until ALL subtasks are complete.**
+
+Before marking any task complete, auditing, or creating a PR:
+
+1. **Run subtask discovery**: `find docs/tasks/refined-tasks -name "task-XXX*.md"` (replace XXX with task number)
+2. **List ALL subtasks found**: task-XXXa.md, task-XXXb.md, task-XXXc.md, etc.
+3. **Verify EACH subtask is complete**:
+   - Implementation exists with file paths
+   - Tests written and passing
+   - Commit hash recorded
+4. **If ANY subtask is incomplete**: STOP - task XXX is NOT complete
+5. **Continue implementing incomplete subtasks** - do NOT skip ahead to audit/PR
+
+**There are NO exceptions to this rule.**
+
+### When a Subtask Cannot Be Completed
+
+If you discover a subtask literally cannot be completed (e.g., task-006b requires widget Y which doesn't exist until task-007):
+
+1. **STOP work immediately**
+2. **Explain the blocking dependency to the user**:
+   - "Task XXXb cannot be completed because it requires [dependency]"
+   - "This dependency is delivered in Task YYY"
+   - "Subtask XXXb should be moved to Task YYY or a new task"
+3. **Wait for user approval** to modify the task specification
+4. **Update the task specification files** to reflect the agreed change
+5. **Only then continue** with the modified scope
+
+**NEVER self-approve subtask deferrals.** The user decides task scope, not you.
+
+### 4. Mandatory Audit Before PR
 
 - **DO NOT create PR without passing audit**
+- **DO NOT audit until ALL subtasks are verified complete** (see Section 3)
 - Follow `docs/AUDIT-GUIDELINES.md` checklist line-by-line
 - Audit failure = task is NOT complete
 - Fix all issues, then re-audit from step 1
 - Only create PR when audit passes
 
 **Audit Failure Criteria (automatic task incomplete):**
+- Any subtask incomplete (task-XXXa, task-XXXb, etc.)
 - Any source file without tests
 - Build has errors or warnings
 - Any test fails
