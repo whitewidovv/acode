@@ -102,115 +102,328 @@ CRITICAL: Mode validation MUST occur before ANY AWS API call. A single API call 
 
 | Term | Definition |
 |------|------------|
-| EC2 | Elastic Compute Cloud |
-| AMI | Amazon Machine Image |
-| Instance Type | Hardware specification |
-| Spot | Discounted preemptible |
-| On-Demand | Standard pricing |
-| VPC | Virtual Private Cloud |
-| Security Group | Firewall rules |
+| EC2 | Elastic Compute Cloud—AWS's core virtual server service |
+| AMI | Amazon Machine Image—template containing OS and software for instance launch |
+| Instance Type | Hardware specification (vCPU, memory, network)—e.g., t3.medium, c5.xlarge |
+| Spot Instance | Discounted EC2 capacity that can be interrupted with 2-minute warning |
+| On-Demand Instance | Standard EC2 pricing with guaranteed availability |
+| VPC | Virtual Private Cloud—isolated network environment in AWS |
+| Subnet | Subdivision of VPC with specific IP range and availability zone |
+| Security Group | Virtual firewall controlling inbound/outbound traffic to instances |
+| Key Pair | SSH key pair for secure instance access—public key stored in AWS |
+| EBS | Elastic Block Store—persistent block storage attached to instances |
+| IAM | Identity and Access Management—AWS permission system |
+| Instance Profile | IAM role attached to EC2 instance for AWS API access |
+| User Data | Script executed on first boot of instance for initialization |
+| Availability Zone | Isolated data center within a region |
+| Elastic IP | Static public IP address that can be associated with instances |
+| CloudTrail | AWS audit logging service for API call tracking |
 
 ---
 
 ## Out of Scope
 
-- Azure VM support
-- GCP Compute Engine
-- Lambda functions
-- ECS/EKS containers
-- EC2 Mac instances
-- Dedicated hosts
+The following items are explicitly excluded from Task 031:
+
+- **Azure VM support** — Future epic for multi-cloud
+- **GCP Compute Engine** — Future epic for multi-cloud
+- **AWS Lambda functions** — Serverless is different execution model
+- **ECS/EKS containers** — Container orchestration is separate concern
+- **EC2 Mac instances** — Specialized use case, different provisioning model
+- **Dedicated hosts** — Enterprise feature for compliance, not typical use
+- **Placement groups** — Advanced networking optimization
+- **Instance store volumes** — Ephemeral storage, EBS preferred for persistence
+- **Hibernate support** — Complex state management, terminate simpler
+- **Auto Scaling groups** — Overkill for single-task execution
 
 ---
 
 ## Functional Requirements
 
-### FR-001 to FR-020: EC2 Target
+### EC2 Target Core (FR-031-01 to FR-031-25)
 
-- FR-001: `Ec2ComputeTarget` MUST implement interface
-- FR-002: AWS credentials MUST be configurable
-- FR-003: Credentials from env vars MUST work
-- FR-004: Credentials from profile MUST work
-- FR-005: Credentials from IAM role MUST work
-- FR-006: Region MUST be configurable
-- FR-007: Default region from env/profile
-- FR-008: Instance type MUST be configurable
-- FR-009: Default: t3.medium
-- FR-010: AMI MUST be configurable
-- FR-011: Default: latest Amazon Linux 2
-- FR-012: VPC MUST be configurable
-- FR-013: Subnet MUST be configurable
-- FR-014: Security group MUST be configurable
-- FR-015: Key pair MUST be configurable
-- FR-016: Auto key pair MUST be optional
-- FR-017: IAM instance profile MUST work
-- FR-018: Tags MUST be settable
-- FR-019: Default tag: acode=true
-- FR-020: User data MUST be supported
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-01 | `Ec2ComputeTarget` class MUST implement `IComputeTarget` interface | Must Have |
+| FR-031-02 | Target MUST have unique `TargetId` property (ULID format) | Must Have |
+| FR-031-03 | Target MUST expose `TargetType` as "ec2" | Must Have |
+| FR-031-04 | Target MUST track `State` (NotProvisioned, Provisioning, Ready, TearingDown, Terminated, Failed) | Must Have |
+| FR-031-05 | Target MUST expose `IsReady` property (true only when Ready and SSH connected) | Must Have |
+| FR-031-06 | Target MUST implement `IAsyncDisposable` for proper cleanup | Must Have |
+| FR-031-07 | `DisposeAsync` MUST call `TeardownAsync` if not already terminated | Must Have |
+| FR-031-08 | Target MUST store `Ec2InstanceInfo` after successful provisioning | Must Have |
+| FR-031-09 | Target MUST track provisioning timestamp for cost calculation | Must Have |
+| FR-031-10 | Target MUST compose `SshComputeTarget` for command execution | Must Have |
+| FR-031-11 | All public methods MUST throw `InvalidOperationException` if called when not ready | Must Have |
+| FR-031-12 | Target MUST publish domain events for lifecycle transitions | Should Have |
+| FR-031-13 | Target MUST log all significant operations at appropriate levels | Must Have |
+| FR-031-14 | Target MUST NOT log AWS credentials or SSH private keys | Must Have |
+| FR-031-15 | Target MUST validate operating mode before any AWS API call | Must Have |
+| FR-031-16 | Target MUST throw `ModeViolationException` in local-only or airgapped mode | Must Have |
+| FR-031-17 | Target MUST support configuration via `Ec2Configuration` record | Must Have |
+| FR-031-18 | Target MUST be created via `Ec2ComputeTargetFactory` | Must Have |
+| FR-031-19 | Factory MUST validate mode before creating target | Must Have |
+| FR-031-20 | Factory MUST create appropriate AWS SDK client with region | Must Have |
+| FR-031-21 | Factory MUST resolve configuration from agent-config.yml | Should Have |
+| FR-031-22 | Target MUST support cancellation via CancellationToken on all async methods | Must Have |
+| FR-031-23 | Target MUST cleanup resources on cancellation | Must Have |
+| FR-031-24 | Target MUST be thread-safe for concurrent method calls | Should Have |
+| FR-031-25 | Target MUST expose `InstanceId` property when provisioned | Should Have |
 
-### FR-021 to FR-040: Provisioning
+### AWS Credential Resolution (FR-031-26 to FR-031-40)
 
-- FR-021: `PrepareAsync` MUST provision instance
-- FR-022: Instance MUST be created
-- FR-023: Instance MUST be waited for running
-- FR-024: Instance MUST be waited for SSH
-- FR-025: SSH readiness check MUST retry
-- FR-026: Max SSH retries: 30
-- FR-027: Retry interval: 10 seconds
-- FR-028: Public IP MUST be obtained
-- FR-029: Elastic IP MUST be optional
-- FR-030: Private IP MUST be option
-- FR-031: Security group MUST allow SSH
-- FR-032: Temp security group MUST be optional
-- FR-033: Temp group MUST be cleaned up
-- FR-034: Instance store MUST work
-- FR-035: EBS volume MUST work
-- FR-036: EBS size MUST be configurable
-- FR-037: Default EBS: 20GB
-- FR-038: EBS cleanup on terminate MUST work
-- FR-039: Provisioning timeout MUST exist
-- FR-040: Default timeout: 5 minutes
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-26 | Credentials MUST be resolvable from environment variables | Must Have |
+| FR-031-27 | Credentials MUST be resolvable from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY | Must Have |
+| FR-031-28 | Credentials MUST be resolvable from AWS_SESSION_TOKEN for temporary credentials | Must Have |
+| FR-031-29 | Credentials MUST be resolvable from ~/.aws/credentials file | Must Have |
+| FR-031-30 | Credentials MUST support profile selection via AWS_PROFILE | Must Have |
+| FR-031-31 | Credentials MUST be resolvable from IAM instance profile (when on EC2) | Should Have |
+| FR-031-32 | Credentials MUST be resolvable from ECS task role | Should Have |
+| FR-031-33 | Credential resolution MUST use AWS SDK default chain | Must Have |
+| FR-031-34 | Missing credentials MUST result in clear error message | Must Have |
+| FR-031-35 | Credential error MUST suggest available resolution methods | Should Have |
+| FR-031-36 | Credentials MUST NOT be logged in any form | Must Have |
+| FR-031-37 | Credentials MUST NOT appear in exception messages | Must Have |
+| FR-031-38 | Region MUST be configurable via Ec2Configuration | Must Have |
+| FR-031-39 | Region MUST have fallback to AWS_REGION environment variable | Should Have |
+| FR-031-40 | Region MUST have fallback to AWS_DEFAULT_REGION | Should Have |
 
-### FR-041 to FR-060: Instance Types
+### Instance Type Configuration (FR-031-41 to FR-031-60)
 
-- FR-041: General purpose MUST work (t3, m5)
-- FR-042: Compute optimized MUST work (c5)
-- FR-043: Memory optimized MUST work (r5)
-- FR-044: GPU instances MUST work (g4dn)
-- FR-045: Instance family validation MUST exist
-- FR-046: Invalid instance type MUST error
-- FR-047: Instance type recommendations MUST work
-- FR-048: Recommend based on task
-- FR-049: Spot instances MUST be optional
-- FR-050: Spot price limit MUST work
-- FR-051: Spot interruption handler MUST work
-- FR-052: Spot fallback to on-demand MUST work
-- FR-053: On-demand MUST be default
-- FR-054: Reserved instance check MUST work
-- FR-055: Savings plan check MUST work
-- FR-056: Cost estimate MUST be available
-- FR-057: Cost MUST include all components
-- FR-058: Hourly rate MUST be shown
-- FR-059: Running cost MUST be tracked
-- FR-060: Cost alerts MUST be optional
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-41 | Instance type MUST be configurable via Ec2Configuration | Must Have |
+| FR-031-42 | Default instance type MUST be t3.medium | Must Have |
+| FR-031-43 | General purpose instances MUST be supported (t3, t3a, m5, m5a, m6i) | Must Have |
+| FR-031-44 | Compute optimized instances MUST be supported (c5, c5a, c6i) | Must Have |
+| FR-031-45 | Memory optimized instances MUST be supported (r5, r5a, r6i) | Should Have |
+| FR-031-46 | GPU instances MUST be supported (g4dn, g5, p4d) | Should Have |
+| FR-031-47 | Invalid instance type MUST result in validation error before launch | Must Have |
+| FR-031-48 | Instance type validation MUST check against known instance families | Should Have |
+| FR-031-49 | Instance type MUST be logged at info level during provisioning | Must Have |
+| FR-031-50 | Burst credits MUST be documented for t-series instances | Should Have |
+| FR-031-51 | vCPU and memory MUST be retrievable for selected instance type | Should Have |
+| FR-031-52 | Instance type recommendations MUST be available based on workload hints | Could Have |
+| FR-031-53 | Workload hint "cpu" SHOULD suggest c5/c6i instances | Could Have |
+| FR-031-54 | Workload hint "memory" SHOULD suggest r5/r6i instances | Could Have |
+| FR-031-55 | Workload hint "gpu" SHOULD suggest g4dn/g5 instances | Could Have |
+| FR-031-56 | Workload hint "balanced" SHOULD suggest m5/m6i instances | Could Have |
+| FR-031-57 | Instance type change MUST require new provisioning | Must Have |
+| FR-031-58 | ARM instances (t4g, m6g, c6g) SHOULD be supported | Could Have |
+| FR-031-59 | ARM instances MUST warn about architecture compatibility | Could Have |
+| FR-031-60 | Maximum instance type limits SHOULD be configurable for cost control | Should Have |
 
-### FR-061 to FR-075: Lifecycle
+### AMI Configuration (FR-031-61 to FR-031-80)
 
-- FR-061: Instance state MUST be tracked
-- FR-062: States: pending, running, stopping, terminated
-- FR-063: State polling MUST work
-- FR-064: Poll interval: 5 seconds
-- FR-065: State callbacks MUST work
-- FR-066: Stop MUST work (preserve instance)
-- FR-067: Start MUST work (resume stopped)
-- FR-068: Terminate MUST work (destroy)
-- FR-069: Teardown MUST terminate
-- FR-070: Terminate MUST be idempotent
-- FR-071: Already terminated MUST not error
-- FR-072: Orphan detection MUST work
-- FR-073: Orphan: running with acode tag + old
-- FR-074: Orphan threshold: 2 hours
-- FR-075: Orphan cleanup MUST be safe
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-61 | AMI ID MUST be configurable via Ec2Configuration | Must Have |
+| FR-031-62 | Default AMI MUST be latest Amazon Linux 2023 for region | Must Have |
+| FR-031-63 | AMI resolution MUST query EC2 DescribeImages API | Must Have |
+| FR-031-64 | AMI resolution MUST filter by owner (amazon for default) | Must Have |
+| FR-031-65 | AMI resolution MUST filter by architecture (x86_64 by default) | Must Have |
+| FR-031-66 | AMI resolution MUST sort by creation date descending | Must Have |
+| FR-031-67 | Resolved AMI ID MUST be logged at debug level | Should Have |
+| FR-031-68 | Custom AMI IDs MUST be validated before launch | Must Have |
+| FR-031-69 | Invalid AMI MUST result in clear error with suggested valid AMIs | Should Have |
+| FR-031-70 | AMI MUST be region-specific (no cross-region AMI usage) | Must Have |
+| FR-031-71 | Ubuntu AMIs SHOULD be supported as alternative | Should Have |
+| FR-031-72 | Debian AMIs SHOULD be supported as alternative | Could Have |
+| FR-031-73 | Windows AMIs MUST NOT be supported (SSH requirement) | Must Have |
+| FR-031-74 | AMI MUST have SSH daemon pre-configured and enabled | Must Have |
+| FR-031-75 | AMI default user MUST be determinable (ec2-user, ubuntu, admin) | Must Have |
+| FR-031-76 | User override MUST be configurable for custom AMIs | Should Have |
+| FR-031-77 | AMI architecture MUST match instance type architecture | Must Have |
+| FR-031-78 | ARM AMIs MUST be used for ARM instances (Graviton) | Should Have |
+| FR-031-79 | AMI caching SHOULD reduce API calls for repeated provisions | Could Have |
+| FR-031-80 | AMI age warnings SHOULD be emitted for old AMIs | Could Have |
+
+### Network Configuration (FR-031-81 to FR-031-100)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-81 | VPC ID SHOULD be configurable via Ec2Configuration | Should Have |
+| FR-031-82 | Subnet ID MUST be configurable via Ec2Configuration | Must Have |
+| FR-031-83 | Default VPC MUST be used when subnet not specified | Must Have |
+| FR-031-84 | Security group IDs MUST be configurable as list | Must Have |
+| FR-031-85 | At least one security group MUST allow SSH (port 22) inbound | Must Have |
+| FR-031-86 | Security group validation SHOULD verify SSH access before launch | Should Have |
+| FR-031-87 | Public IP association MUST be configurable (default true) | Must Have |
+| FR-031-88 | Private IP only mode MUST be supported for VPN scenarios | Should Have |
+| FR-031-89 | Elastic IP association SHOULD be supported | Could Have |
+| FR-031-90 | Elastic IP MUST be released on teardown if temporarily allocated | Should Have |
+| FR-031-91 | Temporary security group creation SHOULD be supported | Could Have |
+| FR-031-92 | Temporary security group MUST be deleted on teardown | Should Have |
+| FR-031-93 | Temporary security group MUST restrict SSH to agent's public IP | Should Have |
+| FR-031-94 | Agent public IP detection MUST use external service (ifconfig.me) | Should Have |
+| FR-031-95 | Private subnet support MUST work with NAT gateway | Should Have |
+| FR-031-96 | DNS hostname MUST be enabled for public instances | Should Have |
+| FR-031-97 | Network interface configuration SHOULD be logged | Should Have |
+| FR-031-98 | IPv6 support SHOULD be available when VPC supports it | Could Have |
+| FR-031-99 | Source/dest check disable SHOULD be configurable | Could Have |
+| FR-031-100 | Enhanced networking SHOULD be enabled for supported types | Could Have |
+
+### SSH Key Pair Configuration (FR-031-101 to FR-031-115)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-101 | Key pair name MUST be configurable via Ec2Configuration | Must Have |
+| FR-031-102 | Private key path MUST be resolvable for SSH connection | Must Have |
+| FR-031-103 | Private key path SHOULD default to ~/.ssh/{keyPairName}.pem | Should Have |
+| FR-031-104 | Private key path MUST be configurable explicitly | Should Have |
+| FR-031-105 | Key pair existence MUST be validated before launch | Must Have |
+| FR-031-106 | Invalid key pair MUST result in clear error | Must Have |
+| FR-031-107 | Private key file existence MUST be validated | Must Have |
+| FR-031-108 | Private key file permissions SHOULD be validated (Unix) | Should Have |
+| FR-031-109 | Auto key pair generation SHOULD be supported | Could Have |
+| FR-031-110 | Auto-generated key pair MUST be stored securely | Should Have |
+| FR-031-111 | Auto-generated key pair MUST be deleted on teardown | Should Have |
+| FR-031-112 | Key pair name MUST NOT be logged at info level | Should Have |
+| FR-031-113 | Private key content MUST NOT be logged at any level | Must Have |
+| FR-031-114 | ED25519 keys SHOULD be supported | Could Have |
+| FR-031-115 | RSA keys MUST be supported (AWS default) | Must Have |
+
+### Instance Provisioning (FR-031-116 to FR-031-140)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-116 | `PrepareAsync` MUST provision EC2 instance | Must Have |
+| FR-031-117 | Instance MUST be created via RunInstances API | Must Have |
+| FR-031-118 | RunInstances MUST specify MinCount=1, MaxCount=1 | Must Have |
+| FR-031-119 | Instance MUST be tagged with acode=true | Must Have |
+| FR-031-120 | Instance MUST be tagged with target-id={TargetId} | Should Have |
+| FR-031-121 | Instance MUST be tagged with provisioned-at={timestamp} | Should Have |
+| FR-031-122 | Custom tags MUST be merged with required tags | Should Have |
+| FR-031-123 | Tag specification MUST use ResourceType.Instance | Must Have |
+| FR-031-124 | Instance state MUST be polled until Running | Must Have |
+| FR-031-125 | State polling interval MUST be 5 seconds | Should Have |
+| FR-031-126 | State polling MUST have configurable timeout (default 5 min) | Must Have |
+| FR-031-127 | Pending state timeout MUST terminate instance and throw | Must Have |
+| FR-031-128 | Public IP MUST be captured once Running | Must Have |
+| FR-031-129 | Private IP MUST be captured as fallback | Must Have |
+| FR-031-130 | SSH readiness MUST be verified after Running state | Must Have |
+| FR-031-131 | SSH readiness MUST retry up to 30 times | Must Have |
+| FR-031-132 | SSH retry interval MUST be 10 seconds | Should Have |
+| FR-031-133 | SSH readiness MUST attempt TCP connection to port 22 | Must Have |
+| FR-031-134 | SSH connection failure after retries MUST terminate instance | Must Have |
+| FR-031-135 | SSH target MUST be created after SSH readiness confirmed | Must Have |
+| FR-031-136 | SSH target MUST be configured with instance IP and key | Must Have |
+| FR-031-137 | Workspace preparation MUST be delegated to SSH target | Must Have |
+| FR-031-138 | Provisioning events MUST be published (Launching, Running) | Should Have |
+| FR-031-139 | Provisioning duration MUST be tracked and logged | Should Have |
+| FR-031-140 | Failed provisioning MUST cleanup any created resources | Must Have |
+
+### Instance Lifecycle Management (FR-031-141 to FR-031-160)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-141 | Instance state MUST be trackable via IEc2InstanceManager | Must Have |
+| FR-031-142 | GetStateAsync MUST return current instance state | Must Have |
+| FR-031-143 | GetInstanceAsync MUST return full Ec2InstanceInfo | Should Have |
+| FR-031-144 | Stop MUST be supported for instance preservation | Could Have |
+| FR-031-145 | Start MUST be supported for stopped instances | Could Have |
+| FR-031-146 | Terminate MUST be the primary cleanup method | Must Have |
+| FR-031-147 | Terminate MUST be idempotent | Must Have |
+| FR-031-148 | Terminate on already-terminated MUST NOT error | Must Have |
+| FR-031-149 | TeardownAsync MUST terminate the instance | Must Have |
+| FR-031-150 | TeardownAsync MUST disconnect SSH first | Must Have |
+| FR-031-151 | TeardownAsync MUST calculate run duration | Should Have |
+| FR-031-152 | TeardownAsync MUST calculate final cost | Should Have |
+| FR-031-153 | TeardownAsync MUST publish termination event | Should Have |
+| FR-031-154 | TeardownAsync MUST log instance ID and run duration | Must Have |
+| FR-031-155 | State transitions MUST be logged at info level | Should Have |
+| FR-031-156 | Unexpected state MUST be logged at warning level | Should Have |
+| FR-031-157 | ListAcodeInstancesAsync MUST find all tagged instances | Should Have |
+| FR-031-158 | List MUST filter by acode=true tag | Should Have |
+| FR-031-159 | List MUST filter by region | Should Have |
+| FR-031-160 | List MUST return running and pending instances | Should Have |
+
+### Spot Instance Support (FR-031-161 to FR-031-180)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-161 | Spot instance mode MUST be configurable (default false) | Should Have |
+| FR-031-162 | Spot request MUST use RunInstances with InstanceMarketOptions | Should Have |
+| FR-031-163 | Spot max price MUST be configurable | Should Have |
+| FR-031-164 | Spot max price SHOULD default to on-demand price | Should Have |
+| FR-031-165 | Spot request type MUST be one-time (not persistent) | Should Have |
+| FR-031-166 | Spot capacity unavailable MUST fallback to on-demand | Should Have |
+| FR-031-167 | Spot fallback MUST be configurable (default true) | Should Have |
+| FR-031-168 | Spot interruption MUST be detectable via instance metadata | Could Have |
+| FR-031-169 | Spot interruption MUST publish event with 2-min warning | Could Have |
+| FR-031-170 | Spot interruption event MUST include interruption reason | Could Have |
+| FR-031-171 | Spot savings MUST be logged (spot price vs on-demand) | Should Have |
+| FR-031-172 | IsSpotInstance MUST be tracked in Ec2InstanceInfo | Should Have |
+| FR-031-173 | Spot price history SHOULD be queryable | Could Have |
+| FR-031-174 | Spot availability SHOULD be checked before request | Could Have |
+| FR-031-175 | Spot-only mode SHOULD be available (no fallback) | Could Have |
+| FR-031-176 | On-demand fallback MUST log that fallback occurred | Should Have |
+| FR-031-177 | Spot interruption behavior type MUST be terminate | Should Have |
+| FR-031-178 | Spot pricing MUST use current spot price for cost tracking | Should Have |
+| FR-031-179 | Spot capacity pools SHOULD be configurable | Could Have |
+| FR-031-180 | Spot hibernation MUST NOT be used (complexity) | Must Have |
+
+### Orphan Detection and Cleanup (FR-031-181 to FR-031-200)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-181 | Orphan detection MUST find running instances with acode=true tag | Must Have |
+| FR-031-182 | Orphan threshold MUST be configurable (default 2 hours) | Should Have |
+| FR-031-183 | Orphan MUST be defined as running beyond threshold with no recent activity | Should Have |
+| FR-031-184 | Orphan detection MUST query DescribeInstances with tag filter | Must Have |
+| FR-031-185 | Orphan detection MUST compare launch time to current time | Must Have |
+| FR-031-186 | DetectOrphansAsync MUST return list of orphan Ec2InstanceInfo | Must Have |
+| FR-031-187 | CleanupOrphansAsync MUST terminate specified instance IDs | Should Have |
+| FR-031-188 | Cleanup MUST be safe (verify tag before terminate) | Must Have |
+| FR-031-189 | Cleanup MUST log each terminated instance | Must Have |
+| FR-031-190 | CleanupAllOrphansAsync MUST support dry-run mode | Should Have |
+| FR-031-191 | Dry-run MUST list orphans without terminating | Should Have |
+| FR-031-192 | Cleanup MUST return count of terminated instances | Should Have |
+| FR-031-193 | CLI command MUST expose orphan detection | Should Have |
+| FR-031-194 | CLI command MUST expose orphan cleanup | Should Have |
+| FR-031-195 | CLI cleanup MUST require confirmation (--force to skip) | Should Have |
+| FR-031-196 | Orphan detection SHOULD run periodically in background | Could Have |
+| FR-031-197 | Orphan detection SHOULD publish alert event | Could Have |
+| FR-031-198 | Orphan cost accumulation SHOULD be reported | Could Have |
+| FR-031-199 | Cross-region orphan detection SHOULD be supported | Could Have |
+| FR-031-200 | Orphan detection MUST NOT affect non-acode instances | Must Have |
+
+### EBS Volume Configuration (FR-031-201 to FR-031-215)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-201 | Root EBS volume size MUST be configurable | Should Have |
+| FR-031-202 | Default EBS size MUST be 20GB | Should Have |
+| FR-031-203 | EBS volume type SHOULD be configurable (default gp3) | Should Have |
+| FR-031-204 | EBS IOPS SHOULD be configurable for io1/io2/gp3 | Could Have |
+| FR-031-205 | EBS throughput SHOULD be configurable for gp3 | Could Have |
+| FR-031-206 | EBS encryption SHOULD be configurable (default false) | Should Have |
+| FR-031-207 | EBS encryption key SHOULD be configurable (KMS) | Could Have |
+| FR-031-208 | DeleteOnTermination MUST be true for root volume | Must Have |
+| FR-031-209 | Additional EBS volumes SHOULD be configurable | Could Have |
+| FR-031-210 | Volume tagging MUST match instance tags | Should Have |
+| FR-031-211 | EBS optimization MUST be enabled for supported types | Should Have |
+| FR-031-212 | EBS snapshot support is OUT OF SCOPE | Must Have |
+| FR-031-213 | Instance store volumes are OUT OF SCOPE | Must Have |
+| FR-031-214 | EBS volume configuration MUST be logged | Should Have |
+| FR-031-215 | Insufficient EBS quota MUST result in clear error | Should Have |
+
+### User Data and Initialization (FR-031-216 to FR-031-225)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-031-216 | User data script MUST be configurable | Should Have |
+| FR-031-217 | User data MUST be base64 encoded before API call | Must Have |
+| FR-031-218 | User data size MUST be validated (<16KB) | Should Have |
+| FR-031-219 | User data execution MUST be waited for if specified | Could Have |
+| FR-031-220 | Cloud-init completion SHOULD be detectable | Could Have |
+| FR-031-221 | User data errors SHOULD be detectable via console output | Could Have |
+| FR-031-222 | Instance profile ARN MUST be configurable | Should Have |
+| FR-031-223 | Instance profile MUST grant instance AWS API access | Should Have |
+| FR-031-224 | Instance metadata service v2 SHOULD be required | Should Have |
+| FR-031-225 | IMDSv2 hop limit SHOULD be configurable | Could Have |
 
 ---
 
