@@ -1,5 +1,7 @@
 using Acode.Application.Configuration;
+using Acode.Application.Inference;
 using Acode.Infrastructure.Configuration;
+using Acode.Infrastructure.Ollama;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Acode.Infrastructure.DependencyInjection;
@@ -30,6 +32,41 @@ public static class ServiceCollectionExtensions
             return schemaPath is null
                 ? JsonSchemaValidator.CreateFromEmbeddedResourceAsync().GetAwaiter().GetResult()
                 : JsonSchemaValidator.CreateAsync(schemaPath).GetAwaiter().GetResult();
+        });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers Ollama provider with the DI container.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Optional Ollama configuration. Uses defaults if null.</param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection AddOllamaProvider(
+        this IServiceCollection services,
+        OllamaConfiguration? configuration = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var config = configuration ?? new OllamaConfiguration();
+
+        // Register configuration as singleton
+        services.AddSingleton(config);
+
+        // Register HttpClient for Ollama (named client with pooling)
+        services.AddHttpClient("Ollama", client =>
+        {
+            client.BaseAddress = new Uri(config.BaseUrl);
+            client.Timeout = config.RequestTimeout;
+        });
+
+        // Register OllamaProvider as IModelProvider
+        services.AddSingleton<IModelProvider>(sp =>
+        {
+            var httpClientFactory = sp.GetRequiredService<System.Net.Http.IHttpClientFactory>();
+            var httpClient = httpClientFactory.CreateClient("Ollama");
+            return new OllamaProvider(httpClient, config);
         });
 
         return services;
