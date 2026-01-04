@@ -858,7 +858,7 @@ public sealed class RunRepository : IRunRepository
     private static string TruncateCommand(string command, int maxLength)
     {
         if (command.Length <= maxLength) return command;
-        return command[..(maxLength - 3)] + "...";
+        return string.Concat(command.AsSpan(0, maxLength - 3), "...");
     }
 }
 
