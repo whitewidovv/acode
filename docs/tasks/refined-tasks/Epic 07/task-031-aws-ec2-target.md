@@ -429,84 +429,432 @@ The following items are explicitly excluded from Task 031:
 
 ## Non-Functional Requirements
 
-- NFR-001: Provision in <5 minutes
-- NFR-002: SSH ready in <2 minutes after running
-- NFR-003: Terminate in <30 seconds
-- NFR-004: No orphan instances
-- NFR-005: Cost tracking accurate
-- NFR-006: Spot handling graceful
-- NFR-007: Structured logging
-- NFR-008: Metrics on instance lifecycle
-- NFR-009: IAM least privilege
-- NFR-010: Secrets not logged
+### Performance (NFR-031-01 to NFR-031-15)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031-01 | Instance provisioning time (pending to running) | <90 seconds | Must Have |
+| NFR-031-02 | SSH readiness after running state | <120 seconds | Must Have |
+| NFR-031-03 | Total PrepareAsync duration | <5 minutes | Must Have |
+| NFR-031-04 | Instance termination time | <30 seconds | Must Have |
+| NFR-031-05 | State polling overhead | <100ms per poll | Should Have |
+| NFR-031-06 | AMI resolution API call | <2 seconds | Should Have |
+| NFR-031-07 | Cost calculation overhead | <10ms | Should Have |
+| NFR-031-08 | Orphan detection query | <5 seconds for 100 instances | Should Have |
+| NFR-031-09 | Memory footprint per target | <10MB | Should Have |
+| NFR-031-10 | Concurrent targets supported | 10+ simultaneous | Should Have |
+| NFR-031-11 | API call retry with backoff | Exponential 100ms-5s | Should Have |
+| NFR-031-12 | SDK client creation time | <500ms | Should Have |
+| NFR-031-13 | Configuration parsing time | <50ms | Should Have |
+| NFR-031-14 | Tag filtering performance | O(1) via AWS filter | Should Have |
+| NFR-031-15 | Dispose/cleanup time | <60 seconds | Must Have |
+
+### Reliability (NFR-031-16 to NFR-031-30)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031-16 | Provisioning success rate | >99% (excluding AWS issues) | Must Have |
+| NFR-031-17 | Teardown success rate | 100% (orphan cleanup fallback) | Must Have |
+| NFR-031-18 | SSH connection success after ready | 100% | Must Have |
+| NFR-031-19 | State polling retry on transient failure | 3 retries with backoff | Should Have |
+| NFR-031-20 | API throttling handling | Exponential backoff | Must Have |
+| NFR-031-21 | Partial provisioning cleanup | Guaranteed termination | Must Have |
+| NFR-031-22 | Orphan instances after crash | Detectable within 2 hours | Should Have |
+| NFR-031-23 | Spot interruption handling | Graceful with event | Should Have |
+| NFR-031-24 | Network partition recovery | Retry with fresh connection | Should Have |
+| NFR-031-25 | AWS service outage handling | Clear error, no orphans | Should Have |
+| NFR-031-26 | Cancellation token respect | <5 seconds to respond | Must Have |
+| NFR-031-27 | Resource leak prevention | Zero leaked instances | Must Have |
+| NFR-031-28 | Concurrent operation safety | Thread-safe implementation | Should Have |
+| NFR-031-29 | Idempotent teardown | Safe to call multiple times | Must Have |
+| NFR-031-30 | Health check during long operations | Heartbeat logging | Should Have |
+
+### Security (NFR-031-31 to NFR-031-45)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031-31 | Credential exposure in logs | Zero occurrences | Must Have |
+| NFR-031-32 | Private key exposure in logs | Zero occurrences | Must Have |
+| NFR-031-33 | Credential exposure in exceptions | Zero occurrences | Must Have |
+| NFR-031-34 | IAM permission documentation | Complete list | Must Have |
+| NFR-031-35 | Minimum IAM permissions | Least privilege | Should Have |
+| NFR-031-36 | Security group validation | SSH port check | Should Have |
+| NFR-031-37 | Tag-based access control support | acode=true enforced | Should Have |
+| NFR-031-38 | Instance isolation | Fresh instance per task | Must Have |
+| NFR-031-39 | SSH key file permissions | Validated on Unix | Should Have |
+| NFR-031-40 | No state persistence on instance | True by design | Must Have |
+| NFR-031-41 | Secrets in user data | Warned against | Should Have |
+| NFR-031-42 | IMDSv2 enforcement | Configurable default | Should Have |
+| NFR-031-43 | EBS encryption support | Configurable | Should Have |
+| NFR-031-44 | CloudTrail audit compatibility | All API calls logged | Must Have |
+| NFR-031-45 | Secure credential chain usage | SDK default only | Must Have |
+
+### Maintainability (NFR-031-46 to NFR-031-60)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031-46 | Unit test coverage for provisioner | >90% | Must Have |
+| NFR-031-47 | Unit test coverage for target | >85% | Must Have |
+| NFR-031-48 | Integration test with real AWS | Available (opt-in) | Should Have |
+| NFR-031-49 | Mock AWS SDK for unit tests | Complete mocks | Must Have |
+| NFR-031-50 | Maximum method complexity | 15 cyclomatic | Should Have |
+| NFR-031-51 | Maximum method length | 60 lines | Should Have |
+| NFR-031-52 | Interface segregation | Single responsibility | Should Have |
+| NFR-031-53 | XML documentation coverage | 100% public members | Must Have |
+| NFR-031-54 | Async/await consistency | All I/O operations | Must Have |
+| NFR-031-55 | Dependency injection support | Constructor injection | Must Have |
+| NFR-031-56 | Configuration validation | Fail fast | Should Have |
+| NFR-031-57 | Error message quality | Actionable guidance | Should Have |
+| NFR-031-58 | AWS SDK version tracking | Latest stable | Should Have |
+| NFR-031-59 | Breaking change resilience | Version pinning | Should Have |
+| NFR-031-60 | Code duplication | <5% | Should Have |
+
+### Observability (NFR-031-61 to NFR-031-75)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031-61 | Provisioning start log | Info level | Must Have |
+| NFR-031-62 | Provisioning complete log | Info with duration | Must Have |
+| NFR-031-63 | Provisioning failure log | Error with context | Must Have |
+| NFR-031-64 | Instance ID in all logs | After creation | Must Have |
+| NFR-031-65 | State transition logs | Info level | Should Have |
+| NFR-031-66 | SSH connection attempt logs | Debug level | Should Have |
+| NFR-031-67 | SSH retry logs | Debug with count | Should Have |
+| NFR-031-68 | API call logs | Debug level (redacted) | Should Have |
+| NFR-031-69 | Cost accumulation logs | Debug level | Should Have |
+| NFR-031-70 | Teardown complete log | Info with cost | Must Have |
+| NFR-031-71 | Orphan detection logs | Info level | Should Have |
+| NFR-031-72 | Orphan cleanup logs | Info per instance | Should Have |
+| NFR-031-73 | Metrics: provisioning duration | Histogram | Should Have |
+| NFR-031-74 | Metrics: instance count | Gauge | Should Have |
+| NFR-031-75 | Metrics: cost per run | Counter | Should Have |
+
+### Cost Control (NFR-031-76 to NFR-031-85)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-031-76 | Cost tracking accuracy | ±$0.01 per hour | Should Have |
+| NFR-031-77 | Real-time cost visibility | Updated per minute | Should Have |
+| NFR-031-78 | Cost alert thresholds | Configurable | Should Have |
+| NFR-031-79 | Maximum run duration limit | Configurable | Should Have |
+| NFR-031-80 | Automatic termination on cost limit | Optional | Could Have |
+| NFR-031-81 | Spot vs on-demand savings report | Per session | Should Have |
+| NFR-031-82 | Orphan cost accumulation tracking | Per instance | Should Have |
+| NFR-031-83 | Daily cost aggregation | Available | Could Have |
+| NFR-031-84 | Cost per instance type report | Available | Could Have |
+| NFR-031-85 | No unexpected charges | Guaranteed cleanup | Must Have |
 
 ---
 
 ## User Manual Documentation
 
+### Overview
+
+The EC2 compute target enables the Agentic Coding Bot to burst workloads to AWS cloud infrastructure when local resources are insufficient. Instances are provisioned on-demand, used for task execution, and terminated immediately after—you pay only for compute time actually used.
+
+### Prerequisites
+
+Before using EC2 targets, ensure:
+
+1. **AWS Credentials**: Valid AWS credentials accessible via environment variables, ~/.aws/credentials, or IAM role
+2. **IAM Permissions**: The following permissions are required:
+   - ec2:RunInstances
+   - ec2:DescribeInstances
+   - ec2:TerminateInstances
+   - ec2:DescribeImages
+   - ec2:DescribeSecurityGroups
+   - ec2:DescribeSubnets
+   - ec2:DescribeKeyPairs
+3. **SSH Key Pair**: An EC2 key pair created in your target region with the private key accessible locally
+4. **Security Group**: A security group allowing SSH (port 22) inbound from your IP
+5. **Operating Mode**: Agent must be running in `burst` mode (not `local-only` or `airgapped`)
+
 ### Configuration
 
 ```yaml
-ec2Target:
-  region: us-west-2
-  instanceType: t3.medium
-  ami: ami-0c55b159cbfafe1f0  # Amazon Linux 2
-  subnetId: subnet-12345678
-  securityGroupIds:
-    - sg-12345678
-  keyPairName: acode-key
-  instanceProfile: acode-instance-profile
-  spotEnabled: false
-  spotMaxPrice: "0.05"
-  ebsSizeGb: 20
-  tags:
-    project: my-project
-    environment: dev
+# .agent/config.yml
+compute:
+  ec2:
+    enabled: true
+    region: us-west-2
+    instanceType: t3.medium
+    ami: ami-0c55b159cbfafe1f0  # Optional: defaults to latest Amazon Linux 2023
+    subnetId: subnet-12345678
+    securityGroupIds:
+      - sg-12345678
+    keyPairName: acode-key
+    privateKeyPath: ~/.ssh/acode-key.pem  # Optional: defaults to ~/.ssh/{keyPairName}.pem
+    instanceProfileArn: arn:aws:iam::123456789:instance-profile/acode-profile  # Optional
+    spotEnabled: false
+    spotMaxPrice: "0.05"  # Optional: defaults to on-demand price
+    spotFallbackToOnDemand: true
+    ebsSizeGb: 20
+    ebsVolumeType: gp3
+    ebsEncrypted: false
+    tags:
+      project: my-project
+      environment: dev
+      team: engineering
+    provisionTimeoutMinutes: 5
+    sshReadyTimeoutMinutes: 2
+    orphanThresholdHours: 2
 ```
 
 ### CLI Usage
 
 ```bash
-# Add EC2 target
+# Add EC2 target configuration
 acode target add ec2 \
   --region us-west-2 \
   --instance-type t3.medium \
-  --ami ami-0c55b159cbfafe1f0
+  --key-pair-name acode-key \
+  --security-group-ids sg-12345678 \
+  --subnet-id subnet-12345678
 
-# Test EC2 provisioning
+# Test EC2 provisioning (dry-run)
 acode target test ec2 --dry-run
 
-# List running instances
+# Test EC2 provisioning (actual provision and terminate)
+acode target test ec2
+
+# List running EC2 instances (acode-managed)
 acode target ec2 list
 
-# Terminate orphans
-acode target ec2 cleanup
+# List orphaned instances
+acode target ec2 orphans
+
+# Cleanup orphaned instances (dry-run)
+acode target ec2 cleanup --dry-run
+
+# Cleanup orphaned instances (actual termination)
+acode target ec2 cleanup --force
+
+# Show EC2 pricing for instance type
+acode target ec2 pricing --instance-type c5.xlarge --region us-west-2
+
+# Estimate cost for task duration
+acode target ec2 estimate --instance-type t3.medium --duration 2h
 ```
 
-### Cost Awareness
+### Instance Type Selection Guide
 
-| Instance Type | Hourly Rate | Use Case |
-|--------------|-------------|----------|
-| t3.micro | $0.0104 | Light tasks |
-| t3.medium | $0.0416 | Standard |
-| c5.large | $0.085 | Compute |
-| r5.large | $0.126 | Memory |
-| g4dn.xlarge | $0.526 | GPU |
+| Instance Type | vCPU | Memory | Use Case | Hourly Cost (us-west-2) |
+|--------------|------|--------|----------|-------------------------|
+| t3.micro | 2 | 1 GB | Light tasks, testing | $0.0104 |
+| t3.small | 2 | 2 GB | Small builds | $0.0208 |
+| t3.medium | 2 | 4 GB | Standard (default) | $0.0416 |
+| t3.large | 2 | 8 GB | Larger builds | $0.0832 |
+| c5.large | 2 | 4 GB | Compute-intensive | $0.085 |
+| c5.xlarge | 4 | 8 GB | Heavy compute | $0.17 |
+| c5.2xlarge | 8 | 16 GB | Parallel builds | $0.34 |
+| r5.large | 2 | 16 GB | Memory-intensive | $0.126 |
+| r5.xlarge | 4 | 32 GB | Large memory needs | $0.252 |
+| g4dn.xlarge | 4 | 16 GB + GPU | GPU workloads | $0.526 |
+
+### Spot Instance Usage
+
+Spot instances offer up to 90% cost savings but can be interrupted with 2 minutes notice:
+
+```yaml
+compute:
+  ec2:
+    spotEnabled: true
+    spotMaxPrice: "0.05"  # Max hourly price willing to pay
+    spotFallbackToOnDemand: true  # Fall back if spot unavailable
+```
+
+**When to use spot:**
+- Non-time-critical workloads
+- Tasks that can be retried if interrupted
+- Cost-sensitive batch processing
+
+**When to avoid spot:**
+- Time-critical deployments
+- Long-running tasks (>1 hour)
+- Tasks with expensive setup that can't be easily repeated
+
+### Security Best Practices
+
+1. **Use IAM Roles**: Prefer IAM roles over access keys when running on EC2/ECS
+2. **Restrict Security Groups**: Limit SSH access to your specific IP, not 0.0.0.0/0
+3. **Rotate SSH Keys**: Periodically rotate EC2 key pairs
+4. **Enable EBS Encryption**: For sensitive workloads, enable encryption at rest
+5. **Use Private Subnets**: For production, use private subnets with NAT gateway
+6. **Tag Everything**: Use tags for cost allocation and access control
+
+### Troubleshooting
+
+#### Instance Launch Fails
+
+**Problem:** `UnauthorizedOperation` error
+
+**Solution:** Check IAM permissions. Required actions:
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "ec2:RunInstances",
+    "ec2:DescribeInstances",
+    "ec2:TerminateInstances",
+    "ec2:DescribeImages",
+    "ec2:DescribeSecurityGroups",
+    "ec2:DescribeSubnets",
+    "ec2:DescribeKeyPairs",
+    "ec2:CreateTags"
+  ],
+  "Resource": "*"
+}
+```
+
+#### SSH Connection Fails
+
+**Problem:** Instance running but SSH times out
+
+**Solutions:**
+1. Verify security group allows inbound SSH (port 22) from your IP
+2. Check that subnet has internet gateway (for public IP)
+3. Verify AMI has SSH daemon enabled
+4. Check key pair matches instance and private key exists locally
+
+#### Orphan Instances Found
+
+**Problem:** `acode target ec2 orphans` shows old instances
+
+**Solution:**
+```bash
+# Review orphans first
+acode target ec2 orphans
+
+# Terminate if safe
+acode target ec2 cleanup --force
+```
+
+**Prevention:** Ensure agent shuts down cleanly—orphans result from crashes or force-kills
 
 ---
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: EC2 instance provisions
-- [ ] AC-002: SSH connection works
-- [ ] AC-003: Commands execute
-- [ ] AC-004: Files transfer
-- [ ] AC-005: Instance terminates
-- [ ] AC-006: Spot instances work
-- [ ] AC-007: Mode compliance enforced
-- [ ] AC-008: Orphan detection works
-- [ ] AC-009: Cost tracking works
-- [ ] AC-010: Credentials work
+### Core Implementation (AC-031-01 to AC-031-25)
+
+- [ ] AC-031-01: `Ec2ComputeTarget` class exists and implements `IComputeTarget`
+- [ ] AC-031-02: Target has unique `TargetId` property (ULID format)
+- [ ] AC-031-03: Target exposes `TargetType` as "ec2"
+- [ ] AC-031-04: Target tracks `State` through full lifecycle
+- [ ] AC-031-05: `IsReady` returns true only when Ready and SSH connected
+- [ ] AC-031-06: Target implements `IAsyncDisposable`
+- [ ] AC-031-07: `DisposeAsync` calls `TeardownAsync` if not terminated
+- [ ] AC-031-08: `Ec2InstanceInfo` stored after successful provisioning
+- [ ] AC-031-09: Provisioning timestamp tracked for cost calculation
+- [ ] AC-031-10: `SshComputeTarget` composed for command execution
+- [ ] AC-031-11: Methods throw `InvalidOperationException` when not ready
+- [ ] AC-031-12: Domain events published for lifecycle transitions
+- [ ] AC-031-13: Significant operations logged at appropriate levels
+- [ ] AC-031-14: AWS credentials never appear in logs
+- [ ] AC-031-15: SSH private keys never appear in logs
+- [ ] AC-031-16: Mode validation occurs before any AWS API call
+- [ ] AC-031-17: `ModeViolationException` thrown in local-only mode
+- [ ] AC-031-18: `ModeViolationException` thrown in airgapped mode
+- [ ] AC-031-19: Configuration via `Ec2Configuration` record works
+- [ ] AC-031-20: Factory creates target correctly
+- [ ] AC-031-21: Factory validates mode before creation
+- [ ] AC-031-22: CancellationToken respected on all async methods
+- [ ] AC-031-23: Resources cleaned up on cancellation
+- [ ] AC-031-24: Thread-safe for concurrent calls
+- [ ] AC-031-25: `InstanceId` property exposed when provisioned
+
+### Credential Resolution (AC-031-26 to AC-031-35)
+
+- [ ] AC-031-26: Environment variable credentials work (AWS_ACCESS_KEY_ID)
+- [ ] AC-031-27: ~/.aws/credentials file credentials work
+- [ ] AC-031-28: AWS_PROFILE selection works
+- [ ] AC-031-29: IAM instance profile credentials work (on EC2)
+- [ ] AC-031-30: Missing credentials produce clear error message
+- [ ] AC-031-31: Credentials never logged
+- [ ] AC-031-32: Credentials never in exception messages
+- [ ] AC-031-33: Region configurable via Ec2Configuration
+- [ ] AC-031-34: Region fallback to AWS_REGION works
+- [ ] AC-031-35: Region fallback to AWS_DEFAULT_REGION works
+
+### Instance Provisioning (AC-031-36 to AC-031-55)
+
+- [ ] AC-031-36: `PrepareAsync` provisions EC2 instance
+- [ ] AC-031-37: Instance created via RunInstances API
+- [ ] AC-031-38: Instance type configurable (default t3.medium)
+- [ ] AC-031-39: AMI configurable (default Amazon Linux 2023)
+- [ ] AC-031-40: Subnet configurable
+- [ ] AC-031-41: Security groups configurable
+- [ ] AC-031-42: Key pair configurable
+- [ ] AC-031-43: Instance tagged with acode=true
+- [ ] AC-031-44: Instance state polled until Running
+- [ ] AC-031-45: SSH readiness verified after Running
+- [ ] AC-031-46: SSH retry up to 30 times with 10s interval
+- [ ] AC-031-47: SSH target created after readiness confirmed
+- [ ] AC-031-48: Workspace preparation delegated to SSH target
+- [ ] AC-031-49: Provisioning timeout enforced (default 5 min)
+- [ ] AC-031-50: Failed provisioning cleans up resources
+- [ ] AC-031-51: Provisioning events published
+- [ ] AC-031-52: Provisioning duration logged
+- [ ] AC-031-53: Instance ID logged at info level
+- [ ] AC-031-54: Public IP captured and used for SSH
+- [ ] AC-031-55: Private IP fallback available
+
+### Instance Lifecycle (AC-031-56 to AC-031-70)
+
+- [ ] AC-031-56: Instance state trackable via API
+- [ ] AC-031-57: `TeardownAsync` terminates instance
+- [ ] AC-031-58: SSH disconnected before termination
+- [ ] AC-031-59: Run duration calculated on teardown
+- [ ] AC-031-60: Final cost calculated on teardown
+- [ ] AC-031-61: Termination event published
+- [ ] AC-031-62: Instance ID and duration logged on teardown
+- [ ] AC-031-63: Terminate is idempotent
+- [ ] AC-031-64: Terminate on already-terminated does not error
+- [ ] AC-031-65: State transitions logged
+- [ ] AC-031-66: List instances with acode tag works
+- [ ] AC-031-67: List filters by region
+- [ ] AC-031-68: Stop instance works (optional)
+- [ ] AC-031-69: Start stopped instance works (optional)
+- [ ] AC-031-70: Cleanup guaranteed even on exceptions
+
+### Spot Instances (AC-031-71 to AC-031-80)
+
+- [ ] AC-031-71: Spot instance mode configurable
+- [ ] AC-031-72: Spot request via InstanceMarketOptions
+- [ ] AC-031-73: Spot max price configurable
+- [ ] AC-031-74: Spot fallback to on-demand works
+- [ ] AC-031-75: Spot fallback logged when triggered
+- [ ] AC-031-76: IsSpotInstance tracked in info
+- [ ] AC-031-77: Spot savings logged
+- [ ] AC-031-78: Spot interruption event published (if detected)
+- [ ] AC-031-79: Spot pricing used for cost tracking
+- [ ] AC-031-80: On-demand is default when spot disabled
+
+### Orphan Detection (AC-031-81 to AC-031-90)
+
+- [ ] AC-031-81: Orphan detection finds running instances with acode tag
+- [ ] AC-031-82: Orphan threshold configurable (default 2 hours)
+- [ ] AC-031-83: Orphan detection queries DescribeInstances
+- [ ] AC-031-84: Orphan detection compares launch time
+- [ ] AC-031-85: DetectOrphansAsync returns Ec2InstanceInfo list
+- [ ] AC-031-86: CleanupOrphansAsync terminates instances
+- [ ] AC-031-87: Cleanup verifies tag before terminate
+- [ ] AC-031-88: Cleanup logs each termination
+- [ ] AC-031-89: Dry-run mode lists without terminating
+- [ ] AC-031-90: Non-acode instances never affected
+
+### Cost Tracking (AC-031-91 to AC-031-100)
+
+- [ ] AC-031-91: Pricing info retrievable for instance type
+- [ ] AC-031-92: Running cost calculated from duration
+- [ ] AC-031-93: Spot pricing used when applicable
+- [ ] AC-031-94: Cost alerts configurable
+- [ ] AC-031-95: Cost alert events published
+- [ ] AC-031-96: Total cost logged on teardown
+- [ ] AC-031-97: Cost estimate available before launch
+- [ ] AC-031-98: Pricing accurate to ±$0.01/hour
+- [ ] AC-031-99: Cost breakdown by component available
+- [ ] AC-031-100: No orphans = no unexpected charges
 
 ---
 
