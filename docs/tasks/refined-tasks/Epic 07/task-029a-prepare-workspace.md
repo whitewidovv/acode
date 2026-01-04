@@ -30,16 +30,54 @@ This task covers preparation. Execution is in 029.b. Artifacts are in 029.c. Tea
 
 ### Integration Points
 
-- Task 029: Uses this for lifecycle
-- Task 005: Git operations
-- Task 030-031: Override for specifics
+| Component | Integration Type | Description |
+|-----------|-----------------|-------------|
+| Task 029 IComputeTarget | Primary | Provides target abstraction for workspace operations |
+| Task 005 Git Operations | Data Source | Clones/fetches repository content |
+| Task 030-031 Remote Targets | Extension | Override sync methods for SSH/EC2 specifics |
+| IWorkspacePreparation | Interface | Main contract for preparation logic |
+| ISourceSyncer | Strategy | Pluggable sync implementations (local/git/rsync) |
+| IDependencyInstaller | Strategy | Ecosystem-specific dependency installation |
+| ICacheManager | Optimization | Manages dependency and artifact caches |
 
 ### Failure Modes
 
-- Sync failure → Retry or fail
-- Dependency install failure → Report clearly
-- Disk full → Cleanup and retry
-- Timeout → Cancel and report
+| Failure Type | Detection | Recovery | User Impact |
+|--------------|-----------|----------|-------------|
+| Network timeout during sync | Connection error | Retry with backoff (3x) | Delayed preparation |
+| Disk space exhausted | IOException | Cleanup temp files, report space needed | Must free space |
+| Dependency install failure | Non-zero exit | Log details, report packages | Manual intervention |
+| Permission denied | UnauthorizedAccess | Clear error message | Fix permissions |
+| Invalid ref (branch/commit) | Git exit code | Report available refs | Fix configuration |
+| Corrupted cache | Hash mismatch | Invalidate cache, re-sync | Automatic recovery |
+| Submodule failure | Git exit code | Report submodule name | Fix submodule config |
+| Custom command failure | Non-zero exit | Log output, fail preparation | Fix command |
+
+---
+
+## Assumptions
+
+1. **Target Ready State**: The compute target is in a state where filesystem operations are possible
+2. **Network Access**: For remote sources, network connectivity is available (respecting mode constraints)
+3. **Git Availability**: Git is installed on all target types that need repository sync
+4. **Package Manager Access**: Package managers (dotnet, npm, pip) are available for dependency installation
+5. **Credential Access**: SSH keys or tokens for private repos are properly configured
+6. **Disk Space**: Sufficient disk space exists on target (validated before sync)
+7. **Time Synchronization**: Target system clocks are reasonably synchronized for cache invalidation
+8. **UTF-8 Support**: File systems support UTF-8 encoded paths and content
+
+---
+
+## Security Considerations
+
+1. **Source Validation**: Only sync from configured/whitelisted sources - never execute arbitrary URLs
+2. **Credential Protection**: Never log SSH keys, tokens, or credentials in preparation output
+3. **Path Traversal Prevention**: Sanitize paths to prevent `../` escapes during sync
+4. **Executable Permissions**: prepareCommands have explicit permissions, logged for audit
+5. **Environment Isolation**: Preparation commands run in sandboxed environment where possible
+6. **Dependency Integrity**: Verify package checksums when lockfiles are present
+7. **Submodule Security**: Submodule URLs validated against allowed sources
+8. **Cache Poisoning Prevention**: Cache entries keyed by content hash, not just path
 
 ---
 
@@ -67,76 +105,154 @@ This task covers preparation. Execution is in 029.b. Artifacts are in 029.c. Tea
 
 ## Functional Requirements
 
-### FR-001 to FR-030: Preparation Steps
+### Preparation Steps (FR-029A-01 to FR-029A-30)
 
-- FR-001: `PrepareWorkspaceAsync` MUST be called
-- FR-002: Config MUST specify source
-- FR-003: Source: repo path or URL
-- FR-004: Config MUST specify ref
-- FR-005: Ref: branch, tag, or commit
-- FR-006: Config MUST specify worktree
-- FR-007: Worktree: target path
-- FR-008: Workspace MUST be created
-- FR-009: Directory MUST be clean
-- FR-010: Existing files MAY be cleaned
-- FR-011: Clean option MUST be configurable
-- FR-012: Default: clean before sync
-- FR-013: Source MUST be synced
-- FR-014: Local: copy or symlink
-- FR-015: Remote: rsync or git clone
-- FR-016: Ref MUST be checked out
-- FR-017: Checkout MUST be detached HEAD
-- FR-018: Submodules MUST be updated
-- FR-019: Submodule depth MUST be configurable
-- FR-020: Dependencies MUST be installed
-- FR-021: .NET: `dotnet restore`
-- FR-022: Node: `npm ci` or `yarn install`
-- FR-023: Python: `pip install -r requirements.txt`
-- FR-024: Detection MUST be automatic
-- FR-025: Multiple ecosystems MUST work
-- FR-026: Custom commands MUST be supported
-- FR-027: prepareCommands config option
-- FR-028: Commands MUST run in order
-- FR-029: Failure MUST stop preparation
-- FR-030: Success MUST update state to Ready
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029A-01 | `PrepareWorkspaceAsync(WorkspaceConfig, CancellationToken)` method MUST be defined | Must Have |
+| FR-029A-02 | WorkspaceConfig MUST specify source (repository path or URL) | Must Have |
+| FR-029A-03 | Source MUST support local filesystem paths | Must Have |
+| FR-029A-04 | Source MUST support git repository URLs (https, ssh) | Must Have |
+| FR-029A-05 | WorkspaceConfig MUST specify ref (branch, tag, or commit SHA) | Must Have |
+| FR-029A-06 | Ref MUST support branch names | Must Have |
+| FR-029A-07 | Ref MUST support tag names | Must Have |
+| FR-029A-08 | Ref MUST support full commit SHAs | Must Have |
+| FR-029A-09 | WorkspaceConfig MUST specify target workspace path | Must Have |
+| FR-029A-10 | Workspace directory MUST be created if not exists | Must Have |
+| FR-029A-11 | Existing workspace files MAY be cleaned before sync | Should Have |
+| FR-029A-12 | Clean option MUST be configurable (default: true) | Should Have |
+| FR-029A-13 | Source code MUST be synced to workspace | Must Have |
+| FR-029A-14 | Local source MUST use efficient copy or symlink | Should Have |
+| FR-029A-15 | Remote source MUST use rsync or git clone | Must Have |
+| FR-029A-16 | Specified ref MUST be checked out after sync | Must Have |
+| FR-029A-17 | Checkout MUST use detached HEAD for consistency | Should Have |
+| FR-029A-18 | Git submodules MUST be updated if present | Should Have |
+| FR-029A-19 | Submodule depth MUST be configurable (default: 1) | Could Have |
+| FR-029A-20 | Dependencies MUST be installed after checkout | Must Have |
+| FR-029A-21 | .NET projects MUST run `dotnet restore` | Must Have |
+| FR-029A-22 | Node projects MUST run `npm ci` or `yarn install` | Must Have |
+| FR-029A-23 | Python projects MUST run `pip install -r requirements.txt` | Must Have |
+| FR-029A-24 | Ecosystem detection MUST be automatic based on project files | Must Have |
+| FR-029A-25 | Multiple ecosystems in same project MUST be supported | Should Have |
+| FR-029A-26 | Custom preparation commands MUST be supported via config | Should Have |
+| FR-029A-27 | Custom commands MUST be defined in `prepareCommands` array | Should Have |
+| FR-029A-28 | Custom commands MUST run in order (sequential execution) | Must Have |
+| FR-029A-29 | Any command failure MUST stop preparation and report error | Must Have |
+| FR-029A-30 | Successful preparation MUST transition target to Ready state | Must Have |
 
-### FR-031 to FR-050: Optimization
+### Caching and Optimization (FR-029A-31 to FR-029A-50)
 
-- FR-031: Caching MUST be supported
-- FR-032: Dependency cache MUST work
-- FR-033: .NET NuGet cache
-- FR-034: Node node_modules cache
-- FR-035: Python venv cache
-- FR-036: Cache location MUST be configurable
-- FR-037: Cache invalidation MUST work
-- FR-038: Invalidation on lockfile change
-- FR-039: Incremental sync MUST work
-- FR-040: Only changed files MUST transfer
-- FR-041: rsync delta MUST be used
-- FR-042: git fetch MUST be incremental
-- FR-043: Parallel download MUST work
-- FR-044: Large files MAY parallelize
-- FR-045: Progress MUST be reported
-- FR-046: Progress events MUST emit
-- FR-047: ETA MUST be estimated
-- FR-048: Cancellation MUST be respected
-- FR-049: Partial state MUST cleanup
-- FR-050: Retry MUST be configurable
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029A-31 | Dependency caching MUST be supported | Should Have |
+| FR-029A-32 | .NET MUST cache NuGet packages | Should Have |
+| FR-029A-33 | Node MUST cache node_modules | Should Have |
+| FR-029A-34 | Python MUST cache virtualenv | Should Have |
+| FR-029A-35 | Cache location MUST be configurable | Should Have |
+| FR-029A-36 | Cache MUST be invalidated on lockfile change | Must Have |
+| FR-029A-37 | Lockfile detection: packages.lock.json, package-lock.json, requirements.txt | Must Have |
+| FR-029A-38 | Incremental sync MUST be supported for repeated preparation | Should Have |
+| FR-029A-39 | Only changed files MUST transfer on incremental sync | Should Have |
+| FR-029A-40 | rsync MUST use delta transfer for remote targets | Should Have |
+| FR-029A-41 | git fetch MUST be incremental (not full clone) | Should Have |
+| FR-029A-42 | Parallel file transfer MAY be used for large files | Could Have |
+| FR-029A-43 | Progress MUST be reported during sync | Must Have |
+| FR-029A-44 | Progress events MUST include bytes transferred and total | Must Have |
+| FR-029A-45 | Progress MUST estimate remaining time (ETA) | Should Have |
+| FR-029A-46 | Cancellation token MUST be respected at all phases | Must Have |
+| FR-029A-47 | Partial state MUST be cleaned up on cancellation | Must Have |
+| FR-029A-48 | Retry count MUST be configurable (default: 3) | Should Have |
+| FR-029A-49 | Retry MUST use exponential backoff | Should Have |
+| FR-029A-50 | Preparation timeout MUST be configurable (default: 10min) | Should Have |
+
+### Ecosystem Detection (FR-029A-51 to FR-029A-65)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029A-51 | `IEcosystemDetector` interface MUST be defined | Must Have |
+| FR-029A-52 | Detector MUST identify .NET by *.csproj, *.sln, *.fsproj | Must Have |
+| FR-029A-53 | Detector MUST identify Node by package.json | Must Have |
+| FR-029A-54 | Detector MUST identify Python by requirements.txt, setup.py, pyproject.toml | Must Have |
+| FR-029A-55 | Detector MUST identify Go by go.mod | Should Have |
+| FR-029A-56 | Detector MUST identify Rust by Cargo.toml | Should Have |
+| FR-029A-57 | Detector MUST return `EcosystemType` flags enum | Must Have |
+| FR-029A-58 | Multiple ecosystems MUST be detected simultaneously | Should Have |
+| FR-029A-59 | Detection MUST search workspace root and immediate subdirectories | Must Have |
+| FR-029A-60 | Detection MUST be cached per workspace path | Should Have |
+| FR-029A-61 | Cache MUST be invalidated on workspace changes | Should Have |
+| FR-029A-62 | Detection result MUST be logged for debugging | Should Have |
+| FR-029A-63 | Unknown ecosystems MUST NOT fail (just skip dependency install) | Must Have |
+| FR-029A-64 | Custom ecosystem detection MUST be extensible | Could Have |
+| FR-029A-65 | Detection timeout MUST be <5 seconds | Should Have |
+
+### Dependency Installation (FR-029A-66 to FR-029A-80)
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-029A-66 | `IDependencyInstaller` interface MUST be defined | Must Have |
+| FR-029A-67 | Installer MUST accept ecosystem type and workspace path | Must Have |
+| FR-029A-68 | Installer MUST run appropriate package manager command | Must Have |
+| FR-029A-69 | Installer MUST capture stdout/stderr for logging | Must Have |
+| FR-029A-70 | Installer MUST report progress via events | Should Have |
+| FR-029A-71 | Installer MUST respect cancellation token | Must Have |
+| FR-029A-72 | Installer MUST use --frozen-lockfile equivalents where available | Should Have |
+| FR-029A-73 | Installer MUST fail on missing lockfile if configured | Should Have |
+| FR-029A-74 | Installer MUST support offline mode for airgapped | Must Have |
+| FR-029A-75 | Offline mode MUST use pre-populated cache | Must Have |
+| FR-029A-76 | Installer MUST validate installation success | Must Have |
+| FR-029A-77 | Validation: check for expected artifacts (bin, lib, etc.) | Should Have |
+| FR-029A-78 | Installer MUST support timeout (default: 5min per ecosystem) | Should Have |
+| FR-029A-79 | Installer MUST log package manager version used | Should Have |
+| FR-029A-80 | Installer errors MUST include package manager output | Must Have |
 
 ---
 
 ## Non-Functional Requirements
 
-- NFR-001: Preparation MUST complete in <5min
-- NFR-002: Large repo (1GB) MUST handle
-- NFR-003: Network interruption MUST retry
-- NFR-004: Disk space MUST be checked
-- NFR-005: Permission errors MUST report
-- NFR-006: Idempotent preparation
-- NFR-007: Parallel preparation MUST work
-- NFR-008: Resource cleanup on failure
-- NFR-009: Clear progress reporting
-- NFR-010: Structured logging
+### Performance (NFR-029A-01 to NFR-029A-10)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029A-01 | Small repo preparation (<100 files) | <30 seconds | Must Have |
+| NFR-029A-02 | Medium repo preparation (100-1000 files) | <2 minutes | Must Have |
+| NFR-029A-03 | Large repo preparation (1GB+) | <5 minutes | Should Have |
+| NFR-029A-04 | Cached dependency restore | <10 seconds | Should Have |
+| NFR-029A-05 | Incremental sync (10% changed files) | <30 seconds | Should Have |
+| NFR-029A-06 | Ecosystem detection time | <5 seconds | Must Have |
+| NFR-029A-07 | Memory usage during sync | <500MB | Should Have |
+| NFR-029A-08 | Parallel operation throughput | 10 files/second | Should Have |
+| NFR-029A-09 | Progress update frequency | Every 1 second | Should Have |
+| NFR-029A-10 | Cancellation response time | <1 second | Must Have |
+
+### Reliability (NFR-029A-11 to NFR-029A-20)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029A-11 | Network interruption recovery | 3 retries with backoff | Must Have |
+| NFR-029A-12 | Disk space check before sync | Fail if <500MB available | Must Have |
+| NFR-029A-13 | Permission error reporting | Clear message with path | Must Have |
+| NFR-029A-14 | Idempotent preparation | Same result on repeat | Must Have |
+| NFR-029A-15 | Parallel preparation safety | No race conditions | Must Have |
+| NFR-029A-16 | Resource cleanup on failure | 100% temporary files removed | Must Have |
+| NFR-029A-17 | Corrupted file detection | Hash verification | Should Have |
+| NFR-029A-18 | Atomic directory operations | Rename-based commits | Should Have |
+| NFR-029A-19 | Lock file for concurrent access | Prevent corruption | Must Have |
+| NFR-029A-20 | Graceful timeout handling | Cleanup and report | Must Have |
+
+### Observability (NFR-029A-21 to NFR-029A-30)
+
+| ID | Requirement | Target | Priority |
+|----|-------------|--------|----------|
+| NFR-029A-21 | Preparation start log | Info level with config summary | Must Have |
+| NFR-029A-22 | Preparation complete log | Info level with duration | Must Have |
+| NFR-029A-23 | Phase transition logs | Debug level | Should Have |
+| NFR-029A-24 | Sync progress logs | Debug level, every 10% | Should Have |
+| NFR-029A-25 | Dependency install logs | Debug level with package manager output | Should Have |
+| NFR-029A-26 | Error logs with context | Error level with exception chain | Must Have |
+| NFR-029A-27 | Structured logging format | JSON-compatible fields | Should Have |
+| NFR-029A-28 | TargetId in all logs | Correlation | Must Have |
+| NFR-029A-29 | Metric: preparation_duration_seconds | Histogram | Should Have |
+| NFR-029A-30 | Metric: preparation_phase_duration_seconds | Histogram per phase | Could Have |
 
 ---
 
@@ -193,35 +309,266 @@ Target.PrepareWorkspaceAsync(config)
 
 ## Acceptance Criteria / Definition of Done
 
-- [ ] AC-001: Workspace created
-- [ ] AC-002: Source synced
-- [ ] AC-003: Ref checked out
-- [ ] AC-004: Dependencies installed
-- [ ] AC-005: Custom commands run
-- [ ] AC-006: Caching works
-- [ ] AC-007: Incremental sync works
-- [ ] AC-008: Progress reported
-- [ ] AC-009: Cancellation works
-- [ ] AC-010: Failure cleanup works
+### Workspace Creation (AC-029A-01 to AC-029A-10)
+
+- [ ] AC-029A-01: `IWorkspacePreparation` interface defined in Application layer
+- [ ] AC-029A-02: `PrepareWorkspaceAsync` method accepts target, config, and cancellation token
+- [ ] AC-029A-03: Method creates workspace directory if not exists
+- [ ] AC-029A-04: Method cleans existing files when clean=true
+- [ ] AC-029A-05: Method preserves existing files when clean=false
+- [ ] AC-029A-06: Directory creation logged at Debug level
+- [ ] AC-029A-07: Clean operation logged at Debug level with file count
+- [ ] AC-029A-08: Invalid path throws `ArgumentException` with path value
+- [ ] AC-029A-09: Permission denied throws `UnauthorizedAccessException`
+- [ ] AC-029A-10: Disk full throws `IOException` with required space
+
+### Source Synchronization (AC-029A-11 to AC-029A-20)
+
+- [ ] AC-029A-11: `ISourceSyncer` interface defined with sync strategy pattern
+- [ ] AC-029A-12: `LocalSourceSyncer` copies files from local path
+- [ ] AC-029A-13: `GitSourceSyncer` clones/fetches from git URL
+- [ ] AC-029A-14: `RsyncSourceSyncer` syncs using rsync protocol
+- [ ] AC-029A-15: Syncer selection automatic based on source URL scheme
+- [ ] AC-029A-16: Progress events emitted during sync
+- [ ] AC-029A-17: Sync respects cancellation token
+- [ ] AC-029A-18: Incremental sync detects unchanged files
+- [ ] AC-029A-19: Failed sync cleans up partial files
+- [ ] AC-029A-20: Sync duration logged with file count and bytes
+
+### Ref Checkout (AC-029A-21 to AC-029A-30)
+
+- [ ] AC-029A-21: Branch names checked out correctly (main, develop, feature/*)
+- [ ] AC-029A-22: Tag names checked out correctly (v1.0.0, release-*)
+- [ ] AC-029A-23: Full commit SHAs checked out correctly
+- [ ] AC-029A-24: Short commit SHAs rejected with helpful error
+- [ ] AC-029A-25: Checkout uses detached HEAD
+- [ ] AC-029A-26: Invalid ref throws with available refs listed
+- [ ] AC-029A-27: Submodules updated after checkout
+- [ ] AC-029A-28: Submodule depth configurable (default 1)
+- [ ] AC-029A-29: Submodule failure logged with module name
+- [ ] AC-029A-30: Checkout duration logged
+
+### Ecosystem Detection (AC-029A-31 to AC-029A-40)
+
+- [ ] AC-029A-31: `IEcosystemDetector` interface defined
+- [ ] AC-029A-32: .NET detected by *.csproj, *.sln, *.fsproj
+- [ ] AC-029A-33: Node detected by package.json
+- [ ] AC-029A-34: Python detected by requirements.txt, pyproject.toml
+- [ ] AC-029A-35: Go detected by go.mod
+- [ ] AC-029A-36: Rust detected by Cargo.toml
+- [ ] AC-029A-37: Multiple ecosystems detected simultaneously
+- [ ] AC-029A-38: Detection returns `EcosystemType` flags enum
+- [ ] AC-029A-39: Detection cached per workspace path
+- [ ] AC-029A-40: Unknown project files do not cause failure
+
+### Dependency Installation (AC-029A-41 to AC-029A-55)
+
+- [ ] AC-029A-41: `IDependencyInstaller` interface defined
+- [ ] AC-029A-42: .NET installer runs `dotnet restore`
+- [ ] AC-029A-43: Node installer runs `npm ci` (prefers over `npm install`)
+- [ ] AC-029A-44: Python installer runs `pip install -r requirements.txt`
+- [ ] AC-029A-45: Go installer runs `go mod download`
+- [ ] AC-029A-46: Rust installer runs `cargo fetch`
+- [ ] AC-029A-47: Installer output captured to logs
+- [ ] AC-029A-48: Non-zero exit code throws with output
+- [ ] AC-029A-49: Timeout (5min default) throws `TimeoutException`
+- [ ] AC-029A-50: Installation respects cancellation token
+- [ ] AC-029A-51: Each ecosystem installed in detected order
+- [ ] AC-029A-52: Installation events emitted per ecosystem
+- [ ] AC-029A-53: Offline mode uses cache only
+- [ ] AC-029A-54: Missing lockfile in strict mode throws
+- [ ] AC-029A-55: Successful install logged with duration
+
+### Caching (AC-029A-56 to AC-029A-65)
+
+- [ ] AC-029A-56: `ICacheManager` interface defined
+- [ ] AC-029A-57: Cache location configurable (default ~/.acode/cache)
+- [ ] AC-029A-58: Cache keyed by lockfile hash
+- [ ] AC-029A-59: Cache hit restores from cache
+- [ ] AC-029A-60: Cache miss performs full install
+- [ ] AC-029A-61: Cache populated after successful install
+- [ ] AC-029A-62: Lockfile change invalidates cache
+- [ ] AC-029A-63: Cache corruption detected and recovered
+- [ ] AC-029A-64: Cache size reported in metrics
+- [ ] AC-029A-65: Cache eviction respects max size setting
+
+### Custom Commands (AC-029A-66 to AC-029A-70)
+
+- [ ] AC-029A-66: `prepareCommands` array executed in order
+- [ ] AC-029A-67: Each command runs in workspace directory
+- [ ] AC-029A-68: Command output captured to logs
+- [ ] AC-029A-69: Non-zero exit stops preparation with error
+- [ ] AC-029A-70: Commands respect cancellation token
+
+### Error Handling and Cleanup (AC-029A-71 to AC-029A-80)
+
+- [ ] AC-029A-71: Any failure cleans up partial workspace
+- [ ] AC-029A-72: Cleanup removes temporary files
+- [ ] AC-029A-73: Cleanup logs what was removed
+- [ ] AC-029A-74: Target state set to Failed on preparation failure
+- [ ] AC-029A-75: Exception includes preparation phase that failed
+- [ ] AC-029A-76: Exception includes original error cause
+- [ ] AC-029A-77: Retry logic attempts configurable times
+- [ ] AC-029A-78: Retry uses exponential backoff
+- [ ] AC-029A-79: Final failure logs all retry attempts
+- [ ] AC-029A-80: Success transitions target to Ready state
+
+---
+
+## User Verification Scenarios
+
+### Scenario 1: Basic .NET Project Preparation
+
+**Persona:** Developer preparing a .NET solution on local target
+
+**Steps:**
+1. Configure workspace with local .NET repo path
+2. Specify ref as `main` branch
+3. Run preparation
+4. Observe ecosystem detection log: ".NET detected via Acode.sln"
+5. Observe dependency install: "Running dotnet restore..."
+6. Observe completion: "Preparation complete in 45s"
+7. Verify workspace contains built dependencies
+
+**Verification:**
+- [ ] Workspace created at configured path
+- [ ] Correct branch checked out
+- [ ] dotnet restore executed successfully
+- [ ] Target state is Ready
+
+### Scenario 2: Multi-Ecosystem Project
+
+**Persona:** Developer with frontend + backend project
+
+**Steps:**
+1. Configure workspace with repo containing both .NET backend and React frontend
+2. Run preparation
+3. Observe: "Multiple ecosystems detected: DotNet, Node"
+4. Observe: "Running dotnet restore..."
+5. Observe: "Running npm ci..."
+6. Both ecosystems installed
+
+**Verification:**
+- [ ] Both ecosystems detected
+- [ ] Both package managers executed
+- [ ] All dependencies available
+
+### Scenario 3: Incremental Sync After Code Change
+
+**Persona:** Developer making small code changes
+
+**Steps:**
+1. Run initial preparation (full sync)
+2. Make small change to one file
+3. Run preparation again
+4. Observe: "Incremental sync: 1 file changed"
+5. Observe preparation completes in <10 seconds
+
+**Verification:**
+- [ ] Only changed files transferred
+- [ ] Dependencies not reinstalled (cache hit)
+- [ ] Significant time savings
+
+### Scenario 4: Network Failure Recovery
+
+**Persona:** Developer on unstable network
+
+**Steps:**
+1. Configure workspace with remote git URL
+2. Start preparation
+3. Simulate network interruption during sync
+4. Observe: "Sync failed, retrying (1/3)..."
+5. Network recovers
+6. Observe: "Retry successful, continuing"
+7. Preparation completes
+
+**Verification:**
+- [ ] Retry occurs automatically
+- [ ] Backoff delay between retries
+- [ ] Success after network recovery
+
+### Scenario 5: Preparation Cancellation
+
+**Persona:** Developer who starts wrong preparation
+
+**Steps:**
+1. Start preparation with large repository
+2. Press Ctrl+C during sync phase
+3. Observe: "Preparation cancelled"
+4. Observe: "Cleaning up partial workspace..."
+5. Verify no partial files remain
+
+**Verification:**
+- [ ] Cancellation responsive (<1s)
+- [ ] Partial files cleaned up
+- [ ] Target state set appropriately
+
+### Scenario 6: Custom Preparation Commands
+
+**Persona:** Developer with special build requirements
+
+**Steps:**
+1. Configure prepareCommands with custom scripts
+2. Run preparation
+3. Observe standard phases complete
+4. Observe: "Running custom command: chmod +x scripts/*.sh"
+5. Observe: "Running custom command: ./scripts/setup-env.sh"
+6. All commands complete
+
+**Verification:**
+- [ ] Commands run in specified order
+- [ ] Commands run in workspace directory
+- [ ] Command failure stops preparation
 
 ---
 
 ## Testing Requirements
 
-### Unit Tests
+### Unit Tests (UT-029A-01 to UT-029A-25)
 
-- [ ] UT-001: Config validation
-- [ ] UT-002: Step ordering
-- [ ] UT-003: Ecosystem detection
-- [ ] UT-004: Cache invalidation
+- [ ] UT-029A-01: WorkspaceConfig validates source is required
+- [ ] UT-029A-02: WorkspaceConfig validates ref is required
+- [ ] UT-029A-03: WorkspaceConfig validates workspace path is required
+- [ ] UT-029A-04: PreparationPhase enum has all required values
+- [ ] UT-029A-05: PreparationProgress calculates percent correctly
+- [ ] UT-029A-06: EcosystemDetector finds .csproj files
+- [ ] UT-029A-07: EcosystemDetector finds package.json
+- [ ] UT-029A-08: EcosystemDetector finds requirements.txt
+- [ ] UT-029A-09: EcosystemDetector returns flags for multiple ecosystems
+- [ ] UT-029A-10: LocalSourceSyncer copies files correctly
+- [ ] UT-029A-11: LocalSourceSyncer handles missing source
+- [ ] UT-029A-12: GitSourceSyncer constructs correct git commands
+- [ ] UT-029A-13: CacheManager generates key from lockfile hash
+- [ ] UT-029A-14: CacheManager detects cache hit
+- [ ] UT-029A-15: CacheManager detects lockfile change
+- [ ] UT-029A-16: DotNetInstaller runs correct restore command
+- [ ] UT-029A-17: NodeInstaller prefers npm ci over npm install
+- [ ] UT-029A-18: PythonInstaller handles missing requirements.txt
+- [ ] UT-029A-19: Preparation cancellation cleans up
+- [ ] UT-029A-20: Preparation timeout triggers after configured time
+- [ ] UT-029A-21: Events contain correct data
+- [ ] UT-029A-22: Retry logic uses exponential backoff
+- [ ] UT-029A-23: Custom commands execute in order
+- [ ] UT-029A-24: Failed command stops execution
+- [ ] UT-029A-25: Success transitions target to Ready
 
-### Integration Tests
+### Integration Tests (IT-029A-01 to IT-029A-15)
 
-- [ ] IT-001: Full preparation
-- [ ] IT-002: Large repo sync
-- [ ] IT-003: Multiple ecosystems
-
----
+- [ ] IT-029A-01: Full preparation of small .NET project
+- [ ] IT-029A-02: Full preparation of Node.js project
+- [ ] IT-029A-03: Full preparation of Python project
+- [ ] IT-029A-04: Multi-ecosystem project preparation
+- [ ] IT-029A-05: Incremental sync with changed files
+- [ ] IT-029A-06: Cache hit restores quickly
+- [ ] IT-029A-07: Cache invalidation on lockfile change
+- [ ] IT-029A-08: Large repo (1GB+) preparation
+- [ ] IT-029A-09: Cancellation during each phase
+- [ ] IT-029A-10: Network failure retry
+- [ ] IT-029A-11: Disk space check prevents start
+- [ ] IT-029A-12: Custom commands execute correctly
+- [ ] IT-029A-13: Parallel preparation of multiple targets
+- [ ] IT-029A-14: Progress events emitted correctly
+- [ ] IT-029A-15: Cross-platform execution (Windows, macOS, Linux)
 
 ## Implementation Prompt
 
