@@ -13,6 +13,7 @@ public class VllmStreamChunkTests
         var chunk = new VllmStreamChunk
         {
             Id = "chatcmpl-123",
+            Model = "test-model",
             Choices = new List<VllmStreamChoice>
             {
                 new()
@@ -37,6 +38,7 @@ public class VllmStreamChunkTests
         var chunk = new VllmStreamChunk
         {
             Id = "chatcmpl-123",
+            Model = "test-model",
             Choices = new List<VllmStreamChoice>
             {
                 new()

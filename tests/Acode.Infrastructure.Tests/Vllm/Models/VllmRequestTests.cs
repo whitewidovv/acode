@@ -38,6 +38,7 @@ public class VllmRequestTests
         var request = new VllmRequest
         {
             Model = "test-model",
+            Messages = new List<VllmMessage>(),
             MaxTokens = 100
         };
 
@@ -46,7 +47,7 @@ public class VllmRequestTests
 
         // Assert
         json.Should().Contain("\"model\":");
-        json.Should().Contain("\"maxTokens\":");
+        json.Should().Contain("\"max_tokens\":");
         json.Should().NotContain("\"Model\":");
     }
 
@@ -56,7 +57,8 @@ public class VllmRequestTests
         // Arrange & Act
         var request = new VllmRequest
         {
-            Model = "test-model"
+            Model = "test-model",
+            Messages = new List<VllmMessage>()
         };
 
         // Assert
@@ -69,7 +71,8 @@ public class VllmRequestTests
         // Arrange & Act
         var request = new VllmRequest
         {
-            Model = "test-model"
+            Model = "test-model",
+            Messages = new List<VllmMessage>()
         };
 
         // Assert

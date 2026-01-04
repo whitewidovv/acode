@@ -13,6 +13,7 @@ public class VllmResponseTests
         var response = new VllmResponse
         {
             Id = "chatcmpl-123",
+            Model = "test-model",
             Choices = new List<VllmChoice>
             {
                 new()
@@ -37,6 +38,7 @@ public class VllmResponseTests
         var response = new VllmResponse
         {
             Id = "chatcmpl-123",
+            Model = "test-model",
             Choices = new List<VllmChoice>()
         };
 
