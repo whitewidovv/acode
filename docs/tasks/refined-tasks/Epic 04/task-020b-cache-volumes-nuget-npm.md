@@ -1226,9 +1226,14 @@ public sealed class PackageManagerDetector : IPackageManagerDetector
         var detected = new List<PackageManagerType>();
         
         // Detect .NET projects
-        if (_fileSystem.Directory.GetFiles(projectPath, "*.csproj", SearchOption.AllDirectories).Any() ||
-            _fileSystem.Directory.GetFiles(projectPath, "*.fsproj", SearchOption.AllDirectories).Any() ||
-            _fileSystem.Directory.GetFiles(projectPath, "*.sln", SearchOption.AllDirectories).Any())
+        var hasDotNetProject = _fileSystem.Directory
+            .EnumerateFiles(projectPath, "*.*", SearchOption.AllDirectories)
+            .Any(filePath =>
+                filePath.EndsWith(".csproj") ||
+                filePath.EndsWith(".fsproj") ||
+                filePath.EndsWith(".sln"));
+
+        if (hasDotNetProject)
         {
             detected.Add(PackageManagerType.NuGet);
             _logger.LogDebug("Detected .NET project, will mount NuGet cache");
