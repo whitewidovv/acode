@@ -1,16 +1,18 @@
-# Task 005.b: Tool-Call Parsing and Retry-on-Invalid-JSON
+# Task 007.d: Tool-Call Parsing and Retry-on-Invalid-JSON
 
-**Priority:** P0 – Critical Path  
-**Tier:** Core Infrastructure  
-**Complexity:** 13 (Fibonacci points)  
-**Phase:** Foundation  
-**Dependencies:** Task 005, Task 005.a, Task 004.a, Task 007  
+**Priority:** P0 – Critical Path
+**Tier:** Core Infrastructure
+**Complexity:** 13 (Fibonacci points)
+**Phase:** Foundation
+**Dependencies:** Task 007, Task 007.a, Task 007.b, Task 007.c, Task 005, Task 004.a
+
+**Note:** This task was originally 005.b but moved to 007.d due to dependency on IToolSchemaRegistry (Task 007).  
 
 ---
 
 ## Description
 
-Task 005.b specifies the detailed implementation of tool call parsing and the retry-on-invalid-JSON mechanism for the Ollama provider adapter. Tool calling is a fundamental capability enabling the Acode agent to interact with its environment—reading files, executing commands, and modifying code. This task ensures that tool calls from Ollama are parsed correctly and that the system gracefully handles the common case where models produce malformed JSON in tool call arguments.
+Task 007.d specifies the detailed implementation of tool call parsing and the retry-on-invalid-JSON mechanism for the Ollama provider adapter. This task is a subtask of Task 007 (Tool Schema Registry) because it depends on the IToolSchemaRegistry interface for validating tool call arguments against JSON schemas. Tool calling is a fundamental capability enabling the Acode agent to interact with its environment—reading files, executing commands, and modifying code. This task ensures that tool calls from Ollama are parsed correctly and that the system gracefully handles the common case where models produce malformed JSON in tool call arguments.
 
 Tool call parsing transforms Ollama's raw response format into Acode's canonical ToolCall type (Task 004.a). Ollama's tool calling format is based on OpenAI's function calling convention but with subtle differences that require careful mapping. The parser MUST extract the tool name, unique call ID, and JSON arguments from each tool call in the response. Multiple tool calls in a single response are common when the model decides to invoke several tools simultaneously.
 
@@ -190,6 +192,17 @@ The following items are explicitly excluded from Task 005.b:
 - FR-079: ToolCallParseResult MUST include errors on failure
 - FR-080: ToolCallParseResult MUST include repair details if applied
 - FR-081: ToolCallParseResult MUST include retry count if retried
+
+### Smoke Test Integration (Task 005c Stub)
+
+- FR-082: Tool calling smoke test MUST be implemented when 007d completes
+- FR-083: Smoke test MUST verify tool call extraction from response
+- FR-084: Smoke test MUST verify JSON argument parsing succeeds
+- FR-085: Smoke test MUST verify tool call mapped to ToolCall type
+- FR-086: Smoke test MUST be added to scripts/smoke-tests/ollama-smoke-test.sh
+- FR-087: Smoke test MUST integrate with `acode providers smoke-test ollama` command
+
+**Note:** Task 005c implemented a stub for the tool calling smoke test with message "Requires Task 007d - skipped". This section ensures the stub is replaced with actual implementation when 007d is complete.
 
 ---
 

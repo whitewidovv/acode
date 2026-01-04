@@ -18,7 +18,7 @@ Task 005 (Ollama Provider Adapter) has been implemented according to specificati
 - **Build Status:** ✅ Clean (0 errors, 0 warnings)
 - **Layer Compliance:** ✅ All Infrastructure layer implementations
 - **Integration:** ✅ Fully wired via DI
-- **Subtasks:** Task 005a complete, 005b and 005c deferred (documented below)
+- **Subtasks:** Task 005a complete, 007d and 005c deferred (documented below)
 
 ---
 
@@ -29,10 +29,10 @@ Task 005 (Ollama Provider Adapter) has been implemented according to specificati
 - **Parent Task:** task-005-ollama-provider-adapter.md
 - **Subtasks:**
   - ✅ task-005a-implement-requestresponse-streaming-handling.md (COMPLETE - 64 tests)
-  - ⏸️ task-005b-tool-call-parsing-retry-on-invalid-json.md (DEFERRED - separate epic)
-  - ⏸️ task-005c-setup-docs-smoke-test-script.md (DEFERRED - polish phase)
+  - ⚠️ task-007d → MOVED to task-007d (dependency on Task 007)
+  - ⏸️ task-005c-setup-docs-smoke-test-script.md (pending - checking if implementable)
 
-**Subtask Status:** Task 005a is complete. Tasks 005b and 005c are deferred with valid justification (see Section 9).
+**Subtask Status:** Task 005a is complete. Task 007d was moved to 007d due to dependency blocker. Task 005c status being verified.
 
 ---
 
@@ -72,12 +72,12 @@ Task 005 (Ollama Provider Adapter) has been implemented according to specificati
 | FR-018 | Set model from request or default | ✅ | OllamaRequestMapper.cs:20-21 |
 | FR-019 | Set stream: false | ✅ | OllamaHttpClient.cs:34 (stream parameter) |
 | FR-020 | Map messages to Ollama format | ✅ | OllamaRequestMapper.cs:23-32 |
-| FR-021 | Map tool definitions | ⏸️ | DEFERRED - Task 005b (tool calling) |
+| FR-021 | Map tool definitions | ⏸️ | DEFERRED - Task 007d (tool calling) |
 | FR-022 | Include options (temp, top_p) | ✅ | OllamaRequestMapper.cs:33-42 |
 | FR-023 | Parse response to ChatResponse | ✅ | src/Acode.Infrastructure/Ollama/Mapping/OllamaResponseMapper.cs:18 |
 | FR-024 | Map finish reason from done_reason | ✅ | OllamaResponseMapper.cs:25-36 |
 | FR-025 | Extract usage from eval_count | ✅ | OllamaResponseMapper.cs:38-43 |
-| FR-026 | Handle tool calls in response | ⏸️ | DEFERRED - Task 005b (tool calling) |
+| FR-026 | Handle tool calls in response | ⏸️ | DEFERRED - Task 007d (tool calling) |
 | FR-027 | Timeout after configured duration | ✅ | HttpClient.Timeout set via config |
 | FR-028 | Support CancellationToken | ✅ | OllamaProvider.cs:38 (parameter wired through) |
 
@@ -90,7 +90,7 @@ Task 005 (Ollama Provider Adapter) has been implemented according to specificati
 | FR-031 | Parse NDJSON stream incrementally | ✅ | src/Acode.Infrastructure/Ollama/Streaming/OllamaStreamReader.cs:25 |
 | FR-032 | Yield ResponseDelta for each chunk | ✅ | OllamaProvider.cs:102-110 |
 | FR-033 | Accumulate content deltas | ✅ | src/Acode.Infrastructure/Ollama/Mapping/OllamaDeltaMapper.cs:21-30 |
-| FR-034 | Accumulate tool call deltas | ⏸️ | DEFERRED - Task 005b (tool calling) |
+| FR-034 | Accumulate tool call deltas | ⏸️ | DEFERRED - Task 007d (tool calling) |
 | FR-035 | Detect final chunk (done: true) | ✅ | OllamaDeltaMapper.cs:32 |
 | FR-036 | Include usage in final delta | ✅ | OllamaDeltaMapper.cs:34-44 |
 | FR-037 | Support cancellation mid-stream | ✅ | OllamaProvider.cs:78 (CancellationToken parameter) |
@@ -104,9 +104,9 @@ Task 005 (Ollama Provider Adapter) has been implemented according to specificati
 | FR-040 | Map MessageRole.System to "system" | ✅ | OllamaRequestMapper.cs:67 |
 | FR-041 | Map MessageRole.User to "user" | ✅ | OllamaRequestMapper.cs:68 |
 | FR-042 | Map MessageRole.Assistant to "assistant" | ✅ | OllamaRequestMapper.cs:69 |
-| FR-043 | Map MessageRole.Tool to "tool" | ⏸️ | DEFERRED - Task 005b (tool calling) |
-| FR-044 | Include tool_calls in assistant messages | ⏸️ | DEFERRED - Task 005b (tool calling) |
-| FR-045 | Include tool_call_id in tool messages | ⏸️ | DEFERRED - Task 005b (tool calling) |
+| FR-043 | Map MessageRole.Tool to "tool" | ⏸️ | DEFERRED - Task 007d (tool calling) |
+| FR-044 | Include tool_calls in assistant messages | ⏸️ | DEFERRED - Task 007d (tool calling) |
+| FR-045 | Include tool_call_id in tool messages | ⏸️ | DEFERRED - Task 007d (tool calling) |
 | FR-046 | Preserve message ordering | ✅ | OllamaRequestMapper.cs:23-32 (Select preserves order) |
 | FR-047 | Handle null content in messages | ✅ | OllamaRequestMapper.cs:55 (empty string fallback) |
 
@@ -114,13 +114,13 @@ Task 005 (Ollama Provider Adapter) has been implemented according to specificati
 
 | FR | Requirement | Status | Evidence |
 |----|-------------|--------|----------|
-| FR-048 to FR-057 | Tool calling features | ⏸️ | DEFERRED - Task 005b (entire subtask) |
+| FR-048 to FR-057 | Tool calling features | ⏸️ | DEFERRED - Task 007d (entire subtask) |
 
 ### JSON Mode (FR-056 to FR-059)
 
 | FR | Requirement | Status | Evidence |
 |----|-------------|--------|----------|
-| FR-056 to FR-059 | JSON mode features | ⏸️ | DEFERRED - Task 005b |
+| FR-056 to FR-059 | JSON mode features | ⏸️ | DEFERRED - Task 007d |
 
 ### Model Management (FR-060 to FR-066)
 
@@ -172,14 +172,14 @@ Task 005 (Ollama Provider Adapter) has been implemented according to specificati
 | FR-090 | OllamaRequest defined | ✅ | src/Acode.Infrastructure/Ollama/Models/OllamaRequest.cs:8 |
 | FR-091 | OllamaResponse defined | ✅ | src/Acode.Infrastructure/Ollama/Models/OllamaResponse.cs:8 |
 | FR-092 | OllamaMessage maps to/from ChatMessage | ✅ | src/Acode.Infrastructure/Ollama/Models/OllamaMessage.cs:8 |
-| FR-093 | OllamaToolCall maps to/from ToolCall | ⏸️ | DEFERRED - Task 005b |
+| FR-093 | OllamaToolCall maps to/from ToolCall | ⏸️ | DEFERRED - Task 007d |
 | FR-094 | OllamaUsage maps to UsageInfo | ✅ | OllamaResponse.cs:30-32 (inline) |
 | FR-095 | Use System.Text.Json source generators | ✅ | OllamaRequest.cs:11, OllamaResponse.cs:11 (JsonSerializable attributes) |
 
 ### Summary: FR Implementation Status
 
 - **Implemented:** 50 FRs
-- **Deferred (Task 005b - Tool Calling):** 15 FRs
+- **Deferred (Task 007d - Tool Calling):** 15 FRs
 - **Deferred (Task 005c - Observability/Polish):** 10 FRs
 - **Deferred (Separate Tasks):** 8 FRs (retry, env vars, etc.)
 - **Total FRs:** 83
@@ -396,11 +396,11 @@ Task specification includes 150-300 line user manual. This is deferred to Task 0
 
 ## 9. Deferral Documentation
 
-### Task 005b: Tool Call Parsing & Retry on Invalid JSON
+### Task 007d: Tool Call Parsing & Retry on Invalid JSON (formerly 005b)
 
-**Status:** ⏸️ DEFERRED
+**Status:** ⚠️ MOVED TO TASK 007
 
-**Reason:** Task 005b is a separate subtask focused on tool calling, which is a distinct feature set from basic chat completion. The task specification explicitly identifies this as a subtask (005b), indicating it can be implemented independently.
+**Reason:** Task 005b was moved to Task 007d due to hard dependency on IToolSchemaRegistry (Task 007). Cannot implement schema validation (FR-057 through FR-063) without the Tool Schema Registry. This follows the new rule: if subtask X cannot be completed because it requires dependency Y from another task, the subtask should be moved to that task.
 
 **FRs Deferred:**
 - FR-021: Map tool definitions to Ollama format
@@ -548,7 +548,7 @@ Total:          809 passed, 1 failed (unrelated to Task 005)
 
 3. **Tool Calling**
    - What: Tool call parsing and retry logic deferred
-   - Why: Separate feature set (Task 005b)
+   - Why: Separate feature set (Task 007d)
    - Plan: Next sprint after Task 005 PR merged
 
 ### No Critical Issues
@@ -592,7 +592,7 @@ Task 005 (Ollama Provider Adapter) meets all mandatory requirements for completi
 3. ✅ **Clean build** (0 errors, 0 warnings)
 4. ✅ **Layer boundaries respected** (Clean Architecture compliant)
 5. ✅ **Integration verified** (DI registration works, no NotImplementedException)
-6. ✅ **Documented deferrals** (Tasks 005b and 005c with valid justification)
+6. ✅ **Documented deferrals** (Tasks 007d and 005c with valid justification)
 
 ### Next Steps
 
@@ -601,7 +601,7 @@ Task 005 (Ollama Provider Adapter) meets all mandatory requirements for completi
 3. ⏭️ Create Pull Request
 4. ⏭️ Request review
 5. ⏭️ Merge to main
-6. ⏭️ Begin Task 005b (Tool Calling)
+6. ⏭️ Begin Task 007d (Tool Calling)
 
 ### Lessons Applied
 
