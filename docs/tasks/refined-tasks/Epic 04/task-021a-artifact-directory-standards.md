@@ -951,10 +951,7 @@ public sealed class RunIdGenerator : IRunIdGenerator
     
     private static string SanitizeTaskName(string taskName)
     {
-        return taskName
-            .ToLowerInvariant()
-            .Replace(" ", "-")
-            .Replace("_", "-");
+        return Regex.Replace(taskName.ToLowerInvariant(), @"[ _]", "-");
     }
 }
 
