@@ -206,6 +206,51 @@ public sealed class OllamaProviderTests
         models.Should().Contain("qwen2.5:latest");
     }
 
+    [Fact]
+    public async Task StreamChatAsync_WithSimpleRequest_ReturnsDeltas()
+    {
+        // Arrange
+        var chunks = new[]
+        {
+            "{\"model\":\"llama3.2:latest\",\"message\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"done\":false}\n",
+            "{\"model\":\"llama3.2:latest\",\"message\":{\"role\":\"assistant\",\"content\":\" there\"},\"done\":false}\n",
+            "{\"model\":\"llama3.2:latest\",\"message\":{\"role\":\"assistant\",\"content\":\"!\"},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":10,\"eval_count\":3}\n",
+        };
+
+        var streamContent = string.Concat(chunks);
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(streamContent),
+        });
+        var httpClient = new HttpClient(handler);
+        var config = new OllamaConfiguration();
+        var provider = new OllamaProvider(httpClient, config);
+
+        var request = new ChatRequest(
+            messages: new[] { ChatMessage.CreateUser("Hello") },
+            stream: true);
+
+        // Act
+        var deltas = new System.Collections.Generic.List<ResponseDelta>();
+        await foreach (var delta in provider.StreamChatAsync(request))
+        {
+            deltas.Add(delta);
+        }
+
+        // Assert
+        deltas.Should().HaveCount(3);
+        deltas[0].ContentDelta.Should().Be("Hello");
+        deltas[0].IsComplete.Should().BeFalse();
+        deltas[1].ContentDelta.Should().Be(" there");
+        deltas[1].IsComplete.Should().BeFalse();
+        deltas[2].ContentDelta.Should().Be("!");
+        deltas[2].IsComplete.Should().BeTrue();
+        deltas[2].FinishReason.Should().Be(FinishReason.Stop);
+        deltas[2].Usage.Should().NotBeNull();
+        deltas[2].Usage!.PromptTokens.Should().Be(10);
+        deltas[2].Usage!.CompletionTokens.Should().Be(3);
+    }
+
     private static HttpClient CreateHttpClient(HttpStatusCode statusCode, string content)
     {
         var handler = new TestHttpMessageHandler(new HttpResponseMessage(statusCode)

@@ -118,9 +118,60 @@ public sealed class OllamaProvider : IModelProvider
     {
         ArgumentNullException.ThrowIfNull(request, nameof(request));
 
-        // Placeholder - will implement in Task 005-6
-        await Task.CompletedTask.ConfigureAwait(false);
-        yield break;
+        // Build Ollama request with stream=true
+        var ollamaRequest = OllamaRequestMapper.Map(request, this._config.DefaultModel);
+        var streamingRequest = ollamaRequest with { Stream = true };
+
+        // Make HTTP POST request (exception handling here, before yield)
+        HttpResponseMessage response;
+        try
+        {
+            var requestUri = $"{this._config.BaseUrl}/api/chat";
+            var content = new System.Net.Http.StringContent(
+                System.Text.Json.JsonSerializer.Serialize(streamingRequest),
+                System.Text.Encoding.UTF8,
+                "application/json");
+
+            response = await this._httpClient.PostAsync(requestUri, content, cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+        }
+        catch (HttpRequestException ex)
+        {
+            if (ex.StatusCode.HasValue && (int)ex.StatusCode.Value >= 500)
+            {
+                throw new OllamaServerException($"Ollama server returned error: {ex.Message}", ex, (int)ex.StatusCode.Value);
+            }
+
+            throw new OllamaConnectionException($"Failed to connect to Ollama server at {this._config.BaseUrl}", ex);
+        }
+        catch (TaskCanceledException ex)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            throw new OllamaTimeoutException($"Request to Ollama server timed out after {this._config.RequestTimeoutSeconds}s", ex);
+        }
+
+        // Read NDJSON stream and yield deltas (no try-catch here to allow yield)
+        using (response)
+        {
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var index = 0;
+
+            await foreach (var chunk in Streaming.OllamaStreamReader.ReadAsync(stream, cancellationToken).ConfigureAwait(false))
+            {
+                var delta = Mapping.OllamaDeltaMapper.MapToDelta(chunk, index);
+                index++;
+                yield return delta;
+
+                if (chunk.Done)
+                {
+                    yield break;
+                }
+            }
+        }
     }
 
     /// <summary>
