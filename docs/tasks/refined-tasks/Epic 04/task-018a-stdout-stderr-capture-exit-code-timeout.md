@@ -544,6 +544,31 @@ Time    0s     T-5s    T      T+5s
 
 ---
 
+## Best Practices
+
+### Output Capture
+
+1. **Stream, don't buffer entirely** - Process output incrementally to handle large outputs
+2. **Separate stdout and stderr** - Keep streams distinct for proper error handling
+3. **Use async readers** - Non-blocking I/O prevents deadlocks with child processes
+4. **Handle encoding properly** - Detect and handle UTF-8, UTF-16, and console encodings
+
+### Timeout Management
+
+5. **Kill process tree** - Terminate child processes when parent times out
+6. **Grace period before force kill** - Give processes time to clean up
+7. **Log timeout context** - Record what was running when timeout occurred
+8. **Make timeouts configurable** - Different operations need different limits
+
+### Exit Code Handling
+
+9. **Preserve original exit code** - Don't mask real exit codes with wrapper errors
+10. **Handle special codes** - Exit codes >128 often indicate signals
+11. **Log exit codes consistently** - Include in all command execution logs
+12. **Define expected codes** - Document what exit codes mean for each command
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

@@ -73,6 +73,37 @@ The following items are explicitly excluded from Task 050:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **SQLite 3.35+** - The runtime SQLite version supports WAL mode, JSON functions, and window functions required for efficient storage and querying
+2. **PostgreSQL 13+** - For production deployments, PostgreSQL 13 or later is available with required extensions (pg_stat_statements, pgcrypto)
+3. **File System Access** - The .agent/data/ directory has write permissions and sufficient disk space for database files
+4. **Single Process Access** - Only one agent process writes to SQLite at a time; concurrent reads are allowed
+5. **Transaction Support** - Both database engines support ACID transactions with proper isolation levels
+6. **Connection Pooling** - PostgreSQL connections benefit from pooling; SQLite uses single-connection model
+7. **UTF-8 Encoding** - All text data is stored and retrieved as UTF-8 encoded strings
+8. **Timestamp Handling** - DateTime values are stored as UTC ISO8601 strings for cross-platform compatibility
+
+### Architectural Assumptions
+
+9. **Repository Pattern** - Data access follows repository pattern with interface abstractions for testing
+10. **Dependency Injection** - Database services are registered in DI container and resolved at runtime
+11. **Configuration Binding** - Connection strings and settings are read from agent-config.yml
+12. **Migration-First Schema** - All schema changes go through versioned migrations; no ad-hoc ALTER TABLE
+13. **No ORM** - Raw ADO.NET/Dapper is used; no Entity Framework or other ORM dependencies
+14. **Provider Abstraction** - IDatabaseProvider interface allows swapping SQLite/PostgreSQL implementations
+
+### Operational Assumptions
+
+15. **Local Development** - Developers use SQLite for local testing; PostgreSQL for integration tests
+16. **Backup Responsibility** - Backup/restore is handled separately in Task 050.e; this task provides hooks
+17. **No Auto-Migration** - Migrations require explicit CLI commands or startup configuration
+18. **Graceful Degradation** - Database unavailability surfaces clear errors; no silent failures
+
+---
+
 ## Functional Requirements
 
 ### SQLite Database
@@ -422,6 +453,77 @@ migrations/
 - [ ] AC-018: Migrate works
 - [ ] AC-019: Rollback works
 - [ ] AC-020: Backup works
+
+---
+
+## Best Practices
+
+### Database Design
+
+1. **Use migrations for all schema changes** - Never modify schema directly; all changes go through versioned migrations
+2. **Design for forward compatibility** - Add nullable columns, avoid removing columns without deprecation period
+3. **Keep transactions short** - Long transactions block other operations; commit frequently
+4. **Index foreign keys** - Always index FK columns for efficient joins and cascading operations
+
+### Connection Management
+
+5. **Use connection factories** - Never create raw connections; use IConnectionFactory for consistency
+6. **Configure timeouts** - Set appropriate command and connection timeouts for workload type
+7. **Close connections promptly** - Use `using` statements to ensure connections are disposed
+8. **Handle transient failures** - Implement retry logic with exponential backoff for network issues
+
+### Data Integrity
+
+9. **Validate before inserting** - Check data validity at application layer before database write
+10. **Use constraints liberally** - NOT NULL, UNIQUE, CHECK constraints catch bugs early
+11. **Soft delete by default** - Use deleted_at column instead of hard DELETE for audit trail
+12. **Log schema changes** - Record who made schema changes and when in sys_migrations
+
+---
+
+## Troubleshooting
+
+### Issue: Database file locked (SQLite)
+
+**Symptoms:** Error "database is locked" during operations
+
+**Causes:**
+- Multiple agent processes accessing same database
+- Long-running transaction holding lock
+- Crashed process left lock file
+
+**Solutions:**
+1. Check for other agent processes: `Get-Process | Where-Object { $_.Name -match 'agent' }`
+2. Look for stale lock file: `.agent/data/workspace.db-wal` and delete if process not running
+3. Enable WAL mode if not already: `PRAGMA journal_mode=WAL;`
+
+### Issue: Migration checksum mismatch
+
+**Symptoms:** Migration fails with "checksum validation failed" error
+
+**Causes:**
+- Migration file was edited after being applied
+- Different file encoding (CRLF vs LF)
+- Embedded resource not updated after source change
+
+**Solutions:**
+1. Compare file hash with sys_migrations.checksum value
+2. Normalize line endings and re-embed resource
+3. Use `--force` flag if change is intentional (dangerous)
+
+### Issue: PostgreSQL connection timeout
+
+**Symptoms:** Operations hang then fail with timeout
+
+**Causes:**
+- Firewall blocking port 5432
+- PostgreSQL not accepting connections
+- Connection pool exhausted
+
+**Solutions:**
+1. Test connectivity: `Test-NetConnection -ComputerName host -Port 5432`
+2. Check pg_hba.conf allows connections from agent host
+3. Increase pool size in connection string or investigate connection leaks
 
 ---
 

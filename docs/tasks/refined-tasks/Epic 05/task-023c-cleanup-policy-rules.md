@@ -41,6 +41,33 @@ This task covers policy definition and execution. Worktree operations are in 023
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Configuration available** - agent-config.yml provides policy settings
+2. **Worktree service operational** - Task 023.a removal works
+3. **Mapping service operational** - Task 023.b queries work
+4. **Filesystem accessible** - Can stat worktree directories
+5. **Disk space checkable** - Can query available disk space
+
+### Policy Assumptions
+
+6. **Age in days** - maxAgeDays uses creation timestamp
+7. **Count is global** - maxWorktrees applies to all worktrees
+8. **Oldest first** - When count exceeded, remove oldest
+9. **Active protected** - Running tasks' worktrees are never cleaned
+10. **Uncommitted checked** - Changes detected before cleanup
+
+### Operational Assumptions
+
+11. **Scheduled execution** - Cleanup can run on schedule
+12. **Manual trigger** - User can trigger cleanup via CLI
+13. **Dry-run available** - Preview what would be cleaned
+14. **Logging required** - All cleanup actions logged
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Policy Definition

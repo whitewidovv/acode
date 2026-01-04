@@ -77,6 +77,42 @@ The following items are explicitly excluded from Task 010.a:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: The parent Task 010 CLI Command Framework is complete and provides the base infrastructure
+- ASM-002: Command implementations follow the ICommand interface defined in Task 010
+- ASM-003: .NET reflection or source generators can enumerate all registered commands at startup
+- ASM-004: Edit distance calculation (Levenshtein or similar) is available or can be implemented efficiently
+- ASM-005: Terminal width can be detected reliably via Console.WindowWidth or environment variables
+- ASM-006: ANSI escape codes are supported by modern terminals (Windows Terminal, iTerm, etc.)
+- ASM-007: Console.IsOutputRedirected can reliably detect non-TTY contexts
+
+### Environmental Assumptions
+
+- ASM-008: Standard output stream is available and writable for help content
+- ASM-009: Standard error stream is available for error messages
+- ASM-010: Terminal emulators support at least 40 column width minimum
+- ASM-011: Environment variables (NO_COLOR, FORCE_COLOR, TERM) are readable
+- ASM-012: Operating system locale settings are accessible for future i18n support
+
+### Dependency Assumptions
+
+- ASM-013: All core commands (run, chat, config, etc.) are registered before router initialization
+- ASM-014: Command metadata (name, description, options) is available via interface methods
+- ASM-015: Global options from Task 010 are available for inclusion in help output
+- ASM-016: Configuration loader can provide current operating mode for context-aware help
+
+### Design Assumptions
+
+- ASM-017: Help output format follows established CLI conventions (git, docker, npm patterns)
+- ASM-018: Users prefer concise help that fits on one screen when possible
+- ASM-019: Examples are more valuable than lengthy prose descriptions
+- ASM-020: Color usage follows accessibility best practices (not sole indicator of meaning)
+
+---
+
 ## Functional Requirements
 
 ### Command Registration

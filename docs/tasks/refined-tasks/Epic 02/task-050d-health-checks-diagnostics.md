@@ -73,6 +73,37 @@ The following items are explicitly excluded from Task 050.d:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **IHealthCheck Interface** - Standard health check contract with Check() returning HealthCheckResult
+2. **Registry Pattern** - IHealthCheckRegistry manages registration and execution of all checks
+3. **Parallel Execution** - Health checks run concurrently with configurable timeout per check
+4. **Aggregate Status** - Overall health is worst status among all checks (Healthy < Degraded < Unhealthy)
+5. **Caching** - Health results cached for configurable duration to prevent hammering
+6. **Timeout Handling** - Checks exceeding timeout return Unhealthy with timeout reason
+
+### Database-Specific Assumptions
+
+7. **SQLite Checks** - Verify file exists, readable, WAL mode active, integrity_check passes
+8. **PostgreSQL Checks** - Verify connection, authentication, schema version, replication lag
+9. **Connection Check** - Simple SELECT 1 query validates basic connectivity
+10. **Migration Check** - Compares sys_migrations against expected migrations list
+11. **Disk Space Check** - Warns if database volume below threshold (configurable MB)
+12. **Lock Check** - Detects long-running locks or deadlock potential
+
+### Diagnostic Assumptions
+
+13. **CLI Integration** - `agent db health` and `agent db diagnostics` commands available
+14. **JSON Output** - --json flag outputs structured health data for automation
+15. **Verbose Mode** - --verbose includes timing, query plans, and detailed metrics
+16. **No Secrets** - Diagnostic output never includes passwords or connection strings
+17. **Performance Metrics** - Query execution times, connection pool stats exposed
+18. **Exit Codes** - Health check exit code reflects overall status (0=healthy, 1=degraded, 2=unhealthy)
+
+---
+
 ## Functional Requirements
 
 ### Health Check Framework
@@ -513,6 +544,77 @@ fi
 - [ ] AC-017: Clear formatting
 - [ ] AC-018: Actionable suggestions
 - [ ] AC-019: No sensitive data
+
+---
+
+## Best Practices
+
+### Health Check Design
+
+1. **Fast checks only** - Health checks should complete in <1 second; move slow checks to diagnostics
+2. **Meaningful status** - Return Degraded for minor issues, Unhealthy only for critical failures
+3. **Include context** - Return useful messages: "Connection timeout after 5s" not just "Failed"
+4. **Cache results** - Avoid hammering database with repeated health checks; cache for 30s
+
+### Diagnostic Safety
+
+5. **Never expose secrets** - Strip passwords, tokens from all diagnostic output
+6. **Read-only operations** - Diagnostics should never modify data
+7. **Timeout all checks** - Set maximum duration; mark as failed if exceeded
+8. **Run checks in parallel** - Don't block one slow check from returning overall status
+
+### Operational Excellence
+
+9. **JSON output for automation** - Always support `--json` for scripted monitoring
+10. **Exit codes matter** - Return 0/1/2 for healthy/degraded/unhealthy for scripting
+11. **Actionable suggestions** - Include fix recommendations in diagnostic output
+12. **Trending support** - Output metrics in format suitable for time-series collection
+
+---
+
+## Troubleshooting
+
+### Issue: Health check returns false positives
+
+**Symptoms:** Reports Unhealthy when database is actually working
+
+**Causes:**
+- Check timeout too short for normal latency
+- Check query competing with heavy workload
+- Transient network blip during check
+
+**Solutions:**
+1. Increase check timeout to accommodate normal latency
+2. Schedule checks during low-activity periods
+3. Implement retry logic for transient failures before marking unhealthy
+
+### Issue: Diagnostic output contains sensitive data
+
+**Symptoms:** Connection strings or credentials visible in output
+
+**Causes:**
+- Exception message includes connection string
+- Query parameters logged with sensitive values
+- Verbose mode too verbose
+
+**Solutions:**
+1. Audit all diagnostic output paths for secrets
+2. Implement connection string sanitizer
+3. Review exception handling to wrap messages
+
+### Issue: Checks run too frequently
+
+**Symptoms:** Health checks causing measurable database load
+
+**Causes:**
+- Caching disabled or too short
+- Multiple consumers polling simultaneously
+- Missing rate limiting
+
+**Solutions:**
+1. Enable result caching with appropriate TTL
+2. Consolidate monitoring endpoints
+3. Implement rate limiting on health check endpoint
 
 ---
 

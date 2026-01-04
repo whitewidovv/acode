@@ -405,6 +405,31 @@ Writes are atomic by default:
 
 ---
 
+## Best Practices
+
+### File I/O
+
+1. **Use FileShare.Read** - Allow other processes to read files while we have them open
+2. **Buffer appropriately** - Use 4KB-64KB buffers based on operation type
+3. **Dispose streams promptly** - Use `using` statements to release file handles
+4. **Handle long paths** - Enable extended-length path support on Windows
+
+### Error Handling
+
+5. **Map to domain exceptions** - Convert IOException to FileSystemException with context
+6. **Retry on transient errors** - Anti-virus locks, network hiccups deserve retry
+7. **Log before throwing** - Record details before wrapping exceptions
+8. **Preserve stack trace** - Use ExceptionDispatchInfo when rethrowing
+
+### Performance
+
+9. **Avoid File.Exists checks** - Just try operation; handle NotFound exception
+10. **Use Memory<byte> over byte[]** - Reduce allocations for large file operations
+11. **Consider memory-mapped files** - For very large files that need random access
+12. **Batch small operations** - Combine multiple small reads into single I/O when possible
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

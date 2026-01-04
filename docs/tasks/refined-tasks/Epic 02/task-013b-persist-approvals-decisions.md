@@ -69,6 +69,38 @@ The following items are explicitly excluded from Task 013.b:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Approval records are stored in workspace database
+- ASM-002: Records are immutable once created
+- ASM-003: Record timestamps use UTC for consistency
+- ASM-004: Query interface supports filtering by date, operation, decision
+- ASM-005: Storage format supports efficient aggregation queries
+
+### Behavioral Assumptions
+
+- ASM-006: Every approval decision creates a record
+- ASM-007: Records include full operation context for audit
+- ASM-008: Aggregations inform policy recommendations
+- ASM-009: Users can export approval history
+- ASM-010: Retention policy configurable (default: session lifetime)
+
+### Dependency Assumptions
+
+- ASM-011: Task 013 gate framework provides decision data
+- ASM-012: Task 050 workspace database provides storage
+- ASM-013: Task 011.b persistence layer provides database access
+
+### Audit Assumptions
+
+- ASM-014: Audit trail is complete - no gaps in recording
+- ASM-015: Records support compliance requirements
+- ASM-016: Query performance is acceptable for reporting
+
+---
+
 ## Functional Requirements
 
 ### Record Structure
@@ -467,6 +499,105 @@ Synced records (when redacted):
 - [ ] AC-035: Show works
 - [ ] AC-036: Delete works
 - [ ] AC-037: Export works
+
+---
+
+## Best Practices
+
+### Record Design
+
+- **BP-001: Immutable records** - Never modify approval records after creation; append corrections as new records
+- **BP-002: Complete context capture** - Store all information needed to understand the decision without external lookups
+- **BP-003: Consistent timestamps** - Use UTC timestamps for all records to avoid timezone confusion
+- **BP-004: Unique identifiers** - Use UUID v7 for time-ordered, collision-free record IDs
+
+### Storage Management
+
+- **BP-005: Efficient indexing** - Index records by session, date, and operation type for common queries
+- **BP-006: Retention policies** - Define clear retention rules and implement automatic cleanup
+- **BP-007: Query optimization** - Aggregate statistics during write time, not query time
+- **BP-008: Export formats** - Support both human-readable (CSV) and machine-readable (JSON) exports
+
+### Audit Trail Integrity
+
+- **BP-009: No gaps in recording** - Every approval decision must be persisted, even in error conditions
+- **BP-010: Chronological ordering** - Records should be retrievable in decision order
+- **BP-011: Session correlation** - All records link to their originating session
+- **BP-012: Failure recording** - Record failed operations alongside their decisions
+
+### Privacy and Security
+
+- **BP-013: Minimal sensitive data** - Avoid storing file contents in approval records
+- **BP-014: Access control consideration** - Record access should be limited to session owner
+- **BP-015: Secure deletion** - Implement proper data deletion when retention expires
+- **BP-016: Export security** - Warn users about sensitive data in exports
+
+---
+
+## Troubleshooting
+
+### Record Storage Issues
+
+#### Approval Not Recorded
+
+**Symptom:** Approval was given but doesn't appear in history.
+
+**Cause:** Database write failure or transaction rollback.
+
+**Solution:**
+1. Check database connectivity
+2. Review logs for write errors
+3. Verify disk space is available
+4. Check for transaction deadlocks
+
+#### Query Returns No Results
+
+**Symptom:** `acode approvals list` shows no records when approvals were given.
+
+**Cause:** Incorrect filter criteria or date range.
+
+**Solution:**
+1. Check date range parameters
+2. Verify session ID is correct
+3. Use broader filters to confirm records exist
+4. Check if retention policy deleted old records
+
+### Export Issues
+
+#### Export File Empty
+
+**Symptom:** Export command creates empty or minimal file.
+
+**Cause:** No records match export criteria.
+
+**Solution:**
+1. Verify records exist with list command
+2. Check export filter parameters
+3. Expand date range for export
+
+#### Export Format Invalid
+
+**Symptom:** Exported JSON/CSV is malformed.
+
+**Cause:** Special characters in operation descriptions.
+
+**Solution:**
+1. Verify encoding is UTF-8
+2. Check for unescaped characters
+3. Report issue if persists
+
+### Statistics Issues
+
+#### Statistics Don't Match Records
+
+**Symptom:** Aggregate counts differ from individual record count.
+
+**Cause:** Statistics calculated before recent records indexed.
+
+**Solution:**
+1. Wait for index update
+2. Force reindex if available
+3. Recalculate statistics from raw records
 
 ---
 

@@ -75,6 +75,39 @@ The following items are explicitly excluded from Task 012.a:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: LLM can decompose tasks into sequential steps
+- ASM-002: Plan format is structured (not free-form prose)
+- ASM-003: Each step specifies tool, inputs, and expected outcomes
+- ASM-004: Context includes task description and repository state
+- ASM-005: Plan is serializable for persistence and resume
+
+### Behavioral Assumptions
+
+- ASM-006: Planning occurs before any execution
+- ASM-007: Plan may be revised based on executor feedback
+- ASM-008: Complexity estimation informs resource allocation
+- ASM-009: Plan steps are ordered by dependency, not parallelizable
+- ASM-010: Failed planning triggers retry or human escalation
+
+### Dependency Assumptions
+
+- ASM-011: Task 012 orchestrator provides IStage contract
+- ASM-012: Task 014+ tool definitions are available for planning
+- ASM-013: Repository indexing provides codebase context
+- ASM-014: Session state tracks plan versions
+
+### Quality Assumptions
+
+- ASM-015: Good plans have 3-10 steps for typical tasks
+- ASM-016: Each step is atomic and testable
+- ASM-017: Plans include verification expectations
+
+---
+
 ## Functional Requirements
 
 ### Stage Lifecycle

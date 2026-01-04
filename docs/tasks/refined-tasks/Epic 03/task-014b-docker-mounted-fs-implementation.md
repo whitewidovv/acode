@@ -418,6 +418,31 @@ fs.ClearCache();
 
 ---
 
+## Best Practices
+
+### Container Integration
+
+1. **Validate mount points** - Verify expected paths exist in container at startup
+2. **Handle permission differences** - Container UID/GID may differ from host
+3. **Monitor mount health** - Detect when bind mounts become unavailable
+4. **Use absolute paths in container** - Avoid relative path confusion
+
+### Performance Considerations
+
+5. **Minimize cross-boundary I/O** - Batch operations to reduce overhead
+6. **Cache file metadata** - Reduce stat calls across container boundary
+7. **Use appropriate timeout** - Container I/O may be slower than native
+8. **Consider async polling** - FileSystemWatcher may not work across mounts
+
+### Security
+
+9. **Enforce read-only when possible** - Mount volumes as ro: when writes not needed
+10. **Validate all paths** - Double-check paths don't escape mount point
+11. **No shell injection** - Never build shell commands from file paths
+12. **Principle of least privilege** - Request only necessary container capabilities
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

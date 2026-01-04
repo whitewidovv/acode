@@ -586,6 +586,31 @@ Rebuilding index...
 
 ---
 
+## Best Practices
+
+### Index Design
+
+1. **Incremental by default** - Only re-index changed files; full rebuild is opt-in
+2. **Store metadata separately** - Keep file content separate from search index
+3. **Version the index format** - Include format version for backward compatibility
+4. **Compress aggressively** - Trade CPU for smaller index size on disk
+
+### Search Quality
+
+5. **Normalize before indexing** - Consistent tokenization for query and content
+6. **Support partial matches** - Prefix, suffix, and fuzzy matching options
+7. **Rank by relevance** - Most relevant results first based on scoring
+8. **Limit result set** - Return top N results; pagination for more
+
+### Performance
+
+9. **Build index in background** - Don't block user operations during indexing
+10. **Throttle I/O** - Respect system resources during large index builds
+11. **Cancel gracefully** - Stop indexing cleanly when user requests
+12. **Cache hot paths** - Keep frequently searched patterns in memory
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

@@ -477,6 +477,77 @@ This ensures artifacts are not committed to version control.
 
 ---
 
+## Best Practices
+
+### Directory Structure
+
+1. **Consistent hierarchy** - Same structure across all projects
+2. **Predictable naming** - {runId}/{artifactType}/{filename}
+3. **Shallow directories** - Avoid deeply nested structures
+4. **Separate by type** - Logs, test results, coverage in own directories
+
+### File Naming
+
+5. **Include timestamps** - ISO8601 format in filenames when relevant
+6. **Avoid special characters** - Alphanumeric, hyphen, underscore only
+7. **Preserve extensions** - Keep original file extensions
+8. **Unique names** - Prevent overwrites with UUID or sequence
+
+### Maintenance
+
+9. **Gitignore artifacts** - Never commit artifacts to source control
+10. **Document structure** - README in artifacts directory explaining layout
+11. **Size monitoring** - Warn when artifacts directory grows large
+12. **Periodic cleanup** - Script or command to prune old artifacts
+
+---
+
+## Troubleshooting
+
+### Issue: Artifacts not being collected
+
+**Symptoms:** Run completes but artifacts directory is empty
+
+**Causes:**
+- Artifact collection disabled in config
+- Output files written to unexpected locations
+- File patterns don't match actual outputs
+
+**Solutions:**
+1. Check `runs.artifacts.enabled` in config
+2. Verify output paths in build/test commands
+3. Update artifact patterns to match actual outputs
+
+### Issue: Artifact directory growing too large
+
+**Symptoms:** Disk space warnings, slow file operations
+
+**Causes:**
+- No retention policy configured
+- Large artifacts (videos, binaries) being collected
+- Many runs accumulating over time
+
+**Solutions:**
+1. Configure retention policy to delete old artifacts
+2. Exclude large file types from collection
+3. Run `acode artifacts prune` periodically
+
+### Issue: Artifacts not found by ID
+
+**Symptoms:** "Artifact not found" errors when retrieving
+
+**Causes:**
+- Artifact was pruned by retention policy
+- ID is from different workspace
+- Database and filesystem out of sync
+
+**Solutions:**
+1. Check artifact retention settings
+2. Verify correct workspace is active
+3. Run `acode artifacts verify` to check consistency
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

@@ -12,25 +12,94 @@
 
 Task 010 implements the CLI Command Framework, the primary interface through which users interact with Acode. The CLI provides structured commands for starting agent runs, managing sessions, configuring behavior, and querying status. A well-designed CLI is essential for usability, automation, and integration with development workflows.
 
+### Purpose and Scope
+
+The CLI serves as the single entry point for all Acode functionality. Whether a developer wants to start an agent run, check status, configure models, or manage conversations, they do so through the CLI. This unified interface simplifies learning and ensures consistent behavior across all operations. The CLI is designed for both interactive use (developers at their terminal) and automated use (CI/CD pipelines, scripts, tooling integrations).
+
+### Command Architecture
+
 The CLI follows established conventions for command-line tools. Commands use a consistent pattern: `acode <command> [subcommand] [options] [arguments]`. Global options apply to all commands. Command-specific options customize behavior. Arguments provide required inputs. This structure enables both interactive use and scriptable automation.
+
+The command router is the central dispatch mechanism. When a user invokes `acode run "task"`, the router parses the command name, locates the registered handler, validates arguments, and delegates execution. The router also handles unknown commands gracefully, suggesting similar commands when a typo is detected.
+
+Each command implements a standard interface that provides:
+- Command name and aliases
+- Description for help text
+- Option definitions with types and defaults
+- Argument specifications
+- Execute method that performs the actual work
+- Help generation for the command
+
+### Help System Design
 
 Help documentation is comprehensive and discoverable. Every command has built-in help accessible via `--help` or `acode help <command>`. Help includes descriptions, option documentation, examples, and related commands. Users can learn the CLI without external documentation.
 
+The help system is generated from command metadata, ensuring documentation stays synchronized with implementation. When new options are added, help automatically updates. This eliminates documentation drift that plagues manually-maintained help.
+
+### Output Formatting Strategy
+
 Output formatting adapts to context. Interactive use gets human-readable output with colors and formatting. Non-interactive use (scripts, CI/CD) gets structured output (JSONL) for parsing. The `--json` flag switches to machine-readable mode. This flexibility enables the CLI to serve both humans and automation.
+
+The output system uses a formatter abstraction. Commands emit semantic output (tables, messages, progress) and the formatter renders appropriately. Console formatter adds colors, borders, and spacing. JSONL formatter emits structured records. This separation keeps commands format-agnostic.
+
+### Configuration Hierarchy
 
 Configuration follows a precedence hierarchy. Command-line arguments override environment variables, which override configuration file values, which override defaults. This allows users to set baseline configuration in files while overriding specific values at runtime.
 
+The configuration loader reads from multiple sources and merges them according to precedence. This happens once at startup, and the resolved configuration is available to all commands. Configuration errors are detected early and reported with actionable messages.
+
+### Error Handling Philosophy
+
 Error handling provides actionable feedback. When commands fail, error messages explain what went wrong and suggest remediation. Exit codes distinguish between different failure types—user error, system error, configuration error. Scripts can respond appropriately to different failure modes.
+
+Every error includes:
+- A unique error code for programmatic handling
+- A human-readable message explaining the problem
+- Suggestions for how to fix the issue
+- Context about what operation was attempted
+
+### Subsystem Integration
 
 The CLI integrates with all Acode subsystems. Model management commands interact with the provider registry (Epic 01). Run commands trigger the agent orchestrator (Tasks 011-012). Configuration commands read and write `.agent/config.yml`. This integration makes the CLI the unified control surface.
 
+Integration follows dependency injection patterns. Commands receive their dependencies rather than creating them. This enables testing with mock implementations and ensures clean separation of concerns.
+
+### Extensibility Design
+
 The framework is extensible for future commands. New commands can be added by implementing the command interface and registering with the router. The framework handles parsing, validation, help generation, and output formatting. This extensibility supports growth without framework changes.
+
+The command registration is declarative. Commands self-describe their options, arguments, and help text. The framework uses this metadata for parsing, validation, and help generation. Adding a command requires only implementing the interface—no framework modifications.
+
+### Performance Optimization
 
 Performance is a key concern. CLI startup must be fast—users expect immediate response from command-line tools. Lazy loading and minimal initialization keep startup under 500ms. Long-running commands provide progress feedback to maintain responsiveness perception.
 
+Startup optimization strategies:
+- Defer configuration loading until needed
+- Lazy-load command handlers
+- Minimize assembly loading
+- Cache parsed configuration
+- Use async initialization where possible
+
+### Accessibility and Compatibility
+
 Accessibility considerations ensure the CLI works in diverse environments. Colors are optional (disabled in non-TTY contexts). Unicode handling is robust. Screen reader compatibility is considered for help text. These considerations broaden usability.
 
+Cross-platform compatibility is essential:
+- Windows PowerShell and cmd.exe
+- Linux bash, zsh, and other shells
+- macOS Terminal and iTerm
+- CI/CD environments (GitHub Actions, Azure DevOps, etc.)
+
+### Logging and Observability
+
 Logging provides observability into CLI operations. Commands log their invocation, key decisions, and results. Log output goes to stderr to not interfere with stdout output. Log verbosity is controllable. This visibility aids debugging and audit.
+
+Log levels:
+- ERROR: Operation failed
+- WARN: Potential issues, degraded operation
+- INFO: Key operations and milestones
+- DEBUG: Detailed execution trace (with -v)
 
 ---
 
@@ -54,6 +123,44 @@ Logging provides observability into CLI operations. Commands log their invocatio
 | Output Formatter | Component that formats output |
 | Progress Indicator | Visual feedback for long operations |
 | Help Generator | Produces help documentation |
+
+---
+
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: .NET 8+ is the target runtime with C# as the primary implementation language
+- ASM-002: System.CommandLine or similar parsing library will be used for argument parsing
+- ASM-003: Console/Terminal supports ANSI escape sequences for colors on modern systems
+- ASM-004: UTF-8 encoding is available and correctly configured on the host system
+- ASM-005: File system operations use standard .NET APIs with cross-platform path handling
+- ASM-006: JSON serialization uses System.Text.Json for JSONL output formatting
+- ASM-007: Logging infrastructure from Microsoft.Extensions.Logging is available
+
+### Environmental Assumptions
+
+- ASM-008: Users have a working terminal/console environment (bash, zsh, PowerShell, cmd)
+- ASM-009: The `.agent/config.yml` file location is determinable from current working directory
+- ASM-010: Environment variables are accessible via standard OS mechanisms
+- ASM-011: Standard input/output/error streams are available and functional
+- ASM-012: The host system has sufficient permissions to read configuration files
+- ASM-013: Network access is NOT required for CLI startup (local-only mode support)
+
+### Dependency Assumptions
+
+- ASM-014: Task 002 (.agent/config.yml) schema and parser are complete and available
+- ASM-015: Task 001 (Operating Modes) provides mode detection and constraint enforcement
+- ASM-016: Model provider registry (Epic 01) is available for model-related commands
+- ASM-017: Agent orchestrator (Tasks 011-012) is available for run/resume commands
+- ASM-018: Database layer (Task 050) is available for db commands
+
+### User Assumptions
+
+- ASM-019: Users have basic familiarity with command-line interfaces
+- ASM-020: Users understand the concept of configuration files and environment variables
+- ASM-021: Users can read English help text and error messages
+- ASM-022: Users have access to documentation or help commands for learning
 
 ---
 
@@ -219,6 +326,49 @@ The following items are explicitly excluded from Task 010:
 - NFR-019: Exit codes MUST be logged
 - NFR-020: Duration MUST be logged
 - NFR-021: Errors MUST be logged with context
+
+---
+
+## Security Considerations
+
+### Input Validation Security
+
+- SEC-001: All command-line arguments MUST be validated before use
+- SEC-002: Path arguments MUST be canonicalized to prevent traversal attacks
+- SEC-003: Arguments MUST NOT be passed directly to shell execution
+- SEC-004: Special characters MUST be escaped or rejected in file paths
+- SEC-005: Maximum argument length MUST be enforced to prevent buffer issues
+
+### Secret Protection
+
+- SEC-006: API keys and tokens MUST NOT appear in command-line arguments (use env vars or config)
+- SEC-007: Secrets MUST NOT be logged at any verbosity level
+- SEC-008: Process command lines are visible to other users; secrets MUST NOT be exposed there
+- SEC-009: Error messages MUST NOT include secret values even when describing errors
+- SEC-010: JSONL output MUST redact any accidentally-included secret patterns
+
+### File System Security
+
+- SEC-011: Configuration files SHOULD have restricted permissions (600 or 640)
+- SEC-012: CLI MUST warn if config file is world-readable and contains secrets
+- SEC-013: Temporary files MUST be created with secure permissions
+- SEC-014: Output files MUST NOT overwrite existing files without confirmation
+- SEC-015: Symbolic links MUST be handled carefully to prevent symlink attacks
+
+### Execution Security
+
+- SEC-016: CLI MUST NOT execute arbitrary code from user input
+- SEC-017: Plugin/extension loading MUST be disabled in this version
+- SEC-018: Commands MUST operate with least-privilege principles
+- SEC-019: Dangerous operations MUST require explicit confirmation (unless --yes)
+- SEC-020: Audit log MUST record all command invocations with timestamps
+
+### Network Security
+
+- SEC-021: CLI startup MUST NOT require network access (local-only mode)
+- SEC-022: Any network operations MUST respect operating mode constraints
+- SEC-023: TLS MUST be used for any network communication
+- SEC-024: Certificate validation MUST NOT be disabled in production
 
 ---
 
@@ -456,7 +606,12 @@ $ acode run --log-level debug "task"
 $ acode: command not found
 ```
 
-**Solution:** Add Acode to your PATH or use full path.
+**Cause:** Acode is not installed or not in your PATH.
+
+**Solution:** 
+1. Verify installation: Check if Acode is installed in the expected location
+2. Add to PATH: Add the Acode installation directory to your system PATH
+3. Use full path: Run using the complete path to the executable
 
 #### Invalid Configuration
 
@@ -467,7 +622,12 @@ Error [ACODE-CFG-001]: Invalid configuration
   Expected: Valid model ID
 ```
 
-**Solution:** Check configuration file or environment variables.
+**Cause:** Configuration file contains invalid values.
+
+**Solution:** 
+1. Check config file: Open `.agent/config.yml` and review the specified path
+2. Validate model ID: Ensure the model ID matches an available model
+3. Check environment: Verify no conflicting environment variables
 
 #### Model Unavailable
 
@@ -477,7 +637,74 @@ Error [ACODE-MDL-001]: Model unavailable
   Suggestion: Start model with 'ollama run llama3.2:70b'
 ```
 
-**Solution:** Ensure model is running and accessible.
+**Cause:** The specified model is not running or accessible.
+
+**Solution:** 
+1. Start the model: Run `ollama run <model-name>` to start the model
+2. Check Ollama: Ensure Ollama service is running
+3. Verify model exists: Run `ollama list` to see available models
+
+#### Permission Denied
+
+```
+Error [ACODE-FS-001]: Permission denied
+  Path: /protected/config.yml
+```
+
+**Cause:** Insufficient permissions to read/write the specified file.
+
+**Solution:**
+1. Check file permissions: Verify you have read/write access
+2. Check directory permissions: Ensure parent directories are accessible
+3. Run with appropriate privileges: May need elevated permissions
+
+#### JSONL Parse Error
+
+```
+Error [ACODE-CLI-005]: Invalid JSON in input
+  Line: 3
+  Error: Unexpected token
+```
+
+**Cause:** Input provided to CLI is not valid JSON.
+
+**Solution:**
+1. Validate JSON: Use a JSON validator to check your input
+2. Check encoding: Ensure UTF-8 encoding without BOM
+3. Escape special characters: Properly escape quotes and backslashes
+
+#### Slow Startup
+
+**Symptom:** CLI takes more than 500ms to start.
+
+**Cause:** Large configuration, slow disk, or excessive plugins.
+
+**Solution:**
+1. Check config file size: Large configs slow parsing
+2. Check disk performance: SSD recommended for responsive CLI
+3. Disable unnecessary features: Reduce startup initialization
+
+#### Colors Not Displaying
+
+**Symptom:** Output appears without colors or with escape codes visible.
+
+**Cause:** Terminal does not support ANSI colors or is not recognized as TTY.
+
+**Solution:**
+1. Use `--no-color`: Explicitly disable colors
+2. Check terminal: Ensure terminal supports ANSI escape sequences
+3. Check TERM variable: Set `TERM=xterm-256color` or similar
+
+#### Environment Variable Not Working
+
+**Symptom:** Setting `ACODE_*` environment variable has no effect.
+
+**Cause:** Variable not exported, typo in name, or CLI arg overriding.
+
+**Solution:**
+1. Export the variable: Use `export ACODE_VAR=value` in bash
+2. Check spelling: Variable names are case-sensitive
+3. Check precedence: CLI args override environment variables
 
 ---
 
@@ -567,6 +794,66 @@ Error [ACODE-MDL-001]: Model unavailable
 
 ---
 
+## Best Practices
+
+### Command Design
+
+- **BP-001: Use verb-noun naming** - Commands should follow `acode <verb> [noun]` pattern (e.g., `run`, `config get`, `models list`)
+- **BP-002: Keep commands shallow** - Limit subcommand depth to 2 levels maximum (`acode config get`, not `acode config settings get value`)
+- **BP-003: Provide sensible defaults** - Commands should work with minimal arguments; require only what's truly necessary
+- **BP-004: Support both interactive and scripted use** - Every command should work in both modes without modification
+
+### Option Conventions
+
+- **BP-005: Use standard option names** - Follow GNU/POSIX conventions (`--help`, `--version`, `--verbose`, `--quiet`)
+- **BP-006: Provide short aliases for common options** - `-h`, `-v`, `-q`, `-y` for frequently used flags
+- **BP-007: Boolean options use --no- prefix** - `--color` and `--no-color`, not `--color=false`
+- **BP-008: Options before arguments** - Parse options first, then positional arguments
+
+### Output Design
+
+- **BP-009: Human-readable by default** - Default output should be formatted for human consumption
+- **BP-010: Machine-readable on request** - `--json` flag for scripting and automation
+- **BP-011: Errors to stderr, results to stdout** - Never mix error messages with program output
+- **BP-012: Use exit codes consistently** - Scripts should be able to rely on exit codes for flow control
+
+### Error Handling
+
+- **BP-013: Fail fast on invalid input** - Validate all arguments before executing any operation
+- **BP-014: Provide actionable error messages** - Tell users what went wrong and how to fix it
+- **BP-015: Include error codes for automation** - Error codes enable programmatic error handling
+- **BP-016: Never expose sensitive information** - Secrets, tokens, and passwords must never appear in errors
+
+### Help System
+
+- **BP-017: Every command has help** - `--help` must work on every command and subcommand
+- **BP-018: Include examples in help** - Real-world usage examples are more valuable than abstract descriptions
+- **BP-019: Show related commands** - Guide users to discover related functionality
+- **BP-020: Keep help concise** - Avoid overwhelming users; link to full documentation for details
+
+### Configuration
+
+- **BP-021: Respect XDG conventions** - Use standard config locations where applicable
+- **BP-022: Environment variables for CI/CD** - Support configuration via environment for automation
+- **BP-023: Document all config options** - Every configuration value should be documented
+- **BP-024: Validate config on load** - Catch configuration errors early with clear messages
+
+### Performance
+
+- **BP-025: Lazy load dependencies** - Don't initialize subsystems until they're needed
+- **BP-026: Fast startup is essential** - Users expect CLI tools to respond instantly
+- **BP-027: Show progress for long operations** - Keep users informed during multi-second operations
+- **BP-028: Support cancellation** - Ctrl+C should always work and clean up properly
+
+### Security
+
+- **BP-029: Sanitize all file paths** - Prevent path traversal and injection attacks
+- **BP-030: Use secure defaults** - Security should not require explicit opt-in
+- **BP-031: Audit log all commands** - Maintain a record of what was executed and when
+- **BP-032: Principle of least privilege** - Request only the permissions actually needed
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
@@ -576,23 +863,61 @@ Tests/Unit/CLI/
 ├── CommandRouterTests.cs
 │   ├── Should_Route_Known_Command()
 │   ├── Should_Error_On_Unknown_Command()
-│   └── Should_Suggest_Similar_Command()
+│   ├── Should_Suggest_Similar_Command()
+│   ├── Should_Handle_Aliases()
+│   └── Should_List_All_Commands()
 │
 ├── ArgumentParserTests.cs
 │   ├── Should_Parse_Long_Options()
 │   ├── Should_Parse_Short_Options()
 │   ├── Should_Parse_Arguments()
-│   └── Should_Handle_Mixed_Input()
+│   ├── Should_Handle_Mixed_Input()
+│   ├── Should_Handle_Equals_Syntax()
+│   ├── Should_Handle_Space_Syntax()
+│   ├── Should_Handle_No_Prefix()
+│   ├── Should_Reject_Unknown_Option()
+│   └── Should_Handle_Boolean_Options()
+│
+├── GlobalOptionsTests.cs
+│   ├── Should_Parse_Help_Flag()
+│   ├── Should_Parse_Version_Flag()
+│   ├── Should_Parse_Verbose_Flag()
+│   ├── Should_Parse_Quiet_Flag()
+│   ├── Should_Parse_Json_Flag()
+│   ├── Should_Parse_Yes_Flag()
+│   ├── Should_Parse_DryRun_Flag()
+│   ├── Should_Parse_NoColor_Flag()
+│   └── Should_Parse_LogLevel_Option()
 │
 ├── OutputFormatterTests.cs
 │   ├── Should_Format_Table()
 │   ├── Should_Format_JSONL()
-│   └── Should_Handle_Wide_Content()
+│   ├── Should_Handle_Wide_Content()
+│   ├── Should_Truncate_Long_Values()
+│   ├── Should_Handle_Unicode()
+│   ├── Should_Disable_Colors_NonTTY()
+│   └── Should_Respect_Terminal_Width()
 │
-└── ConfigPrecedenceTests.cs
-    ├── Should_CLI_Override_Env()
-    ├── Should_Env_Override_File()
-    └── Should_Use_Defaults()
+├── ConfigPrecedenceTests.cs
+│   ├── Should_CLI_Override_Env()
+│   ├── Should_Env_Override_File()
+│   ├── Should_Use_Defaults()
+│   ├── Should_Merge_Nested_Config()
+│   └── Should_Handle_Missing_File()
+│
+├── ErrorHandlerTests.cs
+│   ├── Should_Format_Error_Message()
+│   ├── Should_Include_Error_Code()
+│   ├── Should_Suggest_Remediation()
+│   ├── Should_Write_To_Stderr()
+│   └── Should_Redact_Secrets()
+│
+└── HelpGeneratorTests.cs
+    ├── Should_Generate_Command_Help()
+    ├── Should_Include_Examples()
+    ├── Should_List_Options()
+    ├── Should_Show_Related_Commands()
+    └── Should_Respect_Terminal_Width()
 ```
 
 ### Integration Tests
@@ -602,7 +927,27 @@ Tests/Integration/CLI/
 ├── CommandExecutionTests.cs
 │   ├── Should_Execute_Help()
 │   ├── Should_Execute_Version()
-│   └── Should_Execute_Status()
+│   ├── Should_Execute_Status()
+│   ├── Should_Execute_Config_Get()
+│   ├── Should_Execute_Config_Set()
+│   └── Should_Execute_Models_List()
+│
+├── ConfigurationLoadingTests.cs
+│   ├── Should_Load_From_File()
+│   ├── Should_Load_From_Environment()
+│   ├── Should_Apply_Precedence()
+│   └── Should_Validate_Config()
+│
+├── OutputModeTests.cs
+│   ├── Should_Output_Human_Readable()
+│   ├── Should_Output_JSONL()
+│   ├── Should_Detect_TTY()
+│   └── Should_Respect_NoColor()
+│
+└── SignalHandlingTests.cs
+    ├── Should_Handle_SIGINT()
+    ├── Should_Handle_SIGTERM()
+    └── Should_Cleanup_On_Cancel()
 ```
 
 ### E2E Tests
@@ -612,14 +957,38 @@ Tests/E2E/CLI/
 ├── CLIEndToEndTests.cs
 │   ├── Should_Run_Full_Workflow()
 │   ├── Should_Handle_Interruption()
-│   └── Should_Resume_Session()
+│   ├── Should_Resume_Session()
+│   ├── Should_Respect_DryRun()
+│   └── Should_Work_With_Config_Overrides()
+│
+├── CrossPlatformTests.cs
+│   ├── Should_Work_On_Windows()
+│   ├── Should_Work_On_Linux()
+│   ├── Should_Work_On_MacOS()
+│   └── Should_Handle_Path_Separators()
+│
+└── AutomationTests.cs
+    ├── Should_Work_In_CICD()
+    ├── Should_Parse_JSONL_Output()
+    ├── Should_Return_Correct_Exit_Codes()
+    └── Should_Work_NonInteractive()
 ```
 
 ### Performance Tests
 
-- PERF-001: Startup < 500ms
-- PERF-002: Help output < 100ms
-- PERF-003: Argument parsing < 50ms
+- PERF-001: Startup MUST complete in < 500ms
+- PERF-002: Help output MUST complete in < 100ms
+- PERF-003: Argument parsing MUST complete in < 50ms
+- PERF-004: Config loading MUST complete in < 100ms
+- PERF-005: Command routing MUST complete in < 10ms
+- PERF-006: Memory baseline MUST be < 100MB
+
+### Test Coverage Requirements
+
+- Minimum 80% line coverage for CLI module
+- 100% coverage for error handling paths
+- 100% coverage for security-sensitive paths
+- All public APIs must have at least one test
 
 ---
 

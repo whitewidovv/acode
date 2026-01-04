@@ -76,6 +76,40 @@ The following items are explicitly excluded from Task 012:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Agent loop follows Plan → Execute → Verify → Review cycle
+- ASM-002: Each stage has well-defined inputs and outputs
+- ASM-003: Stage transitions are deterministic based on stage results
+- ASM-004: Single LLM model is used across all stages in a session
+- ASM-005: Context window management is handled at orchestrator level
+- ASM-006: Token budgets can be partitioned across stages
+
+### Behavioral Assumptions
+
+- ASM-007: Stages execute sequentially, not in parallel
+- ASM-008: Stage failures can trigger retry or loop back to earlier stage
+- ASM-009: User approval gates integrate at stage boundaries
+- ASM-010: Each stage emits events for observability
+- ASM-011: Stage timeout triggers graceful degradation
+
+### Dependency Assumptions
+
+- ASM-012: Task 011 session state machine tracks orchestrator state
+- ASM-013: Task 010 CLI provides user interaction primitives
+- ASM-014: Model routing (Epic 01) provides LLM access
+- ASM-015: Tasks 012.a-d implement individual stage logic
+
+### Design Assumptions
+
+- ASM-016: IStage interface provides common stage contract
+- ASM-017: StageResult contains success/failure and output data
+- ASM-018: Orchestrator manages stage lifecycle and transitions
+
+---
+
 ## Functional Requirements
 
 ### Orchestrator Core

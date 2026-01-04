@@ -76,6 +76,37 @@ The following items are explicitly excluded from Task 050.e:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **SQLite Backup API** - Uses sqlite3_backup_* API for consistent online backups
+2. **PostgreSQL pg_dump** - External pg_dump tool available for PostgreSQL backups
+3. **Atomic Backups** - Backup process produces consistent snapshot; no partial states
+4. **Local Storage** - Backup files written to local filesystem (.agent/backups/)
+5. **Timestamped Files** - Backup filenames include ISO8601 timestamp for ordering
+6. **Compression Optional** - gzip compression available but not required
+7. **No Encryption** - Backup files not encrypted; filesystem security assumed
+
+### Operational Assumptions
+
+8. **Manual Trigger** - Primary backup method is `agent db backup` CLI command
+9. **Pre-Migration Hook** - Migrations optionally trigger backup before schema changes
+10. **Retention Policy** - Configurable retention: keep N backups or backups from last N days
+11. **Pruning Command** - `agent db backup prune` removes old backups per retention policy
+12. **Verification** - `agent db backup verify <file>` checks backup integrity
+13. **Restore Command** - `agent db restore <file>` restores from backup with confirmation
+
+### Export Assumptions
+
+14. **JSON Export** - `agent db export --format json` exports data as JSON files
+15. **CSV Export** - `agent db export --format csv` exports tables as CSV files
+16. **Selective Export** - --tables flag limits export to specific tables
+17. **Schema Export** - --schema-only exports DDL without data
+18. **Import Support** - `agent db import` restores from JSON/CSV export format
+
+---
+
 ## Functional Requirements
 
 ### Backup Creation
@@ -462,6 +493,77 @@ export:
 - [ ] AC-021: List command works
 - [ ] AC-022: Restore command works
 - [ ] AC-023: Export command works
+
+---
+
+## Best Practices
+
+### Backup Strategy
+
+1. **Backup before migrations** - Always create backup before schema changes
+2. **Test restore regularly** - Untested backups are not backups; verify restoration works
+3. **Rotate backups** - Keep multiple generations; single backup is single point of failure
+4. **Store offsite** - Copy critical backups to different location/medium
+
+### Backup Operations
+
+5. **Use atomic APIs** - SQLite backup API, pg_dump ensure consistent snapshots
+6. **Verify after backup** - Run integrity check on backup file before considering complete
+7. **Compress for storage** - gzip reduces backup size 5-10x for typical databases
+8. **Timestamp filenames** - Include ISO8601 timestamp for sorting and identification
+
+### Restore Safety
+
+9. **Restore to staging first** - Verify backup on non-production before depending on it
+10. **Confirm before overwrite** - Always prompt when restoring over existing database
+11. **Keep current as backup** - Backup current state before restoring old version
+12. **Document restore procedure** - Write runbook for restore under pressure
+
+---
+
+## Troubleshooting
+
+### Issue: Backup file corrupted
+
+**Symptoms:** Restore fails with "malformed database" or integrity errors
+
+**Causes:**
+- Backup taken during active write (non-atomic method used)
+- Disk error during backup write
+- File transfer corruption (binary mode not used)
+
+**Solutions:**
+1. Verify source database integrity before backup
+2. Use SQLite backup API or pg_dump, not file copy
+3. Check file checksums after transfer
+
+### Issue: Restore changes not visible
+
+**Symptoms:** Restored data not appearing in application
+
+**Causes:**
+- Restored to wrong database file/instance
+- Connection caching showing stale data
+- Application not restarted after restore
+
+**Solutions:**
+1. Verify restore target path matches config
+2. Restart application to clear any cached connections
+3. Run `agent db health` to confirm database state
+
+### Issue: Backup takes too long
+
+**Symptoms:** Large database backup times out or impacts operations
+
+**Causes:**
+- Full backup of very large database
+- Disk I/O contention during backup
+- Network transfer bottleneck for remote backup
+
+**Solutions:**
+1. Schedule backups during off-peak hours
+2. Use faster storage for backup destination
+3. Consider incremental backup strategy for large databases
 
 ---
 

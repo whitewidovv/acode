@@ -585,6 +585,31 @@ acode cache clear --npm --force
 
 ---
 
+## Best Practices
+
+### Cache Volume Design
+
+1. **Separate caches by type** - NuGet, npm, yarn in different volumes
+2. **Named volumes preferred** - Easier to manage than bind mounts
+3. **Regular cleanup** - Schedule cache pruning to manage size
+4. **Verify cache integrity** - Detect corrupted cached packages
+
+### Security
+
+5. **Read-only when possible** - Mount caches read-only for restore
+6. **Scan cached packages** - Periodic vulnerability scanning
+7. **Clear on security alerts** - Remove caches if compromise suspected
+8. **Hash verification** - Verify package hashes on restore
+
+### Performance
+
+9. **Warm cache for common packages** - Pre-populate frequently used packages
+10. **Local cache priority** - Check local cache before remote
+11. **Parallel downloads** - Download multiple packages concurrently
+12. **Monitor cache hit rates** - Track effectiveness of caching
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

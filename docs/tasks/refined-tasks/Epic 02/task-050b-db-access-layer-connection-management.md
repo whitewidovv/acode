@@ -73,6 +73,37 @@ The following items are explicitly excluded from Task 050.b:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **ADO.NET Providers** - Microsoft.Data.Sqlite and Npgsql packages provide database connectivity
+2. **Connection Factory** - IConnectionFactory creates and configures database connections
+3. **Connection Lifetime** - Connections are short-lived; opened for query, closed immediately
+4. **No Connection Pooling SQLite** - SQLite uses single connection; no pooling needed
+5. **PostgreSQL Pooling** - Npgsql built-in pooling handles connection reuse automatically
+6. **Thread Safety** - Connection factory is thread-safe; individual connections are not
+7. **Async Support** - All data access methods are async with proper cancellation token support
+
+### Configuration Assumptions
+
+8. **Connection Strings** - Database connection info read from agent-config.yml storage section
+9. **SSL Configuration** - PostgreSQL SSL mode configurable: disable, prefer, require, verify-full
+10. **Timeout Settings** - Connection and command timeouts configurable with sensible defaults
+11. **Retry Logic** - Transient failure retries with exponential backoff for network issues
+12. **Health Endpoints** - Connection health exposed via Task 050.d health check framework
+
+### Operational Assumptions
+
+13. **Lazy Initialization** - Database connections created on first use, not at startup
+14. **Graceful Shutdown** - Open connections properly disposed on application shutdown
+15. **Transaction Scope** - Unit of work pattern manages transaction boundaries
+16. **Exception Mapping** - Database-specific exceptions wrapped in domain exceptions
+17. **Logging Integration** - Connection events logged for diagnostics (open, close, errors)
+18. **No Raw SQL Logging** - Query text not logged by default to prevent credential exposure
+
+---
+
 ## Functional Requirements
 
 ### Connection Factory
@@ -364,6 +395,77 @@ catch
 - [ ] AC-019: File config works
 - [ ] AC-020: Env vars work
 - [ ] AC-021: Validation works
+
+---
+
+## Best Practices
+
+### Connection Handling
+
+1. **Always use factories** - Never construct connections directly; use IConnectionFactory
+2. **Short-lived connections** - Open, execute, close; don't hold connections across requests
+3. **Dispose properly** - Use `using` statements to ensure connections are released
+4. **Configure pool size** - Set MaxPoolSize based on expected concurrent operations
+
+### Query Execution
+
+5. **Parameterize all queries** - Never concatenate user input into SQL strings
+6. **Use async methods** - All data access should use async/await for scalability
+7. **Set command timeouts** - Prevent runaway queries from blocking indefinitely
+8. **Log slow queries** - Track queries exceeding threshold for optimization
+
+### Error Handling
+
+9. **Wrap database exceptions** - Convert provider-specific exceptions to domain exceptions
+10. **Implement retry logic** - Handle transient failures with exponential backoff
+11. **Log connection events** - Record opens, closes, and errors for diagnostics
+12. **Fail fast on config errors** - Validate connection string at startup, not first use
+
+---
+
+## Troubleshooting
+
+### Issue: Connection pool exhaustion
+
+**Symptoms:** "Timeout waiting for connection" or connection refused
+
+**Causes:**
+- Connections not being disposed properly
+- Long-running transactions holding connections
+- Pool size too small for workload
+
+**Solutions:**
+1. Check for missing `using` statements or `Dispose()` calls
+2. Add logging to track connection open/close events
+3. Increase MaxPoolSize in connection string
+
+### Issue: SSL connection failures (PostgreSQL)
+
+**Symptoms:** "SSL connection required" or certificate errors
+
+**Causes:**
+- SSL mode mismatch between config and server
+- Certificate not trusted by client
+- Self-signed certificate without bypass
+
+**Solutions:**
+1. Check sslmode in connection string: require, verify-ca, verify-full
+2. Add server certificate to trusted store
+3. For development, use `Trust Server Certificate=true` (not for production)
+
+### Issue: Provider not registered
+
+**Symptoms:** "No provider registered for SQLite" or similar
+
+**Causes:**
+- Missing NuGet package (Microsoft.Data.Sqlite, Npgsql)
+- DI registration not called
+- Wrong provider type requested
+
+**Solutions:**
+1. Verify NuGet packages installed in project
+2. Check AddDatabaseServices() called in DI setup
+3. Confirm agent-config.yml database.provider value
 
 ---
 

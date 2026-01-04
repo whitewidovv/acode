@@ -816,6 +816,31 @@ sandbox:
 
 ---
 
+## Best Practices
+
+### Container Management
+
+1. **Use official base images** - Prefer official Docker Hub images
+2. **Pin image versions** - Use specific tags, not :latest in production
+3. **Clean up containers** - Remove containers after task completion
+4. **Limit container resources** - Set memory and CPU limits
+
+### Security
+
+5. **Run as non-root** - Create unprivileged user in container
+6. **Read-only root filesystem** - Mount specific writeable locations
+7. **Drop capabilities** - Remove unnecessary Linux capabilities
+8. **No privileged mode** - Never use --privileged flag
+
+### Networking
+
+9. **Network isolation by default** - No network unless explicitly needed
+10. **Control outbound access** - Restrict to known endpoints if network enabled
+11. **No port publishing** - Don't expose container ports to host
+12. **Use bridge networks** - Isolate sandbox network from host
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

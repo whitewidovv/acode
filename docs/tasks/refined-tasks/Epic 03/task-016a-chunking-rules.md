@@ -373,6 +373,31 @@ Each chunk includes:
 
 ---
 
+## Best Practices
+
+### Chunking Strategy
+
+1. **Prefer semantic boundaries** - Split at function/class boundaries, not arbitrary lines
+2. **Respect language syntax** - Don't break mid-statement or mid-block
+3. **Include leading context** - Imports, namespace declarations for understanding
+4. **Add trailing context** - Closing braces, related code if space permits
+
+### Size Management
+
+5. **Configurable chunk sizes** - Different contexts need different granularity
+6. **Overlap for continuity** - Include few lines overlap between chunks
+7. **Handle edge cases** - Very long lines, minified code, binary files
+8. **Track source metadata** - Preserve file, line numbers through chunking
+
+### Quality Assurance
+
+9. **Validate chunk boundaries** - Verify syntax is valid after chunking
+10. **Test language coverage** - Ensure rules work for all supported languages
+11. **Measure chunk quality** - Are chunks useful in context? Test with LLM
+12. **Log chunking decisions** - Record why boundaries were chosen
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

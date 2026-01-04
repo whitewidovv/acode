@@ -439,6 +439,31 @@ When rate limited:
 
 ---
 
+## Best Practices
+
+### Tool Design
+
+1. **Provide structured output** - Return JSON with file, line, match context
+2. **Support filtering** - Allow file patterns, path exclusions in query
+3. **Limit output size** - Cap results to prevent overwhelming context
+4. **Include match context** - Return lines before/after match for context
+
+### Agent Integration
+
+5. **Clear tool descriptions** - Help LLM understand when to use search vs grep
+6. **Validate inputs early** - Check query parameters before searching
+7. **Handle empty results** - Return informative message, not just empty array
+8. **Log tool invocations** - Track what searches agent performs for debugging
+
+### Error Handling
+
+9. **Graceful degradation** - If index unavailable, fall back to grep
+10. **Timeout protection** - Cancel searches exceeding time limit
+11. **Report partial results** - Return what was found if search interrupted
+12. **Informative errors** - Include what went wrong and how to fix
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

@@ -77,6 +77,40 @@ The following items are explicitly excluded from Task 012.b:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Tools are registered and callable by name
+- ASM-002: Tool invocations are sandboxed for safety
+- ASM-003: Tool results are structured and parseable
+- ASM-004: Execution follows plan step sequence
+- ASM-005: Idempotent operations preferred where possible
+- ASM-006: File system changes are tracked as artifacts
+
+### Behavioral Assumptions
+
+- ASM-007: Each step executes tools specified in plan
+- ASM-008: Failed tools trigger retry with backoff
+- ASM-009: Approval gates pause execution pending user response
+- ASM-010: Progress events emitted for each tool invocation
+- ASM-011: Executor handles tool errors gracefully
+
+### Dependency Assumptions
+
+- ASM-012: Task 012 orchestrator provides IStage contract
+- ASM-013: Task 012.a plan provides step sequence
+- ASM-014: Task 013 approval gates integrate at tool level
+- ASM-015: Task 014+ provides actual tool implementations
+
+### Safety Assumptions
+
+- ASM-016: High-risk operations require explicit approval
+- ASM-017: Sandbox prevents unauthorized system access
+- ASM-018: Execution timeouts prevent runaway processes
+
+---
+
 ## Functional Requirements
 
 ### Stage Lifecycle

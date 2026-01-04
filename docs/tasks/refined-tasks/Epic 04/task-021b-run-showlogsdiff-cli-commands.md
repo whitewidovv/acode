@@ -105,6 +105,35 @@ All commands MUST respect Task 001 operating modes:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Workspace database exists** - Task 011 has created SQLite database with run tables
+2. **Run records persisted** - All command executions are recorded with metadata
+3. **Artifacts stored** - Stdout, stderr, and other artifacts saved to filesystem
+4. **Unique run IDs** - Each run has a unique identifier (UUID or sequential)
+5. **Metadata queryable** - Run metadata supports filtering and ordering
+6. **Exit codes captured** - Command exit codes stored with run records
+
+### CLI Assumptions
+
+7. **Standard output format** - Tabular for humans, JSON for scripts
+8. **Consistent filtering** - Same filter syntax across related commands
+9. **Pagination support** - Large result sets handled efficiently
+10. **Color output optional** - Disable colors for non-terminal output
+11. **Exit codes meaningful** - CLI returns appropriate exit codes
+
+### Data Assumptions
+
+12. **Timestamps in UTC** - All stored times are UTC, display converts to local
+13. **Logs accessible** - Log files remain on disk until explicitly deleted
+14. **Diff possible** - Two runs can be compared if both exist
+15. **No data loss** - Run data persisted reliably
+16. **Reasonable history** - Expected <10K runs per workspace
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-020: `acode runs list` Command
@@ -501,6 +530,31 @@ hexdump -C .acode/artifacts/{run-id}/stdout.txt
 - [ ] AC-037: Unit tests achieve 90% coverage
 - [ ] AC-038: Integration tests cover DB interactions
 - [ ] AC-039: E2E tests verify CLI behavior
+
+---
+
+## Best Practices
+
+### Command Design
+
+1. **Consistent subcommand structure** - `runs list`, `runs show`, `runs logs`, `runs diff`
+2. **Sensible defaults** - Show recent runs, limit output, format for terminal
+3. **Discoverability** - `--help` shows all options with examples
+4. **Tab completion** - Support shell completion for run IDs
+
+### Output Formatting
+
+5. **JSON for automation** - `--json` outputs machine-readable format
+6. **Table for humans** - Default tabular output with aligned columns
+7. **Color coding** - Success green, failure red (when terminal supports)
+8. **Truncate long values** - Show partial command with ellipsis
+
+### Performance
+
+9. **Query efficiently** - Use database indexes, limit result sets
+10. **Stream large logs** - Don't load entire log into memory
+11. **Cancel gracefully** - Ctrl-C stops output cleanly
+12. **Progress indication** - Show progress for long operations
 
 ---
 

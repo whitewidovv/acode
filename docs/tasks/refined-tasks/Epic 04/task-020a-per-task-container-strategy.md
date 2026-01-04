@@ -490,6 +490,31 @@ docker pull mcr.microsoft.com/dotnet/sdk:8.0
 
 ---
 
+## Best Practices
+
+### Container Lifecycle
+
+1. **Fresh container per task** - Prevent state leakage between tasks
+2. **Reuse base image** - Pull once, use many times
+3. **Fast startup** - Minimize container initialization time
+4. **Clean exit handling** - Proper cleanup even on failure
+
+### Resource Management
+
+5. **Set memory limits** - Prevent runaway memory consumption
+6. **Set CPU limits** - Fair sharing of CPU resources
+7. **PIDs limit** - Prevent fork bombs
+8. **Disk quotas** - Limit writeable volume sizes
+
+### State Handling
+
+9. **Mount workspaces carefully** - Source code read-only when possible
+10. **Output to specific volumes** - Artifacts to designated output volumes
+11. **Ephemeral by default** - Container filesystem cleared on exit
+12. **Log container metrics** - Track resource usage per task
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

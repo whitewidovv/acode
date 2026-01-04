@@ -63,6 +63,33 @@ This task covers the Git worktree operations. Task mapping is in 023.b. Cleanup 
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git 2.20+** - Git version supports worktree features used
+2. **Filesystem support** - Filesystem supports git worktree operations
+3. **Sufficient disk space** - Space available for worktree creation
+4. **Write permissions** - Agent has write access to worktree directory
+5. **Single repository** - Worktrees for one git repository at a time
+
+### Operational Assumptions
+
+6. **Branch per worktree** - Each worktree has its own branch
+7. **Unique paths** - No path collisions between worktrees
+8. **Git index available** - Main repo .git directory accessible
+9. **No conflicting locks** - Git index not locked during operations
+10. **Worktree directory writable** - .acode/worktrees/ exists and is writable
+
+### Integration Assumptions
+
+11. **Task IDs unique** - Task IDs can be used for path generation
+12. **Mapping service available** - Task 023.b provides persistence
+13. **CLI integration** - Commands integrate with acode CLI framework
+14. **Event emission** - Worktree events can be published
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-025: Create Operation

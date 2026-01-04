@@ -73,6 +73,37 @@ The following items are explicitly excluded from Task 050.c:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Startup Mode Flag** - agent-config.yml contains database.autoMigrate boolean for startup behavior
+2. **CLI Override** - --migrate and --no-migrate flags override config setting
+3. **Embedded Discovery** - Assembly scanning finds migration classes/resources automatically
+4. **File Discovery** - .agent/migrations/*.sql scanned for external migration files
+5. **Order Guarantee** - Migrations applied in strict numeric order (001 before 002)
+6. **Transaction Isolation** - Each migration in separate transaction; failures don't corrupt state
+7. **Checksum Validation** - Applied migration checksums verified to detect tampering
+
+### Bootstrapping Assumptions
+
+8. **First Run Detection** - Missing workspace.db or empty sys_migrations indicates fresh install
+9. **Version Gap Detection** - Missing intermediate versions prevent migration (fail-safe)
+10. **Concurrent Guard** - Lock file or database lock prevents concurrent migration runs
+11. **Startup Blocking** - Agent waits for migrations before serving requests
+12. **Failure Exit Code** - Migration failures return non-zero exit for scripting
+
+### Operational Assumptions
+
+13. **Dry Run Mode** - --dry-run shows pending migrations without applying
+14. **Status Command** - `agent db status` shows current version and pending migrations
+15. **Force Option** - --force skips checksum validation (dangerous, requires confirmation)
+16. **Backup Prompt** - Migrations prompt for backup on production databases
+17. **Rollback Scripting** - Rollback generates scripts but doesn't auto-execute without confirmation
+18. **Logging Verbosity** - Migration progress logged with timing for each step
+
+---
+
 ## Functional Requirements
 
 ### Migration Discovery
@@ -433,6 +464,78 @@ DROP TABLE IF EXISTS sys_analytics;
 - [ ] AC-021: Acquires lock
 - [ ] AC-022: Releases lock
 - [ ] AC-023: Handles conflict
+
+---
+
+## Best Practices
+
+### Migration Execution
+
+1. **Always backup first** - Run `agent db backup` before any migration
+2. **Verify in staging** - Apply migrations to non-production environment first
+3. **Use dry-run mode** - Preview changes with `--dry-run` before applying
+4. **Monitor progress** - Watch migration output for warnings or slow steps
+
+### Startup Configuration
+
+5. **Explicit over implicit** - Prefer explicit `agent db migrate` over auto-migrate at startup
+6. **Fail-fast startup** - Application should not start if database is in unknown state
+7. **Log startup sequence** - Record migration status check and outcome at startup
+8. **Version check on connect** - Validate schema version matches expected on first connection
+
+### Safety Measures
+
+9. **Never force in production** - Avoid `--force` flag; fix underlying issue instead
+10. **Lock during migration** - Prevent concurrent migrations with file or database lock
+11. **Rollback plan ready** - Have tested rollback procedure before applying migrations
+12. **Health check after migration** - Run `agent db health` after migration completes
+
+---
+
+## Troubleshooting
+
+### Issue: Migration lock timeout
+
+**Symptoms:** "Could not acquire migration lock" error
+
+**Causes:**
+- Previous migration crashed without releasing lock
+- Another migration process running
+- Lock file permissions issue
+
+**Solutions:**
+1. Check for other agent processes running migrations
+2. Remove stale lock file: `.agent/data/.migration-lock`
+3. Inspect sys_migrations for partially applied migration
+
+### Issue: Auto-migrate fails at startup
+
+**Symptoms:** Application exits with migration error before serving
+
+**Causes:**
+- Pending migrations require manual intervention
+- Database connection configuration wrong
+- Migration file corrupt or missing
+
+**Solutions:**
+1. Run `agent db status` to see pending migrations
+2. Apply migrations manually with `agent db migrate`
+3. Set `database.autoMigrate: false` and handle manually
+
+### Issue: Inconsistent state after failed migration
+
+**Symptoms:** sys_migrations shows partial version, schema incomplete
+
+**Causes:**
+- DDL statement failed mid-migration
+- Transaction not properly rolled back (DDL in PostgreSQL)
+- Power failure or crash during migration
+
+**Solutions:**
+1. Check sys_migrations for last applied version
+2. Manually inspect schema for partial changes
+3. Create recovery migration to fix schema state
+4. Consider restoring from pre-migration backup
 
 ---
 

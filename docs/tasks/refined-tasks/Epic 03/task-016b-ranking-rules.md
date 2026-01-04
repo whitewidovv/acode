@@ -395,6 +395,31 @@ Top 10 chunks:
 
 ---
 
+## Best Practices
+
+### Relevance Scoring
+
+1. **Multiple signals** - Combine text similarity, recency, structure signals
+2. **Weight by confidence** - Strong signals count more than weak
+3. **Normalize scores** - Put all signals on comparable scale before combining
+4. **Explain rankings** - Log why each result scored as it did
+
+### Signal Types
+
+5. **Lexical similarity** - Text matching, keyword frequency
+6. **Structural proximity** - Same file, same class, same namespace
+7. **Edit recency** - Recently modified files may be more relevant
+8. **Usage patterns** - Files edited together tend to be related
+
+### Tuning
+
+9. **Configurable weights** - Allow adjustment of signal weights
+10. **Test with real queries** - Validate ranking quality with example searches
+11. **Collect feedback** - Was selected context useful? Learn from outcomes
+12. **A/B test changes** - Compare ranking quality before/after changes
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

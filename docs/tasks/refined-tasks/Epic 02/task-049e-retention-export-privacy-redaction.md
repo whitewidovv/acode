@@ -73,6 +73,38 @@ The following items are explicitly excluded from Task 049.e:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Retention policies are time-based (age of chat/message)
+- ASM-002: Export formats include JSON and Markdown
+- ASM-003: Redaction patterns are configurable (regex)
+- ASM-004: Deletion is permanent after retention period
+- ASM-005: Export respects redaction rules
+
+### Behavioral Assumptions
+
+- ASM-006: Users configure retention based on preferences
+- ASM-007: Export is triggered manually, not automatic
+- ASM-008: Redaction applies to sensitive patterns (keys, passwords)
+- ASM-009: Privacy concerns vary by user
+- ASM-010: Deleted content is unrecoverable
+
+### Dependency Assumptions
+
+- ASM-011: Task 049.a data model supports soft/hard delete
+- ASM-012: Task 049.b provides export CLI command
+- ASM-013: Task 002 config stores retention settings
+
+### Compliance Assumptions
+
+- ASM-014: Users responsible for compliance decisions
+- ASM-015: Redaction patterns catch common secrets
+- ASM-016: Export documentation notes privacy implications
+
+---
+
 ## Functional Requirements
 
 ### Retention Policies
@@ -457,6 +489,68 @@ Export Log:
 
 - [ ] AC-019: Audit logs
 - [ ] AC-020: Reports work
+
+---
+
+## Best Practices
+
+### Retention Policies
+
+- **BP-001: Define clear policies** - Document retention periods and their rationale
+- **BP-002: Notify before deletion** - Warn users before permanent deletion
+- **BP-003: Grace period** - Allow recovery window before permanent deletion
+- **BP-004: Audit retention actions** - Log what was deleted and when
+
+### Export Handling
+
+- **BP-005: Multiple formats** - Support JSON for programmatic use, Markdown for reading
+- **BP-006: Include metadata** - Export timestamps, chat names, message counts
+- **BP-007: Encryption option** - Allow encrypted exports for sensitive data
+- **BP-008: Progress feedback** - Show export progress for large exports
+
+### Privacy & Redaction
+
+- **BP-009: Default patterns** - Ship with common secret patterns (API keys, passwords)
+- **BP-010: Reversibility awareness** - Document that redaction is permanent
+- **BP-011: Preview redaction** - Let users preview what will be redacted
+- **BP-012: Pattern testing** - Provide way to test patterns before applying
+
+---
+
+## Troubleshooting
+
+### Retention Not Applied
+
+**Symptom:** Old content not deleted as expected.
+
+**Cause:** Retention job not running or policy misconfigured.
+
+**Solution:**
+1. Check retention policy configuration
+2. Verify background job is running
+3. Check for errors in retention logs
+
+### Export Fails
+
+**Symptom:** Export command errors or creates empty file.
+
+**Cause:** No matching content or disk space issue.
+
+**Solution:**
+1. Verify content exists with list command
+2. Check disk space
+3. Try smaller export scope
+
+### Redaction Pattern Not Working
+
+**Symptom:** Sensitive data not redacted in exports.
+
+**Cause:** Pattern doesn't match content format.
+
+**Solution:**
+1. Test pattern against known content
+2. Check regex syntax
+3. Review pattern documentation
 
 ---
 

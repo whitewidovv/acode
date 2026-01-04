@@ -71,6 +71,38 @@ The following items are explicitly excluded from Task 049.c:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Git worktrees provide isolated working directories
+- ASM-002: File-based or database locking prevents concurrent modifications
+- ASM-003: Worktree detection is reliable across platforms
+- ASM-004: Session binding uses process-level identifiers
+- ASM-005: Lock release handles process crashes
+
+### Behavioral Assumptions
+
+- ASM-006: Each worktree can have its own active chat
+- ASM-007: Chat binding is optional but useful for context
+- ASM-008: Multiple terminals can operate on different chats
+- ASM-009: Concurrent reads are safe without locking
+- ASM-010: Write locks are short-duration
+
+### Dependency Assumptions
+
+- ASM-011: Task 049.a data model supports worktree references
+- ASM-012: Task 022 git operations provide worktree detection
+- ASM-013: Task 011 session state tracks active chat
+
+### Safety Assumptions
+
+- ASM-014: Orphaned locks are detected and cleaned
+- ASM-015: Lock timeout prevents indefinite blocking
+- ASM-016: Concurrent modification errors are clear
+
+---
+
 ## Functional Requirements
 
 ### Worktree Binding
@@ -374,6 +406,68 @@ Cleaned 1 orphaned binding.
 
 - [ ] AC-016: Deleted worktree unbinds
 - [ ] AC-017: Purged chat unbinds
+
+---
+
+## Best Practices
+
+### Worktree Binding
+
+- **BP-001: Bind early** - Associate chat with worktree when creating for focused work
+- **BP-002: One chat per worktree** - Avoid confusion by keeping 1:1 relationship
+- **BP-003: Unbind on completion** - Release bindings when work is done
+- **BP-004: Document binding purpose** - Use chat name to indicate worktree relationship
+
+### Concurrency Management
+
+- **BP-005: Short lock duration** - Hold write locks only during actual writes
+- **BP-006: Read-heavy design** - Optimize for concurrent reads
+- **BP-007: Lock timeout handling** - Fail gracefully if lock unavailable
+- **BP-008: Orphan lock cleanup** - Detect and clean stale locks
+
+### Multi-Terminal Usage
+
+- **BP-009: Clear active chat display** - Show which chat is active in prompt or status
+- **BP-010: Avoid cross-terminal edits** - One terminal writes to a chat at a time
+- **BP-011: Session isolation** - Each terminal session has independent context
+- **BP-012: Status refresh** - Update status after context changes
+
+---
+
+## Troubleshooting
+
+### Lock Acquisition Failed
+
+**Symptom:** Operation fails with "Cannot acquire lock".
+
+**Cause:** Another process holds the lock.
+
+**Solution:**
+1. Check for other running acode processes
+2. Wait for lock to be released
+3. Check for orphaned locks if persists
+
+### Worktree Not Detected
+
+**Symptom:** Commands say "Not in a worktree" when you are.
+
+**Cause:** Git worktree not properly configured or detection failed.
+
+**Solution:**
+1. Run `git worktree list` to verify worktree
+2. Check if .git file exists in worktree directory
+3. Verify worktree is properly linked
+
+### Binding Mismatch
+
+**Symptom:** Wrong chat is active in worktree.
+
+**Cause:** Binding not updated or stale.
+
+**Solution:**
+1. Rebind with `acode chat bind`
+2. Clear existing binding first
+3. Check for duplicate bindings
 
 ---
 

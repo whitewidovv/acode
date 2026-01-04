@@ -385,6 +385,31 @@ Deduplication:
 
 ---
 
+## Best Practices
+
+### Budget Allocation
+
+1. **Prioritize by value** - Allocate more tokens to high-relevance content
+2. **Reserve for essentials** - System prompt, conversation history get guaranteed share
+3. **Dynamic reallocation** - Adjust budget based on actual content availability
+4. **Overflow handling** - Clear strategy when content exceeds budget
+
+### Deduplication
+
+5. **Content hash comparison** - Detect exact duplicates efficiently
+6. **Fuzzy matching** - Handle near-duplicates (whitespace, comments differ)
+7. **Keep best version** - When deduping, retain the more complete version
+8. **Track dedupe savings** - Report how many tokens saved by deduplication
+
+### Reporting
+
+9. **Show allocation** - Display how budget was spent across categories
+10. **Highlight cuts** - Indicate what was omitted due to budget constraints
+11. **Suggest increases** - Recommend larger context if consistently truncating
+12. **Log for analysis** - Record budget decisions for optimization
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

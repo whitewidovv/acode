@@ -77,6 +77,43 @@ The following items are explicitly excluded from Task 010.c:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Console.IsInputRedirected accurately detects non-TTY stdin on all platforms
+- ASM-002: Console.IsOutputRedirected accurately detects non-TTY stdout on all platforms
+- ASM-003: Environment variables can be read reliably from CI/CD platforms
+- ASM-004: Signal handlers can be registered for SIGINT, SIGTERM, and SIGPIPE
+- ASM-005: Process exit codes 0-127 are reliably propagated to callers
+- ASM-006: Timeouts can be implemented with appropriate cancellation token patterns
+
+### Environmental Assumptions
+
+- ASM-007: CI/CD environments set identifiable environment variables (CI=true, GITHUB_ACTIONS, etc.)
+- ASM-008: Non-interactive contexts have functional stdout and stderr
+- ASM-009: Environment variables are available for timeout and policy configuration
+- ASM-010: Process can cleanly exit with appropriate codes on all platforms
+- ASM-011: Parent processes/schedulers respect exit codes for flow control
+
+### Dependency Assumptions
+
+- ASM-012: Task 010 CLI Framework provides base flag parsing infrastructure
+- ASM-013: Task 010.a command routing is complete
+- ASM-014: Task 010.b JSONL mode is preferred output format for automation
+- ASM-015: Approval gate system (Task 013) integrates with non-interactive policies
+- ASM-016: Configuration loader respects non-interactive settings from config file
+
+### Operational Assumptions
+
+- ASM-017: Operators understand the implications of --yes flag for safety
+- ASM-018: Approval policies are pre-configured before automation runs
+- ASM-019: CI/CD pipelines are configured with appropriate timeouts
+- ASM-020: Log aggregation is available for post-mortem analysis
+- ASM-021: Operators can access error codes for debugging failed runs
+
+---
+
 ## Functional Requirements
 
 ### Mode Detection

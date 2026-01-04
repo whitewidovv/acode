@@ -403,6 +403,31 @@ Source: auto-binary
 
 ---
 
+## Best Practices
+
+### Gitignore Parsing
+
+1. **Follow git semantics exactly** - Match git's behavior for edge cases
+2. **Support nested gitignores** - Respect .gitignore at each directory level
+3. **Handle negation patterns** - Support ! prefix to un-ignore files
+4. **Cache parsed rules** - Parse .gitignore once per directory
+
+### Rule Evaluation
+
+5. **Evaluate in order** - Later rules override earlier; last match wins
+6. **Use anchoring correctly** - Leading / anchors to root; trailing / matches directories only
+7. **Support glob patterns** - *, **, ?, and character classes
+8. **Handle directory vs file** - Distinguish between dir and file for trailing slash rules
+
+### Performance
+
+9. **Minimize filesystem calls** - Batch path existence checks
+10. **Pre-compile patterns** - Convert globs to regex once, reuse
+11. **Short-circuit evaluation** - Skip expensive patterns if already matched
+12. **Cache decisions** - Remember ignore status for paths already evaluated
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

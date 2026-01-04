@@ -335,6 +335,31 @@ acode worktree remove --task TASK-123
 
 ---
 
+## Best Practices
+
+### Worktree Management
+
+1. **Consistent naming** - Use predictable paths: .acode/worktrees/{task-id}/
+2. **One task, one worktree** - Never share worktrees between tasks
+3. **Clean before delete** - Check for uncommitted changes before removal
+4. **Link branches** - Each worktree should have its own branch
+
+### Task Integration
+
+5. **Auto-create on task start** - Worktree created when task begins
+6. **Track in database** - Persist worktree-task mappings
+7. **Query by task** - Easy lookup of worktree for any task
+8. **Cleanup on completion** - Remove worktree when task done (with policy)
+
+### Performance
+
+9. **Reuse when possible** - Recycle worktrees for similar tasks
+10. **Limit concurrency** - Cap active worktrees to prevent disk exhaustion
+11. **Monitor disk usage** - Track space used by worktrees
+12. **Parallel operations** - Create/list operations should be fast
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

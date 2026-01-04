@@ -58,6 +58,33 @@ This task covers database persistence only. Worktree operations are in 023.a. Cl
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **SQLite database available** - Workspace database from Task 050
+2. **Schema applied** - Migration creates worktree_mappings table
+3. **Unique constraints** - One mapping per task, one per path
+4. **Transaction support** - Atomic operations for consistency
+5. **Index support** - Database indexes for efficient queries
+
+### Data Assumptions
+
+6. **Task IDs stable** - Task IDs don't change during lifecycle
+7. **Paths absolute** - Worktree paths stored as absolute paths
+8. **Timestamps UTC** - All times stored as UTC
+9. **Reasonable scale** - <1000 mappings per workspace typical
+10. **No external sync** - Single-process database access
+
+### Integration Assumptions
+
+11. **Worktree service calls mapping** - Task 023.a uses this for persistence
+12. **Cleanup queries mappings** - Task 023.c queries for cleanup candidates
+13. **Reconciliation possible** - Can sync DB with filesystem state
+14. **Error propagation** - DB errors surface to callers
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-020: Core Operations

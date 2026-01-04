@@ -73,6 +73,39 @@ The following items are explicitly excluded from Task 012.d:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Quality assessment uses LLM judgment
+- ASM-002: Review criteria are defined and consistent
+- ASM-003: Quality dimensions are weighted for overall score
+- ASM-004: Review considers full task, not individual steps
+- ASM-005: Feedback is actionable for re-planning
+
+### Behavioral Assumptions
+
+- ASM-006: Review occurs after all steps complete and verify
+- ASM-007: Failed review can trigger iteration (plan → execute → verify → review)
+- ASM-008: Maximum iterations prevent infinite loops
+- ASM-009: Human override can accept despite review failure
+- ASM-010: Review results are persisted for learning
+
+### Dependency Assumptions
+
+- ASM-011: Task 012 orchestrator provides IStage contract
+- ASM-012: Task 012.c verification provides test outcomes
+- ASM-013: Task 012.b execution provides artifacts to review
+- ASM-014: Session state tracks iteration count
+
+### Quality Assumptions
+
+- ASM-015: Code quality is primary review focus
+- ASM-016: Maintainability and readability are considered
+- ASM-017: Review balances perfectionism with practicality
+
+---
+
 ## Functional Requirements
 
 ### Stage Lifecycle

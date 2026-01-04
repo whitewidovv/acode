@@ -75,6 +75,40 @@ The following items are explicitly excluded from Task 011.a:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: Entity Framework Core or similar ORM is used for entity definition
+- ASM-002: UUID v7 provides time-ordered unique identifiers for all entities
+- ASM-003: Nullable reference types are enabled for optional properties
+- ASM-004: Record types are used for immutable entity snapshots
+- ASM-005: JSON can represent all metadata and artifact content
+- ASM-006: Entity hierarchies can be modeled with navigation properties
+
+### Design Assumptions
+
+- ASM-007: Session is the root aggregate containing all other entities
+- ASM-008: Task, Step, ToolCall form a strict hierarchy (Session → Task → Step → ToolCall)
+- ASM-009: Artifacts are attached to their producing entity (Step or ToolCall)
+- ASM-010: Entities are append-only with soft delete for removal
+- ASM-011: State derivation follows deterministic rules from child entities
+
+### Dependency Assumptions
+
+- ASM-012: Task 011 main provides state machine semantics
+- ASM-013: Task 011.b implements actual persistence of these entities
+- ASM-014: Domain layer exists for business logic separation
+
+### Operational Assumptions
+
+- ASM-015: Entities must support serialization for persistence and transfer
+- ASM-016: Entity relationships are navigable in both directions
+- ASM-017: Metadata allows extensibility without schema changes
+- ASM-018: Artifact storage may use separate binary storage for large files
+
+---
+
 ## Functional Requirements
 
 ### Session Entity

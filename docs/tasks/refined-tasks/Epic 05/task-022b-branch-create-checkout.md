@@ -274,6 +274,31 @@ acode git checkout feature/branch
 
 ---
 
+## Best Practices
+
+### Branch Naming
+
+1. **Validate names early** - Check against git naming rules before creation
+2. **Use consistent prefixes** - feature/, bugfix/, task/ for organization
+3. **Include task ID** - Link branches to tasks: task-123-description
+4. **Avoid special characters** - Alphanumeric, hyphen, slash only
+
+### Checkout Operations
+
+5. **Check for uncommitted changes** - Warn or fail if working tree dirty
+6. **Handle detached HEAD** - Detect and warn about headless state
+7. **Update submodules** - Optionally update submodules on checkout
+8. **Preserve stash if needed** - Offer to stash changes before switching
+
+### Safety
+
+9. **Confirm force operations** - Force delete requires explicit confirmation
+10. **List affected files** - Show what would change before checkout
+11. **Backup current work** - Stash or commit before risky operations
+12. **Track branch operations** - Log creates, deletes, renames
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests

@@ -73,6 +73,37 @@ The following items are explicitly excluded from Task 050.a:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Embedded Resources** - Migration SQL files can be embedded as assembly resources for deployment
+2. **File-Based Migrations** - Alternatively, migrations can be loaded from .agent/migrations/ directory
+3. **Linear Versioning** - Migrations follow sequential numeric versioning (001, 002, 003...)
+4. **No Branching** - Migration history is linear; no branch/merge scenarios supported
+5. **Forward-Only Default** - Rollback migrations are optional; forward migrations always required
+6. **Idempotent Checks** - Migrations check existence before CREATE to allow safe re-runs
+7. **Transaction Per Migration** - Each migration runs in its own transaction for atomicity
+
+### Schema Assumptions
+
+8. **Domain Prefixes** - Tables use prefixes: conv_ (conversations), sess_ (sessions), appr_ (approvals), sync_ (synchronization), sys_ (system)
+9. **Primary Keys** - All tables use id column as primary key; UUID strings for portability
+10. **Audit Columns** - Standard tables include created_at, updated_at, deleted_at columns
+11. **Soft Deletes** - deleted_at enables soft delete; queries filter WHERE deleted_at IS NULL
+12. **Index Naming** - Indexes named idx_{table}_{columns} for consistency
+13. **Foreign Keys** - Constraints named fk_{table}_{referenced} with explicit ON DELETE actions
+
+### Operational Assumptions
+
+14. **Version Tracking** - sys_migrations table tracks applied migrations with timestamps
+15. **Hash Verification** - Migration content hashes prevent tampering with applied migrations
+16. **CLI Execution** - Migrations run via `agent db migrate` command or startup flag
+17. **Rollback Explicit** - Rollbacks require explicit `agent db rollback` with version target
+18. **No Data Migration** - This task covers schema only; data transformations are separate concern
+
+---
+
 ## Functional Requirements
 
 ### Table Naming
@@ -402,6 +433,77 @@ Edit these files, then run:
 - [ ] AC-018: PKs indexed
 - [ ] AC-019: FKs indexed
 - [ ] AC-020: Query patterns indexed
+
+---
+
+## Best Practices
+
+### Schema Design
+
+1. **Use consistent naming** - snake_case for tables/columns, domain prefixes for tables
+2. **Document every table** - Add SQL comments explaining purpose and relationships
+3. **Plan indexes early** - Design indexes based on expected query patterns, not afterthought
+4. **Normalize appropriately** - Avoid over-normalization that complicates queries
+
+### Migration Strategy
+
+5. **One change per migration** - Small, focused migrations are easier to debug and rollback
+6. **Write idempotent DDL** - Use IF NOT EXISTS, IF EXISTS for safe re-runs
+7. **Include rollback SQL** - Every UP migration should have corresponding DOWN
+8. **Test migrations on copy** - Apply migrations to database copy before production
+
+### Version Control
+
+9. **Never edit applied migrations** - Create new migration to fix issues in applied migrations
+10. **Sequential numbering only** - Avoid gaps in migration numbers; use 001, 002, 003...
+11. **Descriptive names** - Migration names should clearly indicate the change
+12. **Commit migrations atomically** - Migration and code changes in same commit
+
+---
+
+## Troubleshooting
+
+### Issue: Migration order conflict
+
+**Symptoms:** Error "migration X out of order" or "gap detected"
+
+**Causes:**
+- Two developers created migrations with same number
+- Migration file added after later migrations applied
+- Manual sys_migrations manipulation
+
+**Solutions:**
+1. Renumber conflicting migration to next available number
+2. Check sys_migrations table for applied versions
+3. If local-only, recreate database from scratch
+
+### Issue: Schema drift between environments
+
+**Symptoms:** Queries fail in production but work locally
+
+**Causes:**
+- Migrations not applied consistently
+- Manual DDL changes in production
+- Different database provider (SQLite vs PostgreSQL) behavior
+
+**Solutions:**
+1. Run `agent db status` on both environments to compare versions
+2. Generate schema diff using database tools
+3. Create corrective migration to align schemas
+
+### Issue: Migration performance on large tables
+
+**Symptoms:** ALTER TABLE takes excessive time
+
+**Causes:**
+- PostgreSQL table lock during ALTER
+- Adding NOT NULL column to large table
+- Index creation on large table
+
+**Solutions:**
+1. Use CONCURRENTLY for index creation: `CREATE INDEX CONCURRENTLY`
+2. Add nullable column, backfill data, then add NOT NULL constraint
+3. Schedule migrations during low-traffic periods
 
 ---
 

@@ -71,6 +71,38 @@ The following items are explicitly excluded from Task 013.c:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+- ASM-001: --yes flag accepts optional scope specifier
+- ASM-002: Scope syntax is parseable and validatable
+- ASM-003: Risk levels are predefined (low, medium, high, critical)
+- ASM-004: Scope can include operation types and file patterns
+- ASM-005: Invalid scopes result in clear error messages
+
+### Behavioral Assumptions
+
+- ASM-006: --yes alone approves low-risk operations only
+- ASM-007: Explicit scope required for high-risk auto-approval
+- ASM-008: Critical operations cannot be auto-approved
+- ASM-009: Users must acknowledge danger of broad scopes
+- ASM-010: Scopes are validated before session starts
+
+### Dependency Assumptions
+
+- ASM-011: Task 013 gate framework consults --yes scopes
+- ASM-012: Task 013.a rules define risk levels
+- ASM-013: Task 010 CLI provides --yes flag parsing
+
+### Safety Assumptions
+
+- ASM-014: Default behavior is safe (minimal auto-approval)
+- ASM-015: Dangerous operations require explicit user action
+- ASM-016: Scope documentation clearly explains implications
+
+---
+
 ## Functional Requirements
 
 ### Scope Specification

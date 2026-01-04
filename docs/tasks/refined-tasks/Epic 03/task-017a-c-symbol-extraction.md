@@ -443,6 +443,31 @@ acode symbols extract src/ --stats
 
 ---
 
+## Best Practices
+
+### Roslyn Integration
+
+1. **Use semantic model** - Not just syntax for accurate type resolution
+2. **Handle partial builds** - Extract symbols even from incomplete code
+3. **Cache compilations** - Reuse Roslyn workspace across files
+4. **Dispose properly** - Release Roslyn resources to prevent memory leaks
+
+### Symbol Extraction
+
+5. **Extract all symbol types** - Classes, interfaces, methods, properties, fields, enums
+6. **Capture modifiers** - public, private, static, async, etc.
+7. **Include documentation** - XML doc comments for symbol descriptions
+8. **Track generic parameters** - Generic types and constraints
+
+### Performance
+
+9. **Parallel file processing** - Process independent files concurrently
+10. **Memory management** - Stream large files, don't load fully into memory
+11. **Skip generated code** - Exclude .g.cs, designer files by default
+12. **Cache resolved types** - Avoid redundant type resolution
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
