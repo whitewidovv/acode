@@ -82,32 +82,64 @@ Implemented `OllamaHttpClient` class for HTTP communication with Ollama API:
 
 ---
 
+#### ✅ Task 005a-5: NDJSON Stream Reading (OllamaStreamReader)
+**Commit**: 07ee069
+
+Implemented `OllamaStreamReader` static class for parsing NDJSON streams:
+- ReadAsync returns IAsyncEnumerable<OllamaStreamChunk>
+- Uses StreamReader for line-by-line reading (UTF-8)
+- JsonSerializer.Deserialize for per-line JSON parsing
+- Skips malformed JSON lines and empty lines
+- yield return for immediate chunk delivery
+- yield break when done: true detected
+- leaveOpen: false ensures stream disposal
+- Propagates cancellation via CancellationToken
+
+**Tests**: 5 OllamaStreamReader tests (all passing, 135 total Infrastructure tests)
+
+---
+
+#### ✅ Task 005a-6: Delta Parsing (OllamaDeltaMapper)
+**Commit**: 80b5a42
+
+Implemented `OllamaDeltaMapper` static class to convert stream chunks to deltas:
+- MapToDelta(chunk, index) returns ResponseDelta
+- Extracts content from chunk.Message.Content
+- Maps done_reason to FinishReason (stop/length/tool_calls)
+- Calculates UsageInfo from token counts (final chunk only)
+- Handles null content gracefully (for tool calls or final marker)
+- Creates ResponseDelta with at least contentDelta or finishReason
+
+**Tests**: 8 OllamaDeltaMapper tests (all passing, 143 total Infrastructure tests)
+
+---
+
 ### Currently Working On
 
-Next up: Task 005a-5 (NDJSON stream reading) and Task 005a-6 (Delta parsing).
+**Task 005a completed!** All 6 subtasks done with 64 tests passing.
+
+Next up: Task 005b (Tool call parsing), Task 005 (Core Provider), Task 005c (Setup docs).
 
 ---
 
 ### Remaining Work (Task 005)
 
-- Task 005a-5: NDJSON stream reading (OllamaStreamReader)
-- Task 005a-6: Delta parsing (OllamaStreamChunk → ResponseDelta)
 - Task 005b: Tool call parsing and JSON repair/retry (13 FP)
 - Task 005 parent: Core OllamaProvider implementation (21 FP)
 - Task 005c: Setup docs and smoke tests (5 FP)
 - Final audit and PR creation
 
 **Total**: Task 005 is estimated at 52 Fibonacci points across 4 specifications
-**Completed**: 51 tests passing (Task 005a subtasks 1-4)
+**Completed**: 64 tests passing (Task 005a complete - all 6 subtasks)
 
 ---
 
 ### Notes
 
 - Following TDD strictly: RED → GREEN → REFACTOR for every component
-- All tests passing (130 total Infrastructure tests, 51 for Task 005)
+- All tests passing (143 total Infrastructure tests, 64 for Task 005)
 - Build: 0 errors, 0 warnings
-- Committing after each logical unit of work (4 commits so far)
+- Committing after each logical unit of work (7 commits so far)
 - Implementation plan being updated as work progresses
 - Working autonomously until context runs low or task complete
-- Current token usage: ~97k/200k (still plenty of room)
+- Current token usage: ~115k/200k (still plenty of room - 85k remaining)
