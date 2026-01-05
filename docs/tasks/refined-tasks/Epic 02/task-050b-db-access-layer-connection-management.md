@@ -759,7 +759,7 @@ PostgreSQL (Remote):
 For developers integrating with the access layer:
 
 ```csharp
-// Using unit of work
+// Using unit of work pattern for atomic operations
 await using var uow = await _unitOfWorkFactory.CreateAsync(ct);
 
 try
@@ -775,34 +775,510 @@ catch
 }
 ```
 
-### Troubleshooting
+### Quick Reference Card
 
-#### Connection Pool Exhausted
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                  CONNECTION MANAGEMENT QUICK REFERENCE                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  INTERFACES:                         FACTORIES:                          │
+│  ───────────                         ──────────                          │
+│  IConnectionFactory                  SqliteConnectionFactory             │
+│  IUnitOfWork                         PostgresConnectionFactory           │
+│  IUnitOfWorkFactory                  UnitOfWorkFactory                   │
+│                                                                          │
+│  CONNECTION PATTERNS:                                                    │
+│  ────────────────────                                                    │
+│  await using var conn = await factory.CreateAsync(ct);  // Auto-dispose │
+│  await using var uow = await uowFactory.CreateAsync(ct); // Transaction │
+│                                                                          │
+│  CONFIGURATION KEYS:                 ENVIRONMENT VARS:                   │
+│  ───────────────────                 ─────────────────                   │
+│  database.local.path                 ACODE_PG_CONNECTION                 │
+│  database.local.wal_mode             ACODE_PG_HOST                       │
+│  database.local.busy_timeout_ms      ACODE_PG_PORT                       │
+│  database.remote.connection_string   ACODE_PG_DATABASE                   │
+│  database.remote.pool.max_size       ACODE_PG_USER                       │
+│  database.retry.max_attempts         ACODE_PG_PASSWORD                   │
+│                                                                          │
+│  COMMON COMMANDS:                                                        │
+│  ────────────────                                                        │
+│  acode db connections               Show connection status               │
+│  acode db pool                      Show pool statistics                 │
+│  acode db test                      Test connectivity                    │
+│  acode db config --validate         Validate configuration               │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-**Problem:** All connections in use
+### Programmatic Connection Access
+
+#### Direct Connection Factory Usage
+
+```csharp
+// Inject factory via DI
+public class ChatQueryService
+{
+    private readonly IConnectionFactory _connectionFactory;
+    
+    public ChatQueryService(IConnectionFactory connectionFactory)
+    {
+        _connectionFactory = connectionFactory;
+    }
+    
+    public async Task<IReadOnlyList<Chat>> GetRecentChatsAsync(
+        int limit, 
+        CancellationToken ct)
+    {
+        // Connection is automatically disposed when exiting using block
+        await using var connection = await _connectionFactory.CreateAsync(ct);
+        
+        return (await connection.QueryAsync<Chat>(
+            "SELECT * FROM conv_chats ORDER BY created_at DESC LIMIT @Limit",
+            new { Limit = limit })).ToList();
+    }
+}
+```
+
+#### Unit of Work for Transactions
+
+```csharp
+// Inject factory via DI
+public class ChatService
+{
+    private readonly IUnitOfWorkFactory _uowFactory;
+    private readonly IChatRepository _chatRepo;
+    private readonly IMessageRepository _messageRepo;
+    
+    public async Task CreateChatWithInitialMessageAsync(
+        Chat chat,
+        Message message,
+        CancellationToken ct)
+    {
+        // UnitOfWork manages transaction lifecycle
+        await using var uow = await _uowFactory.CreateAsync(ct);
+        
+        try
+        {
+            // Both operations share the same transaction
+            await _chatRepo.CreateAsync(chat, uow, ct);
+            await _messageRepo.CreateAsync(message, uow, ct);
+            
+            // Commit makes both changes permanent
+            await uow.CommitAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            // Rollback undoes both changes
+            await uow.RollbackAsync(ct);
+            throw new ChatCreationException("Failed to create chat", ex);
+        }
+    }
+}
+```
+
+### Pool Monitoring
+
+```bash
+# View current pool statistics
+$ acode db pool
+
+PostgreSQL Connection Pool
+────────────────────────────────────────────────────────────
+Configuration:
+  Min Pool Size: 2
+  Max Pool Size: 10
+  Connection Lifetime: 300s
+  Command Timeout: 30s
+
+Current State:
+  Active Connections: 3
+  Idle Connections: 2
+  Total Connections: 5
+  Waiting Requests: 0
+
+Performance (last 5 minutes):
+  Acquisitions: 1,247
+  Avg Acquire Time: 4.2ms
+  Max Acquire Time: 89ms
+  Timeouts: 0
+  Errors: 0
+
+Connection Ages:
+  Oldest: 4m 32s
+  Newest: 12s
+  Average: 2m 15s
+```
+
+### SQLite Configuration Details
+
+```bash
+# View SQLite PRAGMA settings
+$ acode db config --show-pragmas
+
+SQLite Configuration
+────────────────────────────────────────────────────────────
+Path: .agent/data/workspace.db
+Size: 12.4 MB
+
+PRAGMA Settings:
+  journal_mode: wal
+  busy_timeout: 5000
+  foreign_keys: on
+  synchronous: normal
+  cache_size: -2000 (2MB)
+  temp_store: memory
+
+WAL Status:
+  Checkpoint Mode: PASSIVE
+  WAL File Size: 1.2 MB
+  Frames: 847
+  Last Checkpoint: 2m ago
+```
+
+### Connection Testing
+
+```bash
+# Test all configured connections
+$ acode db test
+
+Testing database connections...
+
+SQLite (Local):
+  ✓ File exists: .agent/data/workspace.db
+  ✓ Can open connection
+  ✓ WAL mode enabled
+  ✓ Foreign keys enforced
+  ✓ Can execute query (3ms)
+  Status: HEALTHY
+
+PostgreSQL (Remote):
+  ✓ Host reachable: localhost:5432
+  ✓ SSL negotiation successful
+  ✓ Authentication successful
+  ✓ Can execute query (12ms)
+  ✓ Pool initialized (2 connections)
+  Status: HEALTHY
+
+All connections healthy.
+```
+
+---
+
+## Troubleshooting
+
+### Issue 1: Connection Pool Exhausted
+
+**Symptoms:**
+- Error: "Timeout expired. The timeout period elapsed prior to obtaining a connection"
+- Error: "The connection pool has been exhausted"
+- Application hangs waiting for database operations
+- Increasing latency over time
+
+**Causes:**
+- Connections not being disposed properly (missing `using` or `Dispose()`)
+- Long-running transactions holding connections
+- Pool size too small for concurrent workload
+- Queries timing out but holding connections
 
 **Solutions:**
-1. Increase max_pool_size
-2. Check for connection leaks
-3. Add connection timeouts
 
-#### SQLite Busy
+1. **Check for connection leaks:**
+   ```bash
+   # Enable connection tracking
+   acode db config --set diagnostics.track_connections=true
+   
+   # View open connections and their origins
+   acode db connections --trace
+   ```
 
-**Problem:** Database is locked
+2. **Increase pool size:**
+   ```yaml
+   # agent-config.yml
+   database:
+     remote:
+       pool:
+         max_size: 20  # Increase from default 10
+   ```
+
+3. **Add connection leak detection:**
+   ```csharp
+   // In development, detect undisposed connections
+   builder.ConnectionString += ";Include Error Detail=true";
+   ```
+
+4. **Verify using patterns in code:**
+   ```csharp
+   // WRONG - connection may leak
+   var conn = await factory.CreateAsync(ct);
+   var result = await conn.QueryAsync(...);
+   // Missing dispose!
+   
+   // RIGHT - connection always disposed
+   await using var conn = await factory.CreateAsync(ct);
+   var result = await conn.QueryAsync(...);
+   ```
+
+---
+
+### Issue 2: SQLite Database Locked
+
+**Symptoms:**
+- Error: "database is locked"
+- Error: "SQLITE_BUSY"
+- Operations fail after waiting
+- Concurrent writes fail
+
+**Causes:**
+- Another process has write lock
+- WAL mode not enabled (rollback journal blocks readers)
+- Transaction held too long
+- Busy timeout too short
+- External tool (DB browser) holding lock
 
 **Solutions:**
-1. Increase busy_timeout_ms
-2. Check for long transactions
-3. Enable WAL mode
 
-#### Connection Timeout
+1. **Verify WAL mode is enabled:**
+   ```bash
+   acode db config --show-pragmas | grep journal_mode
+   # Should show: journal_mode: wal
+   ```
 
-**Problem:** Cannot connect
+2. **Increase busy timeout:**
+   ```yaml
+   database:
+     local:
+       busy_timeout_ms: 10000  # 10 seconds
+   ```
+
+3. **Close external tools:**
+   - DB Browser for SQLite
+   - VS Code SQLite extension
+   - Other processes accessing the file
+
+4. **Check for stuck transactions:**
+   ```bash
+   # List active transactions
+   acode db transactions --active
+   ```
+
+5. **Force WAL checkpoint:**
+   ```bash
+   acode db checkpoint --force
+   ```
+
+---
+
+### Issue 3: PostgreSQL SSL Connection Failures
+
+**Symptoms:**
+- Error: "SSL connection is required"
+- Error: "certificate verify failed"
+- Error: "The remote certificate was rejected"
+- Connection refused in production
+
+**Causes:**
+- Server requires SSL but client doesn't enable it
+- Self-signed certificate not trusted
+- Certificate chain incomplete
+- SSL mode mismatch between client and server
 
 **Solutions:**
-1. Check network
-2. Verify credentials
-3. Check firewall
+
+1. **Set appropriate SSL mode:**
+   ```yaml
+   database:
+     remote:
+       ssl_mode: require  # or verify-ca, verify-full
+   ```
+
+2. **For development with self-signed certs:**
+   ```yaml
+   database:
+     remote:
+       trust_server_certificate: true  # NOT for production!
+   ```
+
+3. **Install CA certificate:**
+   ```bash
+   # Add CA cert to trusted store
+   cp /path/to/ca-certificate.crt /usr/local/share/ca-certificates/
+   update-ca-certificates
+   ```
+
+4. **Verify server certificate:**
+   ```bash
+   openssl s_client -connect hostname:5432 -starttls postgres
+   ```
+
+---
+
+### Issue 4: Connection Timeout on Startup
+
+**Symptoms:**
+- Application fails to start
+- Error: "A network-related error occurred"
+- Error: "Connection refused"
+- Long startup delay before failure
+
+**Causes:**
+- Database server not running
+- Wrong host/port configuration
+- Firewall blocking connection
+- DNS resolution failure
+- Network routing issue
+
+**Solutions:**
+
+1. **Verify database server is running:**
+   ```bash
+   # PostgreSQL
+   pg_isready -h localhost -p 5432
+   
+   # Check if port is listening
+   netstat -an | grep 5432
+   ```
+
+2. **Test basic connectivity:**
+   ```bash
+   # Test TCP connection
+   telnet localhost 5432
+   
+   # Or with nc
+   nc -zv localhost 5432
+   ```
+
+3. **Check configuration:**
+   ```bash
+   acode db config --validate
+   ```
+
+4. **Verify environment variables:**
+   ```bash
+   echo $ACODE_PG_HOST
+   echo $ACODE_PG_PORT
+   ```
+
+5. **Check firewall rules:**
+   ```bash
+   # Linux
+   sudo iptables -L -n | grep 5432
+   
+   # Windows
+   netsh advfirewall firewall show rule name=all | findstr 5432
+   ```
+
+---
+
+### Issue 5: Transaction Deadlock
+
+**Symptoms:**
+- Error: "deadlock detected"
+- Operations hang indefinitely
+- Multiple operations fail simultaneously
+- PostgreSQL kills one of the transactions
+
+**Causes:**
+- Two transactions acquiring locks in opposite order
+- Long-held locks on frequently accessed rows
+- Complex queries with multiple table locks
+- Nested operations without proper lock ordering
+
+**Solutions:**
+
+1. **Identify the deadlock participants:**
+   ```sql
+   -- PostgreSQL: Check for locks
+   SELECT * FROM pg_stat_activity 
+   WHERE wait_event_type = 'Lock';
+   ```
+
+2. **Implement consistent lock ordering:**
+   ```csharp
+   // Always acquire locks in consistent order (e.g., by ID)
+   var sortedIds = ids.OrderBy(id => id).ToList();
+   foreach (var id in sortedIds)
+   {
+       await LockRowAsync(id, ct);
+   }
+   ```
+
+3. **Reduce transaction scope:**
+   ```csharp
+   // Break large transactions into smaller ones
+   foreach (var batch in items.Chunk(100))
+   {
+       await using var uow = await _uowFactory.CreateAsync(ct);
+       await ProcessBatchAsync(batch, uow, ct);
+       await uow.CommitAsync(ct);
+   }
+   ```
+
+4. **Add retry for deadlock:**
+   ```csharp
+   // Retry policy handles deadlock as transient
+   await _retryPolicy.ExecuteAsync(async ct =>
+   {
+       await using var uow = await _uowFactory.CreateAsync(ct);
+       await DoWorkAsync(uow, ct);
+       await uow.CommitAsync(ct);
+   }, cancellationToken);
+   ```
+
+---
+
+### Issue 6: Memory Growth from Unclosed Connections
+
+**Symptoms:**
+- Memory usage grows over time
+- GC pressure increases
+- Eventually OutOfMemoryException
+- Application needs periodic restarts
+
+**Causes:**
+- Connections created without proper disposal
+- Exception paths skipping disposal
+- Async void methods losing reference to connection
+- Fire-and-forget calls with connections
+
+**Solutions:**
+
+1. **Enable connection tracking diagnostics:**
+   ```yaml
+   database:
+     diagnostics:
+       track_allocations: true
+       allocation_stack_trace: true  # Development only
+   ```
+
+2. **Run memory profiler:**
+   ```bash
+   dotnet-trace collect --process-id <PID> --providers Microsoft.Data.SqlClient
+   ```
+
+3. **Review async patterns:**
+   ```csharp
+   // WRONG - fire and forget loses connection reference
+   _ = ProcessAsync(data);  // Connection may leak
+   
+   // RIGHT - properly await
+   await ProcessAsync(data);
+   ```
+
+4. **Wrap in try-finally:**
+   ```csharp
+   IDbConnection? conn = null;
+   try
+   {
+       conn = await factory.CreateAsync(ct);
+       await DoWorkAsync(conn, ct);
+   }
+   finally
+   {
+       conn?.Dispose();
+   }
+   ```
 
 ---
 
@@ -1194,47 +1670,178 @@ public sealed class SecureSslConnectionFactory : IConnectionFactory
 
 ## Acceptance Criteria
 
-### Factory
+### IConnectionFactory Interface (AC-001 to AC-008)
 
-- [ ] AC-001: IConnectionFactory exists
-- [ ] AC-002: SQLite factory works
-- [ ] AC-003: PostgreSQL factory works
+- [ ] AC-001: `IConnectionFactory` interface exists in `Acode.Application.Interfaces` namespace with `CreateAsync(CancellationToken)` method returning `Task<IDbConnection>`
+- [ ] AC-002: `IConnectionFactory` interface includes `DatabaseType` property returning enum value (SQLite, PostgreSQL)
+- [ ] AC-003: `IConnectionFactory.CreateAsync` throws `OperationCanceledException` when cancellation token is cancelled before connection completes
+- [ ] AC-004: `IConnectionFactory.CreateAsync` throws `DatabaseException` with error code `ACODE-DB-ACC-001` when connection cannot be established
+- [ ] AC-005: Returned `IDbConnection` is in `Open` state when `CreateAsync` completes successfully
+- [ ] AC-006: `IConnectionFactory` implementations are registered in DI container as singletons
+- [ ] AC-007: `IConnectionFactory` can be resolved from DI using `IConnectionFactory` interface type
+- [ ] AC-008: Factory selection is based on `database.provider` configuration value (sqlite or postgresql)
 
-### SQLite
+### SQLite Connection Factory (AC-009 to AC-025)
 
-- [ ] AC-004: Connection creates
-- [ ] AC-005: WAL enabled
-- [ ] AC-006: Busy timeout set
+- [ ] AC-009: `SqliteConnectionFactory` implements `IConnectionFactory` interface
+- [ ] AC-010: SQLite connection uses path from `database.local.path` configuration
+- [ ] AC-011: SQLite connection creates parent directories if they don't exist
+- [ ] AC-012: SQLite database file is created on first connection if it doesn't exist
+- [ ] AC-013: WAL mode is enabled via `PRAGMA journal_mode=WAL` when `database.local.wal_mode` is true
+- [ ] AC-014: WAL mode is disabled (rollback journal) when `database.local.wal_mode` is false
+- [ ] AC-015: `PRAGMA busy_timeout` is set to value from `database.local.busy_timeout_ms` (default 5000)
+- [ ] AC-016: `PRAGMA foreign_keys=ON` is always executed after connection opens
+- [ ] AC-017: `PRAGMA synchronous=NORMAL` is set for performance with WAL mode
+- [ ] AC-018: SQLite connection string includes `Mode=ReadWrite` for normal operations
+- [ ] AC-019: SQLite throws `DatabaseException` with code `ACODE-DB-ACC-001` if database file path is invalid
+- [ ] AC-020: SQLite throws `DatabaseException` with code `ACODE-DB-ACC-001` if database file is corrupted
+- [ ] AC-021: SQLite logs connection open events with path, duration, and WAL status at Debug level
+- [ ] AC-022: SQLite logs connection close events with total connection time at Debug level
+- [ ] AC-023: SQLite connection returns `DatabaseType.Sqlite` from `DatabaseType` property
+- [ ] AC-024: SQLite connection supports concurrent readers when WAL mode is enabled
+- [ ] AC-025: SQLite connection properly handles `SQLITE_BUSY` by waiting up to busy_timeout before failing
 
-### PostgreSQL
+### PostgreSQL Connection Factory (AC-026 to AC-050)
 
-- [ ] AC-007: Connection creates
-- [ ] AC-008: Pooling works
-- [ ] AC-009: Timeout works
+- [ ] AC-026: `PostgresConnectionFactory` implements `IConnectionFactory` interface
+- [ ] AC-027: PostgreSQL uses connection string from `database.remote.connection_string` configuration
+- [ ] AC-028: PostgreSQL falls back to environment variable `ACODE_PG_CONNECTION` if config not set
+- [ ] AC-029: PostgreSQL supports component-based configuration: `host`, `port`, `database`, `username`, `password`
+- [ ] AC-030: PostgreSQL component values can come from environment variables: `ACODE_PG_HOST`, `ACODE_PG_PORT`, `ACODE_PG_DATABASE`, `ACODE_PG_USER`, `ACODE_PG_PASSWORD`
+- [ ] AC-031: PostgreSQL connection string never logged or exposed in exceptions (password masking)
+- [ ] AC-032: PostgreSQL pool minimum size configured via `database.remote.pool.min_size` (default 2)
+- [ ] AC-033: PostgreSQL pool maximum size configured via `database.remote.pool.max_size` (default 10)
+- [ ] AC-034: PostgreSQL connection lifetime configured via `database.remote.pool.connection_lifetime_seconds` (default 300)
+- [ ] AC-035: PostgreSQL command timeout configured via `database.remote.command_timeout_seconds` (default 30)
+- [ ] AC-036: PostgreSQL SSL mode configured via `database.remote.ssl_mode` (disable, prefer, require, verify-ca, verify-full)
+- [ ] AC-037: PostgreSQL connection uses SSL by default in production environment
+- [ ] AC-038: PostgreSQL logs pool acquisition time exceeding 100ms at Warning level
+- [ ] AC-039: PostgreSQL logs connection errors with masked connection string at Error level
+- [ ] AC-040: PostgreSQL throws `DatabaseException` with code `ACODE-DB-ACC-001` if host unreachable
+- [ ] AC-041: PostgreSQL throws `DatabaseException` with code `ACODE-DB-ACC-001` if authentication fails
+- [ ] AC-042: PostgreSQL throws `DatabaseException` with code `ACODE-DB-ACC-002` if pool exhausted within timeout
+- [ ] AC-043: PostgreSQL connection returns `DatabaseType.Postgres` from `DatabaseType` property
+- [ ] AC-044: PostgreSQL pool prewarming creates minimum connections on first factory use
+- [ ] AC-045: PostgreSQL connections are validated before returning from pool (connection lifetime check)
+- [ ] AC-046: PostgreSQL broken connections are detected and removed from pool automatically
+- [ ] AC-047: PostgreSQL connection includes application name for server-side identification
+- [ ] AC-048: PostgreSQL supports trust server certificate option for development scenarios
+- [ ] AC-049: PostgreSQL connection acquisition completes within 5 seconds or throws timeout
+- [ ] AC-050: PostgreSQL pool statistics are available via `IConnectionPoolMetrics` interface
 
-### Transactions
+### IUnitOfWork Interface (AC-051 to AC-060)
 
-- [ ] AC-010: Begin works
-- [ ] AC-011: Commit works
-- [ ] AC-012: Rollback works
+- [ ] AC-051: `IUnitOfWork` interface exists in `Acode.Application.Interfaces` namespace
+- [ ] AC-052: `IUnitOfWork` implements `IAsyncDisposable` for proper async cleanup
+- [ ] AC-053: `IUnitOfWork.Connection` property provides access to underlying `IDbConnection`
+- [ ] AC-054: `IUnitOfWork.Transaction` property provides access to active `IDbTransaction`
+- [ ] AC-055: `IUnitOfWork.CommitAsync(CancellationToken)` commits all pending changes atomically
+- [ ] AC-056: `IUnitOfWork.RollbackAsync(CancellationToken)` reverts all pending changes
+- [ ] AC-057: `IUnitOfWork` automatically rolls back uncommitted changes on `DisposeAsync`
+- [ ] AC-058: `IUnitOfWork.CommitAsync` throws `InvalidOperationException` if already committed or rolled back
+- [ ] AC-059: `IUnitOfWork.RollbackAsync` throws `InvalidOperationException` if already committed or rolled back
+- [ ] AC-060: `IUnitOfWork` logs transaction duration and outcome (commit/rollback) at Debug level
 
-### Unit of Work
+### IUnitOfWorkFactory Interface (AC-061 to AC-068)
 
-- [ ] AC-013: Creates transaction
-- [ ] AC-014: Shares transaction
-- [ ] AC-015: Disposes properly
+- [ ] AC-061: `IUnitOfWorkFactory` interface exists with `CreateAsync(CancellationToken)` method
+- [ ] AC-062: `IUnitOfWorkFactory.CreateAsync` returns configured `IUnitOfWork` with active transaction
+- [ ] AC-063: `UnitOfWorkFactory` implementation uses injected `IConnectionFactory` to create connections
+- [ ] AC-064: `UnitOfWorkFactory` creates transaction with `ReadCommitted` isolation level by default
+- [ ] AC-065: `UnitOfWorkFactory` supports configurable isolation level via method overload
+- [ ] AC-066: `UnitOfWorkFactory` logs unit of work creation with correlation ID at Debug level
+- [ ] AC-067: `UnitOfWorkFactory` is registered in DI container as scoped lifetime
+- [ ] AC-068: Multiple `IUnitOfWork` instances can be created and used independently
 
-### Error Handling
+### Transaction Management (AC-069 to AC-080)
 
-- [ ] AC-016: Retries transient
-- [ ] AC-017: Fails permanent
-- [ ] AC-018: Logs errors
+- [ ] AC-069: Transaction begins automatically when `UnitOfWork` is created
+- [ ] AC-070: All database operations within `UnitOfWork` share the same transaction
+- [ ] AC-071: Commit persists all changes to database permanently
+- [ ] AC-072: Rollback reverts all changes within the transaction
+- [ ] AC-073: Nested transactions are not supported; throws `NotSupportedException` if attempted
+- [ ] AC-074: Transaction timeout is configured via `database.transaction_timeout_seconds` (default 30)
+- [ ] AC-075: Transaction logs start time, operations count, and duration on completion
+- [ ] AC-076: Concurrent transactions on different connections do not interfere with each other
+- [ ] AC-077: Transaction correctly handles `IsolationLevel.Serializable` for critical operations
+- [ ] AC-078: Transaction correctly handles `IsolationLevel.RepeatableRead` for read-modify-write patterns
+- [ ] AC-079: Transaction correctly handles `IsolationLevel.ReadCommitted` for standard operations
+- [ ] AC-080: Transaction automatically times out if held longer than configured maximum
 
-### Config
+### Retry Policy (AC-081 to AC-095)
 
-- [ ] AC-019: File config works
-- [ ] AC-020: Env vars work
-- [ ] AC-021: Validation works
+- [ ] AC-081: `IDatabaseRetryPolicy` interface exists with `ExecuteAsync<T>` method
+- [ ] AC-082: Retry policy uses exponential backoff with jitter for retries
+- [ ] AC-083: Maximum retry attempts configured via `database.retry.max_attempts` (default 3)
+- [ ] AC-084: Base delay configured via `database.retry.base_delay_ms` (default 100)
+- [ ] AC-085: Maximum delay configured via `database.retry.max_delay_ms` (default 5000)
+- [ ] AC-086: Jitter factor is 0.1-0.3 of base delay to prevent thundering herd
+- [ ] AC-087: Transient errors are retried: connection timeout, pool exhausted, network error
+- [ ] AC-088: SQLite `SQLITE_BUSY` is classified as transient and retried
+- [ ] AC-089: PostgreSQL deadlock detected is classified as transient and retried
+- [ ] AC-090: Permanent errors fail immediately without retry: constraint violation, syntax error
+- [ ] AC-091: Authentication failures fail immediately without retry
+- [ ] AC-092: Retry policy logs each retry attempt with attempt number, error, and delay at Warning level
+- [ ] AC-093: Retry policy logs final failure with all attempts summarized at Error level
+- [ ] AC-094: Retry policy respects cancellation token between retry attempts
+- [ ] AC-095: Retry policy can be disabled via `database.retry.enabled=false` configuration
+
+### Error Handling (AC-096 to AC-110)
+
+- [ ] AC-096: All database errors are wrapped in `DatabaseException` with structured error codes
+- [ ] AC-097: Error code `ACODE-DB-ACC-001` indicates connection failure
+- [ ] AC-098: Error code `ACODE-DB-ACC-002` indicates pool exhausted
+- [ ] AC-099: Error code `ACODE-DB-ACC-003` indicates transaction failure
+- [ ] AC-100: Error code `ACODE-DB-ACC-004` indicates command timeout
+- [ ] AC-101: Error code `ACODE-DB-ACC-005` indicates constraint violation (unique, foreign key)
+- [ ] AC-102: Error code `ACODE-DB-ACC-006` indicates SQL syntax error
+- [ ] AC-103: Error code `ACODE-DB-ACC-007` indicates permission denied
+- [ ] AC-104: Error code `ACODE-DB-ACC-008` indicates database does not exist
+- [ ] AC-105: `DatabaseException` includes `IsTransient` property for retry decision
+- [ ] AC-106: `DatabaseException` includes `InnerException` with original provider error
+- [ ] AC-107: `DatabaseException` includes `CorrelationId` for tracing across logs
+- [ ] AC-108: Provider-specific error codes are mapped to generic error codes
+- [ ] AC-109: SQLite error codes (SQLITE_BUSY, SQLITE_LOCKED, etc.) are properly categorized
+- [ ] AC-110: PostgreSQL error codes (23xxx, 40xxx, 53xxx) are properly categorized
+
+### Configuration Validation (AC-111 to AC-120)
+
+- [ ] AC-111: Configuration is validated at startup before first connection attempt
+- [ ] AC-112: Missing `database.provider` throws `ConfigurationException` with clear message
+- [ ] AC-113: Invalid `database.provider` value throws `ConfigurationException` listing valid options
+- [ ] AC-114: SQLite: Missing `database.local.path` throws `ConfigurationException`
+- [ ] AC-115: PostgreSQL: Missing connection string or components throws `ConfigurationException`
+- [ ] AC-116: Pool size validation: `max_size >= min_size` or throws `ConfigurationException`
+- [ ] AC-117: Timeout validation: all timeout values > 0 or throws `ConfigurationException`
+- [ ] AC-118: Configuration validation logs all validated settings at Information level on startup
+- [ ] AC-119: Configuration validation masks passwords in log output
+- [ ] AC-120: Configuration can be reloaded at runtime via configuration change notification
+
+### Logging and Diagnostics (AC-121 to AC-130)
+
+- [ ] AC-121: All log entries include `database_type`, `operation`, and `duration_ms` fields
+- [ ] AC-122: Connection open logged at Debug level with database type and path/host
+- [ ] AC-123: Connection close logged at Debug level with total time held
+- [ ] AC-124: Transaction start logged at Debug level with isolation level
+- [ ] AC-125: Transaction commit logged at Debug level with duration and operations count
+- [ ] AC-126: Transaction rollback logged at Information level with reason
+- [ ] AC-127: Pool exhaustion logged at Warning level with pool statistics
+- [ ] AC-128: Connection errors logged at Error level with masked connection details
+- [ ] AC-129: Slow operations (>1s) logged at Warning level with operation details
+- [ ] AC-130: Retry attempts logged at Warning level with attempt number and next delay
+
+### Performance Metrics (AC-131 to AC-140)
+
+- [ ] AC-131: `IConnectionPoolMetrics` interface provides pool statistics
+- [ ] AC-132: Metric: `db_connection_pool_size` (current pool size)
+- [ ] AC-133: Metric: `db_connection_pool_active` (connections in use)
+- [ ] AC-134: Metric: `db_connection_pool_idle` (connections available)
+- [ ] AC-135: Metric: `db_connection_acquire_duration_ms` (histogram of acquisition times)
+- [ ] AC-136: Metric: `db_command_duration_ms` (histogram of command execution times)
+- [ ] AC-137: Metric: `db_transaction_duration_ms` (histogram of transaction durations)
+- [ ] AC-138: Metric: `db_errors_total` (counter by error code)
+- [ ] AC-139: Metric: `db_retries_total` (counter of retry attempts)
+- [ ] AC-140: Metrics are exposed via OpenTelemetry if configured
 
 ---
 
@@ -1313,84 +1920,1352 @@ public sealed class SecureSslConnectionFactory : IConnectionFactory
 
 ### Unit Tests
 
+#### SqliteConnectionFactoryTests.cs
+
+```csharp
+// Tests/Acode.Infrastructure.Tests/Database/SqliteConnectionFactoryTests.cs
+namespace Acode.Infrastructure.Tests.Database;
+
+using Acode.Application.Interfaces;
+using Acode.Domain.Exceptions;
+using Acode.Infrastructure.Persistence.Connections;
+using FluentAssertions;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Xunit;
+
+public sealed class SqliteConnectionFactoryTests : IDisposable
+{
+    private readonly string _testDbPath;
+    private readonly SqliteConnectionFactory _sut;
+    
+    public SqliteConnectionFactoryTests()
+    {
+        _testDbPath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid()}.db");
+        var options = Options.Create(new DatabaseOptions
+        {
+            Provider = "sqlite",
+            Local = new LocalDatabaseOptions
+            {
+                Path = _testDbPath,
+                WalMode = true,
+                BusyTimeoutMs = 5000
+            }
+        });
+        _sut = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
+    }
+    
+    public void Dispose()
+    {
+        if (File.Exists(_testDbPath))
+            File.Delete(_testDbPath);
+    }
+    
+    [Fact]
+    public async Task CreateAsync_ShouldReturnOpenConnection()
+    {
+        // Act
+        await using var connection = await _sut.CreateAsync(CancellationToken.None);
+        
+        // Assert
+        connection.Should().NotBeNull();
+        connection.State.Should().Be(ConnectionState.Open);
+    }
+    
+    [Fact]
+    public async Task CreateAsync_ShouldCreateDatabaseFileIfNotExists()
+    {
+        // Arrange
+        File.Exists(_testDbPath).Should().BeFalse();
+        
+        // Act
+        await using var connection = await _sut.CreateAsync(CancellationToken.None);
+        
+        // Assert
+        File.Exists(_testDbPath).Should().BeTrue();
+    }
+    
+    [Fact]
+    public async Task CreateAsync_ShouldEnableWalMode_WhenConfigured()
+    {
+        // Act
+        await using var connection = await _sut.CreateAsync(CancellationToken.None);
+        
+        // Assert
+        var sqliteConn = connection as SqliteConnection;
+        await using var cmd = sqliteConn!.CreateCommand();
+        cmd.CommandText = "PRAGMA journal_mode;";
+        var result = await cmd.ExecuteScalarAsync();
+        result.Should().Be("wal");
+    }
+    
+    [Fact]
+    public async Task CreateAsync_ShouldSetBusyTimeout()
+    {
+        // Act
+        await using var connection = await _sut.CreateAsync(CancellationToken.None);
+        
+        // Assert
+        var sqliteConn = connection as SqliteConnection;
+        await using var cmd = sqliteConn!.CreateCommand();
+        cmd.CommandText = "PRAGMA busy_timeout;";
+        var result = await cmd.ExecuteScalarAsync();
+        Convert.ToInt32(result).Should().Be(5000);
+    }
+    
+    [Fact]
+    public async Task CreateAsync_ShouldEnableForeignKeys()
+    {
+        // Act
+        await using var connection = await _sut.CreateAsync(CancellationToken.None);
+        
+        // Assert
+        var sqliteConn = connection as SqliteConnection;
+        await using var cmd = sqliteConn!.CreateCommand();
+        cmd.CommandText = "PRAGMA foreign_keys;";
+        var result = await cmd.ExecuteScalarAsync();
+        Convert.ToInt32(result).Should().Be(1);
+    }
+    
+    [Fact]
+    public async Task CreateAsync_ShouldThrowDatabaseException_WhenPathInvalid()
+    {
+        // Arrange
+        var options = Options.Create(new DatabaseOptions
+        {
+            Provider = "sqlite",
+            Local = new LocalDatabaseOptions { Path = "/invalid\0path/db.sqlite" }
+        });
+        var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
+        
+        // Act
+        var act = () => factory.CreateAsync(CancellationToken.None);
+        
+        // Assert
+        await act.Should().ThrowAsync<DatabaseException>()
+            .Where(e => e.ErrorCode == "ACODE-DB-ACC-001");
+    }
+    
+    [Fact]
+    public async Task CreateAsync_ShouldRespectCancellation()
+    {
+        // Arrange
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        
+        // Act
+        var act = () => _sut.CreateAsync(cts.Token);
+        
+        // Assert
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+    
+    [Fact]
+    public void DatabaseType_ShouldReturnSqlite()
+    {
+        // Act & Assert
+        _sut.DatabaseType.Should().Be(DatabaseType.Sqlite);
+    }
+    
+    [Fact]
+    public async Task CreateAsync_ShouldCreateParentDirectories()
+    {
+        // Arrange
+        var nestedPath = Path.Combine(Path.GetTempPath(), "nested", "dirs", $"test_{Guid.NewGuid()}.db");
+        var options = Options.Create(new DatabaseOptions
+        {
+            Provider = "sqlite",
+            Local = new LocalDatabaseOptions { Path = nestedPath, WalMode = true }
+        });
+        var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
+        
+        try
+        {
+            // Act
+            await using var connection = await factory.CreateAsync(CancellationToken.None);
+            
+            // Assert
+            File.Exists(nestedPath).Should().BeTrue();
+        }
+        finally
+        {
+            if (File.Exists(nestedPath))
+            {
+                File.Delete(nestedPath);
+                Directory.Delete(Path.GetDirectoryName(nestedPath)!, true);
+            }
+        }
+    }
+}
 ```
-Tests/Unit/Database/Access/
-├── SqliteFactoryTests.cs
-│   ├── Should_Create_Connection()
-│   ├── Should_Enable_Wal()
-│   └── Should_Set_BusyTimeout()
-│
-├── PostgresFactoryTests.cs
-│   ├── Should_Parse_ConnectionString()
-│   ├── Should_Configure_Pool()
-│   └── Should_Set_Timeout()
-│
-├── UnitOfWorkTests.cs
-│   ├── Should_Share_Transaction()
-│   ├── Should_Commit()
-│   └── Should_Rollback_On_Dispose()
-│
-└── RetryPolicyTests.cs
-    ├── Should_Retry_Transient()
-    └── Should_Fail_Permanent()
+
+#### PostgresConnectionFactoryTests.cs
+
+```csharp
+// Tests/Acode.Infrastructure.Tests/Database/PostgresConnectionFactoryTests.cs
+namespace Acode.Infrastructure.Tests.Database;
+
+using Acode.Application.Interfaces;
+using Acode.Domain.Exceptions;
+using Acode.Infrastructure.Persistence.Connections;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
+using Xunit;
+
+public sealed class PostgresConnectionFactoryTests
+{
+    private readonly Mock<IOptions<DatabaseOptions>> _optionsMock;
+    private readonly PostgresConnectionFactory _sut;
+    
+    public PostgresConnectionFactoryTests()
+    {
+        _optionsMock = new Mock<IOptions<DatabaseOptions>>();
+        _optionsMock.Setup(o => o.Value).Returns(new DatabaseOptions
+        {
+            Provider = "postgresql",
+            Remote = new RemoteDatabaseOptions
+            {
+                ConnectionString = "Host=localhost;Database=test;Username=test;Password=test",
+                Pool = new PoolOptions { MinSize = 1, MaxSize = 5 },
+                CommandTimeoutSeconds = 30
+            }
+        });
+        _sut = new PostgresConnectionFactory(_optionsMock.Object, NullLogger<PostgresConnectionFactory>.Instance);
+    }
+    
+    [Fact]
+    public void DatabaseType_ShouldReturnPostgres()
+    {
+        // Act & Assert
+        _sut.DatabaseType.Should().Be(DatabaseType.Postgres);
+    }
+    
+    [Fact]
+    public void Constructor_ShouldApplyPoolSettings()
+    {
+        // Arrange
+        var options = Options.Create(new DatabaseOptions
+        {
+            Provider = "postgresql",
+            Remote = new RemoteDatabaseOptions
+            {
+                ConnectionString = "Host=localhost;Database=test",
+                Pool = new PoolOptions { MinSize = 2, MaxSize = 20 }
+            }
+        });
+        
+        // Act
+        var factory = new PostgresConnectionFactory(options, NullLogger<PostgresConnectionFactory>.Instance);
+        
+        // Assert - factory should be created without exception
+        factory.Should().NotBeNull();
+        factory.DatabaseType.Should().Be(DatabaseType.Postgres);
+    }
+    
+    [Fact]
+    public async Task CreateAsync_ShouldThrowDatabaseException_WhenConnectionFails()
+    {
+        // Arrange - use invalid host that won't resolve
+        var options = Options.Create(new DatabaseOptions
+        {
+            Provider = "postgresql",
+            Remote = new RemoteDatabaseOptions
+            {
+                ConnectionString = "Host=invalid.host.that.does.not.exist.local;Database=test;Timeout=1"
+            }
+        });
+        var factory = new PostgresConnectionFactory(options, NullLogger<PostgresConnectionFactory>.Instance);
+        
+        // Act
+        var act = () => factory.CreateAsync(CancellationToken.None);
+        
+        // Assert
+        await act.Should().ThrowAsync<DatabaseException>()
+            .Where(e => e.ErrorCode == "ACODE-DB-ACC-001");
+    }
+    
+    [Fact]
+    public async Task CreateAsync_ShouldRespectCancellation()
+    {
+        // Arrange
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        
+        // Act
+        var act = () => _sut.CreateAsync(cts.Token);
+        
+        // Assert
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+    
+    [Fact]
+    public void Constructor_ShouldThrow_WhenConnectionStringMissing()
+    {
+        // Arrange
+        var options = Options.Create(new DatabaseOptions
+        {
+            Provider = "postgresql",
+            Remote = new RemoteDatabaseOptions { ConnectionString = null }
+        });
+        
+        // Act
+        var act = () => new PostgresConnectionFactory(options, NullLogger<PostgresConnectionFactory>.Instance);
+        
+        // Assert
+        act.Should().Throw<ConfigurationException>();
+    }
+    
+    [Fact]
+    public void Constructor_ShouldBuildConnectionString_FromComponents()
+    {
+        // Arrange
+        var options = Options.Create(new DatabaseOptions
+        {
+            Provider = "postgresql",
+            Remote = new RemoteDatabaseOptions
+            {
+                Host = "localhost",
+                Port = 5432,
+                Database = "testdb",
+                Username = "testuser",
+                Password = "testpass"
+            }
+        });
+        
+        // Act
+        var factory = new PostgresConnectionFactory(options, NullLogger<PostgresConnectionFactory>.Instance);
+        
+        // Assert
+        factory.Should().NotBeNull();
+    }
+}
+```
+
+#### UnitOfWorkTests.cs
+
+```csharp
+// Tests/Acode.Infrastructure.Tests/Database/UnitOfWorkTests.cs
+namespace Acode.Infrastructure.Tests.Database;
+
+using Acode.Application.Interfaces;
+using Acode.Infrastructure.Persistence.Transactions;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using System.Data;
+using Xunit;
+
+public sealed class UnitOfWorkTests
+{
+    private readonly Mock<IDbConnection> _connectionMock;
+    private readonly Mock<IDbTransaction> _transactionMock;
+    
+    public UnitOfWorkTests()
+    {
+        _connectionMock = new Mock<IDbConnection>();
+        _transactionMock = new Mock<IDbTransaction>();
+        _connectionMock.Setup(c => c.BeginTransaction(It.IsAny<IsolationLevel>()))
+            .Returns(_transactionMock.Object);
+    }
+    
+    [Fact]
+    public void Constructor_ShouldBeginTransaction()
+    {
+        // Act
+        using var uow = new UnitOfWork(_connectionMock.Object, IsolationLevel.ReadCommitted, 
+            NullLogger<UnitOfWork>.Instance);
+        
+        // Assert
+        _connectionMock.Verify(c => c.BeginTransaction(IsolationLevel.ReadCommitted), Times.Once);
+    }
+    
+    [Fact]
+    public void Connection_ShouldReturnInjectedConnection()
+    {
+        // Act
+        using var uow = new UnitOfWork(_connectionMock.Object, IsolationLevel.ReadCommitted,
+            NullLogger<UnitOfWork>.Instance);
+        
+        // Assert
+        uow.Connection.Should().BeSameAs(_connectionMock.Object);
+    }
+    
+    [Fact]
+    public void Transaction_ShouldReturnActiveTransaction()
+    {
+        // Act
+        using var uow = new UnitOfWork(_connectionMock.Object, IsolationLevel.ReadCommitted,
+            NullLogger<UnitOfWork>.Instance);
+        
+        // Assert
+        uow.Transaction.Should().BeSameAs(_transactionMock.Object);
+    }
+    
+    [Fact]
+    public async Task CommitAsync_ShouldCommitTransaction()
+    {
+        // Arrange
+        await using var uow = new UnitOfWork(_connectionMock.Object, IsolationLevel.ReadCommitted,
+            NullLogger<UnitOfWork>.Instance);
+        
+        // Act
+        await uow.CommitAsync(CancellationToken.None);
+        
+        // Assert
+        _transactionMock.Verify(t => t.Commit(), Times.Once);
+    }
+    
+    [Fact]
+    public async Task RollbackAsync_ShouldRollbackTransaction()
+    {
+        // Arrange
+        await using var uow = new UnitOfWork(_connectionMock.Object, IsolationLevel.ReadCommitted,
+            NullLogger<UnitOfWork>.Instance);
+        
+        // Act
+        await uow.RollbackAsync(CancellationToken.None);
+        
+        // Assert
+        _transactionMock.Verify(t => t.Rollback(), Times.Once);
+    }
+    
+    [Fact]
+    public async Task DisposeAsync_ShouldRollback_WhenNotCommitted()
+    {
+        // Arrange
+        var uow = new UnitOfWork(_connectionMock.Object, IsolationLevel.ReadCommitted,
+            NullLogger<UnitOfWork>.Instance);
+        
+        // Act
+        await uow.DisposeAsync();
+        
+        // Assert
+        _transactionMock.Verify(t => t.Rollback(), Times.Once);
+    }
+    
+    [Fact]
+    public async Task DisposeAsync_ShouldNotRollback_WhenAlreadyCommitted()
+    {
+        // Arrange
+        var uow = new UnitOfWork(_connectionMock.Object, IsolationLevel.ReadCommitted,
+            NullLogger<UnitOfWork>.Instance);
+        await uow.CommitAsync(CancellationToken.None);
+        
+        // Act
+        await uow.DisposeAsync();
+        
+        // Assert
+        _transactionMock.Verify(t => t.Rollback(), Times.Never);
+    }
+    
+    [Fact]
+    public async Task CommitAsync_ShouldThrowInvalidOperationException_WhenAlreadyCommitted()
+    {
+        // Arrange
+        await using var uow = new UnitOfWork(_connectionMock.Object, IsolationLevel.ReadCommitted,
+            NullLogger<UnitOfWork>.Instance);
+        await uow.CommitAsync(CancellationToken.None);
+        
+        // Act
+        var act = () => uow.CommitAsync(CancellationToken.None);
+        
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*already committed*");
+    }
+    
+    [Fact]
+    public async Task RollbackAsync_ShouldThrowInvalidOperationException_WhenAlreadyRolledBack()
+    {
+        // Arrange
+        await using var uow = new UnitOfWork(_connectionMock.Object, IsolationLevel.ReadCommitted,
+            NullLogger<UnitOfWork>.Instance);
+        await uow.RollbackAsync(CancellationToken.None);
+        
+        // Act
+        var act = () => uow.RollbackAsync(CancellationToken.None);
+        
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*already rolled back*");
+    }
+    
+    [Fact]
+    public async Task DisposeAsync_ShouldDisposeConnectionAndTransaction()
+    {
+        // Arrange
+        var uow = new UnitOfWork(_connectionMock.Object, IsolationLevel.ReadCommitted,
+            NullLogger<UnitOfWork>.Instance);
+        await uow.CommitAsync(CancellationToken.None);
+        
+        // Act
+        await uow.DisposeAsync();
+        
+        // Assert
+        _transactionMock.Verify(t => t.Dispose(), Times.Once);
+        _connectionMock.Verify(c => c.Dispose(), Times.Once);
+    }
+}
+```
+
+#### DatabaseRetryPolicyTests.cs
+
+```csharp
+// Tests/Acode.Infrastructure.Tests/Database/DatabaseRetryPolicyTests.cs
+namespace Acode.Infrastructure.Tests.Database;
+
+using Acode.Domain.Exceptions;
+using Acode.Infrastructure.Persistence.Retry;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Xunit;
+
+public sealed class DatabaseRetryPolicyTests
+{
+    private readonly DatabaseRetryPolicy _sut;
+    
+    public DatabaseRetryPolicyTests()
+    {
+        var options = Options.Create(new RetryOptions
+        {
+            Enabled = true,
+            MaxAttempts = 3,
+            BaseDelayMs = 10,  // Short for tests
+            MaxDelayMs = 100
+        });
+        _sut = new DatabaseRetryPolicy(options, NullLogger<DatabaseRetryPolicy>.Instance);
+    }
+    
+    [Fact]
+    public async Task ExecuteAsync_ShouldReturnResult_WhenNoException()
+    {
+        // Act
+        var result = await _sut.ExecuteAsync(
+            async ct => { await Task.Delay(1, ct); return 42; },
+            CancellationToken.None);
+        
+        // Assert
+        result.Should().Be(42);
+    }
+    
+    [Fact]
+    public async Task ExecuteAsync_ShouldRetry_OnTransientException()
+    {
+        // Arrange
+        var attempts = 0;
+        
+        // Act
+        var result = await _sut.ExecuteAsync(async ct =>
+        {
+            attempts++;
+            if (attempts < 3)
+                throw new DatabaseException("ACODE-DB-ACC-001", "Transient", isTransient: true);
+            return 42;
+        }, CancellationToken.None);
+        
+        // Assert
+        attempts.Should().Be(3);
+        result.Should().Be(42);
+    }
+    
+    [Fact]
+    public async Task ExecuteAsync_ShouldNotRetry_OnPermanentException()
+    {
+        // Arrange
+        var attempts = 0;
+        
+        // Act
+        var act = async () => await _sut.ExecuteAsync<int>(async ct =>
+        {
+            attempts++;
+            throw new DatabaseException("ACODE-DB-ACC-005", "Constraint violation", isTransient: false);
+        }, CancellationToken.None);
+        
+        // Assert
+        await act.Should().ThrowAsync<DatabaseException>();
+        attempts.Should().Be(1);
+    }
+    
+    [Fact]
+    public async Task ExecuteAsync_ShouldThrow_AfterMaxRetries()
+    {
+        // Arrange
+        var attempts = 0;
+        
+        // Act
+        var act = async () => await _sut.ExecuteAsync<int>(async ct =>
+        {
+            attempts++;
+            throw new DatabaseException("ACODE-DB-ACC-001", "Always fails", isTransient: true);
+        }, CancellationToken.None);
+        
+        // Assert
+        await act.Should().ThrowAsync<DatabaseException>();
+        attempts.Should().Be(3); // MaxAttempts = 3
+    }
+    
+    [Fact]
+    public async Task ExecuteAsync_ShouldRespectCancellation()
+    {
+        // Arrange
+        using var cts = new CancellationTokenSource();
+        var attempts = 0;
+        
+        // Act
+        var act = async () => await _sut.ExecuteAsync<int>(async ct =>
+        {
+            attempts++;
+            if (attempts == 2) cts.Cancel();
+            throw new DatabaseException("ACODE-DB-ACC-001", "Transient", isTransient: true);
+        }, cts.Token);
+        
+        // Assert
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+    
+    [Fact]
+    public async Task ExecuteAsync_ShouldApplyExponentialBackoff()
+    {
+        // Arrange
+        var timestamps = new List<DateTime>();
+        
+        // Act
+        try
+        {
+            await _sut.ExecuteAsync<int>(async ct =>
+            {
+                timestamps.Add(DateTime.UtcNow);
+                throw new DatabaseException("ACODE-DB-ACC-001", "Transient", isTransient: true);
+            }, CancellationToken.None);
+        }
+        catch { }
+        
+        // Assert - each delay should be longer than the previous
+        timestamps.Should().HaveCount(3);
+        var delay1 = (timestamps[1] - timestamps[0]).TotalMilliseconds;
+        var delay2 = (timestamps[2] - timestamps[1]).TotalMilliseconds;
+        delay2.Should().BeGreaterThanOrEqualTo(delay1);
+    }
+    
+    [Fact]
+    public async Task ExecuteAsync_ShouldDisable_WhenConfiguredOff()
+    {
+        // Arrange
+        var options = Options.Create(new RetryOptions { Enabled = false });
+        var policy = new DatabaseRetryPolicy(options, NullLogger<DatabaseRetryPolicy>.Instance);
+        var attempts = 0;
+        
+        // Act
+        var act = async () => await policy.ExecuteAsync<int>(async ct =>
+        {
+            attempts++;
+            throw new DatabaseException("ACODE-DB-ACC-001", "Transient", isTransient: true);
+        }, CancellationToken.None);
+        
+        // Assert
+        await act.Should().ThrowAsync<DatabaseException>();
+        attempts.Should().Be(1);
+    }
+    
+    [Theory]
+    [InlineData("ACODE-DB-ACC-001", true)]   // Connection failed
+    [InlineData("ACODE-DB-ACC-002", true)]   // Pool exhausted
+    [InlineData("ACODE-DB-ACC-004", true)]   // Command timeout
+    [InlineData("ACODE-DB-ACC-005", false)]  // Constraint violation
+    [InlineData("ACODE-DB-ACC-006", false)]  // Syntax error
+    [InlineData("ACODE-DB-ACC-007", false)]  // Permission denied
+    public async Task ExecuteAsync_ShouldClassifyErrorsCorrectly(string errorCode, bool shouldRetry)
+    {
+        // Arrange
+        var attempts = 0;
+        
+        // Act
+        try
+        {
+            await _sut.ExecuteAsync<int>(async ct =>
+            {
+                attempts++;
+                throw new DatabaseException(errorCode, "Test error", isTransient: shouldRetry);
+            }, CancellationToken.None);
+        }
+        catch { }
+        
+        // Assert
+        if (shouldRetry)
+            attempts.Should().Be(3); // All retries exhausted
+        else
+            attempts.Should().Be(1); // No retry for permanent errors
+    }
+}
 ```
 
 ### Integration Tests
 
-```
-Tests/Integration/Database/
-├── SqliteConnectionTests.cs
-│   ├── Should_Execute_Query()
-│   └── Should_Handle_Concurrent()
-│
-└── PostgresConnectionTests.cs
-    ├── Should_Pool_Connections()
-    └── Should_Handle_Timeout()
-```
+#### SqliteConnectionIntegrationTests.cs
 
-### E2E Tests
+```csharp
+// Tests/Acode.Integration.Tests/Database/SqliteConnectionIntegrationTests.cs
+namespace Acode.Integration.Tests.Database;
 
-```
-Tests/E2E/Database/
-├── ConnectionE2ETests.cs
-│   └── Should_Connect_Both_Databases()
+using Acode.Infrastructure.Persistence.Connections;
+using FluentAssertions;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Xunit;
+
+[Collection("Database")]
+public sealed class SqliteConnectionIntegrationTests : IAsyncLifetime
+{
+    private readonly string _testDbPath;
+    private readonly SqliteConnectionFactory _factory;
+    
+    public SqliteConnectionIntegrationTests()
+    {
+        _testDbPath = Path.Combine(Path.GetTempPath(), $"integration_test_{Guid.NewGuid()}.db");
+        var options = Options.Create(new DatabaseOptions
+        {
+            Provider = "sqlite",
+            Local = new LocalDatabaseOptions
+            {
+                Path = _testDbPath,
+                WalMode = true,
+                BusyTimeoutMs = 5000
+            }
+        });
+        _factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
+    }
+    
+    public Task InitializeAsync() => Task.CompletedTask;
+    
+    public Task DisposeAsync()
+    {
+        if (File.Exists(_testDbPath))
+            File.Delete(_testDbPath);
+        if (File.Exists(_testDbPath + "-wal"))
+            File.Delete(_testDbPath + "-wal");
+        if (File.Exists(_testDbPath + "-shm"))
+            File.Delete(_testDbPath + "-shm");
+        return Task.CompletedTask;
+    }
+    
+    [Fact]
+    public async Task Should_ExecuteQuery_Successfully()
+    {
+        // Arrange
+        await using var conn = await _factory.CreateAsync(CancellationToken.None);
+        
+        // Act
+        await using var cmd = ((SqliteConnection)conn).CreateCommand();
+        cmd.CommandText = "SELECT 1 + 1 AS result;";
+        var result = await cmd.ExecuteScalarAsync();
+        
+        // Assert
+        Convert.ToInt32(result).Should().Be(2);
+    }
+    
+    [Fact]
+    public async Task Should_CreateTable_AndInsertData()
+    {
+        // Arrange
+        await using var conn = await _factory.CreateAsync(CancellationToken.None);
+        var sqliteConn = (SqliteConnection)conn;
+        
+        // Act - Create table
+        await using var createCmd = sqliteConn.CreateCommand();
+        createCmd.CommandText = "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, value TEXT);";
+        await createCmd.ExecuteNonQueryAsync();
+        
+        // Act - Insert data
+        await using var insertCmd = sqliteConn.CreateCommand();
+        insertCmd.CommandText = "INSERT INTO test (value) VALUES ('hello');";
+        await insertCmd.ExecuteNonQueryAsync();
+        
+        // Act - Read data
+        await using var selectCmd = sqliteConn.CreateCommand();
+        selectCmd.CommandText = "SELECT value FROM test WHERE id = 1;";
+        var result = await selectCmd.ExecuteScalarAsync();
+        
+        // Assert
+        result.Should().Be("hello");
+    }
+    
+    [Fact]
+    public async Task Should_HandleConcurrentReaders_WithWalMode()
+    {
+        // Arrange - Create table with data
+        await using var setupConn = await _factory.CreateAsync(CancellationToken.None);
+        await using var setupCmd = ((SqliteConnection)setupConn).CreateCommand();
+        setupCmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS concurrent_test (id INTEGER PRIMARY KEY, value TEXT);
+            INSERT INTO concurrent_test (value) VALUES ('data');";
+        await setupCmd.ExecuteNonQueryAsync();
+        
+        // Act - Open multiple concurrent readers
+        var tasks = Enumerable.Range(0, 10).Select(async i =>
+        {
+            await using var conn = await _factory.CreateAsync(CancellationToken.None);
+            await using var cmd = ((SqliteConnection)conn).CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM concurrent_test;";
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync());
+        });
+        
+        // Assert
+        var results = await Task.WhenAll(tasks);
+        results.Should().AllSatisfy(r => r.Should().BeGreaterOrEqualTo(1));
+    }
+    
+    [Fact]
+    public async Task Should_EnforceForeignKeys()
+    {
+        // Arrange
+        await using var conn = await _factory.CreateAsync(CancellationToken.None);
+        var sqliteConn = (SqliteConnection)conn;
+        
+        await using var createCmd = sqliteConn.CreateCommand();
+        createCmd.CommandText = @"
+            CREATE TABLE parent (id INTEGER PRIMARY KEY);
+            CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id));";
+        await createCmd.ExecuteNonQueryAsync();
+        
+        // Act - Try to insert child without parent
+        await using var insertCmd = sqliteConn.CreateCommand();
+        insertCmd.CommandText = "INSERT INTO child (parent_id) VALUES (999);";
+        
+        var act = () => insertCmd.ExecuteNonQueryAsync();
+        
+        // Assert - Should throw foreign key constraint error
+        await act.Should().ThrowAsync<SqliteException>()
+            .Where(e => e.SqliteErrorCode == 19); // SQLITE_CONSTRAINT
+    }
+}
 ```
 
 ### Performance Benchmarks
 
-| Benchmark | Target | Maximum |
-|-----------|--------|---------|
-| Pooled acquire | 5ms | 10ms |
-| New connection | 50ms | 100ms |
-| Transaction begin | 0.5ms | 1ms |
+| Benchmark | Target | Maximum | Measurement Method |
+|-----------|--------|---------|-------------------|
+| SQLite connection open | 2ms | 10ms | Stopwatch from CreateAsync start to connection.State == Open |
+| PostgreSQL pooled acquire | 5ms | 15ms | Stopwatch from CreateAsync call to return |
+| PostgreSQL new connection | 50ms | 150ms | First connection with empty pool |
+| Transaction begin | 0.5ms | 2ms | Stopwatch around BeginTransaction call |
+| Transaction commit | 1ms | 5ms | Stopwatch around CommitAsync call |
+| Unit of Work create | 3ms | 10ms | Stopwatch around factory.CreateAsync |
+| Retry policy overhead | <1ms | 2ms | Difference between with/without retry wrapper |
+| Connection dispose | <1ms | 2ms | Stopwatch around Dispose/DisposeAsync |
+
+### Test Coverage Requirements
+
+| Component | Minimum Coverage | Target Coverage |
+|-----------|-----------------|-----------------|
+| IConnectionFactory implementations | 90% | 95% |
+| IUnitOfWork implementation | 95% | 100% |
+| IUnitOfWorkFactory implementation | 90% | 95% |
+| DatabaseRetryPolicy | 95% | 100% |
+| Configuration validation | 90% | 95% |
+| Error handling/mapping | 90% | 95% |
+| Overall module | 85% | 90% |
 
 ---
 
 ## User Verification Steps
 
-### Scenario 1: SQLite Connection
+### Scenario 1: Fresh SQLite Database Creation
 
-1. Delete database file
-2. Run acode command
-3. Verify: Database created
+**Objective:** Verify SQLite database is created automatically on first access
 
-### Scenario 2: PostgreSQL Connection
+**Prerequisites:**
+- Acode CLI installed and built
+- No existing workspace database file
 
-1. Configure remote
-2. Check connections
-3. Verify: Pool active
+**Steps:**
 
-### Scenario 3: Transaction
+1. Navigate to a new empty directory:
+   ```bash
+   cd /tmp/acode-test-fresh
+   ```
 
-1. Start operation
-2. Force error
-3. Verify: Rolled back
+2. Ensure no database exists:
+   ```bash
+   ls -la .agent/data/
+   # Expected: Directory does not exist or workspace.db not present
+   ```
 
-### Scenario 4: Pool Exhaustion
+3. Initialize workspace (triggers database creation):
+   ```bash
+   acode init
+   ```
 
-1. Set small pool
-2. Create many connections
-3. Verify: Waits for available
+4. Verify database was created:
+   ```bash
+   ls -la .agent/data/workspace.db
+   # Expected: File exists with non-zero size
+   ```
+
+5. Verify WAL mode is enabled:
+   ```bash
+   sqlite3 .agent/data/workspace.db "PRAGMA journal_mode;"
+   # Expected: wal
+   ```
+
+6. Verify foreign keys are enabled:
+   ```bash
+   sqlite3 .agent/data/workspace.db "PRAGMA foreign_keys;"
+   # Expected: 1
+   ```
+
+**Expected Outcome:**
+- ✅ Database file created at `.agent/data/workspace.db`
+- ✅ WAL mode enabled (journal_mode = wal)
+- ✅ Foreign keys enforced (foreign_keys = 1)
+- ✅ No errors in application logs
+
+---
+
+### Scenario 2: PostgreSQL Connection with Pool Verification
+
+**Objective:** Verify PostgreSQL connection pooling works correctly
+
+**Prerequisites:**
+- PostgreSQL server running on localhost:5432
+- Test database created with proper credentials
+- Acode configured for PostgreSQL
+
+**Steps:**
+
+1. Configure PostgreSQL connection:
+   ```yaml
+   # agent-config.yml
+   database:
+     provider: postgresql
+     remote:
+       host: localhost
+       port: 5432
+       database: acode_test
+       username: acode_user
+       password: ${ACODE_PG_PASSWORD}
+       pool:
+         min_size: 2
+         max_size: 10
+   ```
+
+2. Set environment variable:
+   ```bash
+   export ACODE_PG_PASSWORD="your_password"
+   ```
+
+3. Test connection:
+   ```bash
+   acode db test
+   # Expected: PostgreSQL (Remote): ✓ Status: HEALTHY
+   ```
+
+4. View pool statistics:
+   ```bash
+   acode db pool
+   # Expected: Shows pool with min 2 connections
+   ```
+
+5. Perform several operations and check pool:
+   ```bash
+   acode chat list
+   acode db pool
+   # Expected: Active connections increased during operation
+   ```
+
+**Expected Outcome:**
+- ✅ Connection test passes with healthy status
+- ✅ Pool shows minimum 2 connections initialized
+- ✅ Operations complete without pool exhaustion errors
+- ✅ Connections are reused (not recreated for each operation)
+
+---
+
+### Scenario 3: Transaction Commit and Rollback
+
+**Objective:** Verify Unit of Work pattern properly commits and rolls back transactions
+
+**Prerequisites:**
+- Working SQLite database
+- Chat repository functioning
+
+**Steps:**
+
+1. Check initial chat count:
+   ```bash
+   acode chat list --count
+   # Note the count, e.g., "5 chats"
+   ```
+
+2. Create a new chat (successful commit):
+   ```bash
+   acode chat new --name "Test Transaction"
+   # Expected: Chat created successfully
+   ```
+
+3. Verify chat was committed:
+   ```bash
+   acode chat list --count
+   # Expected: Count increased by 1
+   ```
+
+4. Simulate a failure scenario (if test mode available):
+   ```bash
+   acode --test-mode chat new --name "Fail After Insert" --fail-on-message
+   # Expected: Error during message creation
+   ```
+
+5. Verify rollback occurred:
+   ```bash
+   acode chat list --name "Fail After Insert"
+   # Expected: Chat not found (rolled back)
+   ```
+
+**Expected Outcome:**
+- ✅ Successful operations are committed (chat count increases)
+- ✅ Failed operations are rolled back (chat not persisted)
+- ✅ Transaction logs show commit/rollback events
+- ✅ Database remains consistent after failure
+
+---
+
+### Scenario 4: Pool Exhaustion and Recovery
+
+**Objective:** Verify system handles pool exhaustion gracefully
+
+**Prerequisites:**
+- PostgreSQL configured with small pool size
+- Ability to simulate concurrent operations
+
+**Steps:**
+
+1. Configure minimal pool:
+   ```yaml
+   # agent-config.yml
+   database:
+     remote:
+       pool:
+         max_size: 2
+         acquisition_timeout_seconds: 5
+   ```
+
+2. Restart application to apply settings
+
+3. Run concurrent operations that exceed pool:
+   ```bash
+   # Terminal 1
+   acode chat export --format json --slow  # Holds connection
+   
+   # Terminal 2
+   acode chat export --format json --slow  # Holds connection
+   
+   # Terminal 3 (runs while above are executing)
+   acode chat list  # Should wait for pool
+   ```
+
+4. Observe the third operation:
+   ```
+   # Expected: Operation waits, then completes when pool frees up
+   # Or: Times out after 5 seconds with clear error message
+   ```
+
+5. Check logs for pool exhaustion warning:
+   ```bash
+   grep "pool" .agent/logs/acode.log
+   # Expected: Warning about pool wait or exhaustion
+   ```
+
+**Expected Outcome:**
+- ✅ Third operation waits for available connection
+- ✅ Clear warning logged about pool contention
+- ✅ Operation completes once connection available
+- ✅ Error message is helpful if timeout occurs
+
+---
+
+### Scenario 5: Retry Policy for Transient Failures
+
+**Objective:** Verify transient database errors are retried automatically
+
+**Prerequisites:**
+- Test environment that can simulate transient failures
+- Logging enabled at Debug level
+
+**Steps:**
+
+1. Enable debug logging:
+   ```yaml
+   logging:
+     level: Debug
+   ```
+
+2. Simulate network instability (if test mode available):
+   ```bash
+   acode --test-mode db simulate-transient --failures 2
+   ```
+
+3. Execute a database operation:
+   ```bash
+   acode chat list
+   ```
+
+4. Check logs for retry attempts:
+   ```bash
+   grep -E "retry|attempt" .agent/logs/acode.log
+   # Expected: Shows retry attempts with delays
+   ```
+
+5. Verify operation eventually succeeded:
+   ```
+   # Expected: Chat list displayed correctly after retries
+   ```
+
+**Expected Outcome:**
+- ✅ Operation succeeds despite initial transient failures
+- ✅ Logs show retry attempts with increasing delays
+- ✅ User doesn't see intermediate failures
+- ✅ Final success is reported normally
+
+---
+
+### Scenario 6: Configuration Validation at Startup
+
+**Objective:** Verify invalid configurations are caught at startup
+
+**Prerequisites:**
+- Ability to modify configuration file
+
+**Steps:**
+
+1. Create invalid configuration (missing provider):
+   ```yaml
+   # agent-config.yml
+   database:
+     # provider: missing!
+     local:
+       path: .agent/data/workspace.db
+   ```
+
+2. Attempt to start application:
+   ```bash
+   acode chat list
+   # Expected: Startup fails with clear error
+   ```
+
+3. Check error message:
+   ```
+   Configuration error: Missing required field 'database.provider'
+   Valid options: sqlite, postgresql
+   ```
+
+4. Create invalid pool configuration:
+   ```yaml
+   database:
+     provider: postgresql
+     remote:
+       pool:
+         min_size: 20
+         max_size: 5  # Invalid: min > max
+   ```
+
+5. Attempt to start:
+   ```bash
+   acode chat list
+   # Expected: Validation error about pool sizes
+   ```
+
+**Expected Outcome:**
+- ✅ Missing provider caught with clear message
+- ✅ Invalid pool sizes caught with explanation
+- ✅ Application fails fast before attempting connection
+- ✅ Error messages suggest valid values
+
+---
+
+### Scenario 7: SSL/TLS Connection to PostgreSQL
+
+**Objective:** Verify secure connections work correctly
+
+**Prerequisites:**
+- PostgreSQL server with SSL enabled
+- SSL certificates configured
+
+**Steps:**
+
+1. Configure SSL connection:
+   ```yaml
+   database:
+     provider: postgresql
+     remote:
+       host: secure.database.example.com
+       port: 5432
+       database: acode_prod
+       ssl_mode: require
+   ```
+
+2. Test connection:
+   ```bash
+   acode db test
+   # Expected: Shows SSL negotiation successful
+   ```
+
+3. Verify SSL is in use:
+   ```bash
+   acode db connections --details
+   # Expected: Shows "Encrypted: Yes" or similar
+   ```
+
+4. Test with stricter SSL mode:
+   ```yaml
+   ssl_mode: verify-full
+   # Requires valid CA certificate
+   ```
+
+**Expected Outcome:**
+- ✅ Connection established with SSL encryption
+- ✅ Connection details show encryption active
+- ✅ verify-full mode validates server certificate
+- ✅ Connection fails if SSL requirements not met
+
+---
+
+### Scenario 8: Connection Diagnostics and Health Check
+
+**Objective:** Verify diagnostic commands provide useful information
+
+**Prerequisites:**
+- Working database connection (SQLite or PostgreSQL)
+
+**Steps:**
+
+1. Run comprehensive connection test:
+   ```bash
+   acode db test --verbose
+   ```
+
+2. Verify output includes:
+   ```
+   SQLite (Local):
+     ✓ File exists: .agent/data/workspace.db
+     ✓ Can open connection
+     ✓ WAL mode enabled
+     ✓ Foreign keys enforced
+     ✓ Can execute query (Xms)
+     Status: HEALTHY
+   ```
+
+3. View connection status:
+   ```bash
+   acode db connections
+   # Expected: Shows current open connections
+   ```
+
+4. View configuration:
+   ```bash
+   acode db config --show
+   # Expected: Shows current configuration (passwords masked)
+   ```
+
+5. Validate configuration:
+   ```bash
+   acode db config --validate
+   # Expected: All settings validated successfully
+   ```
+
+**Expected Outcome:**
+- ✅ Health check provides clear pass/fail for each aspect
+- ✅ Passwords are masked in configuration display
+- ✅ Connection timing information is accurate
+- ✅ Diagnostics help identify issues
+
+---
+
+### Scenario 9: Concurrent Transaction Isolation
+
+**Objective:** Verify transactions are properly isolated from each other
+
+**Prerequisites:**
+- Working database with chat data
+- Two terminal sessions
+
+**Steps:**
+
+1. Terminal 1 - Start a transaction and pause:
+   ```bash
+   acode --test-mode transaction begin
+   acode chat update --id 1 --name "Modified in T1"
+   # Don't commit yet
+   ```
+
+2. Terminal 2 - Read the same record:
+   ```bash
+   acode chat get --id 1
+   # Expected: Shows ORIGINAL name, not "Modified in T1"
+   ```
+
+3. Terminal 1 - Commit the transaction:
+   ```bash
+   acode --test-mode transaction commit
+   ```
+
+4. Terminal 2 - Read again:
+   ```bash
+   acode chat get --id 1
+   # Expected: Now shows "Modified in T1"
+   ```
+
+**Expected Outcome:**
+- ✅ Uncommitted changes not visible to other transactions
+- ✅ Committed changes become visible
+- ✅ No dirty reads occur
+- ✅ Transaction isolation level is respected
+
+---
+
+### Scenario 10: Error Code Mapping and Diagnostics
+
+**Objective:** Verify database errors are mapped to helpful error codes
+
+**Prerequisites:**
+- Working database connection
+
+**Steps:**
+
+1. Trigger a constraint violation:
+   ```bash
+   acode chat new --id 1  # Assuming ID 1 exists
+   # Expected: ACODE-DB-ACC-005 Constraint violation
+   ```
+
+2. Trigger a connection error (disconnect database):
+   ```bash
+   # Stop PostgreSQL or rename SQLite file
+   acode chat list
+   # Expected: ACODE-DB-ACC-001 Connection failed
+   ```
+
+3. Verify error codes are consistent:
+   - Connection failed: ACODE-DB-ACC-001
+   - Pool exhausted: ACODE-DB-ACC-002
+   - Transaction failed: ACODE-DB-ACC-003
+   - Command timeout: ACODE-DB-ACC-004
+   - Constraint violation: ACODE-DB-ACC-005
+
+4. Verify error details are logged:
+   ```bash
+   cat .agent/logs/acode.log | grep ACODE-DB-ACC
+   # Expected: Shows error code with context
+   ```
+
+**Expected Outcome:**
+- ✅ Each error type maps to specific error code
+- ✅ Error messages are user-friendly
+- ✅ Log entries include correlation ID
+- ✅ Original exception preserved for debugging
 
 ---
 
