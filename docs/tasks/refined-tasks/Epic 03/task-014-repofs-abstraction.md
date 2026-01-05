@@ -82,24 +82,1378 @@ This task defines the complete file system abstraction layer:
 8. File sizes are reasonable for in-memory processing (< 10MB typical)
 9. Concurrent agents are not modifying the same repository
 10. Git ignore patterns are respected for enumeration
+11. Docker containers, when used, are already running and accessible
+12. File operations complete without network latency (local or mounted)
+13. The agent process has sufficient memory for file buffering (10MB+ available)
+14. File system supports POSIX-like semantics (or Windows equivalent)
+15. Temp directories are available with write permissions
+16. Clock synchronization is sufficient for timestamp accuracy
+17. File system events (if enabled) are delivered reliably
+18. The repository does not contain circular symbolic links
+19. Binary file detection heuristics are sufficient for common formats
+20. Transaction backup storage has sufficient space (2x modified files)
+
+### ROI and Business Value Metrics
+
+**Quantified Value Proposition:**
+
+| Benefit Area | Without RepoFS | With RepoFS | Annual Savings (10 developers) |
+|--------------|----------------|-------------|-------------------------------|
+| Platform bugs | 15 hrs/dev fixing path issues | 0 hrs | $16,200 |
+| Security incidents | 2 traversal vulnerabilities/year | 0 | $50,000 (breach cost avoided) |
+| Test setup time | 30 min/test for file system mocking | 2 min | $14,400 |
+| Transaction rollback coding | 8 hrs/dev manual rollback | 0 hrs | $8,640 |
+| Docker integration debugging | 20 hrs/dev Docker file issues | 2 hrs | $19,440 |
+| **Total Annual ROI** | | | **$108,680** |
+
+**Calculation Methodology:**
+- Developer rate: $108/hr (fully loaded cost)
+- 10 developers working on agent-related features
+- Security breach cost based on industry average for SMB ($50k minimum)
+- Test setup savings: 28 min × 5 tests/day × 250 days × 10 developers
+
+---
+
+## Use Cases
+
+### Use Case 1: Multi-Platform Development Team
+
+**Persona:** Sarah, Senior Developer at a 50-person SaaS company
+**Context:** Team uses Windows, macOS, and Linux workstations with a shared Git repository
+
+**Before RepoFS:**
+Sarah's team constantly dealt with path-related bugs. A colleague's code used `Path.Combine("src", "file.cs")` which worked on Windows but failed on Linux CI. Another developer hard-coded `C:\repo\file.txt` in tests. The codebase was littered with `#if WINDOWS` directives. Every PR required manual testing on all platforms.
+
+**After RepoFS:**
+Sarah's team uses RepoFS abstraction exclusively. All file operations go through `IRepoFS`:
+```csharp
+// Works identically on Windows, macOS, Linux, and Docker
+var content = await repoFS.ReadFileAsync("src/services/UserService.cs");
+await repoFS.WriteFileAsync("src/generated/models.cs", generatedCode);
+```
+
+**Measurable Improvement:**
+- Path-related bugs: 12 bugs/quarter → 0 bugs/quarter
+- Cross-platform test failures: 8% failure rate → 0.1% failure rate
+- Developer time on platform issues: 15 hrs/month → 0 hrs/month
+- CI pipeline reliability: 87% → 99.2% first-pass success
+
+---
+
+### Use Case 2: Secure Agent Operations in Financial Services
+
+**Persona:** Marcus, DevSecOps Lead at a banking institution
+**Context:** Strict security requirements, audit trail mandatory, zero tolerance for file access violations
+
+**Before RepoFS:**
+Marcus's security team discovered the coding agent could access files outside the repository through carefully crafted paths like `../../etc/passwd`. The agent's logs didn't capture file access patterns. There was no way to prove the agent hadn't accessed sensitive files during an incident investigation.
+
+**After RepoFS:**
+Marcus implements RepoFS with security hardening:
+```yaml
+# .agent/config.yml
+repo:
+  root: /workspace/project
+  read_only: false
+  security:
+    audit_all_operations: true
+    reject_symlinks_outside_root: true
+    protected_paths:
+      - ".env"
+      - "secrets/"
+      - "credentials/"
+```
+
+Every file access is validated and logged:
+```
+2024-01-15T10:23:45Z INFO [RepoFS] READ src/models/Account.cs user=agent session=abc123
+2024-01-15T10:23:46Z WARN [RepoFS] REJECTED path_traversal path=../../etc/passwd user=agent session=abc123
+```
+
+**Measurable Improvement:**
+- Path traversal vulnerabilities: 3 discovered in audit → 0 possible
+- Security incident response time: 4 hours investigation → 15 minutes (complete audit trail)
+- Compliance audit findings: 5 file access concerns → 0 concerns
+- Security team approval time: 3 months → 2 weeks (clear security model)
+
+---
+
+### Use Case 3: Docker-Based Isolated Development
+
+**Persona:** Jordan, Platform Engineer implementing containerized agent execution
+**Context:** Agent must run in Docker container with mounted repository for isolation
+
+**Before RepoFS:**
+Jordan's Docker implementation was fragile. File permission issues plagued mounted volumes. The agent couldn't reliably detect whether it was running in Docker or locally. Different teams used different mount configurations, causing inconsistent behavior. When Docker volumes had issues, debugging was a nightmare.
+
+**After RepoFS:**
+Jordan deploys RepoFS with Docker-aware configuration:
+```yaml
+# .agent/config.yml
+repo:
+  fs_type: auto  # Auto-detects Docker environment
+  docker:
+    container: agent-sandbox
+    mount_path: /workspace
+    timeout_seconds: 30
+    retry_on_failure: true
+```
+
+RepoFS automatically adapts:
+```csharp
+// Factory auto-detects environment
+var repoFS = await repoFSFactory.CreateAsync(config);
+// Returns DockerFileSystem when in container, LocalFileSystem otherwise
+
+// Same code works in both environments
+await repoFS.WriteFileAsync("output/report.txt", report);
+```
+
+**Measurable Improvement:**
+- Docker file operation failures: 15% of runs → 0.5% of runs
+- Environment detection bugs: 8 bugs/quarter → 0 bugs/quarter
+- Developer onboarding (Docker setup): 4 hours → 30 minutes
+- CI/CD Docker pipeline failures: 20% → 2% (with proper retry handling)
+
+---
 
 ### Security Considerations
 
-RepoFS is a critical security boundary. All file operations MUST:
+RepoFS is a critical security boundary. All file operations MUST implement these security controls.
 
-1. **Validate Paths:** Every path MUST be validated before use. Path traversal attempts (../) MUST be rejected.
+---
 
-2. **Enforce Boundaries:** Access MUST be limited to the repository root. No operation may access parent directories.
+### Threat 1: Path Traversal Attack via Encoded Sequences
 
-3. **Handle Symlinks Safely:** Symbolic links MUST be resolved and the final path validated. Links pointing outside the repository MUST be rejected.
+**Risk Level:** Critical
+**CVSS Score:** 9.1 (Critical)
+**Attack Vector:** Input manipulation
 
-4. **Audit Operations:** All file modifications MUST be logged to the audit system with user context, paths, and operation type.
+**Description:**
+An attacker crafts a file path containing encoded traversal sequences (`%2e%2e%2f`, URL-encoded `../`) or Unicode normalization attacks to escape the repository boundary and access system files like `/etc/passwd`, `~/.ssh/id_rsa`, or Windows credential stores.
 
-5. **Sanitize Errors:** Error messages MUST NOT expose sensitive path information beyond the repository root.
+**Attack Scenario:**
+1. Agent receives instruction: "Read file config%2e%2e%2f%2e%2e%2fetc%2fpasswd"
+2. Naive decoder converts to "config../../etc/passwd"
+3. Path validation happens BEFORE decoding
+4. System file exposed to attacker
 
-6. **Limit Permissions:** RepoFS SHOULD operate with minimum necessary permissions. Write access SHOULD be explicit.
+**Complete Mitigation Implementation:**
 
-7. **Protect Sensitive Files:** Certain files (.agent/secrets.yml, .env) SHOULD have additional access controls.
+```csharp
+using System.Text;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.FileSystem;
+
+/// <summary>
+/// Validates file paths for security, rejecting all traversal attempts including
+/// encoded sequences, Unicode tricks, and null byte injection.
+/// </summary>
+public sealed class SecurePathValidator
+{
+    private readonly string _rootPath;
+    private readonly ILogger<SecurePathValidator> _logger;
+
+    /// <summary>
+    /// Patterns that indicate traversal or injection attempts.
+    /// </summary>
+    private static readonly Regex[] DangerousPatterns = new[]
+    {
+        // Basic traversal
+        new Regex(@"\.\./", RegexOptions.Compiled),
+        new Regex(@"\.\.\\", RegexOptions.Compiled),
+        new Regex(@"^\.\.?$", RegexOptions.Compiled),
+
+        // URL-encoded traversal
+        new Regex(@"%2e%2e[/%5c]", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"%252e%252e", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"\.%2e[/%5c]", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"%2e\.[/%5c]", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+
+        // Unicode normalization attacks
+        new Regex(@"[\u002e][\u002e][\u002f]", RegexOptions.Compiled), // Regular dots/slash
+        new Regex(@"[\uff0e][\uff0e][\uff0f]", RegexOptions.Compiled), // Fullwidth ．．／
+        new Regex(@"[\u2024][\u2024]", RegexOptions.Compiled),         // One dot leader
+        new Regex(@"[\u2025]", RegexOptions.Compiled),                 // Two dot leader
+        new Regex(@"[\u2026]", RegexOptions.Compiled),                 // Horizontal ellipsis
+
+        // Windows-specific
+        new Regex(@"^[a-zA-Z]:", RegexOptions.Compiled),               // Drive letter
+        new Regex(@"^\\\\", RegexOptions.Compiled),                    // UNC path
+
+        // Null byte injection
+        new Regex(@"%00", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"\x00", RegexOptions.Compiled),
+    };
+
+    public SecurePathValidator(string rootPath, ILogger<SecurePathValidator> logger)
+    {
+        _rootPath = Path.GetFullPath(rootPath);
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Validates and normalizes a path, ensuring it cannot escape the root.
+    /// </summary>
+    public PathValidationResult Validate(string inputPath)
+    {
+        if (string.IsNullOrEmpty(inputPath))
+        {
+            return PathValidationResult.Invalid("Path cannot be null or empty");
+        }
+
+        // Step 1: Check for dangerous patterns BEFORE any normalization
+        foreach (var pattern in DangerousPatterns)
+        {
+            if (pattern.IsMatch(inputPath))
+            {
+                _logger.LogWarning(
+                    "SECURITY: Path traversal pattern detected in '{Path}'",
+                    SanitizeForLogging(inputPath));
+                return PathValidationResult.TraversalAttempt(
+                    "Path contains dangerous sequences");
+            }
+        }
+
+        // Step 2: Check for null bytes
+        if (inputPath.Contains('\0'))
+        {
+            _logger.LogWarning(
+                "SECURITY: Null byte injection detected in path");
+            return PathValidationResult.Invalid("Path contains null bytes");
+        }
+
+        // Step 3: Normalize the path
+        var normalized = NormalizePath(inputPath);
+
+        // Step 4: Resolve to absolute path
+        var fullPath = Path.GetFullPath(Path.Combine(_rootPath, normalized));
+
+        // Step 5: Verify the resolved path is within root (defense in depth)
+        if (!IsWithinRoot(fullPath))
+        {
+            _logger.LogWarning(
+                "SECURITY: Path '{Normalized}' escapes root after resolution",
+                SanitizeForLogging(normalized));
+            return PathValidationResult.TraversalAttempt(
+                "Path escapes repository boundary");
+        }
+
+        // Step 6: Additional check - re-validate normalized path
+        if (normalized.Contains(".."))
+        {
+            _logger.LogWarning(
+                "SECURITY: Path still contains '..' after normalization");
+            return PathValidationResult.TraversalAttempt(
+                "Path contains parent directory reference");
+        }
+
+        return PathValidationResult.Valid(normalized, fullPath);
+    }
+
+    private string NormalizePath(string path)
+    {
+        // Convert backslashes to forward slashes
+        var normalized = path.Replace('\\', '/');
+
+        // Remove leading ./ or /
+        if (normalized.StartsWith("./"))
+            normalized = normalized.Substring(2);
+        if (normalized.StartsWith("/"))
+            normalized = normalized.Substring(1);
+
+        // Collapse multiple slashes
+        while (normalized.Contains("//"))
+            normalized = normalized.Replace("//", "/");
+
+        // Remove trailing slash
+        normalized = normalized.TrimEnd('/');
+
+        return normalized;
+    }
+
+    private bool IsWithinRoot(string fullPath)
+    {
+        // Ensure path starts with root (case-insensitive on Windows)
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        return fullPath.StartsWith(_rootPath, comparison) &&
+               (fullPath.Length == _rootPath.Length ||
+                fullPath[_rootPath.Length] == Path.DirectorySeparatorChar);
+    }
+
+    private static string SanitizeForLogging(string path)
+    {
+        // Don't log full paths - only safe representation
+        if (path.Length > 50)
+            return path.Substring(0, 47) + "...";
+        return path.Replace("\0", "\\0");
+    }
+}
+
+public sealed record PathValidationResult
+{
+    public bool IsValid { get; }
+    public bool IsTraversalAttempt { get; }
+    public string? NormalizedPath { get; }
+    public string? FullPath { get; }
+    public string? ErrorMessage { get; }
+
+    private PathValidationResult(bool valid, bool traversal, string? normalized,
+        string? full, string? error)
+    {
+        IsValid = valid;
+        IsTraversalAttempt = traversal;
+        NormalizedPath = normalized;
+        FullPath = full;
+        ErrorMessage = error;
+    }
+
+    public static PathValidationResult Valid(string normalized, string full) =>
+        new(true, false, normalized, full, null);
+
+    public static PathValidationResult Invalid(string error) =>
+        new(false, false, null, null, error);
+
+    public static PathValidationResult TraversalAttempt(string error) =>
+        new(false, true, null, null, error);
+}
+```
+
+---
+
+### Threat 2: Symlink Escape to External Files
+
+**Risk Level:** High
+**CVSS Score:** 7.5 (High)
+**Attack Vector:** File system manipulation
+
+**Description:**
+An attacker creates a symbolic link within the repository that points to a file outside the repository boundary. When RepoFS follows the symlink, it inadvertently reads or writes to external files, bypassing the security boundary.
+
+**Attack Scenario:**
+1. Attacker commits symlink: `repo/config/secrets -> /etc/passwd`
+2. Agent is instructed: "Read config/secrets"
+3. Symlink is followed, system file exposed
+4. Similar attack for writes could corrupt system files
+
+**Complete Mitigation Implementation:**
+
+```csharp
+using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.FileSystem;
+
+/// <summary>
+/// Resolves symbolic links safely, ensuring the final target is within
+/// the repository boundary. Rejects links pointing outside.
+/// </summary>
+public sealed class SafeSymlinkResolver
+{
+    private readonly string _rootPath;
+    private readonly ILogger<SafeSymlinkResolver> _logger;
+    private const int MaxSymlinkDepth = 40; // Linux default
+
+    public SafeSymlinkResolver(string rootPath, ILogger<SafeSymlinkResolver> logger)
+    {
+        _rootPath = Path.GetFullPath(rootPath);
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Resolves all symbolic links in a path and validates the final target.
+    /// </summary>
+    public SymlinkResolutionResult ResolvePath(string fullPath)
+    {
+        var depth = 0;
+        var currentPath = fullPath;
+        var visitedLinks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        while (depth < MaxSymlinkDepth)
+        {
+            // Check if current path is a symlink
+            if (!IsSymbolicLink(currentPath))
+            {
+                // Not a symlink - validate final path
+                if (!IsWithinRoot(currentPath))
+                {
+                    _logger.LogWarning(
+                        "SECURITY: Path '{Path}' escapes root after symlink resolution",
+                        SanitizeForLog(currentPath));
+                    return SymlinkResolutionResult.EscapesRoot(
+                        "Resolved path is outside repository boundary");
+                }
+                return SymlinkResolutionResult.Resolved(currentPath);
+            }
+
+            // Detect circular symlinks
+            if (!visitedLinks.Add(currentPath))
+            {
+                _logger.LogWarning(
+                    "SECURITY: Circular symlink detected at '{Path}'",
+                    SanitizeForLog(currentPath));
+                return SymlinkResolutionResult.CircularLink(
+                    "Circular symbolic link detected");
+            }
+
+            // Read symlink target
+            var target = ReadSymlinkTarget(currentPath);
+            if (target == null)
+            {
+                return SymlinkResolutionResult.Error("Cannot read symlink target");
+            }
+
+            // Resolve relative symlinks against their parent directory
+            if (!Path.IsPathRooted(target))
+            {
+                var parentDir = Path.GetDirectoryName(currentPath) ?? _rootPath;
+                target = Path.GetFullPath(Path.Combine(parentDir, target));
+            }
+            else
+            {
+                target = Path.GetFullPath(target);
+            }
+
+            // Immediately check if symlink points outside root
+            if (!IsWithinRoot(target))
+            {
+                _logger.LogWarning(
+                    "SECURITY: Symlink '{Link}' points outside repository to '{Target}'",
+                    SanitizeForLog(currentPath),
+                    SanitizeForLog(target));
+                return SymlinkResolutionResult.EscapesRoot(
+                    "Symbolic link points outside repository boundary");
+            }
+
+            currentPath = target;
+            depth++;
+        }
+
+        _logger.LogWarning(
+            "SECURITY: Symlink resolution exceeded maximum depth at '{Path}'",
+            SanitizeForLog(fullPath));
+        return SymlinkResolutionResult.MaxDepthExceeded(
+            $"Symbolic link depth exceeds maximum of {MaxSymlinkDepth}");
+    }
+
+    private bool IsSymbolicLink(string path)
+    {
+        try
+        {
+            var fileInfo = new FileInfo(path);
+            return fileInfo.LinkTarget != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private string? ReadSymlinkTarget(string path)
+    {
+        try
+        {
+            var fileInfo = new FileInfo(path);
+            return fileInfo.LinkTarget;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to read symlink target for '{Path}'", path);
+            return null;
+        }
+    }
+
+    private bool IsWithinRoot(string fullPath)
+    {
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        return fullPath.StartsWith(_rootPath, comparison) &&
+               (fullPath.Length == _rootPath.Length ||
+                fullPath[_rootPath.Length] == Path.DirectorySeparatorChar);
+    }
+
+    private static string SanitizeForLog(string path) =>
+        path.Length > 50 ? path.Substring(0, 47) + "..." : path;
+}
+
+public sealed record SymlinkResolutionResult
+{
+    public bool IsSuccess { get; }
+    public string? ResolvedPath { get; }
+    public SymlinkFailureReason? FailureReason { get; }
+    public string? ErrorMessage { get; }
+
+    private SymlinkResolutionResult(bool success, string? resolved,
+        SymlinkFailureReason? reason, string? error)
+    {
+        IsSuccess = success;
+        ResolvedPath = resolved;
+        FailureReason = reason;
+        ErrorMessage = error;
+    }
+
+    public static SymlinkResolutionResult Resolved(string path) =>
+        new(true, path, null, null);
+
+    public static SymlinkResolutionResult EscapesRoot(string error) =>
+        new(false, null, SymlinkFailureReason.EscapesRoot, error);
+
+    public static SymlinkResolutionResult CircularLink(string error) =>
+        new(false, null, SymlinkFailureReason.CircularLink, error);
+
+    public static SymlinkResolutionResult MaxDepthExceeded(string error) =>
+        new(false, null, SymlinkFailureReason.MaxDepthExceeded, error);
+
+    public static SymlinkResolutionResult Error(string error) =>
+        new(false, null, SymlinkFailureReason.ReadError, error);
+}
+
+public enum SymlinkFailureReason
+{
+    EscapesRoot,
+    CircularLink,
+    MaxDepthExceeded,
+    ReadError
+}
+```
+
+---
+
+### Threat 3: Transaction Log Manipulation for Corrupt Rollback
+
+**Risk Level:** High
+**CVSS Score:** 7.8 (High)
+**Attack Vector:** File system race condition
+
+**Description:**
+An attacker manipulates transaction backup files during the commit or rollback process. By modifying backup files or creating race conditions, the attacker could cause rollback to restore malicious content instead of the original files.
+
+**Attack Scenario:**
+1. Transaction begins, original file backed up to `.tx/backup/file.cs.bak`
+2. Attacker overwrites backup: `file.cs.bak` with malicious content
+3. Transaction fails (or is forced to fail)
+4. Rollback restores malicious backup, not original
+
+**Complete Mitigation Implementation:**
+
+```csharp
+using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.FileSystem;
+
+/// <summary>
+/// Manages transaction backups with integrity verification to prevent
+/// backup manipulation attacks.
+/// </summary>
+public sealed class SecureTransactionBackup : IAsyncDisposable
+{
+    private readonly string _transactionId;
+    private readonly string _backupDir;
+    private readonly ILogger<SecureTransactionBackup> _logger;
+    private readonly Dictionary<string, BackupRecord> _backups = new();
+    private bool _isDisposed;
+
+    public SecureTransactionBackup(
+        string transactionId,
+        string rootPath,
+        ILogger<SecureTransactionBackup> logger)
+    {
+        _transactionId = transactionId;
+        _backupDir = Path.Combine(rootPath, ".agent", "tx", transactionId);
+        _logger = logger;
+
+        // Create backup directory with restricted permissions
+        Directory.CreateDirectory(_backupDir);
+
+        // On Unix, set directory permissions to owner-only
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(_backupDir,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    /// <summary>
+    /// Creates a verified backup of a file before modification.
+    /// </summary>
+    public async Task<BackupResult> CreateBackupAsync(
+        string originalPath,
+        CancellationToken ct = default)
+    {
+        if (_isDisposed)
+            throw new ObjectDisposedException(nameof(SecureTransactionBackup));
+
+        var relativePath = Path.GetRelativePath(_backupDir, originalPath);
+        var backupPath = Path.Combine(_backupDir, Guid.NewGuid().ToString("N") + ".bak");
+
+        try
+        {
+            // Read original content
+            byte[] originalContent;
+            if (File.Exists(originalPath))
+            {
+                originalContent = await File.ReadAllBytesAsync(originalPath, ct);
+            }
+            else
+            {
+                // File doesn't exist yet - backup is "no file"
+                originalContent = Array.Empty<byte>();
+            }
+
+            // Compute integrity hash
+            var hash = ComputeHash(originalContent);
+
+            // Write backup with restricted permissions
+            await File.WriteAllBytesAsync(backupPath, originalContent, ct);
+
+            // On Unix, restrict backup file permissions
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(backupPath,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+
+            // Verify backup was written correctly (defense in depth)
+            var verifyContent = await File.ReadAllBytesAsync(backupPath, ct);
+            var verifyHash = ComputeHash(verifyContent);
+
+            if (hash != verifyHash)
+            {
+                _logger.LogError(
+                    "SECURITY: Backup verification failed for '{Path}' - possible manipulation",
+                    relativePath);
+                File.Delete(backupPath);
+                return BackupResult.IntegrityFailure("Backup verification failed");
+            }
+
+            // Record the backup
+            _backups[originalPath] = new BackupRecord(
+                originalPath,
+                backupPath,
+                hash,
+                originalContent.Length == 0);
+
+            _logger.LogDebug(
+                "Created verified backup for '{Path}' with hash {Hash}",
+                relativePath, hash.Substring(0, 8));
+
+            return BackupResult.Success(backupPath, hash);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create backup for '{Path}'", relativePath);
+            return BackupResult.Error($"Backup failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Restores all backups with integrity verification.
+    /// </summary>
+    public async Task<RollbackResult> RollbackAsync(CancellationToken ct = default)
+    {
+        if (_isDisposed)
+            throw new ObjectDisposedException(nameof(SecureTransactionBackup));
+
+        var errors = new List<string>();
+        var restored = 0;
+
+        foreach (var (originalPath, record) in _backups)
+        {
+            try
+            {
+                // Verify backup integrity before restoring
+                if (!File.Exists(record.BackupPath))
+                {
+                    _logger.LogError(
+                        "SECURITY: Backup file missing for '{Path}' - possible deletion attack",
+                        originalPath);
+                    errors.Add($"Backup missing for {originalPath}");
+                    continue;
+                }
+
+                var backupContent = await File.ReadAllBytesAsync(record.BackupPath, ct);
+                var backupHash = ComputeHash(backupContent);
+
+                if (backupHash != record.OriginalHash)
+                {
+                    _logger.LogError(
+                        "SECURITY: Backup integrity violation for '{Path}' - hash mismatch. " +
+                        "Expected {Expected}, got {Actual}. Possible manipulation!",
+                        originalPath,
+                        record.OriginalHash.Substring(0, 8),
+                        backupHash.Substring(0, 8));
+                    errors.Add($"Backup corrupted for {originalPath}");
+                    continue;
+                }
+
+                // Restore the original
+                if (record.WasNew)
+                {
+                    // File didn't exist before - delete it
+                    if (File.Exists(originalPath))
+                    {
+                        File.Delete(originalPath);
+                    }
+                }
+                else
+                {
+                    // Restore original content
+                    await File.WriteAllBytesAsync(originalPath, backupContent, ct);
+                }
+
+                restored++;
+                _logger.LogDebug("Restored '{Path}' from verified backup", originalPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to restore '{Path}'", originalPath);
+                errors.Add($"Restore failed for {originalPath}: {ex.Message}");
+            }
+        }
+
+        if (errors.Any())
+        {
+            return RollbackResult.PartialFailure(restored, errors);
+        }
+
+        return RollbackResult.Success(restored);
+    }
+
+    /// <summary>
+    /// Commits the transaction by cleaning up backups.
+    /// </summary>
+    public async Task CommitAsync(CancellationToken ct = default)
+    {
+        if (_isDisposed)
+            throw new ObjectDisposedException(nameof(SecureTransactionBackup));
+
+        // Delete all backup files
+        foreach (var record in _backups.Values)
+        {
+            try
+            {
+                if (File.Exists(record.BackupPath))
+                {
+                    File.Delete(record.BackupPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to clean up backup '{Path}'", record.BackupPath);
+            }
+        }
+
+        // Remove backup directory
+        try
+        {
+            if (Directory.Exists(_backupDir))
+            {
+                Directory.Delete(_backupDir, recursive: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean up backup directory");
+        }
+
+        _backups.Clear();
+    }
+
+    private static string ComputeHash(byte[] content)
+    {
+        using var sha256 = SHA256.Create();
+        var hashBytes = sha256.ComputeHash(content);
+        return Convert.ToHexString(hashBytes);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+
+        // Auto-rollback on dispose if not committed
+        if (_backups.Any())
+        {
+            await RollbackAsync();
+        }
+    }
+
+    private sealed record BackupRecord(
+        string OriginalPath,
+        string BackupPath,
+        string OriginalHash,
+        bool WasNew);
+}
+
+public sealed record BackupResult(bool IsSuccess, string? BackupPath, string? Hash, string? Error)
+{
+    public static BackupResult Success(string path, string hash) => new(true, path, hash, null);
+    public static BackupResult IntegrityFailure(string error) => new(false, null, null, error);
+    public static BackupResult Error(string error) => new(false, null, null, error);
+}
+
+public sealed record RollbackResult(bool IsSuccess, int RestoredCount, IReadOnlyList<string> Errors)
+{
+    public static RollbackResult Success(int count) => new(true, count, Array.Empty<string>());
+    public static RollbackResult PartialFailure(int count, IEnumerable<string> errors) =>
+        new(false, count, errors.ToList());
+}
+```
+
+---
+
+### Threat 4: Error Message Information Disclosure
+
+**Risk Level:** Medium
+**CVSS Score:** 5.3 (Medium)
+**Attack Vector:** Information leakage
+
+**Description:**
+Detailed error messages expose sensitive system information like absolute paths, usernames, or internal directory structures. An attacker probes the system with invalid paths to map the file system structure through error messages.
+
+**Attack Scenario:**
+1. Attacker requests: "Read /very/long/path/that/doesnt/exist"
+2. System returns: "File not found: /home/ubuntu/agent-workspace/repo/very/long/path..."
+3. Attacker learns: system username is "ubuntu", workspace location, deployment structure
+4. Information aids further attacks (path construction, privilege escalation)
+
+**Complete Mitigation Implementation:**
+
+```csharp
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.FileSystem;
+
+/// <summary>
+/// Sanitizes error messages to prevent information disclosure while
+/// maintaining usefulness for legitimate debugging.
+/// </summary>
+public sealed class SecureErrorMessageBuilder
+{
+    private readonly string _rootPath;
+    private readonly bool _debugMode;
+    private readonly ILogger<SecureErrorMessageBuilder> _logger;
+
+    public SecureErrorMessageBuilder(
+        string rootPath,
+        bool debugMode,
+        ILogger<SecureErrorMessageBuilder> logger)
+    {
+        _rootPath = Path.GetFullPath(rootPath);
+        _debugMode = debugMode;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Creates a safe error message for file not found.
+    /// </summary>
+    public FileSystemException FileNotFound(string requestedPath, string? fullPath = null)
+    {
+        var safePath = SanitizePath(requestedPath);
+
+        // Log full details internally
+        _logger.LogDebug(
+            "File not found: requested='{Requested}' resolved='{Resolved}'",
+            requestedPath, fullPath ?? "not resolved");
+
+        // Return sanitized message to user
+        return new FileSystemException(
+            "ACODE-FS-001",
+            $"File not found: {safePath}",
+            FileSystemErrorType.NotFound);
+    }
+
+    /// <summary>
+    /// Creates a safe error message for permission denied.
+    /// </summary>
+    public FileSystemException PermissionDenied(
+        string requestedPath,
+        FileSystemOperation operation)
+    {
+        var safePath = SanitizePath(requestedPath);
+
+        _logger.LogWarning(
+            "Permission denied for {Operation} on '{Path}'",
+            operation, requestedPath);
+
+        return new FileSystemException(
+            "ACODE-FS-002",
+            $"Permission denied: Cannot {operation.ToString().ToLower()} '{safePath}'",
+            FileSystemErrorType.PermissionDenied);
+    }
+
+    /// <summary>
+    /// Creates a safe error message for path traversal attempt.
+    /// Does NOT include the attempted path (security).
+    /// </summary>
+    public FileSystemException PathTraversalAttempt(string attemptedPath)
+    {
+        // Log full details for security audit
+        _logger.LogWarning(
+            "SECURITY: Path traversal attempt detected: '{Path}'",
+            attemptedPath);
+
+        // Return vague message - don't help attacker
+        return new FileSystemException(
+            "ACODE-FS-003",
+            "Invalid path: Path must be within the repository",
+            FileSystemErrorType.PathTraversal);
+    }
+
+    /// <summary>
+    /// Creates a safe error message for general I/O errors.
+    /// </summary>
+    public FileSystemException IoError(
+        string requestedPath,
+        Exception innerException)
+    {
+        var safePath = SanitizePath(requestedPath);
+
+        // Log full details internally
+        _logger.LogError(innerException,
+            "I/O error accessing '{Path}'", requestedPath);
+
+        // Sanitize the error message
+        var safeMessage = SanitizeExceptionMessage(innerException.Message);
+
+        return new FileSystemException(
+            "ACODE-FS-010",
+            $"Error accessing '{safePath}': {safeMessage}",
+            FileSystemErrorType.IoError,
+            innerException);
+    }
+
+    /// <summary>
+    /// Sanitizes a path for user-facing output.
+    /// </summary>
+    private string SanitizePath(string path)
+    {
+        // In debug mode, show relative path from root
+        if (_debugMode)
+        {
+            try
+            {
+                var fullPath = Path.GetFullPath(Path.Combine(_rootPath, path));
+                if (fullPath.StartsWith(_rootPath))
+                {
+                    return Path.GetRelativePath(_rootPath, fullPath);
+                }
+            }
+            catch
+            {
+                // Fall through to safe handling
+            }
+        }
+
+        // Production: Only show the filename or relative path as-given
+        // Never expose full system paths
+        if (path.Contains(_rootPath))
+        {
+            // Strip system path prefix
+            path = path.Replace(_rootPath, "");
+        }
+
+        // Remove any absolute path indicators
+        if (Path.IsPathRooted(path))
+        {
+            return Path.GetFileName(path);
+        }
+
+        // Truncate very long paths
+        if (path.Length > 100)
+        {
+            return "..." + path.Substring(path.Length - 97);
+        }
+
+        return path;
+    }
+
+    /// <summary>
+    /// Sanitizes exception messages to remove sensitive info.
+    /// </summary>
+    private string SanitizeExceptionMessage(string message)
+    {
+        // Remove absolute paths
+        var sanitized = message;
+
+        // Replace common path patterns with generic placeholders
+        sanitized = System.Text.RegularExpressions.Regex.Replace(
+            sanitized,
+            @"(/[a-zA-Z0-9_\-\.]+)+",
+            "[path]");
+
+        sanitized = System.Text.RegularExpressions.Regex.Replace(
+            sanitized,
+            @"[A-Z]:\\[a-zA-Z0-9_\-\.\\]+",
+            "[path]");
+
+        // Remove usernames from paths
+        sanitized = System.Text.RegularExpressions.Regex.Replace(
+            sanitized,
+            @"/home/[a-zA-Z0-9_\-]+/",
+            "/home/[user]/");
+
+        sanitized = System.Text.RegularExpressions.Regex.Replace(
+            sanitized,
+            @"C:\\Users\\[a-zA-Z0-9_\-]+\\",
+            "C:\\Users\\[user]\\");
+
+        return sanitized;
+    }
+}
+
+public class FileSystemException : Exception
+{
+    public string ErrorCode { get; }
+    public FileSystemErrorType ErrorType { get; }
+
+    public FileSystemException(
+        string errorCode,
+        string message,
+        FileSystemErrorType errorType,
+        Exception? innerException = null)
+        : base(message, innerException)
+    {
+        ErrorCode = errorCode;
+        ErrorType = errorType;
+    }
+}
+
+public enum FileSystemErrorType
+{
+    NotFound,
+    PermissionDenied,
+    PathTraversal,
+    IoError,
+    TransactionFailed,
+    PatchFailed
+}
+
+public enum FileSystemOperation
+{
+    Read,
+    Write,
+    Delete,
+    List,
+    CreateDirectory
+}
+```
+
+---
+
+### Threat 5: Audit Log Bypass via Concurrent Operations
+
+**Risk Level:** Medium
+**CVSS Score:** 5.5 (Medium)
+**Attack Vector:** Race condition
+
+**Description:**
+An attacker performs file operations during brief windows when the audit logger is unavailable (e.g., during log rotation, high load, or after triggering an exception in the logger). Operations complete without audit trail, enabling undetected malicious activity.
+
+**Attack Scenario:**
+1. Attacker floods audit logger with requests, causing backpressure
+2. Logger drops events or fails silently
+3. Attacker performs sensitive file operations
+4. No audit trail exists for forensic investigation
+
+**Complete Mitigation Implementation:**
+
+```csharp
+using System.Collections.Concurrent;
+using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.FileSystem;
+
+/// <summary>
+/// Reliable audit logger that guarantees audit events are recorded
+/// even under high load or failure conditions.
+/// </summary>
+public sealed class ReliableAuditLogger : IAsyncDisposable
+{
+    private readonly ILogger<ReliableAuditLogger> _logger;
+    private readonly string _auditLogPath;
+    private readonly Channel<AuditEvent> _eventChannel;
+    private readonly Task _writerTask;
+    private readonly ConcurrentQueue<AuditEvent> _failedEvents = new();
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private bool _isDisposed;
+
+    // Fail-closed: If we can't audit, we can't proceed
+    private bool _failClosed = true;
+
+    public ReliableAuditLogger(
+        string auditLogPath,
+        ILogger<ReliableAuditLogger> logger,
+        bool failClosed = true)
+    {
+        _auditLogPath = auditLogPath;
+        _logger = logger;
+        _failClosed = failClosed;
+
+        // Bounded channel with backpressure
+        _eventChannel = Channel.CreateBounded<AuditEvent>(new BoundedChannelOptions(10000)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = false
+        });
+
+        // Start background writer
+        _writerTask = Task.Run(WriteEventsAsync);
+
+        // Ensure audit directory exists
+        var auditDir = Path.GetDirectoryName(auditLogPath);
+        if (!string.IsNullOrEmpty(auditDir))
+        {
+            Directory.CreateDirectory(auditDir);
+        }
+    }
+
+    /// <summary>
+    /// Records a file operation to the audit log.
+    /// In fail-closed mode, throws if audit cannot be recorded.
+    /// </summary>
+    public async Task AuditAsync(
+        FileSystemOperation operation,
+        string path,
+        string? sessionId,
+        bool success,
+        string? errorMessage = null,
+        CancellationToken ct = default)
+    {
+        if (_isDisposed)
+            throw new ObjectDisposedException(nameof(ReliableAuditLogger));
+
+        var auditEvent = new AuditEvent
+        {
+            Timestamp = DateTimeOffset.UtcNow,
+            Operation = operation,
+            Path = SanitizePath(path),
+            SessionId = sessionId ?? "unknown",
+            Success = success,
+            ErrorMessage = errorMessage,
+            EventId = Guid.NewGuid()
+        };
+
+        try
+        {
+            // Attempt to queue the event
+            if (!_eventChannel.Writer.TryWrite(auditEvent))
+            {
+                // Channel is full - apply backpressure
+                _logger.LogWarning(
+                    "Audit channel full, applying backpressure for event {EventId}",
+                    auditEvent.EventId);
+
+                // Wait for space (with timeout)
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+                if (!await _eventChannel.Writer.WaitToWriteAsync(cts.Token))
+                {
+                    throw new AuditException("Audit channel closed");
+                }
+
+                if (!_eventChannel.Writer.TryWrite(auditEvent))
+                {
+                    throw new AuditException("Failed to write audit event after waiting");
+                }
+            }
+
+            _logger.LogDebug(
+                "Queued audit event {EventId} for {Operation} on {Path}",
+                auditEvent.EventId, operation, auditEvent.Path);
+        }
+        catch (Exception ex) when (ex is not AuditException)
+        {
+            _logger.LogError(ex,
+                "SECURITY: Failed to queue audit event for {Operation} on {Path}",
+                operation, path);
+
+            // Store failed event for retry
+            _failedEvents.Enqueue(auditEvent);
+
+            if (_failClosed)
+            {
+                throw new AuditException(
+                    $"Cannot proceed without audit: {ex.Message}", ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Synchronously ensures an audit event is written before continuing.
+    /// Used for critical operations that must not proceed without audit.
+    /// </summary>
+    public async Task AuditSyncAsync(
+        FileSystemOperation operation,
+        string path,
+        string? sessionId,
+        bool success,
+        CancellationToken ct = default)
+    {
+        var auditEvent = new AuditEvent
+        {
+            Timestamp = DateTimeOffset.UtcNow,
+            Operation = operation,
+            Path = SanitizePath(path),
+            SessionId = sessionId ?? "unknown",
+            Success = success,
+            EventId = Guid.NewGuid()
+        };
+
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            await WriteEventToFileAsync(auditEvent);
+            _logger.LogDebug(
+                "Synchronously wrote audit event {EventId}",
+                auditEvent.EventId);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    private async Task WriteEventsAsync()
+    {
+        try
+        {
+            await foreach (var auditEvent in _eventChannel.Reader.ReadAllAsync())
+            {
+                try
+                {
+                    await WriteEventToFileAsync(auditEvent);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Failed to write audit event {EventId}, queueing for retry",
+                        auditEvent.EventId);
+                    _failedEvents.Enqueue(auditEvent);
+                }
+
+                // Periodically retry failed events
+                await RetryFailedEventsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Audit writer task terminated unexpectedly");
+        }
+    }
+
+    private async Task WriteEventToFileAsync(AuditEvent auditEvent)
+    {
+        var line = FormatAuditLine(auditEvent);
+
+        await _writeLock.WaitAsync();
+        try
+        {
+            await File.AppendAllTextAsync(_auditLogPath, line + Environment.NewLine);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    private async Task RetryFailedEventsAsync()
+    {
+        var retryCount = Math.Min(_failedEvents.Count, 10);
+        for (var i = 0; i < retryCount; i++)
+        {
+            if (_failedEvents.TryDequeue(out var failedEvent))
+            {
+                try
+                {
+                    await WriteEventToFileAsync(failedEvent);
+                    _logger.LogInformation(
+                        "Successfully retried audit event {EventId}",
+                        failedEvent.EventId);
+                }
+                catch
+                {
+                    // Re-queue for later retry
+                    _failedEvents.Enqueue(failedEvent);
+                    break; // Don't keep trying if writes are failing
+                }
+            }
+        }
+    }
+
+    private static string FormatAuditLine(AuditEvent e)
+    {
+        var status = e.Success ? "SUCCESS" : "FAILED";
+        var error = e.ErrorMessage != null ? $" error=\"{e.ErrorMessage}\"" : "";
+        return $"{e.Timestamp:O} [{e.EventId}] {status} {e.Operation} " +
+               $"path=\"{e.Path}\" session=\"{e.SessionId}\"{error}";
+    }
+
+    private static string SanitizePath(string path)
+    {
+        // Never log absolute system paths
+        if (Path.IsPathRooted(path))
+        {
+            return Path.GetFileName(path);
+        }
+        return path.Length > 200 ? path.Substring(0, 197) + "..." : path;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+
+        _eventChannel.Writer.Complete();
+        await _writerTask;
+
+        // Final retry of failed events
+        while (_failedEvents.TryDequeue(out var failedEvent))
+        {
+            try
+            {
+                await WriteEventToFileAsync(failedEvent);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "SECURITY: Lost audit event {EventId} on shutdown",
+                    failedEvent.EventId);
+            }
+        }
+
+        _writeLock.Dispose();
+    }
+}
+
+public sealed record AuditEvent
+{
+    public DateTimeOffset Timestamp { get; init; }
+    public Guid EventId { get; init; }
+    public FileSystemOperation Operation { get; init; }
+    public required string Path { get; init; }
+    public required string SessionId { get; init; }
+    public bool Success { get; init; }
+    public string? ErrorMessage { get; init; }
+}
+
+public class AuditException : Exception
+{
+    public AuditException(string message) : base(message) { }
+    public AuditException(string message, Exception inner) : base(message, inner) { }
+}
+```
 
 ---
 
@@ -868,56 +2222,188 @@ Docker socket: /var/run/docker.sock connected
 
 ## Acceptance Criteria
 
-### Interface
+### Interface Design (AC-001 to AC-012)
 
-- [ ] AC-001: IRepoFS interface defined
-- [ ] AC-002: All methods documented
-- [ ] AC-003: Async throughout
+- [ ] AC-001: IRepoFS interface defined with all required methods
+- [ ] AC-002: All public methods have XML documentation
+- [ ] AC-003: All methods are async (return Task/ValueTask)
+- [ ] AC-004: All methods accept CancellationToken parameter
+- [ ] AC-005: RootPath property returns repository root as string
+- [ ] AC-006: GetCapabilities() returns RepoFSCapabilities record
+- [ ] AC-007: Capabilities include IsReadOnly, SupportsTransactions, SupportsWatch flags
+- [ ] AC-008: IRepoFS implements IAsyncDisposable for cleanup
+- [ ] AC-009: IRepoFSFactory interface defined for creating instances
+- [ ] AC-010: IRepoFSTransaction interface defined for transaction support
+- [ ] AC-011: All result types use record structs for immutability
+- [ ] AC-012: Error codes are documented and consistent (ACODE-FS-XXX format)
 
-### Reading
+### Reading Operations (AC-013 to AC-028)
 
-- [ ] AC-004: Read file works
-- [ ] AC-005: Read lines works
-- [ ] AC-006: Read bytes works
-- [ ] AC-007: Encoding handled
+- [ ] AC-013: ReadFileAsync returns file content as string
+- [ ] AC-014: ReadFileAsync auto-detects UTF-8 encoding
+- [ ] AC-015: ReadFileAsync handles UTF-8 with and without BOM
+- [ ] AC-016: ReadFileAsync handles UTF-16 LE encoding
+- [ ] AC-017: ReadFileAsync handles UTF-16 BE encoding
+- [ ] AC-018: ReadFileAsync defaults to UTF-8 if detection fails
+- [ ] AC-019: ReadFileAsync throws FileNotFoundException for missing files
+- [ ] AC-020: ReadFileAsync supports cancellation via CancellationToken
+- [ ] AC-021: ReadLinesAsync returns IReadOnlyList<string>
+- [ ] AC-022: ReadLinesAsync handles LF line endings
+- [ ] AC-023: ReadLinesAsync handles CRLF line endings
+- [ ] AC-024: ReadLinesAsync handles CR line endings
+- [ ] AC-025: ReadLinesAsync handles empty files (returns empty list)
+- [ ] AC-026: ReadLinesAsync handles files without trailing newline
+- [ ] AC-027: ReadBytesAsync returns raw byte array
+- [ ] AC-028: ReadBytesAsync handles large files (> 10MB) without OOM
 
-### Writing
+### Writing Operations (AC-029 to AC-044)
 
-- [ ] AC-008: Write file works
-- [ ] AC-009: Write lines works
-- [ ] AC-010: Write bytes works
-- [ ] AC-011: Overwrite works
+- [ ] AC-029: WriteFileAsync writes string content successfully
+- [ ] AC-030: WriteFileAsync uses UTF-8 without BOM by default
+- [ ] AC-031: WriteFileAsync creates file if not exists
+- [ ] AC-032: WriteFileAsync overwrites existing file content
+- [ ] AC-033: WriteFileAsync creates parent directories automatically
+- [ ] AC-034: WriteFileAsync supports cancellation via CancellationToken
+- [ ] AC-035: WriteLinesAsync writes lines with configured line endings
+- [ ] AC-036: WriteLinesAsync defaults to platform-specific line endings
+- [ ] AC-037: WriteLinesAsync can be configured for LF, CRLF, or CR
+- [ ] AC-038: WriteBytesAsync writes raw bytes successfully
+- [ ] AC-039: All writes are atomic (temp file + rename pattern)
+- [ ] AC-040: Atomic write failure does not corrupt original file
+- [ ] AC-041: Write operations acquire file locks before modification
+- [ ] AC-042: Lock acquisition timeout is configurable (default 30s)
+- [ ] AC-043: Write operations fire change events (if watching enabled)
+- [ ] AC-044: All write operations are logged to audit system
 
-### Deletion
+### Deletion Operations (AC-045 to AC-054)
 
-- [ ] AC-012: Delete file works
-- [ ] AC-013: Delete directory works
-- [ ] AC-014: Recursive works
+- [ ] AC-045: DeleteFileAsync removes the specified file
+- [ ] AC-046: DeleteFileAsync returns true if file was deleted
+- [ ] AC-047: DeleteFileAsync returns false if file did not exist
+- [ ] AC-048: DeleteFileAsync does not throw for missing files
+- [ ] AC-049: DeleteDirectoryAsync removes empty directories
+- [ ] AC-050: DeleteDirectoryAsync with recursive=true removes all contents
+- [ ] AC-051: DeleteDirectoryAsync with recursive=false fails on non-empty
+- [ ] AC-052: Deletion does not follow symbolic links
+- [ ] AC-053: Deletion operations fire change events
+- [ ] AC-054: All deletion operations are logged to audit system
 
-### Enumeration
+### Enumeration Operations (AC-055 to AC-070)
 
-- [ ] AC-015: Files enumerated
-- [ ] AC-016: Directories enumerated
-- [ ] AC-017: Recursive works
-- [ ] AC-018: Filtering works
+- [ ] AC-055: EnumerateFilesAsync returns IAsyncEnumerable<FileEntry>
+- [ ] AC-056: FileEntry includes RelativePath property
+- [ ] AC-057: FileEntry includes FileName property
+- [ ] AC-058: FileEntry optionally includes Size property
+- [ ] AC-059: FileEntry optionally includes LastModified property
+- [ ] AC-060: EnumerateFilesAsync supports recursive=false (single directory)
+- [ ] AC-061: EnumerateFilesAsync supports recursive=true (all descendants)
+- [ ] AC-062: EnumerateFilesAsync supports glob pattern filtering
+- [ ] AC-063: EnumerateFilesAsync respects .gitignore patterns
+- [ ] AC-064: EnumerateFilesAsync respects .agentignore patterns
+- [ ] AC-065: EnumerateDirectoriesAsync returns directory entries
+- [ ] AC-066: Enumeration skips hidden files by default
+- [ ] AC-067: Enumeration includes hidden files when requested
+- [ ] AC-068: Enumeration supports cancellation via CancellationToken
+- [ ] AC-069: Enumeration handles inaccessible directories gracefully
+- [ ] AC-070: Inaccessible directories are skipped with warning log
 
-### Security
+### Metadata Operations (AC-071 to AC-080)
 
-- [ ] AC-019: Root boundary enforced
-- [ ] AC-020: Traversal prevented
-- [ ] AC-021: No escapes possible
+- [ ] AC-071: ExistsAsync returns true for existing files
+- [ ] AC-072: ExistsAsync returns true for existing directories
+- [ ] AC-073: ExistsAsync returns false for non-existent paths
+- [ ] AC-074: ExistsAsync distinguishes files from directories
+- [ ] AC-075: GetMetadataAsync returns FileMetadata record
+- [ ] AC-076: FileMetadata includes Size in bytes
+- [ ] AC-077: FileMetadata includes LastModified timestamp (UTC)
+- [ ] AC-078: FileMetadata includes CreatedAt timestamp (UTC)
+- [ ] AC-079: FileMetadata includes IsReadOnly flag
+- [ ] AC-080: FileMetadata includes IsDirectory flag
 
-### Transactions
+### Path Validation (AC-081 to AC-095)
 
-- [ ] AC-022: Begin works
-- [ ] AC-023: Commit works
-- [ ] AC-024: Rollback works
+- [ ] AC-081: Path normalizer converts backslashes to forward slashes
+- [ ] AC-082: Path normalizer collapses multiple slashes
+- [ ] AC-083: Path normalizer handles ./ (current directory) prefix
+- [ ] AC-084: Path normalizer resolves ../ (parent directory) safely
+- [ ] AC-085: Path normalizer removes trailing slashes
+- [ ] AC-086: Path normalizer handles empty path as root
+- [ ] AC-087: Path validator rejects null paths
+- [ ] AC-088: Path validator rejects empty paths
+- [ ] AC-089: Path validator rejects absolute paths (Unix and Windows)
+- [ ] AC-090: Path validator rejects UNC paths (\\\\server\\share)
+- [ ] AC-091: Path validator rejects paths escaping root via ../
+- [ ] AC-092: Path validator rejects URL-encoded traversal (%2e%2e)
+- [ ] AC-093: Path validator rejects null bytes in paths
+- [ ] AC-094: Path validator rejects invalid characters
+- [ ] AC-095: PathValidationException includes error code and safe message
 
-### Patching
+### Transaction Support (AC-096 to AC-110)
 
-- [ ] AC-025: Apply works
-- [ ] AC-026: Preview works
-- [ ] AC-027: Validation works
+- [ ] AC-096: BeginTransactionAsync returns IRepoFSTransaction
+- [ ] AC-097: IRepoFSTransaction implements IAsyncDisposable
+- [ ] AC-098: Transaction buffers all write operations
+- [ ] AC-099: CommitAsync applies all buffered writes atomically
+- [ ] AC-100: CommitAsync uses two-phase commit for safety
+- [ ] AC-101: RollbackAsync discards all buffered writes
+- [ ] AC-102: Dispose without commit triggers auto-rollback
+- [ ] AC-103: Transaction tracks all affected files
+- [ ] AC-104: Concurrent transactions are prevented (throws)
+- [ ] AC-105: Transaction timeout is configurable (default 300s)
+- [ ] AC-106: Timeout triggers auto-rollback
+- [ ] AC-107: Nested transactions throw NotSupportedException
+- [ ] AC-108: Transaction creates backup of modified files
+- [ ] AC-109: Backup integrity is verified with SHA-256 hash
+- [ ] AC-110: Backups are cleaned after successful commit
+
+### Patch Application (AC-111 to AC-125)
+
+- [ ] AC-111: ApplyPatchAsync accepts unified diff format
+- [ ] AC-112: ApplyPatchAsync returns PatchResult with Success flag
+- [ ] AC-113: PatchResult includes AffectedFiles list
+- [ ] AC-114: PatchResult includes Error message on failure
+- [ ] AC-115: Patch supports adding lines (+)
+- [ ] AC-116: Patch supports removing lines (-)
+- [ ] AC-117: Patch supports modifying lines (- then +)
+- [ ] AC-118: Patch supports context matching
+- [ ] AC-119: Patch supports multiple hunks per file
+- [ ] AC-120: Patch supports multiple files in single patch
+- [ ] AC-121: Patch supports new file creation (diff /dev/null)
+- [ ] AC-122: Patch supports file deletion (diff to /dev/null)
+- [ ] AC-123: PreviewPatchAsync shows changes without applying
+- [ ] AC-124: ValidatePatchAsync checks patch applicability
+- [ ] AC-125: Patch application is wrapped in transaction (atomic)
+
+### Security (AC-126 to AC-140)
+
+- [ ] AC-126: All paths validated before any file operation
+- [ ] AC-127: Path traversal attempts rejected with ACODE-FS-003
+- [ ] AC-128: URL-encoded traversal attempts detected and rejected
+- [ ] AC-129: Unicode normalization attacks detected and rejected
+- [ ] AC-130: Symbolic links resolved before path validation
+- [ ] AC-131: Symlinks pointing outside root are rejected
+- [ ] AC-132: Circular symlinks detected (max depth 40)
+- [ ] AC-133: All write operations audited with timestamp and path
+- [ ] AC-134: All delete operations audited
+- [ ] AC-135: Audit logs do not contain file content
+- [ ] AC-136: Error messages do not expose system paths
+- [ ] AC-137: Temporary files created in repo .agent/temp directory
+- [ ] AC-138: Temp files have restricted permissions (600 on Unix)
+- [ ] AC-139: Read-only mode prevents all write/delete operations
+- [ ] AC-140: Protected paths (.env, .agent/secrets) require confirmation
+
+### Factory and Configuration (AC-141 to AC-150)
+
+- [ ] AC-141: IRepoFSFactory.CreateAsync creates configured instance
+- [ ] AC-142: Factory reads config from repo section in .agent/config.yml
+- [ ] AC-143: Factory supports fs_type: local
+- [ ] AC-144: Factory supports fs_type: docker
+- [ ] AC-145: Factory auto-detects type when fs_type: auto
+- [ ] AC-146: Auto-detect checks for Docker environment variables
+- [ ] AC-147: Factory validates root path exists and is directory
+- [ ] AC-148: Factory sets read-only mode from config
+- [ ] AC-149: Factory configures ignore patterns from config
+- [ ] AC-150: Factory logs configuration on instance creation
 
 ---
 

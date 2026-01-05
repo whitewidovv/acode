@@ -439,7 +439,239 @@ An attacker could craft malicious input that expands a narrow scope into a broad
 3. Shell splits arguments, adding `--ack-danger` flag
 4. `--yes=all` now active, all operations auto-approve
 
-**Mitigation:** Scope argument is parsed as a single string value, not subject to shell expansion after initial argument parsing. The `ScopeParser` validates syntax strictly and rejects any scope containing spaces or shell metacharacters. The `--ack-danger` flag requires separate interactive confirmation, not a command-line value.
+**Complete Mitigation Implementation:**
+
+```csharp
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.Approvals.Scoping;
+
+/// <summary>
+/// Validates scope input for injection attacks before parsing.
+/// Rejects any scope containing shell metacharacters or injection patterns.
+/// </summary>
+public sealed class ScopeInjectionGuard
+{
+    private readonly ILogger<ScopeInjectionGuard> _logger;
+
+    /// <summary>
+    /// Characters that could enable shell injection or argument splitting.
+    /// </summary>
+    private static readonly char[] DangerousCharacters = new[]
+    {
+        ' ',   // Space - could split arguments
+        '\t',  // Tab - could split arguments
+        '\n',  // Newline - could inject commands
+        '\r',  // Carriage return - could inject commands
+        ';',   // Semicolon - shell command separator
+        '|',   // Pipe - shell command chaining
+        '&',   // Ampersand - background execution
+        '$',   // Dollar - variable expansion
+        '`',   // Backtick - command substitution
+        '(',   // Open paren - subshell
+        ')',   // Close paren - subshell
+        '{',   // Open brace - brace expansion
+        '}',   // Close brace - brace expansion
+        '<',   // Less than - input redirect
+        '>',   // Greater than - output redirect
+        '\\',  // Backslash - escape sequences
+        '"',   // Double quote - could escape parsing
+        '\''   // Single quote - could escape parsing
+    };
+
+    /// <summary>
+    /// Regex patterns that indicate injection attempts.
+    /// </summary>
+    private static readonly Regex[] InjectionPatterns = new[]
+    {
+        new Regex(@"--\w+", RegexOptions.Compiled),           // Embedded flags
+        new Regex(@"\$\{.*\}", RegexOptions.Compiled),        // Variable expansion
+        new Regex(@"\$\(.*\)", RegexOptions.Compiled),        // Command substitution
+        new Regex(@"(?:^|,)all(?:$|,)", RegexOptions.Compiled | RegexOptions.IgnoreCase) // 'all' requires special handling
+    };
+
+    public ScopeInjectionGuard(ILogger<ScopeInjectionGuard> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Validates raw scope input for potential injection attacks.
+    /// </summary>
+    /// <param name="rawScopeInput">The raw scope string from command line.</param>
+    /// <returns>Validation result with details if rejected.</returns>
+    public ScopeValidationResult ValidateForInjection(string rawScopeInput)
+    {
+        if (string.IsNullOrEmpty(rawScopeInput))
+        {
+            return ScopeValidationResult.Valid();
+        }
+
+        // Check for dangerous characters
+        foreach (var dangerousChar in DangerousCharacters)
+        {
+            var index = rawScopeInput.IndexOf(dangerousChar);
+            if (index >= 0)
+            {
+                var charName = GetCharacterName(dangerousChar);
+                _logger.LogWarning(
+                    "Scope injection attempt detected: {Character} at position {Position} in scope '{Scope}'",
+                    charName, index, rawScopeInput);
+
+                return ScopeValidationResult.Rejected(
+                    ScopeRejectionReason.DangerousCharacter,
+                    $"Scope contains dangerous character '{charName}' at position {index}. " +
+                    "Scopes must not contain shell metacharacters.");
+            }
+        }
+
+        // Check for injection patterns
+        foreach (var pattern in InjectionPatterns)
+        {
+            var match = pattern.Match(rawScopeInput);
+            if (match.Success)
+            {
+                // Special case: 'all' is allowed but requires --ack-danger flag
+                if (pattern.ToString().Contains("all"))
+                {
+                    return ScopeValidationResult.RequiresAcknowledgment(
+                        "Scope 'all' requires explicit --ack-danger flag for safety.");
+                }
+
+                _logger.LogWarning(
+                    "Scope injection pattern detected: '{Pattern}' matched '{Match}' in scope '{Scope}'",
+                    pattern.ToString(), match.Value, rawScopeInput);
+
+                return ScopeValidationResult.Rejected(
+                    ScopeRejectionReason.InjectionPattern,
+                    $"Scope contains suspicious pattern '{match.Value}'. " +
+                    "This appears to be an injection attempt.");
+            }
+        }
+
+        // Validate overall length to prevent buffer-based attacks
+        if (rawScopeInput.Length > 500)
+        {
+            _logger.LogWarning(
+                "Scope length {Length} exceeds maximum 500 characters",
+                rawScopeInput.Length);
+
+            return ScopeValidationResult.Rejected(
+                ScopeRejectionReason.ExcessiveLength,
+                $"Scope length {rawScopeInput.Length} exceeds maximum of 500 characters.");
+        }
+
+        // Validate number of scope entries
+        var entryCount = rawScopeInput.Split(',').Length;
+        if (entryCount > 20)
+        {
+            _logger.LogWarning(
+                "Scope entry count {Count} exceeds maximum 20 entries",
+                entryCount);
+
+            return ScopeValidationResult.Rejected(
+                ScopeRejectionReason.TooManyEntries,
+                $"Scope contains {entryCount} entries, maximum is 20.");
+        }
+
+        return ScopeValidationResult.Valid();
+    }
+
+    /// <summary>
+    /// Sanitizes scope input by removing any potential injection attempts.
+    /// Only used as a fallback when strict validation is not possible.
+    /// </summary>
+    public string SanitizeScope(string rawInput)
+    {
+        if (string.IsNullOrEmpty(rawInput))
+        {
+            return string.Empty;
+        }
+
+        var sanitized = rawInput;
+
+        // Remove all dangerous characters
+        foreach (var c in DangerousCharacters)
+        {
+            sanitized = sanitized.Replace(c.ToString(), string.Empty);
+        }
+
+        // Remove any remaining non-alphanumeric except allowed: comma, colon, underscore, asterisk, dot
+        sanitized = Regex.Replace(sanitized, @"[^a-zA-Z0-9,:\-_\*\.]", string.Empty);
+
+        // Truncate to maximum length
+        if (sanitized.Length > 500)
+        {
+            sanitized = sanitized.Substring(0, 500);
+        }
+
+        _logger.LogInformation(
+            "Sanitized scope from '{Original}' to '{Sanitized}'",
+            rawInput, sanitized);
+
+        return sanitized;
+    }
+
+    private static string GetCharacterName(char c) => c switch
+    {
+        ' ' => "space",
+        '\t' => "tab",
+        '\n' => "newline",
+        '\r' => "carriage return",
+        ';' => "semicolon",
+        '|' => "pipe",
+        '&' => "ampersand",
+        '$' => "dollar sign",
+        '`' => "backtick",
+        '(' => "open parenthesis",
+        ')' => "close parenthesis",
+        '{' => "open brace",
+        '}' => "close brace",
+        '<' => "less than",
+        '>' => "greater than",
+        '\\' => "backslash",
+        '"' => "double quote",
+        '\'' => "single quote",
+        _ => c.ToString()
+    };
+}
+
+public sealed record ScopeValidationResult
+{
+    public bool IsValid { get; }
+    public bool RequiresAck { get; }
+    public ScopeRejectionReason? RejectionReason { get; }
+    public string? Message { get; }
+
+    private ScopeValidationResult(bool isValid, bool requiresAck,
+        ScopeRejectionReason? reason, string? message)
+    {
+        IsValid = isValid;
+        RequiresAck = requiresAck;
+        RejectionReason = reason;
+        Message = message;
+    }
+
+    public static ScopeValidationResult Valid() =>
+        new(true, false, null, null);
+
+    public static ScopeValidationResult RequiresAcknowledgment(string message) =>
+        new(true, true, null, message);
+
+    public static ScopeValidationResult Rejected(ScopeRejectionReason reason, string message) =>
+        new(false, false, reason, message);
+}
+
+public enum ScopeRejectionReason
+{
+    DangerousCharacter,
+    InjectionPattern,
+    ExcessiveLength,
+    TooManyEntries,
+    InvalidSyntax
+}
+```
 
 ---
 
@@ -458,7 +690,256 @@ An attacker could modify the risk level configuration to downgrade dangerous ope
 3. User runs `acode --yes` (innocent intent)
 4. `.git/` deletion auto-approved (catastrophic)
 
-**Mitigation:** Level 4 classifications are hardcoded, not configurable. The `HardcodedCriticalOperations` list defines operations that can never be downgraded regardless of configuration. Any configuration attempting to modify Level 4 operations is rejected with a security warning.
+**Complete Mitigation Implementation:**
+
+```csharp
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.Approvals.Scoping;
+
+/// <summary>
+/// Maintains hardcoded list of critical operations that can NEVER be downgraded
+/// from Level 4, regardless of any configuration. This is the last line of defense
+/// against risk level downgrade attacks.
+/// </summary>
+public sealed class HardcodedCriticalOperations
+{
+    private readonly ILogger<HardcodedCriticalOperations> _logger;
+
+    /// <summary>
+    /// Operations that are ALWAYS Level 4 (Critical) and can NEVER be bypassed.
+    /// These are hardcoded and cannot be modified by configuration.
+    /// </summary>
+    private static readonly CriticalOperation[] ImmutableCriticalOperations = new[]
+    {
+        // Git internals - deletion is catastrophic and unrecoverable
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            ".git/**",
+            "Git repository internals - deletion destroys version history"),
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            ".git",
+            "Git repository root - deletion destroys version history"),
+        new CriticalOperation(
+            OperationCategory.DirDelete,
+            ".git",
+            "Git repository directory - deletion destroys version history"),
+
+        // Environment files - contain secrets
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            ".env",
+            "Environment file - may contain secrets"),
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            ".env.*",
+            "Environment file variants - may contain secrets"),
+        new CriticalOperation(
+            OperationCategory.FileWrite,
+            ".env",
+            "Environment file modification - security sensitive"),
+
+        // Acode configuration - agent self-modification
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            ".agent/**",
+            "Agent configuration - self-modification dangerous"),
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            ".acode/**",
+            "Agent configuration - self-modification dangerous"),
+
+        // Destructive terminal commands
+        new CriticalOperation(
+            OperationCategory.Terminal,
+            "rm -rf *",
+            "Recursive force delete all - catastrophic"),
+        new CriticalOperation(
+            OperationCategory.Terminal,
+            "rm -rf /",
+            "Recursive force delete root - catastrophic"),
+        new CriticalOperation(
+            OperationCategory.Terminal,
+            "rm -rf ~",
+            "Recursive force delete home - catastrophic"),
+        new CriticalOperation(
+            OperationCategory.Terminal,
+            "git push --force",
+            "Force push - rewrites remote history"),
+        new CriticalOperation(
+            OperationCategory.Terminal,
+            "git push -f",
+            "Force push - rewrites remote history"),
+        new CriticalOperation(
+            OperationCategory.Terminal,
+            "git reset --hard",
+            "Hard reset - discards uncommitted changes"),
+        new CriticalOperation(
+            OperationCategory.Terminal,
+            "git clean -fd",
+            "Clean force - removes untracked files"),
+
+        // Credential files
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            "credentials.json",
+            "Credential file - authentication data"),
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            "**/*credentials*",
+            "Credential files - authentication data"),
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            "**/*secret*",
+            "Secret files - sensitive data"),
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            "**/*.pem",
+            "Certificate files - encryption keys"),
+        new CriticalOperation(
+            OperationCategory.FileDelete,
+            "**/*.key",
+            "Key files - encryption keys"),
+    };
+
+    public HardcodedCriticalOperations(ILogger<HardcodedCriticalOperations> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Checks if an operation is in the hardcoded critical list.
+    /// Returns true if the operation can NEVER be bypassed.
+    /// </summary>
+    public bool IsCriticalOperation(OperationCategory category, string pattern)
+    {
+        foreach (var critical in ImmutableCriticalOperations)
+        {
+            if (critical.Category == category && MatchesPattern(pattern, critical.Pattern))
+            {
+                _logger.LogInformation(
+                    "Operation {Category}:{Pattern} matched hardcoded critical: {Reason}",
+                    category, pattern, critical.Reason);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Validates configuration risk levels against hardcoded critical operations.
+    /// Rejects any configuration that attempts to downgrade critical operations.
+    /// </summary>
+    public ConfigurationValidationResult ValidateRiskLevelConfiguration(
+        IEnumerable<RiskLevelOverride> configuredOverrides)
+    {
+        var violations = new List<string>();
+
+        foreach (var configOverride in configuredOverrides)
+        {
+            // Check if this override targets a critical operation
+            if (IsCriticalOperation(configOverride.Category, configOverride.Pattern))
+            {
+                // Any risk level other than 4 is a violation
+                if (configOverride.RiskLevel != RiskLevel.Critical)
+                {
+                    var violation = $"Configuration attempted to downgrade critical operation " +
+                        $"{configOverride.Category}:{configOverride.Pattern} from Level 4 to Level {(int)configOverride.RiskLevel}. " +
+                        "This is a hardcoded protection and cannot be overridden.";
+
+                    _logger.LogError(
+                        "SECURITY: Risk level downgrade attack detected! {Violation}",
+                        violation);
+
+                    violations.Add(violation);
+                }
+            }
+        }
+
+        if (violations.Any())
+        {
+            return ConfigurationValidationResult.Rejected(
+                "Risk level configuration contains security violations",
+                violations);
+        }
+
+        return ConfigurationValidationResult.Valid();
+    }
+
+    /// <summary>
+    /// Returns the enforced risk level for an operation, checking hardcoded
+    /// critical operations first before falling back to configuration.
+    /// </summary>
+    public RiskLevel GetEnforcedRiskLevel(
+        OperationCategory category,
+        string pattern,
+        RiskLevel configuredLevel)
+    {
+        // Hardcoded critical operations ALWAYS return Level 4
+        if (IsCriticalOperation(category, pattern))
+        {
+            if (configuredLevel != RiskLevel.Critical)
+            {
+                _logger.LogWarning(
+                    "Overriding configured risk level {Configured} with hardcoded Critical for {Category}:{Pattern}",
+                    configuredLevel, category, pattern);
+            }
+            return RiskLevel.Critical;
+        }
+
+        return configuredLevel;
+    }
+
+    private static bool MatchesPattern(string input, string pattern)
+    {
+        // Direct match
+        if (input.Equals(pattern, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Glob pattern matching
+        if (pattern.Contains('*'))
+        {
+            var regexPattern = "^" + Regex.Escape(pattern)
+                .Replace("\\*\\*", ".*")
+                .Replace("\\*", "[^/]*") + "$";
+            return Regex.IsMatch(input, regexPattern, RegexOptions.IgnoreCase);
+        }
+
+        return false;
+    }
+}
+
+public sealed record CriticalOperation(
+    OperationCategory Category,
+    string Pattern,
+    string Reason);
+
+public sealed record RiskLevelOverride(
+    OperationCategory Category,
+    string Pattern,
+    RiskLevel RiskLevel);
+
+public sealed record ConfigurationValidationResult
+{
+    public bool IsValid { get; }
+    public string? ErrorMessage { get; }
+    public IReadOnlyList<string> Violations { get; }
+
+    private ConfigurationValidationResult(bool isValid, string? errorMessage, IReadOnlyList<string> violations)
+    {
+        IsValid = isValid;
+        ErrorMessage = errorMessage;
+        Violations = violations;
+    }
+
+    public static ConfigurationValidationResult Valid() =>
+        new(true, null, Array.Empty<string>());
+
+    public static ConfigurationValidationResult Rejected(string errorMessage, IEnumerable<string> violations) =>
+        new(false, errorMessage, violations.ToList());
+}
+```
 
 ---
 
@@ -477,7 +958,304 @@ An attacker could craft complex scope patterns that cause exponential matching t
 3. Session becomes unusably slow
 4. User forced to kill process
 
-**Mitigation:** Scope patterns are validated for complexity before use. Maximum pattern depth (number of `**` segments) is limited to 3. Pattern matching uses a timeout of 100ms per operation. The `ScopePatternValidator` rejects patterns that could cause performance issues.
+**Complete Mitigation Implementation:**
+
+```csharp
+using System.Diagnostics;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.Approvals.Scoping;
+
+/// <summary>
+/// Validates scope patterns for complexity to prevent DoS via pattern exhaustion.
+/// Enforces limits on pattern depth, length, and matching time.
+/// </summary>
+public sealed class ScopePatternComplexityValidator
+{
+    private readonly ILogger<ScopePatternComplexityValidator> _logger;
+
+    /// <summary>
+    /// Maximum allowed depth of recursive glob patterns (**).
+    /// Example: **/**/** has depth 3 (allowed), **/**/**/** has depth 4 (rejected).
+    /// </summary>
+    public const int MaxRecursiveGlobDepth = 3;
+
+    /// <summary>
+    /// Maximum allowed length of a single pattern in characters.
+    /// </summary>
+    public const int MaxPatternLength = 100;
+
+    /// <summary>
+    /// Maximum allowed time for pattern matching in milliseconds.
+    /// </summary>
+    public const int MaxMatchTimeMs = 100;
+
+    /// <summary>
+    /// Maximum number of wildcards allowed in a single pattern.
+    /// </summary>
+    public const int MaxWildcards = 10;
+
+    /// <summary>
+    /// Patterns known to cause exponential backtracking.
+    /// </summary>
+    private static readonly Regex[] CatastrophicPatterns = new[]
+    {
+        // Nested quantifiers with overlapping character classes
+        new Regex(@"\*\*[/\\]\*\*[/\\]\*\*[/\\]\*\*", RegexOptions.Compiled),
+        // Character class with nested repetition
+        new Regex(@"\[.+\]\+\*", RegexOptions.Compiled),
+        // Multiple consecutive wildcards
+        new Regex(@"\*{3,}", RegexOptions.Compiled),
+    };
+
+    public ScopePatternComplexityValidator(ILogger<ScopePatternComplexityValidator> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Validates a scope pattern for complexity issues.
+    /// </summary>
+    public PatternComplexityResult ValidatePattern(string pattern)
+    {
+        if (string.IsNullOrEmpty(pattern))
+        {
+            return PatternComplexityResult.Valid(0);
+        }
+
+        // Check pattern length
+        if (pattern.Length > MaxPatternLength)
+        {
+            _logger.LogWarning(
+                "Pattern '{Pattern}' exceeds maximum length {Max}",
+                pattern, MaxPatternLength);
+
+            return PatternComplexityResult.TooComplex(
+                $"Pattern length {pattern.Length} exceeds maximum of {MaxPatternLength} characters.");
+        }
+
+        // Count recursive glob depth
+        var recursiveGlobCount = CountOccurrences(pattern, "**");
+        if (recursiveGlobCount > MaxRecursiveGlobDepth)
+        {
+            _logger.LogWarning(
+                "Pattern '{Pattern}' has recursive glob depth {Depth}, max is {Max}",
+                pattern, recursiveGlobCount, MaxRecursiveGlobDepth);
+
+            return PatternComplexityResult.TooComplex(
+                $"Pattern contains {recursiveGlobCount} recursive globs (**), maximum is {MaxRecursiveGlobDepth}.");
+        }
+
+        // Count total wildcards
+        var wildcardCount = CountWildcards(pattern);
+        if (wildcardCount > MaxWildcards)
+        {
+            _logger.LogWarning(
+                "Pattern '{Pattern}' has {Count} wildcards, max is {Max}",
+                pattern, wildcardCount, MaxWildcards);
+
+            return PatternComplexityResult.TooComplex(
+                $"Pattern contains {wildcardCount} wildcards, maximum is {MaxWildcards}.");
+        }
+
+        // Check for known catastrophic patterns
+        foreach (var catastrophic in CatastrophicPatterns)
+        {
+            if (catastrophic.IsMatch(pattern))
+            {
+                _logger.LogWarning(
+                    "Pattern '{Pattern}' matches known catastrophic pattern",
+                    pattern);
+
+                return PatternComplexityResult.TooComplex(
+                    "Pattern contains a known complexity issue that could cause performance problems.");
+            }
+        }
+
+        // Estimate complexity score
+        var complexityScore = CalculateComplexityScore(pattern);
+
+        return PatternComplexityResult.Valid(complexityScore);
+    }
+
+    /// <summary>
+    /// Tests pattern matching performance with a timeout.
+    /// Used to catch patterns that pass static analysis but are still slow.
+    /// </summary>
+    public PatternPerformanceResult TestPatternPerformance(string pattern, string testInput)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            // Convert glob to regex for matching
+            var regexPattern = ConvertGlobToRegex(pattern);
+
+            // Use a regex with a timeout
+            var regex = new Regex(
+                regexPattern,
+                RegexOptions.Compiled | RegexOptions.IgnoreCase,
+                TimeSpan.FromMilliseconds(MaxMatchTimeMs));
+
+            var isMatch = regex.IsMatch(testInput);
+
+            stopwatch.Stop();
+
+            if (stopwatch.ElapsedMilliseconds > MaxMatchTimeMs / 2)
+            {
+                _logger.LogWarning(
+                    "Pattern '{Pattern}' took {Ms}ms to match (warning threshold: {Threshold}ms)",
+                    pattern, stopwatch.ElapsedMilliseconds, MaxMatchTimeMs / 2);
+            }
+
+            return PatternPerformanceResult.Success(
+                isMatch,
+                stopwatch.ElapsedMilliseconds);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            stopwatch.Stop();
+
+            _logger.LogError(
+                "Pattern '{Pattern}' timed out after {Ms}ms",
+                pattern, MaxMatchTimeMs);
+
+            return PatternPerformanceResult.TimedOut(
+                $"Pattern matching timed out after {MaxMatchTimeMs}ms. " +
+                "Please use a simpler pattern.");
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogError(ex,
+                "Pattern '{Pattern}' produced invalid regex",
+                pattern);
+
+            return PatternPerformanceResult.InvalidPattern(
+                $"Pattern is invalid: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Safely matches a pattern against input with timeout protection.
+    /// </summary>
+    public bool SafeMatch(string pattern, string input)
+    {
+        // First validate complexity
+        var complexityResult = ValidatePattern(pattern);
+        if (!complexityResult.IsValid)
+        {
+            _logger.LogWarning(
+                "Pattern '{Pattern}' rejected for complexity: {Reason}",
+                pattern, complexityResult.Message);
+            return false;
+        }
+
+        // Then test performance
+        var performanceResult = TestPatternPerformance(pattern, input);
+        if (!performanceResult.IsSuccess)
+        {
+            _logger.LogWarning(
+                "Pattern '{Pattern}' performance issue: {Reason}",
+                pattern, performanceResult.Message);
+            return false;
+        }
+
+        return performanceResult.IsMatch;
+    }
+
+    private static int CountOccurrences(string input, string pattern)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = input.IndexOf(pattern, index, StringComparison.Ordinal)) != -1)
+        {
+            count++;
+            index += pattern.Length;
+        }
+        return count;
+    }
+
+    private static int CountWildcards(string pattern)
+    {
+        var count = 0;
+        foreach (var c in pattern)
+        {
+            if (c == '*' || c == '?' || c == '[' || c == ']')
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static int CalculateComplexityScore(string pattern)
+    {
+        var score = 0;
+        score += CountOccurrences(pattern, "**") * 10;  // Recursive glob is expensive
+        score += CountOccurrences(pattern, "*") * 2;    // Single glob less so
+        score += CountOccurrences(pattern, "?") * 1;    // Single char is cheap
+        score += pattern.Length / 10;                    // Length contributes
+        return score;
+    }
+
+    private static string ConvertGlobToRegex(string glob)
+    {
+        var regex = "^";
+        regex += Regex.Escape(glob)
+            .Replace("\\*\\*", ".*")
+            .Replace("\\*", "[^/]*")
+            .Replace("\\?", ".");
+        regex += "$";
+        return regex;
+    }
+}
+
+public sealed record PatternComplexityResult
+{
+    public bool IsValid { get; }
+    public int ComplexityScore { get; }
+    public string? Message { get; }
+
+    private PatternComplexityResult(bool isValid, int score, string? message)
+    {
+        IsValid = isValid;
+        ComplexityScore = score;
+        Message = message;
+    }
+
+    public static PatternComplexityResult Valid(int score) =>
+        new(true, score, null);
+
+    public static PatternComplexityResult TooComplex(string message) =>
+        new(false, int.MaxValue, message);
+}
+
+public sealed record PatternPerformanceResult
+{
+    public bool IsSuccess { get; }
+    public bool IsMatch { get; }
+    public long ElapsedMs { get; }
+    public string? Message { get; }
+
+    private PatternPerformanceResult(bool success, bool match, long elapsed, string? message)
+    {
+        IsSuccess = success;
+        IsMatch = match;
+        ElapsedMs = elapsed;
+        Message = message;
+    }
+
+    public static PatternPerformanceResult Success(bool isMatch, long elapsedMs) =>
+        new(true, isMatch, elapsedMs, null);
+
+    public static PatternPerformanceResult TimedOut(string message) =>
+        new(false, false, -1, message);
+
+    public static PatternPerformanceResult InvalidPattern(string message) =>
+        new(false, false, -1, message);
+}
+```
 
 ---
 
@@ -496,7 +1274,245 @@ If operations are not correctly classified, a dangerous operation might match a 
 3. User runs `--yes=terminal:safe`
 4. Force push auto-approved, remote history rewritten
 
-**Mitigation:** Operation classification uses strict pattern matching with explicit deny lists. The `OperationClassifier` has a hardcoded `DangerousCommandPatterns` list that takes precedence over general classification. All terminal commands are cross-checked against this list before any scope matching.
+**Complete Mitigation Implementation:**
+
+```csharp
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.Approvals.Scoping;
+
+/// <summary>
+/// Classifies terminal operations with explicit deny-list checking to prevent
+/// dangerous commands from being misclassified as safe.
+/// </summary>
+public sealed class TerminalOperationClassifier
+{
+    private readonly ILogger<TerminalOperationClassifier> _logger;
+
+    /// <summary>
+    /// Dangerous command patterns that are ALWAYS classified as high risk,
+    /// regardless of how they might otherwise be parsed.
+    /// </summary>
+    private static readonly DangerousCommandPattern[] DangerousPatterns = new[]
+    {
+        // Force push - rewrites remote history
+        new DangerousCommandPattern(
+            @"\bgit\s+push\s+.*(-f|--force)",
+            RiskLevel.Critical,
+            "git push --force rewrites remote history"),
+        new DangerousCommandPattern(
+            @"\bgit\s+push\s+--force-with-lease",
+            RiskLevel.High,
+            "git push --force-with-lease can still rewrite history"),
+
+        // Hard reset - discards changes
+        new DangerousCommandPattern(
+            @"\bgit\s+reset\s+--hard",
+            RiskLevel.Critical,
+            "git reset --hard discards uncommitted changes"),
+        new DangerousCommandPattern(
+            @"\bgit\s+checkout\s+\.\s*$",
+            RiskLevel.High,
+            "git checkout . discards all uncommitted changes"),
+
+        // Clean operations - remove files
+        new DangerousCommandPattern(
+            @"\bgit\s+clean\s+.*-f",
+            RiskLevel.High,
+            "git clean -f removes untracked files"),
+
+        // Recursive force delete
+        new DangerousCommandPattern(
+            @"\brm\s+.*-r.*-f|\brm\s+.*-f.*-r|\brm\s+-rf",
+            RiskLevel.Critical,
+            "rm -rf can delete entire directories"),
+        new DangerousCommandPattern(
+            @"\brm\s+.*\*",
+            RiskLevel.High,
+            "rm with wildcard can delete multiple files"),
+
+        // Dangerous operations
+        new DangerousCommandPattern(
+            @"\bsudo\s+",
+            RiskLevel.Critical,
+            "sudo elevates privileges"),
+        new DangerousCommandPattern(
+            @"\bchmod\s+777",
+            RiskLevel.High,
+            "chmod 777 makes files world-writable"),
+        new DangerousCommandPattern(
+            @"\bchown\s+",
+            RiskLevel.High,
+            "chown changes file ownership"),
+
+        // Package operations
+        new DangerousCommandPattern(
+            @"\bnpm\s+publish",
+            RiskLevel.Critical,
+            "npm publish releases packages publicly"),
+        new DangerousCommandPattern(
+            @"\bdotnet\s+nuget\s+push",
+            RiskLevel.Critical,
+            "dotnet nuget push releases packages"),
+
+        // Database operations
+        new DangerousCommandPattern(
+            @"\bDROP\s+(TABLE|DATABASE|SCHEMA)",
+            RiskLevel.Critical,
+            "DROP destroys database objects"),
+        new DangerousCommandPattern(
+            @"\bTRUNCATE\s+TABLE",
+            RiskLevel.Critical,
+            "TRUNCATE removes all data from table"),
+        new DangerousCommandPattern(
+            @"\bDELETE\s+FROM\s+\w+\s*;?\s*$",
+            RiskLevel.Critical,
+            "DELETE without WHERE removes all rows"),
+    };
+
+    /// <summary>
+    /// Commands explicitly whitelisted as safe for terminal:safe scope.
+    /// These are read-only or harmless operations.
+    /// </summary>
+    private static readonly Regex[] SafeCommandPatterns = new[]
+    {
+        // Git informational commands
+        new Regex(@"^\s*git\s+status\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*git\s+log\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*git\s+diff\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*git\s+show\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*git\s+branch\s*(-a|-r|--list)?\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*git\s+remote\s+-v\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+
+        // List/read operations
+        new Regex(@"^\s*ls\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*dir\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*cat\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*head\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*tail\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*less\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*more\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*pwd\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*whoami\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+
+        // Search operations
+        new Regex(@"^\s*grep\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*find\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*which\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*whereis\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+
+        // Build/test read-only
+        new Regex(@"^\s*dotnet\s+--version\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*node\s+--version\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*npm\s+--version\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*npm\s+ls\b", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+        new Regex(@"^\s*npm\s+outdated\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase),
+    };
+
+    public TerminalOperationClassifier(ILogger<TerminalOperationClassifier> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Classifies a terminal command, checking dangerous patterns first.
+    /// </summary>
+    public TerminalClassificationResult Classify(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return TerminalClassificationResult.Safe("Empty command");
+        }
+
+        // FIRST: Check dangerous patterns (deny list takes priority)
+        foreach (var dangerous in DangerousPatterns)
+        {
+            if (Regex.IsMatch(command, dangerous.Pattern, RegexOptions.IgnoreCase))
+            {
+                _logger.LogWarning(
+                    "Command '{Command}' matched dangerous pattern: {Reason}",
+                    command, dangerous.Reason);
+
+                return TerminalClassificationResult.Dangerous(
+                    dangerous.RiskLevel,
+                    dangerous.Reason);
+            }
+        }
+
+        // SECOND: Check safe patterns (allow list)
+        foreach (var safe in SafeCommandPatterns)
+        {
+            if (safe.IsMatch(command))
+            {
+                _logger.LogDebug(
+                    "Command '{Command}' matched safe pattern",
+                    command);
+
+                return TerminalClassificationResult.Safe(
+                    "Matched whitelisted safe command pattern");
+            }
+        }
+
+        // DEFAULT: Unknown commands require explicit approval
+        _logger.LogInformation(
+            "Command '{Command}' not in safe list, requiring approval",
+            command);
+
+        return TerminalClassificationResult.Unknown(
+            RiskLevel.High,
+            "Command not in safe list, requires explicit approval");
+    }
+
+    /// <summary>
+    /// Checks if a command qualifies for terminal:safe scope.
+    /// </summary>
+    public bool IsSafeCommand(string command)
+    {
+        var result = Classify(command);
+        return result.IsSafe;
+    }
+
+    /// <summary>
+    /// Gets the risk level for a command.
+    /// </summary>
+    public RiskLevel GetRiskLevel(string command)
+    {
+        var result = Classify(command);
+        return result.RiskLevel;
+    }
+}
+
+public sealed record DangerousCommandPattern(
+    string Pattern,
+    RiskLevel RiskLevel,
+    string Reason);
+
+public sealed record TerminalClassificationResult
+{
+    public bool IsSafe { get; }
+    public bool IsDangerous { get; }
+    public RiskLevel RiskLevel { get; }
+    public string Reason { get; }
+
+    private TerminalClassificationResult(bool safe, bool dangerous, RiskLevel level, string reason)
+    {
+        IsSafe = safe;
+        IsDangerous = dangerous;
+        RiskLevel = level;
+        Reason = reason;
+    }
+
+    public static TerminalClassificationResult Safe(string reason) =>
+        new(true, false, RiskLevel.Low, reason);
+
+    public static TerminalClassificationResult Dangerous(RiskLevel level, string reason) =>
+        new(false, true, level, reason);
+
+    public static TerminalClassificationResult Unknown(RiskLevel level, string reason) =>
+        new(false, false, level, reason);
+}
+```
 
 ---
 
@@ -509,7 +1525,262 @@ If operations are not correctly classified, a dangerous operation might match a 
 **Description:**
 If scopes persist between sessions unexpectedly, a broad scope used for one task could remain active for a sensitive task. The user thinks they're running with default scopes but actually has `--yes=all` active from yesterday.
 
-**Mitigation:** Scopes are strictly session-scoped and never persisted. The `ScopeManager` initializes with empty scope each session. The `--yes` flag must be explicitly provided on each command. No configuration option exists to set default scopes (intentional design to prevent this attack).
+**Complete Mitigation Implementation:**
+
+```csharp
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.Approvals.Scoping;
+
+/// <summary>
+/// Manages session-scoped --yes configurations. Explicitly designed to NEVER
+/// persist scopes between sessions to prevent unintended bypass attacks.
+/// </summary>
+public sealed class SessionScopeManager : IDisposable
+{
+    private readonly ILogger<SessionScopeManager> _logger;
+    private readonly Guid _sessionId;
+    private readonly DateTimeOffset _sessionStartTime;
+    private readonly object _lock = new();
+
+    private YesScope _currentScope;
+    private YesScope? _nextOperationScope;
+    private int _bypassCount;
+    private bool _isDisposed;
+
+    /// <summary>
+    /// Creates a new session scope manager. Scope is ALWAYS empty at creation.
+    /// There is NO way to restore scope from a previous session.
+    /// </summary>
+    public SessionScopeManager(
+        Guid sessionId,
+        ILogger<SessionScopeManager> logger)
+    {
+        _sessionId = sessionId;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _sessionStartTime = DateTimeOffset.UtcNow;
+
+        // CRITICAL: Always start with empty scope
+        // This is by design - no persistence, no restoration
+        _currentScope = YesScope.Default;
+        _nextOperationScope = null;
+        _bypassCount = 0;
+
+        _logger.LogInformation(
+            "Session {SessionId} initialized with default scope at {Time}",
+            _sessionId, _sessionStartTime);
+    }
+
+    /// <summary>
+    /// Gets the current effective scope for the session.
+    /// Returns default scope if no scope is set.
+    /// </summary>
+    public YesScope CurrentScope
+    {
+        get
+        {
+            ThrowIfDisposed();
+            lock (_lock)
+            {
+                return _currentScope;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sets the session scope from CLI argument.
+    /// This scope applies to the entire session.
+    /// </summary>
+    public void SetSessionScope(YesScope scope)
+    {
+        ThrowIfDisposed();
+
+        lock (_lock)
+        {
+            _logger.LogInformation(
+                "Session {SessionId} scope set to: {Scope}",
+                _sessionId, scope);
+
+            _currentScope = scope;
+        }
+    }
+
+    /// <summary>
+    /// Sets a one-time scope for the next operation only.
+    /// This scope is consumed after one use.
+    /// </summary>
+    public void SetNextOperationScope(YesScope scope)
+    {
+        ThrowIfDisposed();
+
+        lock (_lock)
+        {
+            _logger.LogInformation(
+                "Session {SessionId} next-operation scope set to: {Scope}",
+                _sessionId, scope);
+
+            _nextOperationScope = scope;
+        }
+    }
+
+    /// <summary>
+    /// Gets the scope for the current operation and consumes any one-time scope.
+    /// </summary>
+    public YesScope GetScopeForOperation()
+    {
+        ThrowIfDisposed();
+
+        lock (_lock)
+        {
+            // If there's a one-time scope, use it and clear it
+            if (_nextOperationScope != null)
+            {
+                var oneTimeScope = _nextOperationScope;
+                _nextOperationScope = null;
+
+                _logger.LogDebug(
+                    "Session {SessionId} using one-time scope: {Scope}",
+                    _sessionId, oneTimeScope);
+
+                return oneTimeScope;
+            }
+
+            return _currentScope;
+        }
+    }
+
+    /// <summary>
+    /// Records a bypass for audit purposes.
+    /// </summary>
+    public void RecordBypass(OperationCategory category, string target, YesScope scopeUsed)
+    {
+        ThrowIfDisposed();
+
+        lock (_lock)
+        {
+            _bypassCount++;
+
+            _logger.LogInformation(
+                "Session {SessionId} bypass #{Count}: {Category}:{Target} using scope {Scope}",
+                _sessionId, _bypassCount, category, target, scopeUsed);
+        }
+    }
+
+    /// <summary>
+    /// Gets session statistics for audit.
+    /// </summary>
+    public SessionScopeStatistics GetStatistics()
+    {
+        ThrowIfDisposed();
+
+        lock (_lock)
+        {
+            return new SessionScopeStatistics(
+                _sessionId,
+                _sessionStartTime,
+                DateTimeOffset.UtcNow,
+                _currentScope,
+                _bypassCount);
+        }
+    }
+
+    /// <summary>
+    /// Resets the scope to default. Used when user wants to clear all --yes.
+    /// </summary>
+    public void Reset()
+    {
+        ThrowIfDisposed();
+
+        lock (_lock)
+        {
+            _logger.LogInformation(
+                "Session {SessionId} scope reset to default",
+                _sessionId);
+
+            _currentScope = YesScope.Default;
+            _nextOperationScope = null;
+        }
+    }
+
+    /// <summary>
+    /// Disposes the session, clearing all scope information.
+    /// This is called automatically at session end.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            // Log final statistics
+            _logger.LogInformation(
+                "Session {SessionId} ending. Total bypasses: {Count}. Duration: {Duration}",
+                _sessionId,
+                _bypassCount,
+                DateTimeOffset.UtcNow - _sessionStartTime);
+
+            // Clear all state
+            _currentScope = YesScope.None;
+            _nextOperationScope = null;
+
+            _isDisposed = true;
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_isDisposed)
+        {
+            throw new ObjectDisposedException(nameof(SessionScopeManager),
+                "Session has ended. Scope information is no longer available. " +
+                "Start a new session to set scopes.");
+        }
+    }
+}
+
+public sealed record SessionScopeStatistics(
+    Guid SessionId,
+    DateTimeOffset StartTime,
+    DateTimeOffset CurrentTime,
+    YesScope CurrentScope,
+    int TotalBypasses)
+{
+    public TimeSpan Duration => CurrentTime - StartTime;
+}
+
+/// <summary>
+/// Factory for creating session scope managers.
+/// Ensures each session gets a fresh, empty scope manager.
+/// </summary>
+public sealed class SessionScopeManagerFactory
+{
+    private readonly ILoggerFactory _loggerFactory;
+
+    public SessionScopeManagerFactory(ILoggerFactory loggerFactory)
+    {
+        _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+    }
+
+    /// <summary>
+    /// Creates a new session scope manager with empty scope.
+    /// CRITICAL: This is the ONLY way to get a scope manager.
+    /// There is NO method to restore from previous session.
+    /// </summary>
+    public SessionScopeManager CreateForSession(Guid sessionId)
+    {
+        var logger = _loggerFactory.CreateLogger<SessionScopeManager>();
+        return new SessionScopeManager(sessionId, logger);
+    }
+}
+```
 
 ---
 
@@ -871,72 +2142,150 @@ WARNING: Rate limit exceeded (100/min). Pausing...
 
 ## Acceptance Criteria
 
-### Scope Syntax
+### Scope Syntax and Parsing
 
-- [ ] AC-001: --yes works
-- [ ] AC-002: --yes=scope works
-- [ ] AC-003: Comma-separated works
-- [ ] AC-004: Modifiers work
+- [ ] AC-001: `--yes` flag without value uses default scope (file_read, dir_list, search)
+- [ ] AC-002: `--yes=scope` parses single scope value correctly
+- [ ] AC-003: `--yes=scope1,scope2,scope3` parses comma-separated scopes
+- [ ] AC-004: Scope modifiers parse correctly: `--yes=file_write:test`
+- [ ] AC-005: Pattern modifiers parse correctly: `--yes=file_write:*.test.ts`
+- [ ] AC-006: Combined scopes with mixed modifiers parse: `--yes=file_read,file_write:test,terminal:safe`
+- [ ] AC-007: Invalid scope syntax produces clear error message with position indicator
+- [ ] AC-008: Scope parser rejects shell metacharacters (semicolon, pipe, ampersand, backtick)
+- [ ] AC-009: Scope parser rejects embedded flags (`--yes=file_read --ack-danger` as single value)
+- [ ] AC-010: Maximum 20 scope entries enforced per specification
+- [ ] AC-011: Maximum 100 character pattern length enforced per pattern
 
-### Categories
+### Category Coverage
 
-- [ ] AC-005: file_read works
-- [ ] AC-006: file_write works
-- [ ] AC-007: file_delete works
-- [ ] AC-008: terminal works
-- [ ] AC-009: config works
-- [ ] AC-010: all works
+- [ ] AC-012: `file_read` scope bypasses approval for all file read operations
+- [ ] AC-013: `file_write` scope bypasses approval for file create/modify operations
+- [ ] AC-014: `file_delete` scope bypasses approval for file deletion operations
+- [ ] AC-015: `dir_create` scope bypasses approval for directory creation
+- [ ] AC-016: `dir_delete` scope bypasses approval for directory deletion
+- [ ] AC-017: `terminal` scope bypasses approval for shell command execution
+- [ ] AC-018: `terminal:safe` scope only bypasses whitelisted safe commands
+- [ ] AC-019: `config` scope bypasses approval for configuration file modifications
+- [ ] AC-020: `all` scope requires explicit `--ack-danger` flag to activate
+- [ ] AC-021: Unknown category produces helpful error with "Did you mean?" suggestions
 
-### Modifiers
+### Scope Modifiers
 
-- [ ] AC-011: safe works
-- [ ] AC-012: all works
-- [ ] AC-013: pattern works
+- [ ] AC-022: `:safe` modifier restricts to operations marked as safe
+- [ ] AC-023: `:test` modifier restricts to paths containing `/test/` or `/tests/` or `*.test.*`
+- [ ] AC-024: `:generated` modifier restricts to paths in generated directories
+- [ ] AC-025: `:pattern` modifier with glob pattern filters paths correctly
+- [ ] AC-026: Glob patterns support `*` for single directory level matching
+- [ ] AC-027: Glob patterns support `**` for recursive directory matching
+- [ ] AC-028: Glob patterns support character classes `[abc]`
+- [ ] AC-029: Glob patterns support negation `!pattern` in scope exclusions
 
-### Risk Levels
+### Risk Level Classification
 
-- [ ] AC-014: Level 1 implicit
-- [ ] AC-015: Level 2 explicit
-- [ ] AC-016: Level 3 acknowledged
-- [ ] AC-017: Level 4 blocked
+- [ ] AC-030: Level 1 (Low) operations auto-approve with bare `--yes` flag
+- [ ] AC-031: Level 2 (Medium) operations require explicit scope in `--yes=scope`
+- [ ] AC-032: Level 3 (High) operations require explicit scope AND display warning
+- [ ] AC-033: Level 4 (Critical) operations NEVER bypass, always prompt regardless of `--yes`
+- [ ] AC-034: Risk levels are correctly assigned per operation type table in spec
+- [ ] AC-035: Hardcoded critical operations cannot be downgraded via configuration
+- [ ] AC-036: Configuration-based risk overrides are validated against hardcoded protections
 
-### Precedence
+### Precedence and Resolution
 
-- [ ] AC-018: CLI > config
-- [ ] AC-019: Config > default
-- [ ] AC-020: Specific > general
-- [ ] AC-021: Deny > allow
+- [ ] AC-037: CLI `--yes` scope overrides config `yes.default_scope` for allow/prompt decisions
+- [ ] AC-038: Config `yes.default_scope` overrides built-in defaults
+- [ ] AC-039: More specific scope rules override general scope rules
+- [ ] AC-040: Deny rules ALWAYS override allow rules regardless of specificity
+- [ ] AC-041: `--no` flag takes highest precedence, blocks all auto-approvals
+- [ ] AC-042: `--interactive` flag forces prompts regardless of `--yes` scope
+- [ ] AC-043: Precedence: `--no` > protected_operations > deny_rules > `--yes` scope > config > defaults
 
-### Protection
+### Protected Operations (Never Bypassable)
 
-- [ ] AC-022: .git protected
-- [ ] AC-023: .agent protected
-- [ ] AC-024: Custom protected
+- [ ] AC-044: `.git/**` deletion is NEVER bypassable, always prompts
+- [ ] AC-045: `.git` directory deletion is NEVER bypassable
+- [ ] AC-046: `.env*` deletion is NEVER bypassable (all environment files)
+- [ ] AC-047: `.agent/**` and `.acode/**` deletion NEVER bypassable
+- [ ] AC-048: `git push --force` and `git push -f` are NEVER bypassable
+- [ ] AC-049: `rm -rf /`, `rm -rf ~`, `rm -rf *` are NEVER bypassable
+- [ ] AC-050: `git reset --hard` is NEVER bypassable
+- [ ] AC-051: Custom protected operations from config are enforced
+- [ ] AC-052: Protected operation warning displays full reason for protection
 
 ### Rate Limiting
 
-- [ ] AC-025: Limit enforced
-- [ ] AC-026: Pause works
-- [ ] AC-027: Configurable
+- [ ] AC-053: Default rate limit of 100 bypasses per minute is enforced
+- [ ] AC-054: Rate limit exceeded triggers automatic 30-second pause
+- [ ] AC-055: Rate limit is configurable via `yes.rate_limit.max_per_minute`
+- [ ] AC-056: Pause duration is configurable via `yes.rate_limit.pause_seconds`
+- [ ] AC-057: Rate limit message shows current count, limit, and time until reset
+- [ ] AC-058: Rate limit applies per session, resets when session ends
+- [ ] AC-059: Rate limit can be disabled with `yes.rate_limit.enabled: false`
 
-### Logging
+### Audit Logging
 
-- [ ] AC-028: Bypasses logged
-- [ ] AC-029: Scope logged
-- [ ] AC-030: Operation logged
+- [ ] AC-060: Every bypass is logged with timestamp, session ID, operation, scope used
+- [ ] AC-061: Scope specification is logged in full when session starts
+- [ ] AC-062: Operation details logged: category, target path, risk level
+- [ ] AC-063: Protected operation blocks are logged with reason
+- [ ] AC-064: Rate limit triggers are logged
+- [ ] AC-065: Session summary logged at session end: total bypasses, duration
+- [ ] AC-066: Audit logs include structured JSON format for machine parsing
+- [ ] AC-067: Audit logs are written even when operation is blocked
 
-### CLI
+### CLI Integration
 
-- [ ] AC-031: --yes works
-- [ ] AC-032: --yes-next works
-- [ ] AC-033: --no works
-- [ ] AC-034: --interactive works
+- [ ] AC-068: `--yes` flag is accepted on all commands that trigger approvals
+- [ ] AC-069: `--yes-next=scope` sets one-time scope for next operation only
+- [ ] AC-070: One-time scope is consumed after single use
+- [ ] AC-071: `--no` flag explicitly denies all operations (no auto-approval)
+- [ ] AC-072: `--interactive` flag forces interactive mode (always prompt)
+- [ ] AC-073: `--ack-danger` flag required for `--yes=all` scope
+- [ ] AC-074: `--yes-exclude=scope` excludes specific operations from default scope
+- [ ] AC-075: Help text for `--yes` includes complete scope syntax documentation
 
-### Errors
+### Error Handling and User Feedback
 
-- [ ] AC-035: Invalid scope error
-- [ ] AC-036: Protected warning
-- [ ] AC-037: Rate limit message
+- [ ] AC-076: Invalid scope error shows exact position of syntax error
+- [ ] AC-077: Unknown category error suggests closest valid category
+- [ ] AC-078: Invalid modifier error lists valid modifiers for the category
+- [ ] AC-079: Pattern complexity error explains specific limitation exceeded
+- [ ] AC-080: Protected operation warning is clearly distinguished from regular prompts
+- [ ] AC-081: Rate limit warning shows countdown to next available bypass
+- [ ] AC-082: Acknowledgment prompt for `--yes=all` requires typing "I UNDERSTAND"
+
+### Configuration Integration
+
+- [ ] AC-083: `yes.default_scope` in `.agent/config.yml` sets default scopes
+- [ ] AC-084: `yes.protected_operations` defines additional protected patterns
+- [ ] AC-085: `yes.rate_limit` configures rate limiting parameters
+- [ ] AC-086: `yes.require_ack_for_all` can be set to false to skip acknowledgment (not recommended)
+- [ ] AC-087: Configuration validation rejects invalid scope syntax
+- [ ] AC-088: Configuration validation warns when downgrading risk levels
+
+### Session Management
+
+- [ ] AC-089: Scope is session-scoped, never persisted between sessions
+- [ ] AC-090: Session scope manager initializes with empty/default scope
+- [ ] AC-091: Scope cannot be restored from previous session (intentional design)
+- [ ] AC-092: `--yes` flag must be provided on each command invocation
+- [ ] AC-093: Session statistics available for audit: bypass count, duration, scope used
+
+### Performance Requirements
+
+- [ ] AC-094: Scope parsing completes in < 1ms for typical scope strings
+- [ ] AC-095: Scope validation completes in < 5ms including all checks
+- [ ] AC-096: Pattern matching for single operation completes in < 100ms with timeout
+- [ ] AC-097: Pattern complexity validation prevents DoS via exponential backtracking
+- [ ] AC-098: Risk level lookup is O(1) from in-memory cache
+
+### Security Mitigations
+
+- [ ] AC-099: Scope injection guard rejects all shell metacharacters
+- [ ] AC-100: Risk level downgrade attacks detected and blocked with security warning
+- [ ] AC-101: Pattern complexity validator rejects patterns with > 3 recursive globs
+- [ ] AC-102: Terminal command classifier checks deny list before allow list
+- [ ] AC-103: Session scope manager disposed properly at session end
 
 ---
 
@@ -944,59 +2293,949 @@ WARNING: Rate limit exceeded (100/min). Pausing...
 
 ### Unit Tests
 
-```
-Tests/Unit/Approvals/YesScope/
-├── ScopeParserTests.cs
-│   ├── Should_Parse_Single_Scope()
-│   ├── Should_Parse_Multiple_Scopes()
-│   ├── Should_Parse_Modifiers()
-│   ├── Should_Reject_Invalid()
-│   └── Should_Suggest_Corrections()
-│
-├── RiskLevelTests.cs
-│   ├── Should_Classify_Low_Risk()
-│   ├── Should_Classify_Medium_Risk()
-│   ├── Should_Classify_High_Risk()
-│   └── Should_Block_Critical()
-│
-└── PrecedenceTests.cs
-    ├── Should_CLI_Override_Config()
-    ├── Should_Config_Override_Default()
-    └── Should_Deny_Override_Allow()
+```csharp
+// Tests/Unit/Approvals/YesScope/ScopeParserTests.cs
+using Xunit;
+using FluentAssertions;
+using AgenticCoder.Infrastructure.Approvals.Scoping;
+
+namespace AgenticCoder.Tests.Unit.Approvals.YesScope;
+
+public class ScopeParserTests
+{
+    private readonly ScopeParser _parser;
+
+    public ScopeParserTests()
+    {
+        _parser = new ScopeParser();
+    }
+
+    [Fact]
+    public void Should_Parse_Single_Scope()
+    {
+        // Arrange
+        var input = "file_read";
+
+        // Act
+        var result = _parser.Parse(input);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Entries.Should().HaveCount(1);
+        result.Value.Entries[0].Category.Should().Be(OperationCategory.FileRead);
+        result.Value.Entries[0].Modifier.Should().BeNull();
+        result.Value.Entries[0].Pattern.Should().BeNull();
+    }
+
+    [Fact]
+    public void Should_Parse_Multiple_Scopes_Comma_Separated()
+    {
+        // Arrange
+        var input = "file_read,file_write,terminal";
+
+        // Act
+        var result = _parser.Parse(input);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Entries.Should().HaveCount(3);
+        result.Value.Entries[0].Category.Should().Be(OperationCategory.FileRead);
+        result.Value.Entries[1].Category.Should().Be(OperationCategory.FileWrite);
+        result.Value.Entries[2].Category.Should().Be(OperationCategory.Terminal);
+    }
+
+    [Fact]
+    public void Should_Parse_Scope_With_Safe_Modifier()
+    {
+        // Arrange
+        var input = "terminal:safe";
+
+        // Act
+        var result = _parser.Parse(input);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Entries.Should().HaveCount(1);
+        result.Value.Entries[0].Category.Should().Be(OperationCategory.Terminal);
+        result.Value.Entries[0].Modifier.Should().Be("safe");
+    }
+
+    [Fact]
+    public void Should_Parse_Scope_With_Glob_Pattern()
+    {
+        // Arrange
+        var input = "file_write:*.test.ts";
+
+        // Act
+        var result = _parser.Parse(input);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Entries.Should().HaveCount(1);
+        result.Value.Entries[0].Category.Should().Be(OperationCategory.FileWrite);
+        result.Value.Entries[0].Pattern.Should().Be("*.test.ts");
+    }
+
+    [Fact]
+    public void Should_Reject_Invalid_Category()
+    {
+        // Arrange
+        var input = "invalid_category";
+
+        // Act
+        var result = _parser.Parse(input);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().Contain("Unknown category");
+    }
+
+    [Fact]
+    public void Should_Suggest_Correction_For_Typo()
+    {
+        // Arrange
+        var input = "file_writ"; // Missing 'e'
+
+        // Act
+        var result = _parser.Parse(input);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().Contain("Did you mean 'file_write'");
+    }
+
+    [Fact]
+    public void Should_Reject_Shell_Metacharacters()
+    {
+        // Arrange
+        var input = "file_read;rm -rf /"; // Injection attempt
+
+        // Act
+        var result = _parser.Parse(input);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().Contain("dangerous character");
+    }
+
+    [Fact]
+    public void Should_Reject_Embedded_Flags()
+    {
+        // Arrange
+        var input = "file_read --ack-danger"; // Space indicates injection
+
+        // Act
+        var result = _parser.Parse(input);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().Contain("dangerous character 'space'");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    public void Should_Return_Default_Scope_For_Empty_Input(string input)
+    {
+        // Act
+        var result = _parser.Parse(input);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().Be(YesScope.Default);
+    }
+
+    [Fact]
+    public void Should_Enforce_Maximum_Entry_Count()
+    {
+        // Arrange - 21 entries exceeds limit of 20
+        var input = string.Join(",", Enumerable.Repeat("file_read", 21));
+
+        // Act
+        var result = _parser.Parse(input);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().Contain("maximum is 20");
+    }
+}
+
+// Tests/Unit/Approvals/YesScope/RiskLevelClassifierTests.cs
+public class RiskLevelClassifierTests
+{
+    private readonly RiskLevelClassifier _classifier;
+
+    public RiskLevelClassifierTests()
+    {
+        _classifier = new RiskLevelClassifier();
+    }
+
+    [Theory]
+    [InlineData(OperationCategory.FileRead, RiskLevel.Low)]
+    [InlineData(OperationCategory.DirCreate, RiskLevel.Low)]
+    [InlineData(OperationCategory.DirList, RiskLevel.Low)]
+    public void Should_Classify_Level_1_Operations(OperationCategory category, RiskLevel expected)
+    {
+        // Act
+        var result = _classifier.GetRiskLevel(category, "any/path");
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(OperationCategory.FileWrite)]
+    public void Should_Classify_Level_2_Operations(OperationCategory category)
+    {
+        // Act
+        var result = _classifier.GetRiskLevel(category, "src/file.ts");
+
+        // Assert
+        result.Should().Be(RiskLevel.Medium);
+    }
+
+    [Theory]
+    [InlineData(OperationCategory.FileDelete)]
+    [InlineData(OperationCategory.DirDelete)]
+    [InlineData(OperationCategory.Config)]
+    public void Should_Classify_Level_3_Operations(OperationCategory category)
+    {
+        // Act
+        var result = _classifier.GetRiskLevel(category, "src/file.ts");
+
+        // Assert
+        result.Should().Be(RiskLevel.High);
+    }
+
+    [Theory]
+    [InlineData(OperationCategory.FileDelete, ".git/config")]
+    [InlineData(OperationCategory.FileDelete, ".git/HEAD")]
+    [InlineData(OperationCategory.FileDelete, ".env")]
+    [InlineData(OperationCategory.FileDelete, ".env.local")]
+    public void Should_Always_Return_Critical_For_Protected_Paths(
+        OperationCategory category, string path)
+    {
+        // Act
+        var result = _classifier.GetRiskLevel(category, path);
+
+        // Assert
+        result.Should().Be(RiskLevel.Critical);
+    }
+
+    [Fact]
+    public void Should_Prevent_Downgrade_Of_Critical_Operations()
+    {
+        // Arrange - pretend config tries to override
+        var configOverride = new RiskLevelOverride(
+            OperationCategory.FileDelete,
+            ".git/**",
+            RiskLevel.Low);
+
+        // Act
+        var result = _classifier.GetRiskLevel(
+            OperationCategory.FileDelete,
+            ".git/config",
+            configOverride);
+
+        // Assert - should still be Critical, not Low
+        result.Should().Be(RiskLevel.Critical);
+    }
+}
+
+// Tests/Unit/Approvals/YesScope/ScopePrecedenceTests.cs
+public class ScopePrecedenceTests
+{
+    private readonly ScopeResolver _resolver;
+
+    public ScopePrecedenceTests()
+    {
+        _resolver = new ScopeResolver(
+            NullLogger<ScopeResolver>.Instance,
+            new HardcodedCriticalOperations(NullLogger<HardcodedCriticalOperations>.Instance));
+    }
+
+    [Fact]
+    public void Should_CLI_Override_Config_For_Allow_Decisions()
+    {
+        // Arrange
+        var cliScope = YesScope.Parse("file_write").Value;
+        var configScope = YesScope.Parse("file_read").Value;
+        var operation = new Operation(OperationCategory.FileWrite, "src/test.ts");
+
+        // Act
+        var result = _resolver.CanBypass(operation, cliScope, configScope);
+
+        // Assert
+        result.Should().BeTrue("CLI scope includes file_write");
+    }
+
+    [Fact]
+    public void Should_Config_Override_Default_Scope()
+    {
+        // Arrange
+        var configScope = YesScope.Parse("file_write").Value;
+        var defaultScope = YesScope.Default; // Only file_read
+        var operation = new Operation(OperationCategory.FileWrite, "src/test.ts");
+
+        // Act
+        var result = _resolver.CanBypass(operation, null, configScope, defaultScope);
+
+        // Assert
+        result.Should().BeTrue("Config scope includes file_write");
+    }
+
+    [Fact]
+    public void Should_Deny_Override_Allow_Always()
+    {
+        // Arrange
+        var cliScope = YesScope.Parse("file_write").Value;
+        var denyRule = new DenyRule(OperationCategory.FileWrite, "*.config");
+        var operation = new Operation(OperationCategory.FileWrite, "app.config");
+
+        // Act
+        var result = _resolver.CanBypass(operation, cliScope, denyRules: new[] { denyRule });
+
+        // Assert
+        result.Should().BeFalse("Deny rules always override allow");
+    }
+
+    [Fact]
+    public void Should_No_Flag_Override_All_Scopes()
+    {
+        // Arrange
+        var cliScope = YesScope.Parse("all").Value;
+        var operation = new Operation(OperationCategory.FileRead, "README.md");
+        var noFlagSet = true;
+
+        // Act
+        var result = _resolver.CanBypass(operation, cliScope, noFlagSet: noFlagSet);
+
+        // Assert
+        result.Should().BeFalse("--no flag overrides all scopes");
+    }
+
+    [Fact]
+    public void Should_Interactive_Flag_Force_Prompt()
+    {
+        // Arrange
+        var cliScope = YesScope.Parse("file_read").Value;
+        var operation = new Operation(OperationCategory.FileRead, "README.md");
+        var interactiveMode = true;
+
+        // Act
+        var result = _resolver.CanBypass(operation, cliScope, interactiveMode: interactiveMode);
+
+        // Assert
+        result.Should().BeFalse("--interactive forces prompts");
+    }
+}
+
+// Tests/Unit/Approvals/YesScope/TerminalClassifierTests.cs
+public class TerminalClassifierTests
+{
+    private readonly TerminalOperationClassifier _classifier;
+
+    public TerminalClassifierTests()
+    {
+        _classifier = new TerminalOperationClassifier(
+            NullLogger<TerminalOperationClassifier>.Instance);
+    }
+
+    [Theory]
+    [InlineData("git status")]
+    [InlineData("git log")]
+    [InlineData("git diff")]
+    [InlineData("ls -la")]
+    [InlineData("cat file.txt")]
+    [InlineData("pwd")]
+    public void Should_Classify_Safe_Commands_As_Low_Risk(string command)
+    {
+        // Act
+        var result = _classifier.Classify(command);
+
+        // Assert
+        result.IsSafe.Should().BeTrue();
+        result.RiskLevel.Should().Be(RiskLevel.Low);
+    }
+
+    [Theory]
+    [InlineData("git push --force")]
+    [InlineData("git push -f")]
+    [InlineData("rm -rf /")]
+    [InlineData("rm -rf ~")]
+    [InlineData("sudo rm file")]
+    public void Should_Classify_Dangerous_Commands_As_Critical(string command)
+    {
+        // Act
+        var result = _classifier.Classify(command);
+
+        // Assert
+        result.IsDangerous.Should().BeTrue();
+        result.RiskLevel.Should().Be(RiskLevel.Critical);
+    }
+
+    [Fact]
+    public void Should_Check_Deny_List_Before_Allow_List()
+    {
+        // Arrange - command that looks safe but has dangerous flags
+        var command = "git push origin main --force";
+
+        // Act
+        var result = _classifier.Classify(command);
+
+        // Assert - deny list catches --force even though "git push" might seem normal
+        result.IsDangerous.Should().BeTrue();
+        result.Reason.Should().Contain("force");
+    }
+
+    [Fact]
+    public void Should_Require_Approval_For_Unknown_Commands()
+    {
+        // Arrange
+        var command = "some_custom_script.sh";
+
+        // Act
+        var result = _classifier.Classify(command);
+
+        // Assert
+        result.IsSafe.Should().BeFalse();
+        result.IsDangerous.Should().BeFalse();
+        result.RiskLevel.Should().Be(RiskLevel.High);
+    }
+}
 ```
 
 ### Integration Tests
 
-```
-Tests/Integration/Approvals/YesScope/
-├── ScopeApplicationTests.cs
-│   ├── Should_Apply_Session_Scope()
-│   ├── Should_Apply_Operation_Scope()
-│   └── Should_Clear_Operation_Scope()
-│
-└── ProtectionTests.cs
-    ├── Should_Protect_Git()
-    └── Should_Protect_Config()
+```csharp
+// Tests/Integration/Approvals/YesScope/ScopeApplicationTests.cs
+using Xunit;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using AgenticCoder.Infrastructure.Approvals.Scoping;
+
+namespace AgenticCoder.Tests.Integration.Approvals.YesScope;
+
+public class ScopeApplicationTests : IDisposable
+{
+    private readonly SessionScopeManager _sessionManager;
+    private readonly ScopeResolver _resolver;
+
+    public ScopeApplicationTests()
+    {
+        _sessionManager = new SessionScopeManager(
+            Guid.NewGuid(),
+            NullLogger<SessionScopeManager>.Instance);
+        _resolver = new ScopeResolver(
+            NullLogger<ScopeResolver>.Instance,
+            new HardcodedCriticalOperations(NullLogger<HardcodedCriticalOperations>.Instance));
+    }
+
+    [Fact]
+    public async Task Should_Apply_Session_Scope_To_Multiple_Operations()
+    {
+        // Arrange
+        var scope = YesScope.Parse("file_read,file_write").Value;
+        _sessionManager.SetSessionScope(scope);
+
+        var operations = new[]
+        {
+            new Operation(OperationCategory.FileRead, "src/test.ts"),
+            new Operation(OperationCategory.FileWrite, "src/test.ts"),
+            new Operation(OperationCategory.FileRead, "README.md"),
+        };
+
+        // Act & Assert
+        foreach (var op in operations)
+        {
+            var currentScope = _sessionManager.GetScopeForOperation();
+            var canBypass = _resolver.CanBypass(op, currentScope);
+            canBypass.Should().BeTrue($"Session scope should cover {op.Category}");
+        }
+
+        // Verify session statistics
+        var stats = _sessionManager.GetStatistics();
+        stats.CurrentScope.Should().Be(scope);
+    }
+
+    [Fact]
+    public async Task Should_Apply_OneTime_Scope_Then_Revert()
+    {
+        // Arrange
+        var sessionScope = YesScope.Parse("file_read").Value;
+        var oneTimeScope = YesScope.Parse("file_delete").Value;
+        _sessionManager.SetSessionScope(sessionScope);
+
+        // Act - set one-time scope
+        _sessionManager.SetNextOperationScope(oneTimeScope);
+
+        // First operation should use one-time scope
+        var firstScope = _sessionManager.GetScopeForOperation();
+        firstScope.Should().Be(oneTimeScope);
+
+        // Second operation should use session scope (one-time consumed)
+        var secondScope = _sessionManager.GetScopeForOperation();
+        secondScope.Should().Be(sessionScope);
+    }
+
+    [Fact]
+    public async Task Should_Clear_Operation_Scope_After_Use()
+    {
+        // Arrange
+        var oneTimeScope = YesScope.Parse("file_delete").Value;
+        _sessionManager.SetNextOperationScope(oneTimeScope);
+
+        // Act - consume the one-time scope
+        _ = _sessionManager.GetScopeForOperation();
+
+        // Assert - subsequent calls return default
+        var nextScope = _sessionManager.GetScopeForOperation();
+        nextScope.Should().Be(YesScope.Default);
+    }
+
+    public void Dispose()
+    {
+        _sessionManager.Dispose();
+    }
+}
+
+// Tests/Integration/Approvals/YesScope/ProtectedOperationTests.cs
+public class ProtectedOperationTests
+{
+    private readonly HardcodedCriticalOperations _protections;
+    private readonly ScopeResolver _resolver;
+
+    public ProtectedOperationTests()
+    {
+        _protections = new HardcodedCriticalOperations(
+            NullLogger<HardcodedCriticalOperations>.Instance);
+        _resolver = new ScopeResolver(
+            NullLogger<ScopeResolver>.Instance,
+            _protections);
+    }
+
+    [Theory]
+    [InlineData(".git/config")]
+    [InlineData(".git/HEAD")]
+    [InlineData(".git/objects/pack/pack-123.pack")]
+    public void Should_Protect_Git_Directory_From_Bypass(string path)
+    {
+        // Arrange
+        var scope = YesScope.Parse("all").Value; // Even "all" shouldn't bypass
+        var operation = new Operation(OperationCategory.FileDelete, path);
+
+        // Act
+        var canBypass = _resolver.CanBypass(operation, scope);
+
+        // Assert
+        canBypass.Should().BeFalse($"Git path {path} should be protected");
+    }
+
+    [Theory]
+    [InlineData(".agent/config.yml")]
+    [InlineData(".acode/settings.json")]
+    public void Should_Protect_Agent_Config_From_Bypass(string path)
+    {
+        // Arrange
+        var scope = YesScope.Parse("all").Value;
+        var operation = new Operation(OperationCategory.FileDelete, path);
+
+        // Act
+        var canBypass = _resolver.CanBypass(operation, scope);
+
+        // Assert
+        canBypass.Should().BeFalse($"Agent config {path} should be protected");
+    }
+
+    [Theory]
+    [InlineData(".env")]
+    [InlineData(".env.local")]
+    [InlineData(".env.production")]
+    public void Should_Protect_Environment_Files_From_Bypass(string path)
+    {
+        // Arrange
+        var scope = YesScope.Parse("file_delete").Value;
+        var operation = new Operation(OperationCategory.FileDelete, path);
+
+        // Act
+        var canBypass = _resolver.CanBypass(operation, scope);
+
+        // Assert
+        canBypass.Should().BeFalse($"Environment file {path} should be protected");
+    }
+
+    [Fact]
+    public void Should_Block_Critical_Terminal_Commands()
+    {
+        // Arrange
+        var scope = YesScope.Parse("terminal").Value;
+        var operations = new[]
+        {
+            new Operation(OperationCategory.Terminal, "git push --force"),
+            new Operation(OperationCategory.Terminal, "rm -rf /"),
+            new Operation(OperationCategory.Terminal, "git reset --hard"),
+        };
+
+        // Act & Assert
+        foreach (var op in operations)
+        {
+            var canBypass = _resolver.CanBypass(op, scope);
+            canBypass.Should().BeFalse($"Critical command '{op.Target}' should be blocked");
+        }
+    }
+}
+
+// Tests/Integration/Approvals/YesScope/RateLimitTests.cs
+public class RateLimitTests
+{
+    private readonly RateLimiter _rateLimiter;
+
+    public RateLimitTests()
+    {
+        _rateLimiter = new RateLimiter(new RateLimitConfig
+        {
+            MaxPerMinute = 5, // Low limit for testing
+            PauseSeconds = 1
+        });
+    }
+
+    [Fact]
+    public async Task Should_Allow_Bypasses_Within_Limit()
+    {
+        // Act & Assert - 5 bypasses should succeed
+        for (int i = 0; i < 5; i++)
+        {
+            var result = _rateLimiter.TryBypass();
+            result.IsAllowed.Should().BeTrue($"Bypass {i + 1} should be within limit");
+        }
+    }
+
+    [Fact]
+    public async Task Should_Block_When_Limit_Exceeded()
+    {
+        // Arrange - exhaust the limit
+        for (int i = 0; i < 5; i++)
+        {
+            _rateLimiter.TryBypass();
+        }
+
+        // Act - 6th bypass should be blocked
+        var result = _rateLimiter.TryBypass();
+
+        // Assert
+        result.IsAllowed.Should().BeFalse();
+        result.RetryAfter.Should().BeGreaterThan(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public async Task Should_Reset_After_Pause_Period()
+    {
+        // Arrange - exhaust the limit
+        for (int i = 0; i < 5; i++)
+        {
+            _rateLimiter.TryBypass();
+        }
+
+        // Wait for reset
+        await Task.Delay(TimeSpan.FromSeconds(1.1));
+
+        // Act - should be allowed again
+        var result = _rateLimiter.TryBypass();
+
+        // Assert
+        result.IsAllowed.Should().BeTrue();
+    }
+}
 ```
 
 ### E2E Tests
 
-```
-Tests/E2E/Approvals/YesScope/
-├── YesScopingE2ETests.cs
-│   ├── Should_Bypass_With_Scope()
-│   ├── Should_Prompt_Without_Scope()
-│   ├── Should_Block_Protected()
-│   └── Should_Rate_Limit()
+```csharp
+// Tests/E2E/Approvals/YesScope/YesScopingE2ETests.cs
+using Xunit;
+using FluentAssertions;
+using AgenticCoder.CLI;
+
+namespace AgenticCoder.Tests.E2E.Approvals.YesScope;
+
+public class YesScopingE2ETests : IClassFixture<AcodeTestFixture>
+{
+    private readonly AcodeTestFixture _fixture;
+
+    public YesScopingE2ETests(AcodeTestFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task Should_Bypass_File_Read_With_Default_Yes()
+    {
+        // Arrange
+        var testFile = _fixture.CreateTestFile("test.txt", "content");
+
+        // Act
+        var result = await _fixture.RunAcode(
+            $"run \"Read {testFile}\" --yes");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Stdout.Should().NotContain("Approval required");
+        result.AuditLog.Should().Contain("AUTO_APPROVED");
+    }
+
+    [Fact]
+    public async Task Should_Prompt_For_File_Write_Without_Explicit_Scope()
+    {
+        // Arrange
+        var testFile = _fixture.GetTestFilePath("new-file.txt");
+
+        // Act - use bare --yes without file_write scope
+        var result = await _fixture.RunAcode(
+            $"run \"Create file {testFile}\" --yes",
+            timeout: TimeSpan.FromSeconds(2)); // Will timeout waiting for prompt
+
+        // Assert
+        result.WasPromptShown.Should().BeTrue();
+        result.PromptOperation.Should().Contain("file_write");
+    }
+
+    [Fact]
+    public async Task Should_Bypass_File_Write_With_Explicit_Scope()
+    {
+        // Arrange
+        var testFile = _fixture.GetTestFilePath("new-file.txt");
+
+        // Act
+        var result = await _fixture.RunAcode(
+            $"run \"Create file {testFile}\" --yes=file_write");
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.WasPromptShown.Should().BeFalse();
+        result.AuditLog.Should().Contain("scope: file_write");
+    }
+
+    [Fact]
+    public async Task Should_Block_Protected_Operation_Even_With_Yes_All()
+    {
+        // Arrange - .git directory always protected
+        _fixture.CreateGitDirectory();
+
+        // Act
+        var result = await _fixture.RunAcode(
+            "run \"Delete .git directory\" --yes=all --ack-danger");
+
+        // Assert
+        result.WasPromptShown.Should().BeTrue("Protected ops always prompt");
+        result.PromptMessage.Should().Contain("PROTECTED");
+        result.AuditLog.Should().Contain("BLOCKED_PROTECTED");
+    }
+
+    [Fact]
+    public async Task Should_Enforce_Rate_Limit()
+    {
+        // Arrange
+        _fixture.ConfigureRateLimit(maxPerMinute: 3, pauseSeconds: 5);
+
+        // Act - try 5 quick bypasses
+        for (int i = 0; i < 5; i++)
+        {
+            var result = await _fixture.RunAcode(
+                $"run \"Read file{i}.txt\" --yes");
+
+            if (i < 3)
+            {
+                result.ExitCode.Should().Be(0);
+            }
+            else
+            {
+                result.Stdout.Should().Contain("Rate limit exceeded");
+                result.Stdout.Should().Contain("Pausing");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Should_Require_Acknowledgment_For_Yes_All()
+    {
+        // Act - --yes=all without --ack-danger
+        var result = await _fixture.RunAcode(
+            "run \"Do everything\" --yes=all",
+            timeout: TimeSpan.FromSeconds(2));
+
+        // Assert
+        result.Stderr.Should().Contain("--yes=all requires --ack-danger");
+        result.ExitCode.Should().NotBe(0);
+    }
+
+    [Fact]
+    public async Task Should_Reject_Invalid_Scope_Syntax()
+    {
+        // Act
+        var result = await _fixture.RunAcode(
+            "run \"Test\" --yes=invalid;rm -rf /");
+
+        // Assert
+        result.ExitCode.Should().NotBe(0);
+        result.Stderr.Should().Contain("dangerous character");
+        // Command injection should not have executed
+        _fixture.DirectoryExists("/").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Should_Log_All_Bypasses_To_Audit()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        _fixture.SetSessionId(sessionId);
+
+        // Act
+        await _fixture.RunAcode("run \"Read file1.txt\" --yes");
+        await _fixture.RunAcode("run \"Read file2.txt\" --yes");
+        await _fixture.RunAcode("run \"Read file3.txt\" --yes");
+
+        // Assert
+        var auditEntries = _fixture.GetAuditEntriesForSession(sessionId);
+        auditEntries.Should().HaveCount(3);
+        auditEntries.All(e => e.Decision == "AUTO_APPROVED").Should().BeTrue();
+        auditEntries.All(e => e.ScopeUsed == "default").Should().BeTrue();
+    }
+}
 ```
 
 ### Performance Benchmarks
 
-| Benchmark | Target | Maximum |
-|-----------|--------|---------|
-| Scope parsing | 0.5ms | 1ms |
-| Scope validation | 2ms | 5ms |
-| Risk lookup | 0.1ms | 0.5ms |
+```csharp
+// Tests/Performance/Approvals/YesScope/ScopeBenchmarks.cs
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
+using AgenticCoder.Infrastructure.Approvals.Scoping;
+
+namespace AgenticCoder.Tests.Performance.Approvals.YesScope;
+
+[MemoryDiagnoser]
+public class ScopeBenchmarks
+{
+    private ScopeParser _parser;
+    private ScopePatternComplexityValidator _validator;
+    private RiskLevelClassifier _classifier;
+    private string _simpleScope;
+    private string _complexScope;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _parser = new ScopeParser();
+        _validator = new ScopePatternComplexityValidator(
+            NullLogger<ScopePatternComplexityValidator>.Instance);
+        _classifier = new RiskLevelClassifier();
+        _simpleScope = "file_read";
+        _complexScope = "file_read,file_write:*.test.ts,terminal:safe,config";
+    }
+
+    [Benchmark]
+    public void ParseSimpleScope()
+    {
+        _ = _parser.Parse(_simpleScope);
+    }
+
+    [Benchmark]
+    public void ParseComplexScope()
+    {
+        _ = _parser.Parse(_complexScope);
+    }
+
+    [Benchmark]
+    public void ValidatePattern()
+    {
+        _ = _validator.ValidatePattern("src/**/*.ts");
+    }
+
+    [Benchmark]
+    public void ClassifyRiskLevel()
+    {
+        _ = _classifier.GetRiskLevel(OperationCategory.FileWrite, "src/test.ts");
+    }
+}
+
+// Performance Targets:
+// | Benchmark           | Target   | Maximum  |
+// |---------------------|----------|----------|
+// | ParseSimpleScope    | 0.3ms    | 1ms      |
+// | ParseComplexScope   | 0.8ms    | 2ms      |
+// | ValidatePattern     | 1ms      | 5ms      |
+// | ClassifyRiskLevel   | 0.05ms   | 0.5ms    |
+```
+
+### Test Coverage Requirements
+
+| Component | Target Coverage | Test Types |
+|-----------|-----------------|------------|
+| ScopeParser | 95% | Unit, Integration |
+| ScopeValidator | 90% | Unit |
+| ScopeResolver | 95% | Unit, Integration |
+| RiskLevelClassifier | 95% | Unit |
+| TerminalClassifier | 90% | Unit |
+| SessionScopeManager | 90% | Unit, Integration |
+| RateLimiter | 85% | Unit, Integration |
+| HardcodedCriticalOperations | 100% | Unit |
+
+### Regression Tests
+
+```csharp
+// Tests/Regression/YesScopeRegressionTests.cs
+public class YesScopeRegressionTests
+{
+    [Fact]
+    public void Regression_ScopeInjection_CVE2024001()
+    {
+        // This test ensures the scope injection vulnerability is mitigated
+        var parser = new ScopeParser();
+
+        // Attack vector: embedded flag injection
+        var maliciousInput = "file_read,all --ack-danger";
+
+        var result = parser.Parse(maliciousInput);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().Contain("dangerous");
+    }
+
+    [Fact]
+    public void Regression_RiskLevelDowngrade_CVE2024002()
+    {
+        // This test ensures critical operations cannot be downgraded
+        var protections = new HardcodedCriticalOperations(
+            NullLogger<HardcodedCriticalOperations>.Instance);
+
+        var maliciousConfig = new RiskLevelOverride(
+            OperationCategory.FileDelete,
+            ".git/**",
+            RiskLevel.Low);
+
+        var result = protections.ValidateRiskLevelConfiguration(
+            new[] { maliciousConfig });
+
+        result.IsValid.Should().BeFalse();
+        result.Violations.Should().Contain(v => v.Contains("downgrade"));
+    }
+
+    [Fact]
+    public void Regression_PatternDenialOfService_CVE2024003()
+    {
+        // This test ensures complex patterns are rejected
+        var validator = new ScopePatternComplexityValidator(
+            NullLogger<ScopePatternComplexityValidator>.Instance);
+
+        var maliciousPattern = "**/**/**/**/**/*.ts"; // 5 recursive globs
+
+        var result = validator.ValidatePattern(maliciousPattern);
+
+        result.IsValid.Should().BeFalse();
+        result.Message.Should().Contain("recursive globs");
+    }
+}
+```
 
 ---
 
@@ -1047,148 +3286,911 @@ Tests/E2E/Approvals/YesScope/
 
 ## Implementation Prompt
 
-### File Structure
+### Step 1: Create Domain Types (src/AgenticCoder.Domain/Approvals/)
 
-```
-src/AgenticCoder.Domain/
-├── Approvals/
-│   ├── YesScope.cs
-│   └── RiskLevel.cs
-│
-src/AgenticCoder.Application/
-├── Approvals/
-│   └── Scoping/
-│       ├── IScopeParser.cs
-│       ├── IScopeValidator.cs
-│       └── IScopeResolver.cs
-│
-src/AgenticCoder.Infrastructure/
-├── Approvals/
-│   └── Scoping/
-│       ├── ScopeParser.cs
-│       ├── ScopeValidator.cs
-│       └── ScopeResolver.cs
-│
-src/AgenticCoder.CLI/
-└── Options/
-    └── YesOptions.cs
-```
-
-### YesScope Value Object
+#### OperationCategory Enum
 
 ```csharp
+// src/AgenticCoder.Domain/Approvals/OperationCategory.cs
 namespace AgenticCoder.Domain.Approvals;
 
-public sealed record YesScope
+/// <summary>
+/// Categories of operations that can be scoped for --yes bypass.
+/// </summary>
+public enum OperationCategory
 {
-    public IReadOnlyList<ScopeEntry> Entries { get; }
-    public bool IsAll { get; }
-    public bool IsNone { get; }
-    
-    public static YesScope Parse(string input);
-    public static YesScope Default { get; }
-    public static YesScope All { get; }
-    public static YesScope None { get; }
-    
-    public bool Covers(Operation operation);
-}
+    /// <summary>Reading files - Risk Level 1 (Low)</summary>
+    FileRead,
 
-public sealed record ScopeEntry(
-    OperationCategory Category,
-    string? Modifier,
-    string? Pattern);
+    /// <summary>Creating or modifying files - Risk Level 2 (Medium)</summary>
+    FileWrite,
+
+    /// <summary>Deleting files - Risk Level 3 (High)</summary>
+    FileDelete,
+
+    /// <summary>Creating directories - Risk Level 1 (Low)</summary>
+    DirCreate,
+
+    /// <summary>Deleting directories - Risk Level 3 (High)</summary>
+    DirDelete,
+
+    /// <summary>Listing directory contents - Risk Level 1 (Low)</summary>
+    DirList,
+
+    /// <summary>Executing shell commands - Risk Level 2-4 (varies)</summary>
+    Terminal,
+
+    /// <summary>Modifying configuration files - Risk Level 3 (High)</summary>
+    Config,
+
+    /// <summary>Searching codebase - Risk Level 1 (Low)</summary>
+    Search
+}
 ```
 
-### RiskLevel Enum
+#### RiskLevel Enum
 
 ```csharp
+// src/AgenticCoder.Domain/Approvals/RiskLevel.cs
 namespace AgenticCoder.Domain.Approvals;
 
+/// <summary>
+/// Risk classification for operations. Higher levels require more explicit consent.
+/// </summary>
 public enum RiskLevel
 {
-    Low = 1,      // Implicit --yes
-    Medium = 2,   // Explicit scope required
-    High = 3,     // Acknowledgment required
-    Critical = 4  // Cannot bypass
+    /// <summary>
+    /// Low risk - implicitly approved with bare --yes flag.
+    /// Examples: file_read, dir_list, search
+    /// </summary>
+    Low = 1,
+
+    /// <summary>
+    /// Medium risk - requires explicit scope in --yes=scope.
+    /// Examples: file_write, terminal:safe
+    /// </summary>
+    Medium = 2,
+
+    /// <summary>
+    /// High risk - requires explicit scope AND displays warning.
+    /// Examples: file_delete, dir_delete, config, terminal
+    /// </summary>
+    High = 3,
+
+    /// <summary>
+    /// Critical - NEVER bypassable, always prompts regardless of --yes.
+    /// Examples: .git deletion, .env deletion, git push --force
+    /// </summary>
+    Critical = 4
 }
 ```
 
-### IScopeResolver Interface
+#### ScopeEntry Record
 
 ```csharp
-namespace AgenticCoder.Application.Approvals.Scoping;
+// src/AgenticCoder.Domain/Approvals/ScopeEntry.cs
+namespace AgenticCoder.Domain.Approvals;
 
-public interface IScopeResolver
+/// <summary>
+/// A single entry in a --yes scope specification.
+/// Format: category[:modifier][:pattern]
+/// </summary>
+public sealed record ScopeEntry
 {
-    YesScope Resolve(
-        YesScope? cliScope,
-        YesScope? configScope,
-        YesScope defaultScope);
-        
-    bool CanBypass(Operation operation, YesScope scope);
-    bool IsProtected(Operation operation);
+    public OperationCategory Category { get; }
+    public string? Modifier { get; }
+    public string? Pattern { get; }
+
+    public ScopeEntry(OperationCategory category, string? modifier = null, string? pattern = null)
+    {
+        Category = category;
+        Modifier = modifier;
+        Pattern = pattern;
+    }
+
+    /// <summary>
+    /// Checks if this scope entry covers the given operation.
+    /// </summary>
+    public bool Covers(Operation operation)
+    {
+        // Category must match
+        if (Category != operation.Category)
+            return false;
+
+        // If modifier is "safe", operation must be marked safe
+        if (Modifier == "safe" && !operation.IsSafe)
+            return false;
+
+        // If modifier is "test", path must be in test directory
+        if (Modifier == "test" && !IsTestPath(operation.Target))
+            return false;
+
+        // If pattern specified, path must match glob
+        if (!string.IsNullOrEmpty(Pattern) && !MatchesGlob(operation.Target, Pattern))
+            return false;
+
+        return true;
+    }
+
+    private static bool IsTestPath(string path)
+    {
+        return path.Contains("/test/", StringComparison.OrdinalIgnoreCase) ||
+               path.Contains("/tests/", StringComparison.OrdinalIgnoreCase) ||
+               path.Contains(".test.", StringComparison.OrdinalIgnoreCase) ||
+               path.Contains(".spec.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesGlob(string path, string pattern)
+    {
+        var regexPattern = "^" + Regex.Escape(pattern)
+            .Replace("\\*\\*", ".*")
+            .Replace("\\*", "[^/]*")
+            .Replace("\\?", ".") + "$";
+        return Regex.IsMatch(path, regexPattern, RegexOptions.IgnoreCase);
+    }
+
+    public override string ToString()
+    {
+        var parts = new List<string> { Category.ToString().ToLowerInvariant() };
+        if (!string.IsNullOrEmpty(Modifier)) parts.Add(Modifier);
+        if (!string.IsNullOrEmpty(Pattern)) parts.Add(Pattern);
+        return string.Join(":", parts);
+    }
 }
 ```
 
-### Error Codes
+#### YesScope Value Object
 
-| Code | Meaning |
-|------|---------|
-| ACODE-YES-001 | Invalid scope syntax |
-| ACODE-YES-002 | Unknown category |
-| ACODE-YES-003 | Invalid modifier |
-| ACODE-YES-004 | Protected operation |
-| ACODE-YES-005 | Rate limit exceeded |
+```csharp
+// src/AgenticCoder.Domain/Approvals/YesScope.cs
+namespace AgenticCoder.Domain.Approvals;
 
-### Logging Fields
-
-```json
+/// <summary>
+/// Immutable value object representing a --yes scope specification.
+/// </summary>
+public sealed record YesScope
 {
-  "event": "approval_bypassed",
-  "operation_category": "file_write",
-  "scope_used": "file_write",
-  "risk_level": 2,
-  "session_id": "abc123",
-  "path": "src/readme.md"
+    private readonly IReadOnlyList<ScopeEntry> _entries;
+
+    public IReadOnlyList<ScopeEntry> Entries => _entries;
+    public bool IsAll { get; }
+    public bool IsNone { get; }
+
+    private YesScope(IReadOnlyList<ScopeEntry> entries, bool isAll = false, bool isNone = false)
+    {
+        _entries = entries;
+        IsAll = isAll;
+        IsNone = isNone;
+    }
+
+    /// <summary>
+    /// Default scope: file_read, dir_list, dir_create, search (Level 1 only)
+    /// </summary>
+    public static YesScope Default { get; } = new(new[]
+    {
+        new ScopeEntry(OperationCategory.FileRead),
+        new ScopeEntry(OperationCategory.DirList),
+        new ScopeEntry(OperationCategory.DirCreate),
+        new ScopeEntry(OperationCategory.Search)
+    });
+
+    /// <summary>
+    /// All scope - covers everything except Critical (Level 4) operations.
+    /// Requires --ack-danger flag.
+    /// </summary>
+    public static YesScope All { get; } = new(Array.Empty<ScopeEntry>(), isAll: true);
+
+    /// <summary>
+    /// None scope - bypasses nothing, all operations prompt.
+    /// </summary>
+    public static YesScope None { get; } = new(Array.Empty<ScopeEntry>(), isNone: true);
+
+    /// <summary>
+    /// Creates a scope from a list of entries.
+    /// </summary>
+    public static YesScope From(IEnumerable<ScopeEntry> entries)
+    {
+        return new YesScope(entries.ToList());
+    }
+
+    /// <summary>
+    /// Checks if this scope covers the given operation.
+    /// </summary>
+    public bool Covers(Operation operation)
+    {
+        if (IsNone) return false;
+        if (IsAll) return operation.RiskLevel != RiskLevel.Critical;
+
+        return _entries.Any(e => e.Covers(operation));
+    }
+
+    /// <summary>
+    /// Combines this scope with another, returning a new scope with both entries.
+    /// </summary>
+    public YesScope Combine(YesScope other)
+    {
+        if (IsAll || other.IsAll) return All;
+        if (IsNone) return other;
+        if (other.IsNone) return this;
+
+        return new YesScope(_entries.Concat(other._entries).ToList());
+    }
+
+    public override string ToString()
+    {
+        if (IsAll) return "all";
+        if (IsNone) return "none";
+        if (!_entries.Any()) return "default";
+        return string.Join(",", _entries.Select(e => e.ToString()));
+    }
+}
+```
+
+#### Operation Record
+
+```csharp
+// src/AgenticCoder.Domain/Approvals/Operation.cs
+namespace AgenticCoder.Domain.Approvals;
+
+/// <summary>
+/// Represents an operation that may require approval.
+/// </summary>
+public sealed record Operation
+{
+    public OperationCategory Category { get; }
+    public string Target { get; }
+    public RiskLevel RiskLevel { get; }
+    public bool IsSafe { get; }
+    public string Description { get; }
+
+    public Operation(
+        OperationCategory category,
+        string target,
+        RiskLevel? riskLevel = null,
+        bool isSafe = false,
+        string description = "")
+    {
+        Category = category;
+        Target = target;
+        RiskLevel = riskLevel ?? GetDefaultRiskLevel(category, target);
+        IsSafe = isSafe;
+        Description = description;
+    }
+
+    private static RiskLevel GetDefaultRiskLevel(OperationCategory category, string target)
+    {
+        // Check for critical paths first
+        if (IsCriticalPath(target))
+            return RiskLevel.Critical;
+
+        return category switch
+        {
+            OperationCategory.FileRead => RiskLevel.Low,
+            OperationCategory.DirCreate => RiskLevel.Low,
+            OperationCategory.DirList => RiskLevel.Low,
+            OperationCategory.Search => RiskLevel.Low,
+            OperationCategory.FileWrite => RiskLevel.Medium,
+            OperationCategory.FileDelete => RiskLevel.High,
+            OperationCategory.DirDelete => RiskLevel.High,
+            OperationCategory.Config => RiskLevel.High,
+            OperationCategory.Terminal => RiskLevel.High,
+            _ => RiskLevel.High
+        };
+    }
+
+    private static bool IsCriticalPath(string path)
+    {
+        var criticalPatterns = new[]
+        {
+            ".git", ".git/", ".git\\",
+            ".env", ".env.",
+            ".agent", ".agent/", ".agent\\",
+            ".acode", ".acode/", ".acode\\",
+            "credentials", "secret", ".pem", ".key"
+        };
+
+        return criticalPatterns.Any(p =>
+            path.Contains(p, StringComparison.OrdinalIgnoreCase));
+    }
+}
+```
+
+### Step 2: Create Application Interfaces (src/AgenticCoder.Application/Approvals/Scoping/)
+
+```csharp
+// src/AgenticCoder.Application/Approvals/Scoping/IScopeParser.cs
+namespace AgenticCoder.Application.Approvals.Scoping;
+
+/// <summary>
+/// Parses --yes scope specifications from string format.
+/// </summary>
+public interface IScopeParser
+{
+    /// <summary>
+    /// Parses a scope string into a YesScope object.
+    /// </summary>
+    /// <param name="input">Scope specification like "file_read,file_write:*.test.ts"</param>
+    /// <returns>Result containing YesScope or error details</returns>
+    Result<YesScope> Parse(string? input);
+}
+
+// src/AgenticCoder.Application/Approvals/Scoping/IScopeResolver.cs
+namespace AgenticCoder.Application.Approvals.Scoping;
+
+/// <summary>
+/// Resolves effective scope from CLI, config, and defaults with precedence rules.
+/// </summary>
+public interface IScopeResolver
+{
+    /// <summary>
+    /// Determines if an operation can be bypassed under the given scope.
+    /// </summary>
+    bool CanBypass(
+        Operation operation,
+        YesScope? cliScope,
+        YesScope? configScope = null,
+        YesScope? defaultScope = null,
+        IEnumerable<DenyRule>? denyRules = null,
+        bool noFlagSet = false,
+        bool interactiveMode = false);
+
+    /// <summary>
+    /// Checks if an operation is protected (never bypassable).
+    /// </summary>
+    bool IsProtected(Operation operation);
+
+    /// <summary>
+    /// Gets the effective scope after applying precedence rules.
+    /// </summary>
+    YesScope GetEffectiveScope(
+        YesScope? cliScope,
+        YesScope? configScope,
+        YesScope? defaultScope);
+}
+
+// src/AgenticCoder.Application/Approvals/Scoping/IRateLimiter.cs
+namespace AgenticCoder.Application.Approvals.Scoping;
+
+/// <summary>
+/// Rate limits --yes bypasses to prevent runaway automation.
+/// </summary>
+public interface IRateLimiter
+{
+    /// <summary>
+    /// Attempts to record a bypass. Returns whether allowed.
+    /// </summary>
+    RateLimitResult TryBypass();
+
+    /// <summary>
+    /// Gets current rate limit status.
+    /// </summary>
+    RateLimitStatus GetStatus();
+
+    /// <summary>
+    /// Resets the rate limiter (e.g., at session end).
+    /// </summary>
+    void Reset();
+}
+```
+
+### Step 3: Implement Infrastructure (src/AgenticCoder.Infrastructure/Approvals/Scoping/)
+
+```csharp
+// src/AgenticCoder.Infrastructure/Approvals/Scoping/ScopeParser.cs
+using Microsoft.Extensions.Logging;
+using System.Text.RegularExpressions;
+
+namespace AgenticCoder.Infrastructure.Approvals.Scoping;
+
+public sealed class ScopeParser : IScopeParser
+{
+    private readonly ILogger<ScopeParser> _logger;
+    private readonly ScopeInjectionGuard _injectionGuard;
+
+    private static readonly Dictionary<string, OperationCategory> CategoryMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["file_read"] = OperationCategory.FileRead,
+        ["file_write"] = OperationCategory.FileWrite,
+        ["file_delete"] = OperationCategory.FileDelete,
+        ["dir_create"] = OperationCategory.DirCreate,
+        ["dir_delete"] = OperationCategory.DirDelete,
+        ["dir_list"] = OperationCategory.DirList,
+        ["terminal"] = OperationCategory.Terminal,
+        ["config"] = OperationCategory.Config,
+        ["search"] = OperationCategory.Search,
+        ["all"] = OperationCategory.FileRead, // Special handling
+        ["none"] = OperationCategory.FileRead, // Special handling
+        ["default"] = OperationCategory.FileRead // Special handling
+    };
+
+    public ScopeParser(ILogger<ScopeParser> logger)
+    {
+        _logger = logger;
+        _injectionGuard = new ScopeInjectionGuard(
+            NullLogger<ScopeInjectionGuard>.Instance);
+    }
+
+    public Result<YesScope> Parse(string? input)
+    {
+        // Empty input = default scope
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return Result<YesScope>.Success(YesScope.Default);
+        }
+
+        // Validate for injection attacks first
+        var injectionCheck = _injectionGuard.ValidateForInjection(input);
+        if (!injectionCheck.IsValid)
+        {
+            return Result<YesScope>.Failure(
+                "ACODE-YES-001",
+                injectionCheck.Message ?? "Invalid scope syntax");
+        }
+
+        // Handle special scopes
+        if (input.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!injectionCheck.RequiresAck)
+            {
+                return Result<YesScope>.Failure(
+                    "ACODE-YES-006",
+                    "Scope 'all' requires --ack-danger flag");
+            }
+            return Result<YesScope>.Success(YesScope.All);
+        }
+
+        if (input.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            return Result<YesScope>.Success(YesScope.None);
+        }
+
+        if (input.Equals("default", StringComparison.OrdinalIgnoreCase))
+        {
+            return Result<YesScope>.Success(YesScope.Default);
+        }
+
+        // Parse comma-separated entries
+        var entries = new List<ScopeEntry>();
+        var parts = input.Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var part in parts)
+        {
+            var entryResult = ParseEntry(part.Trim());
+            if (!entryResult.IsSuccess)
+            {
+                return Result<YesScope>.Failure(entryResult.ErrorCode!, entryResult.ErrorMessage!);
+            }
+            entries.Add(entryResult.Value!);
+        }
+
+        _logger.LogDebug("Parsed scope: {Scope} with {Count} entries", input, entries.Count);
+
+        return Result<YesScope>.Success(YesScope.From(entries));
+    }
+
+    private Result<ScopeEntry> ParseEntry(string entry)
+    {
+        // Format: category[:modifier][:pattern]
+        var colonParts = entry.Split(':', 3);
+        var categoryStr = colonParts[0];
+
+        // Validate category
+        if (!CategoryMap.TryGetValue(categoryStr, out var category))
+        {
+            var suggestion = FindClosestCategory(categoryStr);
+            var message = $"Unknown category '{categoryStr}'.";
+            if (suggestion != null)
+            {
+                message += $" Did you mean '{suggestion}'?";
+            }
+            return Result<ScopeEntry>.Failure("ACODE-YES-002", message);
+        }
+
+        string? modifier = null;
+        string? pattern = null;
+
+        if (colonParts.Length >= 2)
+        {
+            var second = colonParts[1];
+            // Check if it's a known modifier or a pattern
+            if (IsKnownModifier(second))
+            {
+                modifier = second;
+                if (colonParts.Length >= 3)
+                {
+                    pattern = colonParts[2];
+                }
+            }
+            else
+            {
+                // Treat as pattern
+                pattern = second;
+            }
+        }
+
+        return Result<ScopeEntry>.Success(new ScopeEntry(category, modifier, pattern));
+    }
+
+    private static bool IsKnownModifier(string value)
+    {
+        return value.Equals("safe", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("test", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("generated", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("all", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? FindClosestCategory(string input)
+    {
+        var candidates = CategoryMap.Keys.ToList();
+        return candidates
+            .Select(c => (Category: c, Distance: LevenshteinDistance(input.ToLower(), c.ToLower())))
+            .Where(x => x.Distance <= 3)
+            .OrderBy(x => x.Distance)
+            .Select(x => x.Category)
+            .FirstOrDefault();
+    }
+
+    private static int LevenshteinDistance(string s1, string s2)
+    {
+        var m = s1.Length;
+        var n = s2.Length;
+        var d = new int[m + 1, n + 1];
+
+        for (var i = 0; i <= m; i++) d[i, 0] = i;
+        for (var j = 0; j <= n; j++) d[0, j] = j;
+
+        for (var j = 1; j <= n; j++)
+        {
+            for (var i = 1; i <= m; i++)
+            {
+                var cost = s1[i - 1] == s2[j - 1] ? 0 : 1;
+                d[i, j] = Math.Min(
+                    Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                    d[i - 1, j - 1] + cost);
+            }
+        }
+
+        return d[m, n];
+    }
+}
+```
+
+### Step 4: Implement Scope Resolver
+
+```csharp
+// src/AgenticCoder.Infrastructure/Approvals/Scoping/ScopeResolver.cs
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.Approvals.Scoping;
+
+public sealed class ScopeResolver : IScopeResolver
+{
+    private readonly ILogger<ScopeResolver> _logger;
+    private readonly HardcodedCriticalOperations _criticalOps;
+
+    public ScopeResolver(
+        ILogger<ScopeResolver> logger,
+        HardcodedCriticalOperations criticalOps)
+    {
+        _logger = logger;
+        _criticalOps = criticalOps;
+    }
+
+    public bool CanBypass(
+        Operation operation,
+        YesScope? cliScope,
+        YesScope? configScope = null,
+        YesScope? defaultScope = null,
+        IEnumerable<DenyRule>? denyRules = null,
+        bool noFlagSet = false,
+        bool interactiveMode = false)
+    {
+        // Precedence 1: --no flag blocks everything
+        if (noFlagSet)
+        {
+            _logger.LogDebug("Bypass blocked: --no flag set");
+            return false;
+        }
+
+        // Precedence 2: --interactive forces prompts
+        if (interactiveMode)
+        {
+            _logger.LogDebug("Bypass blocked: --interactive mode");
+            return false;
+        }
+
+        // Precedence 3: Protected operations never bypass
+        if (IsProtected(operation))
+        {
+            _logger.LogDebug("Bypass blocked: protected operation {Target}", operation.Target);
+            return false;
+        }
+
+        // Precedence 4: Critical risk level never bypasses
+        if (operation.RiskLevel == RiskLevel.Critical)
+        {
+            _logger.LogDebug("Bypass blocked: critical risk level for {Target}", operation.Target);
+            return false;
+        }
+
+        // Precedence 5: Deny rules block
+        if (denyRules != null)
+        {
+            foreach (var rule in denyRules)
+            {
+                if (rule.Matches(operation))
+                {
+                    _logger.LogDebug("Bypass blocked: deny rule {Rule} matched", rule);
+                    return false;
+                }
+            }
+        }
+
+        // Precedence 6: Apply scope hierarchy (CLI > config > default)
+        var effectiveScope = GetEffectiveScope(cliScope, configScope, defaultScope ?? YesScope.Default);
+
+        // Check if scope covers the operation
+        var canBypass = effectiveScope.Covers(operation);
+
+        _logger.LogDebug(
+            "Bypass {Result} for {Category}:{Target} with scope {Scope}",
+            canBypass ? "allowed" : "blocked",
+            operation.Category,
+            operation.Target,
+            effectiveScope);
+
+        return canBypass;
+    }
+
+    public bool IsProtected(Operation operation)
+    {
+        return _criticalOps.IsCriticalOperation(operation.Category, operation.Target);
+    }
+
+    public YesScope GetEffectiveScope(
+        YesScope? cliScope,
+        YesScope? configScope,
+        YesScope? defaultScope)
+    {
+        // CLI scope takes precedence if provided
+        if (cliScope != null && !cliScope.IsNone)
+        {
+            return cliScope;
+        }
+
+        // Config scope next
+        if (configScope != null && !configScope.IsNone)
+        {
+            return configScope;
+        }
+
+        // Fall back to default
+        return defaultScope ?? YesScope.Default;
+    }
+}
+```
+
+### Step 5: Implement Rate Limiter
+
+```csharp
+// src/AgenticCoder.Infrastructure/Approvals/Scoping/RateLimiter.cs
+namespace AgenticCoder.Infrastructure.Approvals.Scoping;
+
+public sealed class RateLimiter : IRateLimiter
+{
+    private readonly RateLimitConfig _config;
+    private readonly object _lock = new();
+    private int _count;
+    private DateTimeOffset _windowStart;
+
+    public RateLimiter(RateLimitConfig config)
+    {
+        _config = config;
+        _windowStart = DateTimeOffset.UtcNow;
+        _count = 0;
+    }
+
+    public RateLimitResult TryBypass()
+    {
+        lock (_lock)
+        {
+            var now = DateTimeOffset.UtcNow;
+
+            // Check if window has expired and reset
+            if (now - _windowStart > TimeSpan.FromMinutes(1))
+            {
+                _windowStart = now;
+                _count = 0;
+            }
+
+            // Check if within limit
+            if (_count < _config.MaxPerMinute)
+            {
+                _count++;
+                return RateLimitResult.Allowed(_count, _config.MaxPerMinute);
+            }
+
+            // Rate limit exceeded
+            var retryAfter = TimeSpan.FromSeconds(_config.PauseSeconds);
+            return RateLimitResult.Exceeded(_count, _config.MaxPerMinute, retryAfter);
+        }
+    }
+
+    public RateLimitStatus GetStatus()
+    {
+        lock (_lock)
+        {
+            return new RateLimitStatus(_count, _config.MaxPerMinute, _windowStart);
+        }
+    }
+
+    public void Reset()
+    {
+        lock (_lock)
+        {
+            _count = 0;
+            _windowStart = DateTimeOffset.UtcNow;
+        }
+    }
+}
+
+public sealed record RateLimitConfig
+{
+    public int MaxPerMinute { get; init; } = 100;
+    public int PauseSeconds { get; init; } = 30;
+    public bool Enabled { get; init; } = true;
+}
+
+public sealed record RateLimitResult
+{
+    public bool IsAllowed { get; }
+    public int CurrentCount { get; }
+    public int MaxAllowed { get; }
+    public TimeSpan RetryAfter { get; }
+
+    private RateLimitResult(bool allowed, int count, int max, TimeSpan retry)
+    {
+        IsAllowed = allowed;
+        CurrentCount = count;
+        MaxAllowed = max;
+        RetryAfter = retry;
+    }
+
+    public static RateLimitResult Allowed(int count, int max) =>
+        new(true, count, max, TimeSpan.Zero);
+
+    public static RateLimitResult Exceeded(int count, int max, TimeSpan retry) =>
+        new(false, count, max, retry);
+}
+
+public sealed record RateLimitStatus(int CurrentCount, int MaxPerMinute, DateTimeOffset WindowStart);
+```
+
+### Step 6: Add CLI Options Integration
+
+```csharp
+// src/AgenticCoder.CLI/Options/YesOptions.cs
+using System.CommandLine;
+
+namespace AgenticCoder.CLI.Options;
+
+public static class YesOptions
+{
+    public static Option<string?> YesOption { get; } = new(
+        aliases: new[] { "--yes", "-y" },
+        description: "Auto-approve operations matching scope. Default: file_read,dir_list,search");
+
+    public static Option<string?> YesNextOption { get; } = new(
+        aliases: new[] { "--yes-next" },
+        description: "Auto-approve next operation only with specified scope");
+
+    public static Option<string?> YesExcludeOption { get; } = new(
+        aliases: new[] { "--yes-exclude" },
+        description: "Exclude operations from auto-approval");
+
+    public static Option<bool> NoOption { get; } = new(
+        aliases: new[] { "--no", "-n" },
+        description: "Deny all operations (no auto-approval)");
+
+    public static Option<bool> InteractiveOption { get; } = new(
+        aliases: new[] { "--interactive", "-i" },
+        description: "Force interactive mode (always prompt)");
+
+    public static Option<bool> AckDangerOption { get; } = new(
+        aliases: new[] { "--ack-danger" },
+        description: "Acknowledge danger for --yes=all");
+
+    public static void AddYesOptionsToCommand(Command command)
+    {
+        command.AddOption(YesOption);
+        command.AddOption(YesNextOption);
+        command.AddOption(YesExcludeOption);
+        command.AddOption(NoOption);
+        command.AddOption(InteractiveOption);
+        command.AddOption(AckDangerOption);
+    }
+}
+```
+
+### Error Codes Reference
+
+| Code | Meaning | User Action |
+|------|---------|-------------|
+| ACODE-YES-001 | Invalid scope syntax | Check scope format: category[:modifier][:pattern] |
+| ACODE-YES-002 | Unknown category | Use: file_read, file_write, file_delete, terminal, config |
+| ACODE-YES-003 | Invalid modifier | Use: safe, test, generated, or a glob pattern |
+| ACODE-YES-004 | Protected operation | Cannot bypass, must approve manually |
+| ACODE-YES-005 | Rate limit exceeded | Wait for cooldown period |
+| ACODE-YES-006 | Missing --ack-danger | Add --ack-danger flag with --yes=all |
+
+### DI Registration
+
+```csharp
+// src/AgenticCoder.Infrastructure/DependencyInjection.cs
+public static class DependencyInjection
+{
+    public static IServiceCollection AddYesScopingServices(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        // Register scoping services
+        services.AddSingleton<IScopeParser, ScopeParser>();
+        services.AddSingleton<IScopeResolver, ScopeResolver>();
+        services.AddSingleton<HardcodedCriticalOperations>();
+        services.AddSingleton<ScopeInjectionGuard>();
+        services.AddSingleton<ScopePatternComplexityValidator>();
+        services.AddSingleton<TerminalOperationClassifier>();
+
+        // Configure rate limiting from config
+        services.Configure<RateLimitConfig>(
+            configuration.GetSection("Yes:RateLimit"));
+        services.AddSingleton<IRateLimiter, RateLimiter>();
+
+        // Session scope manager is scoped per session
+        services.AddScoped<SessionScopeManager>();
+        services.AddSingleton<SessionScopeManagerFactory>();
+
+        return services;
+    }
 }
 ```
 
 ### Implementation Checklist
 
-1. [ ] Create YesScope value object
-2. [ ] Create RiskLevel enum
-3. [ ] Implement scope parser
-4. [ ] Implement scope validator
-5. [ ] Implement scope resolver
-6. [ ] Add protected operations
-7. [ ] Implement rate limiting
-8. [ ] Add CLI options
-9. [ ] Integrate with approval gates
-10. [ ] Add bypass logging
-11. [ ] Write unit tests
-12. [ ] Write integration tests
-13. [ ] Write E2E tests
+1. [ ] Create OperationCategory enum (src/AgenticCoder.Domain/Approvals/OperationCategory.cs)
+2. [ ] Create RiskLevel enum (src/AgenticCoder.Domain/Approvals/RiskLevel.cs)
+3. [ ] Create ScopeEntry record (src/AgenticCoder.Domain/Approvals/ScopeEntry.cs)
+4. [ ] Create YesScope value object (src/AgenticCoder.Domain/Approvals/YesScope.cs)
+5. [ ] Create Operation record (src/AgenticCoder.Domain/Approvals/Operation.cs)
+6. [ ] Create IScopeParser interface (src/AgenticCoder.Application/Approvals/Scoping/)
+7. [ ] Create IScopeResolver interface (src/AgenticCoder.Application/Approvals/Scoping/)
+8. [ ] Create IRateLimiter interface (src/AgenticCoder.Application/Approvals/Scoping/)
+9. [ ] Implement ScopeParser (src/AgenticCoder.Infrastructure/Approvals/Scoping/)
+10. [ ] Implement ScopeResolver (src/AgenticCoder.Infrastructure/Approvals/Scoping/)
+11. [ ] Implement RateLimiter (src/AgenticCoder.Infrastructure/Approvals/Scoping/)
+12. [ ] Implement ScopeInjectionGuard (from Security section)
+13. [ ] Implement HardcodedCriticalOperations (from Security section)
+14. [ ] Implement ScopePatternComplexityValidator (from Security section)
+15. [ ] Implement TerminalOperationClassifier (from Security section)
+16. [ ] Implement SessionScopeManager (from Security section)
+17. [ ] Add CLI options (src/AgenticCoder.CLI/Options/YesOptions.cs)
+18. [ ] Register DI services
+19. [ ] Write unit tests for all components
+20. [ ] Write integration tests
+21. [ ] Write E2E tests
+22. [ ] Verify performance benchmarks meet targets
 
 ### Validation Checklist Before Merge
 
-- [ ] Scope parsing works
-- [ ] Validation catches errors
-- [ ] Precedence correct
-- [ ] Protection enforced
-- [ ] Rate limiting works
-- [ ] Logging complete
+- [ ] All scope parsing tests pass
+- [ ] All precedence tests pass
+- [ ] All protection tests pass
+- [ ] All rate limit tests pass
+- [ ] All security mitigation tests pass
+- [ ] Performance benchmarks meet targets
 - [ ] Unit test coverage > 90%
-
-### Rollout Plan
-
-1. **Phase 1:** Domain types
-2. **Phase 2:** Parser/validator
-3. **Phase 3:** Resolver
-4. **Phase 4:** Protection
-5. **Phase 5:** Rate limiting
-6. **Phase 6:** CLI integration
-7. **Phase 7:** Logging
-8. **Phase 8:** Configuration
+- [ ] No security vulnerabilities detected
+- [ ] Documentation updated
 
 ---
 

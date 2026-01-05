@@ -211,16 +211,27 @@ CRITICAL RULES (NO EXCEPTIONS):
 WORK IN CHUNKS (to avoid token limits):
 
 Since this file will be 1200-2500+ lines, work section by section:
+REMEMBER, if the section is present and has content, we must read the content and determine if it is semantically complete. If it is, we move on to the next section. If it is not, we expand it fully, 
+possibly replacing the existing content, possibly expanding upon it, depending on what is already there. LINE COUNT IS NOT ENOUGH TO DETERMINE COMPLETENESS, NOR IS PRESENCE OF THE SECTION ALONE.
 
 1. Read the stub file to understand scope
-2. Write Description section (300+ lines) → SAVE to file immediately
-3. Write Use Cases section (300+ lines) → APPEND to file
-4. Write User Manual section (200-400 lines) → APPEND to file
-5. Write Acceptance Criteria section (100-150 lines) → APPEND to file
-6. Write Testing Requirements section (200-300 lines) → APPEND to file
-7. Write User Verification section (100-150 lines) → APPEND to file
-8. Write Implementation Prompt section (400-600 lines) → APPEND to file
-9. Run final audit:
+2. Write the **Header** section first (if not already complete)
+3. Write the **Description** section next (300+ lines)
+4. Write the **Use Cases** section (3+ scenarios, 10-15 lines each)
+5. Write the **Glossary** section (10-20 terms)
+6. Write the **Out of Scope** section (8-15 items)
+7. Write the **Functional Requirements** section (50-100+ items)
+8. Write the **Non-Functional Requirements** section (15-30 items)
+9. Write the **User Manual Documentation** section (200-400 lines)
+10. Write the **Assumptions** section (15-20 items)
+11. Write the **Security Considerations** section (5+ threats)
+12. Write the **Best Practices** section (12-20 items)
+13. Write the **Troubleshooting** section (5+ issues)
+14. Write the **Acceptance Criteria** section (50-80+ items)
+15. Write the **Testing Requirements** section (200-400 lines of complete test code)
+16. Write the **User Verification Steps** section (8-10 scenarios, 100-150 lines)
+17. Write the **Implementation Prompt for Claude** section (400-600 lines of complete code)
+18. Run final audit:
    - Check line count: `wc -l [filename]` (must be >= 1200)
    - Verify all sections present
    - Check for NO abbreviation phrases
@@ -239,16 +250,8 @@ TASK STATE MANAGEMENT:
 4. Git commit with message: "Task [XXX]: Full specification expansion complete ([XXXX] lines)"
 
 FINAL AUDIT CHECKLIST:
-- [ ] Line count >= 1200 lines (run: wc -l [task-file]) **1200-2500 lines total** (can exceed for complex features like Task 044's 3,699 lines)
-
-- [ ] **All 8 sections complete** (no abbreviations, placeholders, or "see above" references)
-- [ ] **at least 3 use cases with personas, more if deemed relevant** (10-15 lines each minimum)
-- [ ] All test cases captured, with descriptions and reason for testing (at the very least, 5-8 unit + 3-5 integration + 3-5 E2E, likely there should be many more test cases identified. )
-- [ ] **ASCII mockups in user manual** (when applicable for UI features)
-- [ ] **50-80+ acceptance criteria** (comprehensive checklist)
+- [ ] **All sections SEMANTICALLY complete** (it's critically important to remember that presence of a section, or linecount, is not an indication of completion. this is because we could have a description with 300 lines of lorem ipsum, but that doesn't mean we skip and move on; that is semantically useless, so should be caught and replaced with adequate relevant semantically complete text according to our standards.)
 - [ ] File quality matches e-commerce golden standard task sample
-- [ ] **12+ implementation steps** with full code examples
-- [ ] **No "TODO" or placeholder text**
 - [ ] **Technically accurate** (follows .NET best practices)
 - [ ] **Follows Clean Architecture** (Domain → Application → Infrastructure → API/UI)
 - [ ] **ENABLES AND FOLLOWS TDD** 
