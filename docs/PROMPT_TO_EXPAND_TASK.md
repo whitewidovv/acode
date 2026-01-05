@@ -1,4 +1,4 @@
-## 📝 PROMPT 1: TASK SPECIFICATION EXPANSION (Documentation Only)
+## 📝 TASK SPECIFICATION EXPANSION (Documentation Only)
 
 **Use this prompt when expanding task stub files from 50 lines to 1200-2500+ lines**
 
@@ -33,8 +33,6 @@ To avoid losing work due to token limits, write and save incrementally:
 15. **User Verification Steps** (8-10 scenarios, 100-150 lines) - Detailed step-by-step manual testing with complete commands and expected outputs
 16. **Implementation Prompt for Claude** (400-600 lines) - Complete code for all entities, services, controllers with full implementations (not stubs)
 
-
-### Step 4: Quality Verification
 
 **Automated Checks:**
 ```bash

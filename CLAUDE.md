@@ -77,8 +77,8 @@ To prevent losing work due to token limits, write and save incrementally:
 13. Write **Testing Requirements** section (200-400 lines complete code) → Append to file
 14. Write **User Verification** section (8-10 scenarios) → Append to file
 15. Write **Implementation Prompt** section (400-600 lines complete code) → Append to file
-16. **Verify semantic completeness** → Check each section has required depth, not just presence
-17. **Verify line count** → Run line count check (must be >= 1200 for subtasks)
+16. **Verify semantic completeness** → Check each section has required depth, not just presence, reattempt expansion of a section if needed
+17. **Verify line count** → Run line count check (must be >= 1500)
 18. **Mark task as completed** → Update tracking file
 
 If interrupted mid-task, resume from last completed section.
