@@ -9,6 +9,27 @@
 ---
 
 ## Description
+Task 008 implements the Prompt Pack System, a modular architecture for managing system prompts, coding guidelines, and behavioral configurations for the Acode agent. Prompt packs encapsulate the instructions that shape how the model approaches coding tasks—language conventions, framework patterns, code style preferences, and workflow behaviors. This system enables customization without modifying core agent code.
+
+System prompts are the foundational instructions that determine model behavior. They establish the agent's persona, define its capabilities and limitations, specify output formats, and encode domain knowledge. Without well-crafted prompts, even powerful models produce inconsistent or incorrect results. The Prompt Pack System formalizes prompt management, enabling version control, validation, and easy customization.
+
+Prompt packs are self-contained bundles of related prompts and metadata. A pack includes system prompts for different agent roles (planner, coder, reviewer), tool guidance, language-specific instructions, and framework patterns. Packs are versioned and hashed for integrity verification. Users select packs via configuration, enabling different behaviors for different projects.
+
+The system supports multiple prompt pack sources. Built-in packs ship with Acode and cover common scenarios (general coding, .NET development, React/TypeScript). User packs are stored in `.acode/prompts/` within the workspace. Community packs can be downloaded from trusted sources. The loader prioritizes user packs over built-in packs, enabling customization.
+
+Prompt composition assembles final prompts from pack components. A complete system prompt may combine base instructions, role-specific guidance, language-specific patterns, and project-specific rules. The composition engine merges these components, handles conflicts, and produces the final prompt. Composition is deterministic and logged for debugging.
+
+Template variables enable dynamic content in prompts. Templates use Mustache-style syntax (`{{variable}}`) for placeholders. Variables are populated from context—workspace name, current file, language, framework. This allows prompts to adapt to context while maintaining consistent structure.
+
+Validation ensures prompts are well-formed before use. The validator checks syntax, template variables, size limits, and required sections. Invalid prompts fail fast with clear error messages. Validation runs at pack load time, not during agent execution, to catch problems early.
+
+The Prompt Pack System integrates with the Model Provider Interface (Task 004). When constructing chat requests, the system fetches appropriate prompts from the active pack and includes them as system messages. Different providers may receive different prompt formats, though content remains consistent.
+
+Configuration controls pack selection and behavior. The `.agent/config.yml` file specifies which pack to use, template variable overrides, and component inclusion/exclusion. Environment variables can override configuration for deployment flexibility. The CLI provides commands for listing, validating, and switching packs.
+
+Observability includes logging when packs are loaded, when prompts are composed, and when template variables are substituted. Metrics track prompt sizes, composition times, and validation results. This visibility helps optimize prompts and debug behavioral issues.
+
+The Prompt Pack System is extensible for future enhancements. Pack formats are versioned; loaders can support multiple versions. New component types can be added without breaking existing packs. The composition engine supports plugins for custom merge strategies.
 
 ### Executive Summary
 
