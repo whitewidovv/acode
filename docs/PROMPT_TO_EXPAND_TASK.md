@@ -16,14 +16,23 @@ Write Section-by-Section
 
 To avoid losing work due to token limits, write and save incrementally:
 
-1. Write **Description** section → Save to file
-2. Write **Use Cases** section → Append to file
-3. Write **User Manual** section → Append to file
-4. Write **Acceptance Criteria** section → Append to file
-5. Write **Testing Requirements** section → Append to file
-6. Write **User Verification** section → Append to file
-7. Write **Implementation Prompt** section → Append to file
-8. **Verify file completeness** → Run `wc -l [filename]` to check line count (must be ≥1200)
+1. **Header** - Priority, Tier, Complexity, Phase, Dependencies (complete)
+2. **Description** (300+ lines) - Business value with ROI calculations, technical approach with architectural decisions, integration points with specific systems, constraints and limitations, trade-offs explained
+3. **Use Cases** (3+ scenarios, 10-15 lines each) - Real personas with names/roles, before/after workflow comparisons, concrete metrics showing improvement
+4. **Glossary** (10-20 terms) - All domain-specific terms, technical jargon, acronyms defined with clear explanations
+5. **Out of Scope** (8-15 items) - Explicit list of what is NOT included in this task, boundaries clearly defined
+6. **Functional Requirements** (50-100+ items) - All functional capabilities listed as FR-001, FR-002, etc. with testable statements
+7. **Non-Functional Requirements** (15-30 items) - Performance, security, scalability, maintainability requirements as NFR-001, etc.
+8. **User Manual Documentation** (200-400 lines) - Complete guide with step-by-step instructions, ASCII mockups, configuration examples, best practices, troubleshooting
+9. **Assumptions** (15-20 items) - Technical assumptions, operational assumptions, integration assumptions explicitly stated
+10. **Security Considerations** (5+ threats) - Each threat with risk description, attack scenario, complete mitigation code (not snippets)
+11. **Best Practices** (12-20 items) - Organized by category, specific actionable guidance
+12. **Troubleshooting** (5+ issues) - Each with Symptoms, Causes, Solutions format including code/commands
+13. **Acceptance Criteria** (50-80+ items) - Comprehensive testable checklist across all functional areas
+14. **Testing Requirements** (complete test code, 200-400 lines) - Full C# test implementations with Arrange-Act-Assert, realistic test data, all test types
+15. **User Verification Steps** (8-10 scenarios, 100-150 lines) - Detailed step-by-step manual testing with complete commands and expected outputs
+16. **Implementation Prompt for Claude** (400-600 lines) - Complete code for all entities, services, controllers with full implementations (not stubs)
+
 
 ### Step 4: Quality Verification
 
@@ -54,7 +63,31 @@ grep -E "^- \[ \]" refined-tasks/phase-XX-*/task-XXX-*.md | wc -l
 
 EXPANSION REQUIREMENTS (per CLAUDE.md) - ALL 16 SECTIONS REQUIRED:
 
-1. DESCRIPTION (300+ lines MINIMUM):
+1. **Header** - Priority, Tier, Complexity, Phase, Dependencies (complete)
+2. **Description** (300+ lines) - Business value with ROI calculations, technical approach with architectural decisions, integration points with specific systems, constraints and limitations, trade-offs explained
+3. **Use Cases** (3+ scenarios, 10-15 lines each) - Real personas with names/roles, before/after workflow comparisons, concrete metrics showing improvement
+4. **Glossary** (10-20 terms) - All domain-specific terms, technical jargon, acronyms defined with clear explanations
+5. **Out of Scope** (8-15 items) - Explicit list of what is NOT included in this task, boundaries clearly defined
+6. **Functional Requirements** (50-100+ items) - All functional capabilities listed as FR-001, FR-002, etc. with testable statements
+7. **Non-Functional Requirements** (15-30 items) - Performance, security, scalability, maintainability requirements as NFR-001, etc.
+8. **User Manual Documentation** (200-400 lines) - Complete guide with step-by-step instructions, ASCII mockups, configuration examples, best practices, troubleshooting
+9. **Assumptions** (15-20 items) - Technical assumptions, operational assumptions, integration assumptions explicitly stated
+10. **Security Considerations** (5+ threats) - Each threat with risk description, attack scenario, complete mitigation code (not snippets)
+11. **Best Practices** (12-20 items) - Organized by category, specific actionable guidance
+12. **Troubleshooting** (5+ issues) - Each with Symptoms, Causes, Solutions format including code/commands
+13. **Acceptance Criteria** (50-80+ items) - Comprehensive testable checklist across all functional areas
+14. **Testing Requirements** (complete test code, 200-400 lines) - Full C# test implementations with Arrange-Act-Assert, realistic test data, all test types
+15. **User Verification Steps** (8-10 scenarios, 100-150 lines) - Detailed step-by-step manual testing with complete commands and expected outputs
+16. **Implementation Prompt for Claude** (400-600 lines) - Complete code for all entities, services, controllers with full implementations (not stubs)
+
+1. HEADDER
+    - Priority
+    - Tier
+    - Complexity
+    - Phase
+    - Dependencies
+
+2. DESCRIPTION (300+ lines MINIMUM):
    - Business value with specific ROI calculations ($X saved, Y hours reduced)
    - Technical approach with architectural decisions fully explained
    - Integration points with existing systems (specific classes, methods, endpoints)
@@ -62,39 +95,39 @@ EXPANSION REQUIREMENTS (per CLAUDE.md) - ALL 16 SECTIONS REQUIRED:
    - Trade-offs and alternative approaches considered
    - Complete, detailed paragraphs (NO abbreviations like "see above", "etc.", or "...")
 
-2. USE CASES (3+ scenarios, 10-15 lines EACH MINIMUM):
+3. USE CASES (3+ scenarios, 10-15 lines EACH MINIMUM):
    - Real personas with names, roles, company context, and specific goals
    - Before/after workflow comparisons showing concrete improvement
    - Concrete examples with real numbers/metrics (time saved, errors prevented, cost reduced)
    - Each use case fully written out independently (NO "similar to above" references)
    - Include code examples showing before/after when relevant
 
-3. GLOSSARY (10-20 terms):
+4. GLOSSARY (10-20 terms):
    - All domain-specific terms defined
    - Technical jargon explained in plain language
    - Acronyms spelled out with context
    - Table format: | Term | Definition |
 
-4. OUT OF SCOPE (8-15 items):
+5. OUT OF SCOPE (8-15 items):
    - Explicit list of what is NOT included in this task
    - Related features deferred to other tasks (with task IDs)
    - Boundaries clearly defined to prevent scope creep
    - Future enhancements mentioned but excluded from current work
 
-5. FUNCTIONAL REQUIREMENTS (50-100+ items):
+6. FUNCTIONAL REQUIREMENTS (50-100+ items):
    - All functional capabilities listed as FR-001, FR-002, etc.
    - Each requirement testable and specific (not "system should be fast")
    - Use MUST/SHOULD language clearly
    - Organized by subsystem or feature area
 
-6. NON-FUNCTIONAL REQUIREMENTS (15-30 items):
+7. NON-FUNCTIONAL REQUIREMENTS (15-30 items):
    - Performance requirements with specific targets (< 500ms, 60 FPS)
    - Security requirements (NFR-001, etc.)
    - Scalability targets (handle X concurrent users)
    - Maintainability standards (test coverage %, documentation)
    - Compatibility requirements (OS, browsers, frameworks)
 
-7. USER MANUAL DOCUMENTATION (200-400 lines):
+8. USER MANUAL DOCUMENTATION (200-400 lines):
    - Step-by-step configuration guides with screenshots/ASCII mockups
    - Settings and options tables with all possible values
    - Integration setup instructions (exact commands, API keys, etc.)
@@ -102,7 +135,29 @@ EXPANSION REQUIREMENTS (per CLAUDE.md) - ALL 16 SECTIONS REQUIRED:
    - Troubleshooting common issues with complete solutions
    - FAQ section (5-10 questions with detailed answers)
 
-4. ACCEPTANCE CRITERIA (50-80 items):
+9. ASSUMPTIONS (15-20 items):
+   - Technical assumptions (e.g., "System has .NET 7 installed")
+   - Operational assumptions (e.g., "Users have admin rights")
+   - Integration assumptions (e.g., "External API is available 99.9% uptime")
+   - Each assumption clearly stated and justified
+
+10. SECURITY CONSIDERATIONS (5+ threats):
+    - Each threat with risk description and potential impact
+    - Attack scenario fully detailed
+    - Complete mitigation code examples (NO snippets)
+    - Testing strategies to verify mitigations
+
+11. BEST PRACTICES (12-20 items):
+    - Organized by category (coding, security, performance, UX)
+    - Specific, actionable guidance (e.g., "Use async/await for I/O operations")
+    - Examples of correct vs. incorrect implementations
+
+12. TROUBLESHOOTING (5+ issues):
+    - Each issue with Symptoms, Causes, Solutions format
+    - Complete code/commands for solutions (NO placeholders)
+    - Common pitfalls and how to avoid them
+
+13. ACCEPTANCE CRITERIA (50-80 items):
    - Core functionality (15-20 specific, testable criteria)
    - Advanced features (10-15 specific criteria)
    - UI/UX requirements (8-10 criteria with specific behaviors)
@@ -113,7 +168,7 @@ EXPANSION REQUIREMENTS (per CLAUDE.md) - ALL 16 SECTIONS REQUIRED:
    - Documentation (3-5 criteria)
    - Each criterion written as a checkbox item: `- [ ] Specific testable requirement`
 
-5. TESTING REQUIREMENTS (complete code examples, 200-300 lines total):
+14. TESTING REQUIREMENTS (complete code examples, 200-300 lines total):
    - Unit Tests: 5-8 complete C# test methods with full Arrange-Act-Assert code
    - Integration Tests: 3-5 complete test scenarios with setup/teardown code
    - E2E Tests: 3-5 complete user journey test scenarios with full code
@@ -122,13 +177,13 @@ EXPANSION REQUIREMENTS (per CLAUDE.md) - ALL 16 SECTIONS REQUIRED:
    - ALL test code written completely (NO "// ... additional tests" placeholders)
    - Use realistic test data and actual class/method names from the feature
 
-6. USER VERIFICATION STEPS (8-10 scenarios, 100-150 lines):
+15. USER VERIFICATION STEPS (8-10 scenarios, 100-150 lines):
    - Complete step-by-step manual testing instructions
    - Expected outcomes clearly stated for each step
    - Screenshots or ASCII diagrams where helpful
    - Each verification scenario 10-15 lines with full details
 
-7. IMPLEMENTATION PROMPT FOR CLAUDE (12+ steps, 400-600 lines):
+16. IMPLEMENTATION PROMPT FOR CLAUDE (12+ steps, 400-600 lines):
    - Entity definitions with complete C# code (all properties, navigation properties)
    - Service layer implementations with complete methods (not stubs)
    - API controller endpoints with complete code (all CRUD operations)

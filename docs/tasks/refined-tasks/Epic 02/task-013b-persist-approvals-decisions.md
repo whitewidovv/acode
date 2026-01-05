@@ -10,23 +10,257 @@
 
 ## Description
 
-Task 013.b implements persistence for approval decisions—recording every approval, denial, skip, and timeout in durable storage. This audit trail is essential for accountability, debugging, and policy refinement. Users can review what was approved, when, and by whom.
+Task 013.b implements durable persistence for human approval decisions—creating an immutable audit trail of every approval, denial, skip, and timeout throughout Acode's operation. This persistence layer serves as the foundation for accountability, compliance, debugging, session resume, and intelligent policy recommendations. Every decision made through the approval gate system is captured, timestamped, and stored for future reference.
 
-Approval persistence serves multiple purposes. First, it provides an audit trail for compliance and accountability. When something goes wrong, you can trace back through the approval history to understand what happened. Second, it enables analytics—patterns in approvals inform policy tuning. Third, it supports session resume—interrupted sessions can restore approval state.
+### Business Value and ROI
 
-Each approval decision is persisted as an ApprovalRecord. The record includes: session ID, operation details, decision (approved/denied/skipped/timeout), timestamp, rule that matched, and any user-provided reason. Records are immutable once created.
+**Quantified Benefits:**
 
-Persistence integrates with the two-tier storage model (Task 011.b). Approval records are stored in SQLite for local access and synced to PostgreSQL for centralized analysis. The outbox pattern ensures reliable sync even with network interruptions.
+1. **Compliance and Audit Cost Reduction: $85,000/year**
+   - Regulated industries (fintech, healthcare, enterprise) require audit trails for automated actions
+   - Manual audit log maintenance costs: 20 hours/month × $100/hour = $24,000/year
+   - Audit preparation costs: 80 hours/quarter × $150/hour = $48,000/year
+   - Legal/compliance consultation for gaps: $15,000/year
+   - With approval persistence: Automated, queryable, exportable audit trail
+   - Audit preparation reduced to 10 hours/quarter
+   - Total savings: **$85,000/year** in compliance costs
 
-Query capabilities support common needs. List approvals by session. Search by operation type. Filter by decision. Aggregate by rule. These queries enable the CLI commands for viewing approval history.
+2. **Incident Investigation Time Reduction: $45,000/year**
+   - Average incident investigation without audit trail: 8 hours
+   - Average incident investigation with approval history: 1.5 hours
+   - Time savings per incident: 6.5 hours
+   - Average incidents requiring investigation: 30/year
+   - 30 × 6.5 hours × $230/hour (senior engineer time) = **$44,850/year** saved
 
-Privacy considerations apply to approval records. Operation details may include file paths or command strings that could be sensitive. Records are stored locally by default. Sync to remote can be disabled. Sensitive details can be redacted before sync.
+3. **Policy Optimization Value: $35,000/year**
+   - Approval data enables pattern analysis
+   - Identify consistently approved patterns → create auto-approve rules
+   - Identify consistently denied patterns → create deny rules
+   - Each optimized rule saves 2 seconds × 50 occurrences/day = 100 seconds/day
+   - 20 optimized rules × 100 seconds × 250 days × $50/hour = **$34,700/year** productivity gains
 
-Retention policies manage storage growth. By default, records are retained for 90 days. Configurable retention allows longer or shorter periods. Explicit deletion is available for compliance requirements.
+4. **Session Resume Reliability: $25,000/year**
+   - Without persistence: Interrupted session loses all approval context
+   - User must re-approve everything or start over
+   - Average re-approval time: 15 minutes per session
+   - Interruption frequency: 10% of sessions
+   - With persistence: Seamless resume with full approval state
+   - 500 sessions/year × 10% × 15 minutes × $50/hour = **$6,250** base savings
+   - Plus: Avoided frustration, context switching costs: **$18,750/year** additional value
 
-The approval history is used for policy suggestions. If a pattern is consistently approved, the system might suggest an auto-approve rule. If a pattern is consistently denied, the system might suggest a deny rule. These suggestions are informational only.
+**Total ROI: $190,000/year for a 10-person development team**
 
-Error handling ensures persistence never blocks execution. If storage fails, the decision still applies—the operation proceeds or is blocked. Persistence failures are logged and retried. No approval is lost due to temporary storage issues.
+### Technical Architecture
+
+#### Approval Record Data Model
+
+The core data model captures all information needed for audit, query, and resume capabilities:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        ApprovalRecord Entity                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  Identity                                                        │   │
+│  │  - RecordId: Guid (Primary Key, generated)                       │   │
+│  │  - SessionId: Guid (FK to Sessions)                              │   │
+│  │  - Sequence: int (Order within session)                          │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  Operation Context                                               │   │
+│  │  - Category: enum (FILE_READ, FILE_WRITE, FILE_DELETE, etc.)    │   │
+│  │  - OperationHash: string (deterministic ID of operation)        │   │
+│  │  - Path: string? (for file operations)                          │   │
+│  │  - Command: string? (for terminal operations)                   │   │
+│  │  - DetailsJson: string (full operation details, JSON)           │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  Decision                                                        │   │
+│  │  - Decision: enum (APPROVED, DENIED, SKIPPED, TIMEOUT, AUTO)    │   │
+│  │  - Reason: string? (user-provided reason)                       │   │
+│  │  - MatchedRuleName: string? (which rule determined policy)      │   │
+│  │  - PolicyApplied: enum (AUTO, PROMPT, DENY, SKIP)               │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  Timing                                                          │   │
+│  │  - RequestedAt: DateTimeOffset (when approval was requested)    │   │
+│  │  - DecidedAt: DateTimeOffset (when decision was made)           │   │
+│  │  - DurationMs: int (time to decide)                             │   │
+│  │  - TimeoutConfiguredMs: int? (timeout if applicable)            │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │  Integrity                                                       │   │
+│  │  - Signature: string (HMAC signature for tamper detection)      │   │
+│  │  - CreatedAt: DateTimeOffset (immutable record creation time)   │   │
+│  │  - Version: int (schema version for migration)                  │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Storage Architecture
+
+Approval records use the two-tier storage model defined in Task 011.b:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Approval Persistence Architecture                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌────────────────────┐                                                 │
+│  │  Approval Gate     │                                                 │
+│  │  (Decision Source) │                                                 │
+│  └─────────┬──────────┘                                                 │
+│            │ Decision Event                                             │
+│            ▼                                                            │
+│  ┌────────────────────┐                                                 │
+│  │  ApprovalRecorder  │                                                 │
+│  │  - Creates record  │                                                 │
+│  │  - Signs record    │                                                 │
+│  │  - Validates data  │                                                 │
+│  └─────────┬──────────┘                                                 │
+│            │ ApprovalRecord                                             │
+│            ▼                                                            │
+│  ┌────────────────────┐     ┌────────────────────┐                     │
+│  │  SQLite (Local)    │────▶│  Outbox Queue      │                     │
+│  │  - Immediate write │     │  - Pending syncs   │                     │
+│  │  - Fast queries    │     │  - Retry logic     │                     │
+│  │  - WAL mode        │     │  - Batch uploads   │                     │
+│  └────────────────────┘     └─────────┬──────────┘                     │
+│                                       │ Async Sync                      │
+│                                       ▼                                 │
+│                             ┌────────────────────┐                      │
+│                             │  PostgreSQL        │                      │
+│                             │  (Optional Remote) │                      │
+│                             │  - Aggregation     │                      │
+│                             │  - Team analytics  │                      │
+│                             │  - Long-term store │                      │
+│                             └────────────────────┘                      │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Query Capabilities
+
+The persistence layer supports various query patterns:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Query Interface Capabilities                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Query by Session:                                                       │
+│  ─────────────────                                                       │
+│  SELECT * FROM approval_records                                          │
+│  WHERE session_id = @sessionId                                           │
+│  ORDER BY sequence ASC                                                   │
+│                                                                          │
+│  Query by Decision Type:                                                 │
+│  ────────────────────────                                                │
+│  SELECT * FROM approval_records                                          │
+│  WHERE decision = @decision                                              │
+│  AND decided_at BETWEEN @start AND @end                                  │
+│                                                                          │
+│  Query by Operation Category:                                            │
+│  ────────────────────────────                                            │
+│  SELECT * FROM approval_records                                          │
+│  WHERE category = @category                                              │
+│  AND path LIKE @pathPattern                                              │
+│                                                                          │
+│  Aggregation by Rule:                                                    │
+│  ────────────────────                                                    │
+│  SELECT matched_rule_name,                                               │
+│         decision,                                                        │
+│         COUNT(*) as count,                                               │
+│         AVG(duration_ms) as avg_duration                                 │
+│  FROM approval_records                                                   │
+│  WHERE decided_at >= @since                                              │
+│  GROUP BY matched_rule_name, decision                                    │
+│                                                                          │
+│  Pattern Analysis for Policy Suggestions:                                │
+│  ────────────────────────────────────────                                │
+│  SELECT path_pattern,                                                    │
+│         category,                                                        │
+│         SUM(CASE WHEN decision = 'APPROVED' THEN 1 ELSE 0 END) as approved, │
+│         SUM(CASE WHEN decision = 'DENIED' THEN 1 ELSE 0 END) as denied   │
+│  FROM approval_records                                                   │
+│  WHERE policy_applied = 'PROMPT'                                         │
+│  GROUP BY path_pattern, category                                         │
+│  HAVING COUNT(*) >= 10                                                   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Integration Points
+
+#### Integration with Task 013 (Human Approval Gates)
+- Gate framework emits decision events
+- ApprovalRecorder subscribes to events
+- Records created synchronously with decisions
+- Resume queries existing records for session
+
+#### Integration with Task 011.b (Persistence Model)
+- Uses workspace database for SQLite storage
+- Uses outbox pattern for PostgreSQL sync
+- Follows same transaction patterns
+- Shares connection pooling
+
+#### Integration with Task 013.a (Gate Rules/Prompts)
+- Records which rule matched each decision
+- Supports rule effectiveness analysis
+- Enables policy suggestions from patterns
+
+### Design Decisions and Trade-offs
+
+**Decision 1: Synchronous Local Write, Async Remote Sync**
+- Local write must complete before operation proceeds
+- Remote sync happens in background
+- Trade-off: Local storage must always be available, but remote failures don't block
+
+**Decision 2: Immutable Records**
+- Records cannot be modified after creation
+- Corrections require new records with reference to original
+- Trade-off: Storage grows, but audit integrity guaranteed
+
+**Decision 3: Operation Details in JSON**
+- Flexible storage for varying operation types
+- Queryable with SQLite JSON functions
+- Trade-off: Less type safety, but more extensible
+
+**Decision 4: Retention with Soft Delete**
+- Expired records marked as deleted, not removed
+- Actual removal happens during maintenance window
+- Trade-off: Storage overhead, but safer for compliance
+
+### Constraints and Limitations
+
+**Technical Constraints:**
+- Maximum record size: 64KB (including operation details)
+- Maximum records per session: 10,000 (practical limit)
+- Query result limit: 1,000 records per page
+
+**Operational Constraints:**
+- Retention minimum: 1 day
+- Retention maximum: 10 years
+- Sync to remote requires network access (optional)
+
+**Security Constraints:**
+- Records signed with session key
+- Sensitive paths redacted in remote sync
+- No PII stored in operation details
+
+### Performance Characteristics
+
+- Record creation: < 10ms (local SQLite)
+- Query by session: < 50ms for 1,000 records
+- Aggregation query: < 200ms for 100,000 records
+- Remote sync: Batched, every 5 minutes or 100 records
+- Storage per record: ~500 bytes average
 
 ---
 
@@ -49,6 +283,134 @@ Error handling ensures persistence never blocks execution. If storage fails, the
 | Session History | Approvals for one session |
 | Aggregate | Summary statistics |
 | Expiry | When record can be deleted |
+
+---
+
+## Use Cases
+
+### Use Case 1: David the Compliance Manager
+
+**Persona:** David Park, Compliance Manager at a healthcare software company. His organization must demonstrate audit trails for SOC 2 compliance and HIPAA-related code changes. He needs to prove that all automated actions were explicitly approved and that the approval process is traceable.
+
+**Before Acode with Approval Persistence:**
+David's compliance audits are a nightmare. Developers use various AI coding tools, but there's no centralized record of what was approved. When auditors ask "who approved this database migration script?", the team scrambles through Slack messages, git blame, and developer memory. Each audit costs $50,000 in preparation time and inevitably has findings about gaps in authorization records.
+
+**After Acode with Approval Persistence:**
+Every approval decision is automatically recorded with full context:
+
+```bash
+$ acode approvals export --format csv --since 2024-01-01
+
+session_id,operation,path,decision,decided_at,rule_matched,duration_ms
+abc123,FILE_WRITE,src/migrations/001_add_patient_table.sql,APPROVED,2024-01-15T10:23:45Z,prompt-migrations,4523
+abc123,TERMINAL,npm run migrate:prod,APPROVED,2024-01-15T10:24:12Z,prompt-prod-commands,8901
+def456,FILE_DELETE,src/legacy/old_api.ts,DENIED,2024-01-16T14:32:01Z,deny-source-delete,892
+...
+```
+
+Auditors get a complete, timestamped, queryable record of every decision. Export to CSV, filter by date range, show decision timing—all automated.
+
+**Measurable Improvement:**
+- Audit preparation time: 80 hours → 8 hours (90% reduction)
+- Audit findings related to approval gaps: 5 → 0
+- Cost per audit: $50,000 → $5,000
+- Annual savings: **$180,000** (4 audits × $45,000 saved)
+
+---
+
+### Use Case 2: Priya the Incident Responder
+
+**Persona:** Priya Sharma, Senior SRE at an e-commerce platform. When production incidents occur, she needs to quickly trace what changed, when, and whether it was properly authorized. The difference between a 30-minute outage and a 4-hour outage often depends on how fast she can find the root cause.
+
+**Before Acode with Approval Persistence:**
+A production incident occurs—orders are failing. Priya suspects a recent code change. She checks git history and finds 15 commits in the last 2 hours. For each commit, she has to ask developers: "Did you review this change?" "What did the AI generate?" "Did you approve the database query change?" Meanwhile, the incident continues. After 3 hours, she discovers the culprit was an AI-generated SQL query that a developer quickly approved without reading carefully.
+
+**After Acode with Approval Persistence:**
+When the incident occurs, Priya queries approval history:
+
+```bash
+$ acode approvals history --path "src/database/**" --since "2h ago"
+
+Session  Operation    Path                              Decision  Time     Rule
+─────────────────────────────────────────────────────────────────────────────────
+gh789    FILE_WRITE   src/database/queries/orders.sql   APPROVED  1h ago   prompt-db
+gh789    FILE_WRITE   src/database/queries/inventory.sql APPROVED  1h ago   prompt-db
+jk012    FILE_WRITE   src/database/connection.ts        APPROVED  45m ago  prompt-source
+
+$ acode approvals details gh789-op-3
+
+Operation: FILE_WRITE
+Path: src/database/queries/orders.sql
+Decision: APPROVED
+Decided At: 2024-03-15T14:23:01Z
+Duration: 2.1 seconds    ← Very short review time!
+Rule: prompt-db
+Session: gh789 (Developer: alice@company.com)
+
+[View file content at approval time]
+```
+
+The 2.1-second decision duration immediately flags a rushed approval. Priya identifies the problematic query in minutes instead of hours.
+
+**Measurable Improvement:**
+- Average incident investigation time: 3 hours → 30 minutes (85% reduction)
+- MTTR for code-related incidents: 4 hours → 1.5 hours
+- Annual incident cost savings: **$150,000** (20 incidents × 2.5 hours × $300/hour)
+
+---
+
+### Use Case 3: Alex the Team Lead Optimizing Workflow
+
+**Persona:** Alex Thompson, Engineering Team Lead who wants to improve the team's productivity without compromising safety. They notice developers complaining about too many approval prompts, but aren't sure which patterns are safe to auto-approve.
+
+**Before Acode with Approval Persistence:**
+Alex tries to optimize approval rules based on developer complaints. "Tests always get approved, let's auto-approve them." But this is anecdotal—maybe 5% of test file writes actually get denied for good reasons. Without data, optimizations are guesses that might introduce risk or miss opportunities.
+
+**After Acode with Approval Persistence:**
+Alex queries the approval data for insights:
+
+```bash
+$ acode approvals stats --since "90 days" --group-by pattern
+
+Pattern Analysis (Last 90 Days)
+═══════════════════════════════════════════════════════════════════════════
+
+Pattern: **/*.test.ts
+  Total: 4,521 decisions
+  Approved: 4,519 (99.96%)
+  Denied: 2 (0.04%)
+  Avg Decision Time: 1.2s
+  → RECOMMENDATION: Consider auto-approve (98%+ approval rate)
+
+Pattern: src/config/**
+  Total: 234 decisions
+  Approved: 156 (66.7%)
+  Denied: 78 (33.3%)
+  Avg Decision Time: 45.3s
+  → RECOMMENDATION: Keep as prompt (significant denial rate)
+
+Pattern: **/.env*
+  Total: 12 decisions
+  Approved: 0 (0%)
+  Denied: 12 (100%)
+  Avg Decision Time: 8.2s
+  → RECOMMENDATION: Consider deny rule (100% denial rate)
+
+$ acode approvals suggest-rules
+
+Suggested Rule Changes:
+1. ADD: auto-approve **/*.test.ts (saves ~75 prompts/day)
+2. ADD: deny **/.env* (prevents 12 mistakes/month)
+3. KEEP: prompt src/config/** (meaningful review)
+```
+
+Data-driven rule optimization improves productivity while maintaining safety.
+
+**Measurable Improvement:**
+- Prompts reduced via optimized rules: 75/day → 18,750/year
+- Time saved: 18,750 × 3 seconds = 15.6 hours/year/developer
+- Team of 8: **125 hours/year** productivity recovered
+- Prevented accidents via data-informed deny rules: ~12/year × $2,500 = **$30,000/year**
 
 ---
 
@@ -98,6 +460,73 @@ The following items are explicitly excluded from Task 013.b:
 - ASM-014: Audit trail is complete - no gaps in recording
 - ASM-015: Records support compliance requirements
 - ASM-016: Query performance is acceptable for reporting
+
+---
+
+## Security Considerations
+
+### Threat 1: Audit Record Tampering
+
+**Risk Level:** Critical
+**CVSS Score:** 8.6 (High)
+**Attack Vector:** Database manipulation
+
+**Description:**
+An attacker who gains access to the SQLite database could modify approval records to hide malicious activity. By changing a DENIED record to APPROVED, or deleting records entirely, the audit trail becomes unreliable.
+
+**Mitigation:** Each record includes an HMAC signature computed over all fields using a session-derived key. The `ApprovalRecordIntegrityVerifier` class (from Task 013 Security Considerations) validates signatures on read. Any tampered record fails verification and triggers a security alert.
+
+---
+
+### Threat 2: Sensitive Data Exposure in Records
+
+**Risk Level:** High
+**CVSS Score:** 7.1 (High)
+**Attack Vector:** Data leakage
+
+**Description:**
+Approval records contain operation details that may include file paths, command strings, or file contents. If these contain sensitive data (credentials, PII, proprietary code), the audit trail becomes a target for data exfiltration.
+
+**Mitigation:** The `RecordSanitizer` class filters sensitive patterns before persistence. File paths are stored, but file contents are never stored in records. Command strings are redacted for known secret patterns. Sync to remote storage applies additional redaction configured in `.agent/config.yml`.
+
+---
+
+### Threat 3: Storage Exhaustion via Record Flooding
+
+**Risk Level:** Medium
+**CVSS Score:** 5.3 (Medium)
+**Attack Vector:** Resource exhaustion
+
+**Description:**
+An attacker could craft tasks that generate millions of operations, creating millions of approval records. This could exhaust disk space, slow queries to unusable levels, or cause out-of-memory conditions.
+
+**Mitigation:** Per-session record limits (10,000 max), per-day limits (100,000 max), and automatic cleanup of old records via retention policy. The `ApprovalStorageGuard` monitors storage usage and blocks new records if limits are exceeded.
+
+---
+
+### Threat 4: Query Injection via Malformed Filters
+
+**Risk Level:** Medium
+**CVSS Score:** 5.9 (Medium)
+**Attack Vector:** SQL injection
+
+**Description:**
+Query interfaces accept user-provided filters (path patterns, rule names, etc.). Malformed input could be crafted to inject SQL, bypassing query constraints or extracting unauthorized data.
+
+**Mitigation:** All queries use parameterized statements. Path patterns are validated against allowed characters before use in LIKE clauses. The `SafeQueryBuilder` constructs all SQL with strict input validation.
+
+---
+
+### Threat 5: Timing Attacks on Decision Duration
+
+**Risk Level:** Low
+**CVSS Score:** 3.1 (Low)
+**Attack Vector:** Information disclosure
+
+**Description:**
+Decision duration is recorded for analytics. An attacker analyzing this data might infer information about approval patterns—e.g., very short durations suggest auto-approval or inattentive review.
+
+**Mitigation:** Duration data is used for aggregate analytics only. Individual duration values are not exposed in standard queries. The `DurationAnalyzer` applies differential privacy techniques when generating reports.
 
 ---
 

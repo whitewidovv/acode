@@ -10,25 +10,233 @@
 
 ## Description
 
-Task 013.c implements the --yes flag scoping system—controlling when and how automated approval bypasses prompts. The --yes flag provides convenience for experienced users, but unscoped --yes is dangerous. Scoping rules define exactly what --yes approves.
+Task 013.c implements the `--yes` flag scoping system—a carefully designed automation feature that allows experienced users to bypass approval prompts while maintaining strong safety guardrails. The scoping system transforms `--yes` from a dangerous all-or-nothing flag into a precise, auditable automation tool that balances productivity with safety.
 
-The --yes flag is a productivity feature for interactive sessions. Users who understand the risk can bypass prompts. But --yes without scope is like running `rm -rf` without looking—convenient until catastrophic. Scoping rules provide guardrails.
+### Business Value and ROI
 
-By default, --yes applies only to low-risk operations: reading files, listing directories, and similar read-only actions. High-risk operations—file deletion, terminal commands, config changes—require explicit scoping or remain prompted.
+**Quantified Benefits:**
 
-Scoping uses a domain-specific syntax. `--yes=file_write` approves file writes. `--yes=terminal:safe` approves terminal commands marked safe. `--yes=all` approves everything (requires explicit acknowledgment). Scopes can be combined: `--yes=file_write,file_read`.
+1. **Automation Time Savings: $125,000/year**
+   - Without scoped --yes: Every CI/CD run requires interactive approval or unsafe `--yes`
+   - With scoped --yes: Safe operations auto-approve, dangerous ones blocked
+   - Average CI/CD session: 50 prompts × 3 seconds = 150 seconds of prompting
+   - With `--yes=file_write:*.test.ts,terminal:npm`: 2 prompts × 3 seconds = 6 seconds
+   - Time savings per session: 144 seconds
+   - Sessions per day: 100 (CI + developer automation)
+   - 144 seconds × 100 sessions × 250 days = 1,000 hours/year
+   - 1,000 hours × $125/hour = **$125,000/year**
 
-Scope inheritance follows precedence rules. Command-line --yes overrides config file. Config file overrides defaults. More specific scopes override general. Deny always wins—if any rule denies, the operation is denied regardless of --yes.
+2. **Prevented Automation Accidents: $80,000/year**
+   - Unscoped `--yes` in automation: ~4 incidents/year (file deletions, bad commits)
+   - Average incident cost: $20,000 (recovery, debugging, downtime)
+   - With scoped --yes: 0 incidents (dangerous ops still blocked)
+   - Savings: 4 × $20,000 = **$80,000/year**
 
-Risk levels gate what scopes are available. Level 1 (low) operations can be approved with basic --yes. Level 2 (medium) requires explicit scope. Level 3 (high) requires explicit acknowledgment. Level 4 (critical) cannot use --yes at all.
+3. **Reduced Context Switching: $45,000/year**
+   - With prompts in automation: Developers monitor pipelines for approval
+   - Average monitoring time: 15 minutes/day/developer
+   - With scoped --yes: No monitoring needed
+   - 15 minutes × 250 days × 8 developers × $60/hour = **$45,000/year**
 
-Audit logging records all --yes usage. Every bypassed prompt is logged with the scope that allowed it. Analytics identify patterns—operations frequently auto-approved might merit policy changes.
+4. **Compliance Confidence: $30,000/year**
+   - Auditors concerned about --yes bypass: "How do you ensure nothing dangerous auto-approves?"
+   - With scoping: Clear documentation of what can/cannot bypass
+   - Audit findings reduced: 2/year → 0/year
+   - 2 findings × $15,000 remediation = **$30,000/year** avoided
 
-Error handling addresses invalid scopes. Typos are caught: `--yes=filwrite` is rejected with suggestions. Unknown operations in scope are rejected. Conflicting scopes are flagged.
+**Total ROI: $280,000/year for a 10-person team with CI/CD automation**
 
-Session-level vs operation-level scoping provides flexibility. `acode run --yes=file_write` applies to the entire session. `--yes-next=file_write` applies only to the next operation. This granularity supports cautious automation.
+### Technical Architecture
 
-The system protects against footguns. `--yes=all` requires additional confirmation. Certain operations (like deleting .git) cannot be --yes'd. Rate limiting prevents runaway automation.
+#### Scope Evaluation Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     --yes Scope Evaluation Pipeline                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Operation    ┌───────────────┐    ┌───────────────┐    Decision        │
+│  ─────────────│  Scope        │────│  Risk Level   │─────────────▶      │
+│               │  Parser       │    │  Evaluator    │                    │
+│               └───────┬───────┘    └───────┬───────┘                    │
+│                       │                    │                            │
+│                       ▼                    ▼                            │
+│               ┌───────────────┐    ┌───────────────┐                    │
+│               │  Command Line │    │  Level 1-4    │                    │
+│               │  --yes=scope  │    │  Classification│                   │
+│               └───────────────┘    └───────────────┘                    │
+│                       │                    │                            │
+│                       ▼                    ▼                            │
+│               ┌───────────────────────────────────────┐                 │
+│               │         Scope Matcher                  │                │
+│               │  - Check operation against scope       │                │
+│               │  - Check risk level allows bypass      │                │
+│               │  - Check no deny rule overrides        │                │
+│               │  - Check rate limits not exceeded      │                │
+│               └───────────────────────────────────────┘                 │
+│                       │                                                  │
+│                       ▼                                                  │
+│               ┌─────────────────┐                                        │
+│               │ AUTO_APPROVE or │                                        │
+│               │ PROMPT          │                                        │
+│               └─────────────────┘                                        │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Scope Syntax Specification
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Scope Syntax Grammar                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Scope Specification:                                                    │
+│  ────────────────────                                                    │
+│  --yes[=scope_list]                                                      │
+│  --yes-next[=scope_list]                                                 │
+│  --yes-exclude=scope_list                                                │
+│                                                                          │
+│  Scope List:                                                             │
+│  ───────────                                                             │
+│  scope_list := scope (',' scope)*                                        │
+│  scope      := category [':' modifier] [':' pattern]                     │
+│                                                                          │
+│  Categories:                                                             │
+│  ───────────                                                             │
+│  file_read     - Reading files (Risk Level 1)                           │
+│  file_write    - Creating/modifying files (Risk Level 2)                │
+│  file_delete   - Removing files (Risk Level 3)                          │
+│  dir_create    - Creating directories (Risk Level 1)                    │
+│  dir_delete    - Removing directories (Risk Level 3)                    │
+│  terminal      - Running shell commands (Risk Level 2-4)                │
+│  terminal:safe - Only whitelisted commands (Risk Level 2)               │
+│  config        - Modifying config files (Risk Level 3)                  │
+│  all           - Everything (Risk Level 4, requires ack)                │
+│                                                                          │
+│  Modifiers:                                                              │
+│  ──────────                                                              │
+│  :safe         - Only operations marked safe                            │
+│  :test         - Only in test directories                               │
+│  :generated    - Only in generated directories                          │
+│  :pattern      - Custom glob pattern follows                            │
+│                                                                          │
+│  Examples:                                                               │
+│  ─────────                                                               │
+│  --yes                        # Default: file_read, dir_create only     │
+│  --yes=file_write             # Add file writes                         │
+│  --yes=file_write:*.test.ts   # Only test file writes                   │
+│  --yes=terminal:safe          # Only whitelisted commands               │
+│  --yes=file_write,terminal:safe  # Combined scopes                      │
+│  --yes=all --ack-danger       # Everything (explicit danger ack)        │
+│  --yes-next=file_delete       # One-time scope                          │
+│  --yes-exclude=file_delete    # Exclude from default scopes             │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Risk Level System
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Risk Level Classification                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Level 1 (Low Risk) - Default --yes approved                            │
+│  ──────────────────────────────────────────────                         │
+│  - file_read: Reading any file                                          │
+│  - dir_create: Creating directories                                     │
+│  - dir_list: Listing directory contents                                 │
+│  Rationale: Read-only operations, no data loss possible                 │
+│                                                                          │
+│  Level 2 (Medium Risk) - Requires explicit scope                        │
+│  ──────────────────────────────────────────────                         │
+│  - file_write: Creating/modifying files                                 │
+│  - terminal:safe: Whitelisted shell commands                            │
+│  - git:status: Git informational commands                               │
+│  Rationale: Can modify state but typically reversible                   │
+│                                                                          │
+│  Level 3 (High Risk) - Requires explicit scope + warning                │
+│  ──────────────────────────────────────────────────────                 │
+│  - file_delete: Removing files                                          │
+│  - dir_delete: Removing directories                                     │
+│  - config: Modifying configuration                                      │
+│  - git:commit: Git state-changing commands                              │
+│  - terminal:* (non-safe): Arbitrary shell commands                      │
+│  Rationale: Can cause data loss or system state changes                 │
+│                                                                          │
+│  Level 4 (Critical) - Cannot use --yes, always prompt                   │
+│  ──────────────────────────────────────────────────                     │
+│  - file_delete:.git/** - Deleting git internals                         │
+│  - file_delete:.env* - Deleting environment files                       │
+│  - terminal:rm -rf - Recursive force delete                             │
+│  - terminal:git push --force - Force push                               │
+│  Rationale: Potentially catastrophic, unrecoverable operations          │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Integration Points
+
+#### Integration with Task 013 (Human Approval Gates)
+- Gate framework queries scope system before prompting
+- If scope allows, bypasses prompt entirely
+- Decision recorded as AUTO_APPROVED with scope reference
+
+#### Integration with Task 013.a (Gate Rules/Prompts)
+- Rules define risk levels for operations
+- Scopes override rules for matching operations
+- Deny rules still block even with --yes
+
+#### Integration with Task 013.b (Persistence)
+- All --yes bypasses recorded in audit trail
+- Records include: scope used, operation matched, risk level
+
+### Design Decisions and Trade-offs
+
+**Decision 1: Opt-in vs Opt-out Scoping**
+- Default --yes is minimal (Level 1 only)
+- Users must explicitly expand scope
+- Trade-off: More typing for automation, but safer defaults
+
+**Decision 2: Cannot --yes Level 4 Operations**
+- Critical operations always prompt regardless of --yes
+- No override mechanism exists
+- Trade-off: Slightly inconvenient, but prevents catastrophic accidents
+
+**Decision 3: Deny Always Wins**
+- If any rule denies, --yes cannot override
+- Policy layer > automation layer
+- Trade-off: Automation may be blocked, but safety guaranteed
+
+**Decision 4: Session vs Operation Scope**
+- `--yes` applies to whole session
+- `--yes-next` applies to next operation only
+- Trade-off: Complexity, but enables fine-grained control
+
+### Constraints and Limitations
+
+**Technical Constraints:**
+- Maximum scope list: 20 items
+- Pattern complexity limit: 100 characters
+- No regex in scope patterns (glob only)
+
+**Operational Constraints:**
+- Rate limit: 100 --yes bypasses per minute
+- Cooldown after hitting rate limit: 60 seconds
+- No persistent scope storage (session only)
+
+**Safety Constraints:**
+- Level 4 operations never bypassable
+- `--yes=all` requires `--ack-danger` flag
+- Protected paths never bypassable
+
+### Performance Characteristics
+
+- Scope parsing: < 1ms per specification
+- Scope matching: < 0.5ms per operation
+- Risk level lookup: O(1) from cache
+- No network calls in scope evaluation
 
 ---
 
@@ -51,6 +259,117 @@ The system protects against footguns. `--yes=all` requires additional confirmati
 | Audit | Record of bypasses |
 | Acknowledgment | Explicit danger acceptance |
 | Scope Validation | Checking scope syntax |
+
+---
+
+## Use Cases
+
+### Use Case 1: Mike the CI/CD Engineer
+
+**Persona:** Mike Chen, DevOps Engineer responsible for CI/CD pipelines that use Acode to automate code generation, testing, and deployment preparation. His pipelines run hundreds of times per day and must be fully automated.
+
+**Before Acode with --yes Scoping:**
+Mike's CI/CD pipeline uses Acode for automated test generation. Without `--yes`, pipelines hang waiting for approval. With unscoped `--yes`, everything auto-approves—including a job that once accidentally deleted the build directory. Mike is stuck between broken automation and dangerous automation.
+
+**After Acode with --yes Scoping:**
+Mike configures precisely scoped automation:
+
+```bash
+# In CI/CD pipeline
+acode run "Generate tests for new endpoints" \
+  --yes=file_write:*.test.ts,file_read,terminal:safe
+
+# Result:
+# ✓ file_read any file - AUTO (Level 1)
+# ✓ file_write *.test.ts - AUTO (scope match)
+# ✗ file_write src/api.ts - PROMPT (not in scope)
+# ✓ terminal: npm test - AUTO (whitelisted)
+# ✗ terminal: rm -rf build/ - BLOCKED (Level 4, cannot bypass)
+```
+
+Safe operations auto-approve, dangerous ones are blocked, and the pipeline never deletes important directories.
+
+**Measurable Improvement:**
+- Pipeline execution time: 15 minutes → 8 minutes (47% faster)
+- Automation incidents: 2/quarter → 0/quarter
+- Developer on-call interrupts for pipeline approvals: 20/week → 0/week
+- Annual value: **$95,000** (time + incident prevention)
+
+---
+
+### Use Case 2: Lisa the Power User
+
+**Persona:** Lisa Park, Staff Engineer who uses Acode extensively for rapid prototyping and refactoring. She's very comfortable with the tool and finds constant approval prompts disruptive to her flow state.
+
+**Before Acode with --yes Scoping:**
+Lisa uses Acode for 6+ hours daily. Without `--yes`, she approves 150+ prompts per day. She starts using `--yes` everywhere, which works great until she accidentally auto-approves a deletion of a migration file she needed to keep. Recovery takes 2 hours.
+
+**After Acode with --yes Scoping:**
+Lisa configures her workflow with graduated trust:
+
+```bash
+# Interactive development (high trust)
+acode run "Refactor authentication module" --yes=file_write,file_read
+
+# Operations Lisa sees during session:
+# ✓ Read src/auth/*.ts - AUTO
+# ✓ Write src/auth/login.ts - AUTO
+# ⚠ Delete src/auth/legacy.ts - PROMPT (Level 3, not in scope)
+# ✓ Write tests/auth/*.test.ts - AUTO
+
+# She can expand scope mid-session when needed:
+# > Approval required: Delete src/auth/legacy.ts
+# > [A]pprove [D]eny [Y]es-rest (add file_delete to scope)
+#
+# Lisa presses 'Y' to auto-approve remaining deletions in this session
+```
+
+Lisa maintains flow for safe operations while dangerous ones still pause for confirmation.
+
+**Measurable Improvement:**
+- Prompts per day: 150 → 25 (83% reduction)
+- Flow state interruptions: 50/day → 10/day
+- Accidents from blind approval: 2/month → 0/month
+- Developer satisfaction: "I can work fast AND safe"
+- Annual productivity value: **$35,000** (recovered flow time)
+
+---
+
+### Use Case 3: Omar the Cautious Junior Developer
+
+**Persona:** Omar Rodriguez, Junior Developer in his first month at the company. He's still learning the codebase and wants to use Acode but is nervous about accidentally breaking things.
+
+**Before Acode with --yes Scoping:**
+Omar is afraid to use Acode's `--yes` flag at all because he's heard horror stories. This means every operation prompts him, which is actually good for learning but very slow. Some senior developers tell him to "just use --yes, it's fine"—but he's hesitant.
+
+**After Acode with --yes Scoping:**
+Omar uses scoping to create a safe learning environment:
+
+```bash
+# Omar's cautious configuration
+acode run "Add validation to user form" --yes=file_read
+
+# This means:
+# ✓ Read any file - AUTO (can't break anything)
+# ⚠ Write anything - PROMPT (Omar reviews each write)
+# ⚠ Delete anything - PROMPT (Omar reviews each delete)
+# ⚠ Terminal commands - PROMPT (Omar reviews each command)
+
+# As Omar gains confidence, he gradually expands:
+acode run "Add tests" --yes=file_read,file_write:*.test.ts
+
+# Later, with mentor approval:
+acode run "Refactor utils" --yes=file_read,file_write:src/utils/**
+```
+
+Omar learns by reviewing prompts for dangerous operations while not being overwhelmed by safe ones.
+
+**Measurable Improvement:**
+- Onboarding time: 4 weeks → 2.5 weeks (graduated autonomy)
+- Junior developer accidents: 3 in first month → 0 (prompts catch mistakes)
+- Mentor intervention time: 10 hours → 4 hours (fewer mistakes to fix)
+- Junior developer confidence: "I can use this safely"
+- Annual value: **$15,000** (faster onboarding, fewer accidents)
 
 ---
 
@@ -100,6 +419,97 @@ The following items are explicitly excluded from Task 013.c:
 - ASM-014: Default behavior is safe (minimal auto-approval)
 - ASM-015: Dangerous operations require explicit user action
 - ASM-016: Scope documentation clearly explains implications
+
+---
+
+## Security Considerations
+
+### Threat 1: Scope Injection via Command Line Arguments
+
+**Risk Level:** High
+**CVSS Score:** 7.5 (High)
+**Attack Vector:** Command injection
+
+**Description:**
+An attacker could craft malicious input that expands a narrow scope into a broad one. By exploiting shell expansion, environment variables, or scope parsing vulnerabilities, `--yes=file_read` could become `--yes=all`.
+
+**Attack Scenario:**
+1. Script constructs scope from user input: `--yes=$USER_SCOPE`
+2. Attacker sets `USER_SCOPE="file_read,all --ack-danger"`
+3. Shell splits arguments, adding `--ack-danger` flag
+4. `--yes=all` now active, all operations auto-approve
+
+**Mitigation:** Scope argument is parsed as a single string value, not subject to shell expansion after initial argument parsing. The `ScopeParser` validates syntax strictly and rejects any scope containing spaces or shell metacharacters. The `--ack-danger` flag requires separate interactive confirmation, not a command-line value.
+
+---
+
+### Threat 2: Risk Level Downgrade Attack
+
+**Risk Level:** High
+**CVSS Score:** 7.8 (High)
+**Attack Vector:** Configuration manipulation
+
+**Description:**
+An attacker could modify the risk level configuration to downgrade dangerous operations from Level 4 (never bypass) to Level 1 (default bypass). This would allow `--yes` to approve previously protected operations.
+
+**Attack Scenario:**
+1. Attacker gains write access to configuration
+2. Modifies risk level: `file_delete:.git/** → Level 1`
+3. User runs `acode --yes` (innocent intent)
+4. `.git/` deletion auto-approved (catastrophic)
+
+**Mitigation:** Level 4 classifications are hardcoded, not configurable. The `HardcodedCriticalOperations` list defines operations that can never be downgraded regardless of configuration. Any configuration attempting to modify Level 4 operations is rejected with a security warning.
+
+---
+
+### Threat 3: Scope Exhaustion via Pattern Complexity
+
+**Risk Level:** Medium
+**CVSS Score:** 5.5 (Medium)
+**Attack Vector:** Resource exhaustion
+
+**Description:**
+An attacker could craft complex scope patterns that cause exponential matching time. A carefully constructed glob pattern like `**/**/**/**/*.ts` could cause each operation check to take seconds, effectively freezing Acode.
+
+**Attack Scenario:**
+1. Attacker provides scope: `--yes=file_write:**/**/**/**/**/*.ts`
+2. For each file write, pattern matching takes 5+ seconds
+3. Session becomes unusably slow
+4. User forced to kill process
+
+**Mitigation:** Scope patterns are validated for complexity before use. Maximum pattern depth (number of `**` segments) is limited to 3. Pattern matching uses a timeout of 100ms per operation. The `ScopePatternValidator` rejects patterns that could cause performance issues.
+
+---
+
+### Threat 4: Bypass via Operation Misclassification
+
+**Risk Level:** Medium
+**CVSS Score:** 6.1 (Medium)
+**Attack Vector:** Logic manipulation
+
+**Description:**
+If operations are not correctly classified, a dangerous operation might match a safe scope. For example, if `git push --force` is misclassified as `git:status` (Level 2), it could auto-approve under `--yes=terminal:safe`.
+
+**Attack Scenario:**
+1. Bug in operation classifier misidentifies commands
+2. `git push --force` classified as git informational
+3. User runs `--yes=terminal:safe`
+4. Force push auto-approved, remote history rewritten
+
+**Mitigation:** Operation classification uses strict pattern matching with explicit deny lists. The `OperationClassifier` has a hardcoded `DangerousCommandPatterns` list that takes precedence over general classification. All terminal commands are cross-checked against this list before any scope matching.
+
+---
+
+### Threat 5: Scope Persistence Leading to Unintended Bypass
+
+**Risk Level:** Low
+**CVSS Score:** 4.0 (Medium)
+**Attack Vector:** State confusion
+
+**Description:**
+If scopes persist between sessions unexpectedly, a broad scope used for one task could remain active for a sensitive task. The user thinks they're running with default scopes but actually has `--yes=all` active from yesterday.
+
+**Mitigation:** Scopes are strictly session-scoped and never persisted. The `ScopeManager` initializes with empty scope each session. The `--yes` flag must be explicitly provided on each command. No configuration option exists to set default scopes (intentional design to prevent this attack).
 
 ---
 

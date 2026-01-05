@@ -10,25 +10,311 @@
 
 ## Description
 
-Task 049 implements conversation history and multi-chat management—the system that stores, organizes, and retrieves chat sessions. Users can have multiple concurrent conversations, switch between them, and search across history. The architecture is offline-first with SQLite for local storage and PostgreSQL for remote sync.
+### Business Value
 
-Conversation history is fundamental to agentic coding workflows. Developers work on multiple features simultaneously—each deserving its own conversation context. The agent needs to recall what was discussed, what was tried, and what worked. History enables continuity across sessions and machines.
+Conversation history is the memory layer of Acode—enabling continuity, context preservation, and knowledge sharing across sessions, machines, and team members. Without persistent conversation storage, developers lose valuable context every time they close the CLI, switch machines, or work on multiple features concurrently. Conversations History & Multi-Chat Management transforms Acode from a stateless tool into an intelligent assistant that remembers, learns, and adapts.
 
-The data model centers on Chats, Runs, and Messages. A Chat is a conversation thread with a title and metadata. A Run is an execution within a chat—a single user request and the agent's response. Messages are the individual exchanges: user prompts, agent responses, tool calls, and tool results.
+**Direct Business Impact:**
+- **Developer Productivity:** Eliminates 40-45 minutes per day spent re-explaining context and searching previous discussions ($17,520/year per developer at $100/hour rate)
+- **Incident Resolution:** Reduces investigation time by 50% through complete audit trails of troubleshooting attempts ($13,500 per major incident)
+- **Team Knowledge Sharing:** Cuts onboarding time by 60% and repetitive support questions by 80% ($44,760/year for a 10-person team)
+- **Multi-Tasking Efficiency:** Enables seamless context switching between concurrent features, reducing cognitive load and errors
+- **Audit & Compliance:** Provides complete, immutable records of all AI-assisted development decisions for regulatory and internal review
 
-Offline-first architecture ensures the agent works without network. SQLite serves as the local database—fast, reliable, zero-config. Changes are queued in an outbox for sync. When network is available, the sync engine pushes changes to PostgreSQL and pulls updates from other machines.
+**Annual ROI for a 10-Developer Team:**
+- Productivity gains: 10 developers × $17,520 = $175,200
+- Incident cost reduction: 8 incidents/year × $13,500 savings = $108,000
+- Onboarding efficiency: 10 hires/year × $2,400 savings = $24,000
+- Support time savings: 10 developers × $8,000 = $80,000
+- **Total Annual Value: $387,200**
 
-CRUSD operations (Create, Read, Update, Soft-Delete) provide full lifecycle management. Create new chats for new topics. Read to load conversation context. Update to rename or tag chats. Soft-delete to archive without losing history. Restore to recover archived chats. Purge for permanent deletion.
+### Technical Architecture
 
-Multi-chat concurrency allows multiple open conversations. Each chat can be bound to a worktree for context. Switching chats is instant—context is isolated. The agent maintains state per-chat without confusion.
+Task 049 implements a three-layer architecture for conversation storage: Domain (entities), Application (use cases), Infrastructure (persistence). The design prioritizes offline-first operation, eventual consistency, and multi-device synchronization.
 
-Search spans all history. Find messages by content, filter by date, filter by chat. Full-text search enables quick retrieval: "What did we decide about the authentication approach?" Search works locally and remotely.
+**Core Entities:**
 
-Privacy and retention policies govern data lifecycle. Configure how long to retain chats. Configure what syncs to remote. Redact sensitive content before sync. Export conversations for archival.
+1. **Chat** - Aggregate root representing a conversation thread
+   - Unique identifier (ULID for time-based sorting and global uniqueness)
+   - Title (user-provided or auto-generated from first message)
+   - Tags (for categorization: \"bug\", \"feature\", \"refactor\")
+   - Worktree binding (optional link to git worktree for context isolation)
+   - Soft-delete flag (archive without losing history)
+   - Timestamps (created, updated, last message)
+   - Message count (cached for performance)
 
-Integration with the session system (Task 011) ensures conversation state survives interruptions. Resume a chat after restart, after network loss, after machine switch. The experience is seamless.
+2. **Run** - Single execution cycle within a chat (one user request + agent response)
+   - Unique identifier (ULID)
+   - Parent chat reference
+   - Status (pending, in-progress, completed, failed, cancelled)
+   - Token usage tracking (prompt tokens, completion tokens, total cost)
+   - Duration (start time, end time, elapsed seconds)
+   - Model used (for cost analysis and debugging)
+   - Exit code (0 for success, non-zero for errors)
 
-The sync engine (Task 049.f) handles the complexity of distributed data. Conflict resolution when the same chat is modified on multiple machines. Batching for efficiency. Retries for reliability. Idempotency for safety.
+3. **Message** - Individual exchange unit within a run
+   - Unique identifier (ULID)
+   - Parent run reference
+   - Role (user, assistant, system, tool)
+   - Content (text, code, structured data)
+   - Timestamp (sub-second precision for ordering)
+   - Tool calls (for assistant messages invoking tools)
+   - Tool results (for tool messages returning outputs)
+   - Metadata (token count, latency, model-specific info)
+
+**Relationship Model:**
+```
+Chat (1) ──▶ (N) Run (1) ──▶ (N) Message
+  │                              │
+  └─ WorktreeBinding?            └─ ToolCall[]?
+  └─ Tags[]                      └─ ToolResult?
+```
+
+**Storage Architecture:**
+
+**Local Storage (SQLite):**
+- Primary data store for offline operation
+- Located in `.agent/chats.db` within workspace
+- Write-Ahead Logging (WAL) mode for concurrent read/write
+- Full-text search index on message content
+- Indexes on chat_id, run_id, timestamps for fast queries
+- Pragma settings: `journal_mode=WAL`, `synchronous=NORMAL`, `cache_size=-2000` (2MB)
+- Schema versioning with migration support (compatible with Task 050 workspace database)
+
+**Remote Storage (PostgreSQL - Optional):**
+- Secondary store for multi-machine sync and team sharing
+- Connection configured in `~/.acode/config.yml` (user-level, not workspace-level to avoid secret leakage)
+- Same schema as SQLite for portability
+- Materialized views for aggregations (chat message counts, token usage summaries)
+- Row-level security for multi-user scenarios (future)
+
+**Sync Engine (Task 049.f):**
+- Outbox pattern for reliable sync: changes written to `sync_outbox` table locally
+- Background worker polls outbox every 30 seconds when online
+- Batch size: 50 messages per sync round (tunable via config)
+- Conflict resolution: Last-Write-Wins (LWW) based on updated_at timestamp
+- Idempotency: Each sync operation has a unique ID to prevent duplicates on retry
+- Retry policy: Exponential backoff (1s, 2s, 4s, 8s, 16s max), 5 attempts
+- Network detection: Periodic health check to PostgreSQL (5s timeout)
+
+**CRUSD Operations:**
+
+- **Create**: New chat with generated ID, initial metadata. Offline: writes to SQLite, queues sync. Online: writes to both SQLite and PostgreSQL transactionally.
+- **Read**: Load chat by ID, load all chats, load chat with message history (paginated). Always reads from local SQLite for speed.
+- **Update**: Change title, add/remove tags, update worktree binding. Offline: writes locally, queues sync. Online: writes both.
+- **Soft-Delete**: Set `is_deleted=true`, preserve all data. UI hides by default, but data remains queryable with `--include-deleted` flag.
+- **Restore**: Set `is_deleted=false`. Only works if chat not purged.
+- **Purge**: Permanent deletion, cascades to runs and messages. Requires explicit confirmation (`acode chat purge <id> --confirm`). Not reversible.
+
+**Multi-Chat Concurrency:**
+
+Acode supports multiple open chats for concurrent workflows. Key design decisions:
+
+1. **Active Chat Determination**: The active chat is resolved in order of precedence:
+   - Explicit `--chat <id>` flag on command
+   - Environment variable `ACODE_ACTIVE_CHAT`
+   - Worktree binding (if current directory is in a worktree, use its bound chat)
+   - Session state (last active chat in current session)
+   - Fallback: Prompt user to select or create a chat
+
+2. **Context Isolation**: Each chat maintains its own conversation context. Switching chats does not leak messages or tool call history. The agent's context window is populated only from the active chat's messages.
+
+3. **Worktree Binding**: Chat can be bound to a git worktree (Task 023) for automatic context association. When the user `cd`s into a worktree, the active chat switches to that worktree's bound chat. This enables spatial context: \"When I'm in the `feature/auth` worktree, I'm working on authentication; when I'm in `bugfix/leak`, I'm debugging memory issues.\"
+
+4. **Fast Switching**: Chat switching is <100ms. Only metadata loads initially; messages load on-demand when displayed or sent to model.
+
+**Search Implementation:**
+
+Full-text search uses SQLite's FTS5 extension (fallback to LIKE queries if FTS5 unavailable):
+
+```sql
+CREATE VIRTUAL TABLE message_fts USING fts5(
+  message_id UNINDEXED,
+  content,
+  tokenize='porter unicode61'
+);
+```
+
+Search query:
+```sql
+SELECT m.* FROM messages m
+JOIN message_fts fts ON m.id = fts.message_id
+WHERE fts.content MATCH ? 
+ORDER BY m.created_at DESC
+LIMIT 50;
+```
+
+Filters:
+- By chat: `WHERE m.chat_id = ?`
+- By date range: `WHERE m.created_at BETWEEN ? AND ?`
+- By role: `WHERE m.role = ?`
+- Combined: Filters applied with AND logic
+
+Search ranking: Results ordered by recency (most recent first). Future: relevance scoring using FTS5 `rank` function.
+
+### Integration Points
+
+**Task 010 (CLI Framework):**
+- Conversation commands: `acode chat <subcommand>` (new, list, open, show, rename, tag, delete, restore, purge, search, export, sync)
+- Global `--chat <id>` flag to specify active chat
+- Output formatting via Task 010.b (JSONL mode) for programmatic access
+
+**Task 011 (Session State Machine):**
+- Active chat persisted in session state
+- Chat history included in session checkpoints for resume
+- Session recovery restores last active chat
+
+**Task 023 (Worktree Management):**
+- Worktree-to-chat binding stored in both chat metadata and worktree state
+- Automatic chat activation when entering worktree directory
+- Cleanup: When worktree is removed, chat binding is cleared (chat remains but unbound)
+
+**Task 050 (Workspace Database):**
+- Conversation history shares database connection pool with other workspace data
+- Migrations coordinated with workspace schema versioning
+- Backup/export includes conversation data
+
+**Task 021 (Security & Secrets):**
+- Secret redaction before sync: Messages scanned for API keys, tokens, passwords before writing to remote PostgreSQL
+- Redaction patterns configurable in `security.redaction_patterns`
+- Redacted content replaced with `[REDACTED:API_KEY]` placeholder
+
+### Constraints and Limitations
+
+1. **Linear Conversation Model**: Conversations are strictly linear—no branching or parallel conversation threads. If a user wants to explore two different approaches, they must create two separate chats. This simplifies the mental model and implementation but reduces flexibility.
+
+2. **Single-User Context**: Task 049 assumes single-user ownership of chats. No sharing, no collaboration, no permissions. Multi-user support deferred to future (would require Row-Level Security in PostgreSQL, user authentication, and access control lists).
+
+3. **Sync Conflicts Use LWW**: Last-Write-Wins conflict resolution is simple but may lose concurrent edits. Example: User edits chat title on machine A, edits same chat title on machine B while offline. When both sync, only the last sync wins. Acceptable trade-off because chat metadata changes are rare and low-risk. Messages are append-only, so no message conflicts.
+
+4. **No Encryption at Rest**: Chat data stored in plain text in SQLite and PostgreSQL. Encryption deferred to Task 021 (disk encryption at OS level recommended). Future: Optionally encrypt messages using workspace-level key.
+
+5. **Pagination Required for Large Chats**: Chats with >1,000 messages must paginate or performance degrades. CLI commands default to last 50 messages; use `--limit` and `--offset` for pagination. UI/API must implement virtual scrolling or infinite scroll for large chats.
+
+6. **Search Limited to Content**: Search only indexes message `content` field. Tool call parameters and tool result outputs are not indexed (would require structured indexing—deferred to Task 049.d).
+
+7. **No Real-Time Sync**: Sync is eventually consistent with 30-second polling interval. Real-time push notifications via WebSocket/SSE not supported. Acceptable for single-user agentic workflows; problematic for multi-user collaboration (future consideration).
+
+### Trade-Offs and Alternatives Considered
+
+**Trade-Off: SQLite vs. PostgreSQL Only**
+- **Decision**: Use SQLite locally, PostgreSQL optionally for remote sync.
+- **Alternative Considered**: PostgreSQL-only with local caching.
+- **Why SQLite**: Zero-config, single-file, embedded, excellent for offline-first. PostgreSQL requires server setup, network connection, complexity.
+- **Trade-Off**: Sync complexity, schema duplication. **Benefit**: Offline robustness, simplicity, portability.
+
+**Trade-Off: Outbox Pattern vs. Direct Sync**
+- **Decision**: Use outbox table to queue sync operations.
+- **Alternative Considered**: Direct write to PostgreSQL when online, with rollback on failure.
+- **Why Outbox**: Decouples sync from main workflow, enables retries, prevents blocking. If PostgreSQL is slow or unavailable, local operation continues unaffected.
+- **Trade-Off**: Sync lag (up to 30 seconds). **Benefit**: Reliability, availability, performance.
+
+**Trade-Off: Last-Write-Wins vs. Operational Transformation**
+- **Decision**: LWW conflict resolution for simplicity.
+- **Alternative Considered**: Operational Transformation (OT) or CRDTs for conflict-free merging.
+- **Why LWW**: Conflicts are rare (chats are typically edited on one machine at a time). OT/CRDTs add significant complexity for minimal benefit in single-user scenario.
+- **Trade-Off**: Potential data loss on rare concurrent edit. **Benefit**: Simple implementation, predictable behavior.
+
+**Trade-Off: Soft-Delete vs. Hard-Delete**
+- **Decision**: Soft-delete by default, purge for permanent deletion.
+- **Alternative Considered**: Hard-delete only.
+- **Why Soft-Delete**: Accidental deletion is common; recovery without backup is valuable. Supports audit trail and compliance.
+- **Trade-Off**: Storage growth, additional complexity. **Benefit**: Data recovery, audit history, user confidence.
+
+**Trade-Off: Auto-Title vs. Manual-Only Titles**
+- **Decision**: Support both—auto-generate from first message, allow manual override.
+- **Alternative Considered**: Manual titles only (like Slack channels).
+- **Why Auto**: Reduces friction—user can start chatting immediately. Manual override for important conversations.
+- **Trade-Off**: Auto-generated titles may be generic. **Benefit**: Low cognitive load, fast start.
+
+### Performance Targets
+
+| Operation | Target | Maximum | Justification |
+|-----------|--------|---------|---------------|
+| Create chat | 25ms | 50ms | Single row insert + index update |
+| Append message | 5ms | 10ms | Single row insert, FTS index update deferred |
+| Load chat metadata | 10ms | 25ms | Single row read by primary key |
+| Load chat with last 50 messages | 50ms | 100ms | Join query with limit, indexed |
+| Switch active chat | 20ms | 50ms | Update session state, no message load |
+| Search 10,000 messages | 250ms | 500ms | FTS5 query, indexed, paginated |
+| Sync 50 messages | 500ms | 1000ms | Batch insert to PostgreSQL over network |
+
+### Observability and Logging
+
+**Metrics to Track:**
+- Chat operations: create, read, update, delete, restore, purge counts
+- Message operations: append, read counts
+- Search operations: query count, query latency, result count
+- Sync operations: success, failure, conflict count, bytes synced
+- Storage: SQLite file size, PostgreSQL table size, message count per chat
+
+**Log Events:**
+- Chat lifecycle: `ChatCreated`, `ChatRenamed`, `ChatDeleted`, `ChatRestored`, `ChatPurged`
+- Run lifecycle: `RunStarted`, `RunCompleted`, `RunFailed`
+- Sync events: `SyncStarted`, `SyncCompleted`, `SyncFailed`, `SyncConflict`
+- Search events: `SearchExecuted`, `SearchFailed`
+
+**Error Codes:**
+| Code | Meaning | Action |
+|------|---------|--------|
+| ACODE-CONV-001 | Chat not found | Verify chat ID, check if deleted |
+| ACODE-CONV-002 | Chat already exists | Use unique title or explicit ID |
+| ACODE-CONV-003 | Storage error | Check SQLite file permissions, disk space |
+| ACODE-CONV-004 | Sync failed | Check network, PostgreSQL connection, retry |
+| ACODE-CONV-005 | Search failed | Check FTS5 extension, rebuild index |
+| ACODE-CONV-006 | Chat deleted | Use --include-deleted or restore |
+| ACODE-CONV-007 | Purge not allowed | Confirm with --confirm flag |
+
+This architecture enables Acode to provide seamless, reliable, offline-first conversation management with optional multi-device sync—forming the foundation for persistent, context-aware agentic coding workflows.
+
+---
+
+## Use Cases
+
+### Use Case 1: DevBot's Multi-Feature Development Workflow
+
+**Persona:** DevBot is a senior software engineer working on three concurrent features: authentication refactor, API versioning, and database migration. Each feature requires distinct context, and DevBot switches between them multiple times per day based on team priorities.
+
+**Before:** DevBot used a single long conversation that mixed contexts from all three features. Finding previous discussions required scrolling through hundreds of messages. "What did we decide about the JWT expiry time?" meant reading through irrelevant database discussions. Context switching was slow and error-prone. DevBot wasted 45 minutes per day searching conversation history and re-explaining context when switching topics.
+
+**After:** DevBot creates three separate chats—one per feature. Each chat has a descriptive title and is bound to its worktree: `feature/auth-refactor` → "Auth: JWT Migration to RS256", `feature/api-v2` → "API: v2 Endpoint Design", `feature/db-migration` → "Database: PostgreSQL Migration". When DevBot switches worktrees with `cd feature/auth-refactor`, the active chat automatically switches to the auth context. The agent remembers: "Last time we discussed rotating keys every 30 days." Search with `acode chat search "JWT expiry"` instantly finds the relevant decision in the auth chat. DevBot saves 40 minutes per day—14.6 hours per month, $1,460/month at $100/hour rate. Over a year: **$17,520 productivity gain**.
+
+**Concrete Metrics:**
+- Context switch time: 5 minutes → 10 seconds (97% reduction)
+- Time spent searching history: 20 minutes/day → 2 minutes/day (90% reduction)
+- Incorrect context retrieved: 3 times/week → 0 (100% elimination)
+- Monthly time saved: 14.6 hours per developer
+- Annual ROI: $17,520 per developer
+
+### Use Case 2: Jordan's Long-Running Investigation
+
+**Persona:** Jordan is investigating a production memory leak that spans multiple weeks. The investigation involves hypothesis testing, profiling runs, code reviews, and discussions with the team. Jordan needs to track what was tried, what failed, and why.
+
+**Before:** Jordan took notes in a text file, but notes lacked agent context—no tool outputs, no code snippets, no timestamps. "Did we try increasing the GC threshold?" required manual searching through notes and logs. After two weeks, Jordan forgot which approaches had been ruled out. The investigation dragged on for 6 weeks with repeated dead-ends. The memory leak cost $500/month in excess infrastructure costs during investigation.
+
+**After:** Jordan creates a chat titled "Incident: Memory Leak in API Gateway" and binds it to worktree `bugfix/memory-leak`. All profiling commands, heap dumps, and code changes are captured in the chat history. When Jordan returns after a weekend, `acode chat show` displays the full context: "Last Friday we confirmed the leak is in the Redis connection pool. We tested increasing pool size—no effect. Next: Check for connection leaks." Search with `acode chat search "connection pool"` finds all related discussions. Jordan exports the investigation as a postmortem with `acode chat export --format markdown > postmortem.md`. The leak is fixed in 3 weeks instead of 6. **$1,500 infrastructure cost saved + 120 hours of developer time saved = $13,500 total savings**.
+
+**Concrete Metrics:**
+- Investigation time: 6 weeks → 3 weeks (50% reduction)
+- Repeated attempts at ruled-out solutions: 5 → 0 (100% elimination)
+- Time to recall previous context after breaks: 30 minutes → 2 minutes (93% reduction)
+- Infrastructure waste during investigation: $3,000 → $1,500 (50% reduction)
+- Total incident cost: $21,000 → $7,500 (64% reduction)
+
+### Use Case 3: Alex's Team Knowledge Sharing
+
+**Persona:** Alex is a tech lead mentoring junior developers on the team. When juniors ask "How do I set up the local environment?" or "What's our pattern for error handling?", Alex wants to share previous agent conversations as examples rather than re-explaining.
+
+**Before:** Alex re-typed explanations in Slack or copy-pasted code snippets without full context. Juniors got partial information and often misunderstood. "What's the full command to initialize the database?" led to Alex searching through terminal history or re-running commands. Team members asked the same questions multiple times. Alex spent 5 hours per week answering repetitive questions.
+
+**After:** Alex maintains a chat titled "Setup: Local Development Environment" that captures the complete setup process with all commands, outputs, and troubleshooting. When a junior asks for help, Alex shares: `acode chat export chat_setup123 --format markdown > setup-guide.md` and posts the guide in Slack. Juniors follow step-by-step instructions with actual tool outputs and error handling. Complex questions like "How do we handle API rate limiting?" link to chat `chat_api456` with the full design discussion. Alex saves 4 hours per week—17.3 hours per month, $1,730/month at $100/hour rate. Over a year: **$20,760 time savings**. Team onboarding time drops from 5 days to 2 days—saving $2,400 per hire for 10 hires/year = **$24,000 additional savings**.
+
+**Concrete Metrics:**
+- Time answering repetitive questions: 5 hours/week → 1 hour/week (80% reduction)
+- Junior developer self-service success rate: 30% → 85% (183% improvement)
+- Team onboarding time: 5 days → 2 days (60% reduction)
+- Onboarding cost per hire: $4,000 → $1,600 (60% reduction)
+- Annual value for 10 hires: $20,760 time savings + $24,000 onboarding savings = **$44,760 total**
 
 ---
 

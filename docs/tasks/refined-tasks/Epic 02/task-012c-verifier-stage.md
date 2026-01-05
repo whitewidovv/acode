@@ -578,57 +578,299 @@ Check Details:
 
 ### Unit Tests
 
-```
-Tests/Unit/Orchestration/Stages/Verifier/
-├── VerifierStageTests.cs
-│   ├── Should_Verify_All_Steps()
-│   ├── Should_Report_Pass()
-│   ├── Should_Report_Failure()
-│   └── Should_Generate_Feedback()
-│
-├── FileCheckTests.cs
-│   ├── Should_Verify_File_Exists()
-│   ├── Should_Verify_Content_Matches()
-│   └── Should_Handle_Missing_File()
-│
-├── CompilationCheckTests.cs
-│   ├── Should_Run_Build()
-│   ├── Should_Parse_Errors()
-│   └── Should_Fail_On_Error()
-│
-├── TestRunnerTests.cs
-│   ├── Should_Run_Tests()
-│   ├── Should_Parse_Results()
-│   └── Should_Handle_Timeout()
-│
-└── LlmVerificationTests.cs
-    ├── Should_Present_Context()
-    ├── Should_Parse_Judgment()
-    └── Should_Include_Reasoning()
+```csharp
+namespace AgenticCoder.Application.Tests.Unit.Orchestration.Stages.Verifier;
+
+public class VerifierStageTests
+{
+    private readonly Mock<ICheckRunner> _mockCheckRunner;
+    private readonly Mock<IFeedbackGenerator> _mockFeedbackGenerator;
+    private readonly ILogger<VerifierStage> _logger;
+    private readonly VerifierStage _verifier;
+    
+    public VerifierStageTests()
+    {
+        _mockCheckRunner = new Mock<ICheckRunner>();
+        _mockFeedbackGenerator = new Mock<IFeedbackGenerator>();
+        _logger = NullLogger<VerifierStage>.Instance;
+        _verifier = new VerifierStage(_mockCheckRunner.Object, _mockFeedbackGenerator.Object, _logger);
+    }
+    
+    [Fact]
+    public async Task Should_Report_Pass_When_All_Checks_Pass()
+    {
+        // Arrange
+        var stepResults = CreateSuccessfulStepResults(3);
+        var options = new VerificationOptions();
+        var allPassed = new List<CheckResult>
+        {
+            new CheckResult("FileExists", CheckStatus.Passed, "File found", null, TimeSpan.FromMilliseconds(20)),
+            new CheckResult("Compilation", CheckStatus.Passed, "Compiled successfully", null, TimeSpan.FromSeconds(2)),
+            new CheckResult("Tests", CheckStatus.Passed, "All tests passed", null, TimeSpan.FromSeconds(5))
+        };
+        
+        _mockCheckRunner
+            .Setup(r => r.RunAllAsync(It.IsAny<CheckContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(allPassed);
+        
+        // Act
+        var result = await _verifier.VerifyAsync(stepResults, options, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(VerificationStatus.Passed, result.Status);
+        Assert.Equal(3, result.CheckResults.Count);
+        Assert.All(result.CheckResults, c => Assert.Equal(CheckStatus.Passed, c.Status));
+        Assert.Null(result.Feedback); // No feedback on success
+    }
+    
+    [Fact]
+    public async Task Should_Report_Failure_And_Generate_Feedback()
+    {
+        // Arrange
+        var stepResults = CreateSuccessfulStepResults(1);
+        var options = new VerificationOptions();
+        var withFailure = new List<CheckResult>
+        {
+            new CheckResult("FileExists", CheckStatus.Passed, "File found", null, TimeSpan.FromMilliseconds(20)),
+            new CheckResult("Compilation", CheckStatus.Failed, "Syntax error on line 15", "Missing semicolon", TimeSpan.FromSeconds(2))
+        };
+        
+        var feedback = new VerificationFeedback(
+            Issues: new List<FeedbackIssue> { new("Compilation", "Missing semicolon", "Syntax error on line 15") },
+            Suggestions: new List<string> { "Add semicolon at end of line 15" });
+        
+        _mockCheckRunner
+            .Setup(r => r.RunAllAsync(It.IsAny<CheckContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(withFailure);
+            
+        _mockFeedbackGenerator
+            .Setup(f => f.Generate(It.IsAny<IReadOnlyList<CheckResult>>()))
+            .Returns(feedback);
+        
+        // Act
+        var result = await _verifier.VerifyAsync(stepResults, options, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(VerificationStatus.Failed, result.Status);
+        Assert.Contains(result.CheckResults, c => c.Status == CheckStatus.Failed);
+        Assert.NotNull(result.Feedback);
+        Assert.Single(result.Feedback.Issues);
+        Assert.Single(result.Feedback.Suggestions);
+    }
+    
+    private static IReadOnlyList<StepResult> CreateSuccessfulStepResults(int count)
+    {
+        return Enumerable.Range(0, count)
+            .Select(i => new StepResult(
+                Status: StepStatus.Success,
+                Output: $"Step {i} output",
+                Message: "Success",
+                TokensUsed: 100))
+            .ToList();
+    }
+}
+
+public class FileCheckTests
+{
+    private readonly FileExistsCheck _fileExistsCheck;
+    private readonly FileContentCheck _fileContentCheck;
+    private readonly string _testWorkspacePath;
+    
+    public FileCheckTests()
+    {
+        _testWorkspacePath = Path.Combine(Path.GetTempPath(), "test-workspace-" + Guid.NewGuid());
+        Directory.CreateDirectory(_testWorkspacePath);
+        _fileExistsCheck = new FileExistsCheck(NullLogger<FileExistsCheck>.Instance);
+        _fileContentCheck = new FileContentCheck(NullLogger<FileContentCheck>.Instance);
+    }
+    
+    [Fact]
+    public async Task Should_Pass_When_File_Exists()
+    {
+        // Arrange
+        var testFile = Path.Combine(_testWorkspacePath, "test.txt");
+        File.WriteAllText(testFile, "test content");
+        
+        var context = new CheckContext(
+            WorkspacePath: _testWorkspacePath,
+            FilesToVerify: new[] { "test.txt" },
+            ExpectedContent: null,
+            AdditionalData: new Dictionary<string, object>());
+        
+        // Act
+        var result = await _fileExistsCheck.RunAsync(context, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(CheckStatus.Passed, result.Status);
+        Assert.Contains("test.txt", result.Details);
+    }
+    
+    [Fact]
+    public async Task Should_Fail_When_File_Missing()
+    {
+        // Arrange
+        var context = new CheckContext(
+            WorkspacePath: _testWorkspacePath,
+            FilesToVerify: new[] { "missing.txt" },
+            ExpectedContent: null,
+            AdditionalData: new Dictionary<string, object>());
+        
+        // Act
+        var result = await _fileExistsCheck.RunAsync(context, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(CheckStatus.Failed, result.Status);
+        Assert.Contains("missing.txt", result.Reason);
+    }
+    
+    [Fact]
+    public async Task Should_Verify_Content_Matches_Pattern()
+    {
+        // Arrange
+        var testFile = Path.Combine(_testWorkspacePath, "class.cs");
+        File.WriteAllText(testFile, "public class UserService { }");
+        
+        var context = new CheckContext(
+            WorkspacePath: _testWorkspacePath,
+            FilesToVerify: new[] { "class.cs" },
+            ExpectedContent: new Dictionary<string, string> { { "class.cs", "public class.*\\{" } },
+            AdditionalData: new Dictionary<string, object>());
+        
+        // Act
+        var result = await _fileContentCheck.RunAsync(context, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(CheckStatus.Passed, result.Status);
+    }
+}
+
+public class CompilationCheckTests
+{
+    private readonly Mock<IProcessRunner> _mockProcessRunner;
+    private readonly CompilationCheck _compilationCheck;
+    
+    public CompilationCheckTests()
+    {
+        _mockProcessRunner = new Mock<IProcessRunner>();
+        _compilationCheck = new CompilationCheck(_mockProcessRunner.Object, NullLogger<CompilationCheck>.Instance);
+    }
+    
+    [Fact]
+    public async Task Should_Pass_When_Compilation_Succeeds()
+    {
+        // Arrange
+        var context = new CheckContext(
+            WorkspacePath: "/workspace",
+            FilesToVerify: Array.Empty<string>(),
+            ExpectedContent: null,
+            AdditionalData: new Dictionary<string, object> { { "BuildCommand", "dotnet build" } });
+        
+        _mockProcessRunner
+            .Setup(p => p.RunAsync("dotnet", "build", "/workspace", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult(ExitCode: 0, Output: "Build succeeded", Error: ""));
+        
+        // Act
+        var result = await _compilationCheck.RunAsync(context, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(CheckStatus.Passed, result.Status);
+        Assert.Contains("succeeded", result.Details, StringComparison.OrdinalIgnoreCase);
+    }
+    
+    [Fact]
+    public async Task Should_Fail_And_Parse_Errors_When_Compilation_Fails()
+    {
+        // Arrange
+        var context = new CheckContext(
+            WorkspacePath: "/workspace",
+            FilesToVerify: Array.Empty<string>(),
+            ExpectedContent: null,
+            AdditionalData: new Dictionary<string, object> { { "BuildCommand", "dotnet build" } });
+        
+        var errorOutput = "error CS1002: ; expected [/workspace/file.cs(15)]";
+        _mockProcessRunner
+            .Setup(p => p.RunAsync("dotnet", "build", "/workspace", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult(ExitCode: 1, Output: "", Error: errorOutput));
+        
+        // Act
+        var result = await _compilationCheck.RunAsync(context, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(CheckStatus.Failed, result.Status);
+        Assert.Contains("CS1002", result.Details);
+        Assert.Contains("semicolon", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+}
 ```
 
 ### Integration Tests
 
-```
-Tests/Integration/Orchestration/Stages/Verifier/
-├── VerifierIntegrationTests.cs
-│   ├── Should_Verify_Real_Files()
-│   ├── Should_Run_Real_Compilation()
-│   └── Should_Run_Real_Tests()
-│
-└── CycleIntegrationTests.cs
-    ├── Should_Cycle_On_Failure()
-    └── Should_Escalate_At_Limit()
+```csharp
+namespace AgenticCoder.Application.Tests.Integration.Orchestration.Stages.Verifier;
+
+public class VerifierIntegrationTests : IClassFixture<TestServerFixture>
+{
+    private readonly TestServerFixture _fixture;
+    
+    public VerifierIntegrationTests(TestServerFixture fixture)
+    {
+        _fixture = fixture;
+    }
+    
+    [Fact]
+    public async Task Should_Verify_Real_Files_In_Workspace()
+    {
+        // Arrange
+        var verifier = _fixture.GetService<IVerifierStage>();
+        var workspace = await _fixture.CreateTestWorkspaceAsync();
+        await File.WriteAllTextAsync(Path.Combine(workspace.RootPath, "test.txt"), "content");
+        
+        var stepResults = new List<StepResult>
+        {
+            new StepResult(StepStatus.Success, "Created test.txt", "Success", 100)
+        };
+        var options = new VerificationOptions();
+        
+        // Act
+        var result = await verifier.VerifyAsync(stepResults, options, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(VerificationStatus.Passed, result.Status);
+    }
+}
 ```
 
 ### E2E Tests
 
-```
-Tests/E2E/Orchestration/Stages/Verifier/
-├── VerifierE2ETests.cs
-│   ├── Should_Pass_Good_Code()
-│   ├── Should_Fail_Bad_Code()
-│   └── Should_Enable_Retry()
+```csharp
+namespace AgenticCoder.Application.Tests.E2E.Orchestration.Stages.Verifier;
+
+public class VerifierE2ETests : IClassFixture<E2ETestFixture>
+{
+    private readonly E2ETestFixture _fixture;
+    
+    public VerifierE2ETests(E2ETestFixture fixture)
+    {
+        _fixture = fixture;
+    }
+    
+    [Fact]
+    public async Task Should_Pass_Good_Code_Through_All_Checks()
+    {
+        // Arrange
+        var verifier = _fixture.GetService<IVerifierStage>();
+        var workspace = await _fixture.CreateTestWorkspaceWithValidCodeAsync();
+        var stepResults = await _fixture.ExecuteCodeGenerationStepsAsync(workspace);
+        var options = new VerificationOptions();
+        
+        // Act
+        var result = await verifier.VerifyAsync(stepResults, options, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(VerificationStatus.Passed, result.Status);
+        Assert.All(result.CheckResults, c => Assert.Equal(CheckStatus.Passed, c.Status));
+    }
+}
 ```
 
 ### Performance Benchmarks
@@ -773,25 +1015,362 @@ public enum CheckStatus
 }
 ```
 
-### FeedbackGenerator
+### VerifierStage Complete Implementation
 
 ```csharp
 namespace AgenticCoder.Application.Orchestration.Stages.Verifier;
 
-public sealed class FeedbackGenerator
+public sealed class VerifierStage : StageBase, IVerifierStage
 {
-    public VerificationFeedback Generate(IReadOnlyList<CheckResult> failures)
+    private readonly ICheckRunner _checkRunner;
+    private readonly IFeedbackGenerator _feedbackGenerator;
+    private readonly ILogger<VerifierStage> _logger;
+    
+    public override StageType Type => StageType.Verifier;
+    
+    public VerifierStage(
+        ICheckRunner checkRunner,
+        IFeedbackGenerator feedbackGenerator,
+        ILogger<VerifierStage> logger) : base(logger)
     {
-        var issues = failures
-            .Where(f => f.Status == CheckStatus.Failed)
-            .Select(f => new FeedbackIssue(f.CheckName, f.Reason, f.Details))
-            .ToList();
-            
-        var suggestions = GenerateSuggestions(issues);
+        _checkRunner = checkRunner ?? throw new ArgumentNullException(nameof(checkRunner));
+        _feedbackGenerator = feedbackGenerator ?? throw new ArgumentNullException(nameof(feedbackGenerator));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    
+    protected override async Task<StageResult> ExecuteStageAsync(
+        StageContext context,
+        CancellationToken ct)
+    {
+        var stepResults = (IReadOnlyList<StepResult>)context.StageData["step_results"];
+        var options = new VerificationOptions();
         
-        return new VerificationFeedback(issues, suggestions);
+        var verificationResult = await VerifyAsync(stepResults, options, ct);
+        
+        return new StageResult(
+            Status: verificationResult.Status == VerificationStatus.Passed ? StageStatus.Success : StageStatus.Cycle,
+            Output: verificationResult,
+            NextStage: verificationResult.Status == VerificationStatus.Passed ? StageType.Reviewer : StageType.Executor,
+            Message: $"Verification {verificationResult.Status}: {verificationResult.CheckResults.Count} checks",
+            Metrics: new StageMetrics(StageType.Verifier, TimeSpan.Zero, 0));
+    }
+    
+    public async Task<VerificationResult> VerifyAsync(
+        IReadOnlyList<StepResult> stepResults,
+        VerificationOptions options,
+        CancellationToken ct)
+    {
+        _logger.LogInformation("Verifying {StepCount} steps", stepResults.Count);
+        
+        var checkContext = new CheckContext(
+            WorkspacePath: options.WorkspacePath,
+            FilesToVerify: ExtractFilesFromStepResults(stepResults),
+            ExpectedContent: null,
+            AdditionalData: new Dictionary<string, object> { { "StepResults", stepResults } });
+        
+        var checkResults = await _checkRunner.RunAllAsync(checkContext, ct);
+        
+        var allPassed = checkResults.All(c => c.Status == CheckStatus.Passed);
+        var status = allPassed ? VerificationStatus.Passed : VerificationStatus.Failed;
+        
+        VerificationFeedback? feedback = null;
+        if (!allPassed)
+        {
+            feedback = _feedbackGenerator.Generate(checkResults);
+            _logger.LogWarning("Verification failed: {IssueCount} issues found", feedback.Issues.Count);
+        }
+        
+        return new VerificationResult(status, checkResults, feedback);
+    }
+    
+    private static string[] ExtractFilesFromStepResults(IReadOnlyList<StepResult> stepResults)
+    {
+        return stepResults
+            .Where(r => r.Output != null && r.Output.ToString().Contains("file"))
+            .Select(r => ExtractFileName(r.Output.ToString()))
+            .Where(f => !string.IsNullOrEmpty(f))
+            .ToArray();
+    }
+    
+    private static string ExtractFileName(string output)
+    {
+        // Simple extraction logic - in real implementation would be more sophisticated
+        var match = Regex.Match(output, @"\bfile:\s*([\w/.\-]+)");
+        return match.Success ? match.Groups[1].Value : string.Empty;
     }
 }
+```
+
+### CheckRunner Implementation
+
+```csharp
+namespace AgenticCoder.Application.Orchestration.Stages.Verifier;
+
+public interface ICheckRunner
+{
+    Task<IReadOnlyList<CheckResult>> RunAllAsync(CheckContext context, CancellationToken ct);
+}
+
+public sealed class CheckRunner : ICheckRunner
+{
+    private readonly IEnumerable<ICheck> _checks;
+    private readonly ILogger<CheckRunner> _logger;
+    
+    public CheckRunner(IEnumerable<ICheck> checks, ILogger<CheckRunner> logger)
+    {
+        _checks = checks ?? throw new ArgumentNullException(nameof(checks));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    
+    public async Task<IReadOnlyList<CheckResult>> RunAllAsync(CheckContext context, CancellationToken ct)
+    {
+        _logger.LogInformation("Running {CheckCount} verification checks", _checks.Count());
+        
+        var results = new List<CheckResult>();
+        
+        // Run checks in parallel for better performance
+        var tasks = _checks.Select(check => RunCheckAsync(check, context, ct));
+        var checkResults = await Task.WhenAll(tasks);
+        
+        results.AddRange(checkResults);
+        
+        var passedCount = results.Count(r => r.Status == CheckStatus.Passed);
+        var failedCount = results.Count(r => r.Status == CheckStatus.Failed);
+        
+        _logger.LogInformation("Checks complete: {Passed} passed, {Failed} failed",
+            passedCount, failedCount);
+        
+        return results.AsReadOnly();
+    }
+    
+    private async Task<CheckResult> RunCheckAsync(ICheck check, CheckContext context, CancellationToken ct)
+    {
+        _logger.LogDebug("Running check: {CheckName}", check.Name);
+        
+        try
+        {
+            return await check.RunAsync(context, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Check {CheckName} threw exception", check.Name);
+            return new CheckResult(
+                CheckName: check.Name,
+                Status: CheckStatus.Failed,
+                Details: null,
+                Reason: $"Check threw exception: {ex.Message}",
+                Duration: TimeSpan.Zero);
+        }
+    }
+}
+```
+
+### FeedbackGenerator Complete Implementation
+
+```csharp
+namespace AgenticCoder.Application.Orchestration.Stages.Verifier;
+
+public interface IFeedbackGenerator
+{
+    VerificationFeedback Generate(IReadOnlyList<CheckResult> checkResults);
+}
+
+public sealed class FeedbackGenerator : IFeedbackGenerator
+{
+    private readonly ILogger<FeedbackGenerator> _logger;
+    
+    public FeedbackGenerator(ILogger<FeedbackGenerator> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    
+    public VerificationFeedback Generate(IReadOnlyList<CheckResult> checkResults)
+    {
+        _logger.LogInformation("Generating feedback for {FailureCount} failures",
+            checkResults.Count(c => c.Status == CheckStatus.Failed));
+        
+        var issues = checkResults
+            .Where(c => c.Status == CheckStatus.Failed)
+            .Select(c => new FeedbackIssue(
+                CheckName: c.CheckName,
+                Reason: c.Reason ?? "Check failed",
+                Details: c.Details))
+            .ToList();
+        
+        var suggestions = GenerateSuggestions(issues);
+        
+        return new VerificationFeedback(issues.AsReadOnly(), suggestions.AsReadOnly());
+    }
+    
+    private List<string> GenerateSuggestions(List<FeedbackIssue> issues)
+    {
+        var suggestions = new List<string>();
+        
+        foreach (var issue in issues)
+        {
+            var suggestion = issue.CheckName switch
+            {
+                "FileExists" => $"Create the missing file: {issue.Details}",
+                "Compilation" => $"Fix compilation error: {issue.Reason}",
+                "Tests" => $"Fix failing test: {issue.Details}",
+                "LintErrors" => $"Address linter issues: {issue.Reason}",
+                _ => $"Resolve issue in {issue.CheckName}: {issue.Reason}"
+            };
+            
+            suggestions.Add(suggestion);
+        }
+        
+        return suggestions;
+    }
+}
+
+public sealed record VerificationFeedback(
+    IReadOnlyList<FeedbackIssue> Issues,
+    IReadOnlyList<string> Suggestions);
+
+public sealed record FeedbackIssue(
+    string CheckName,
+    string Reason,
+    string? Details);
+```
+
+### FileExistsCheck Implementation
+
+```csharp
+namespace AgenticCoder.Application.Orchestration.Stages.Verifier.Checks;
+
+public sealed class FileExistsCheck : ICheck
+{
+    private readonly ILogger<FileExistsCheck> _logger;
+    
+    public string Name => "FileExists";
+    public CheckType Type => CheckType.Programmatic;
+    
+    public FileExistsCheck(ILogger<FileExistsCheck> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    
+    public Task<CheckResult> RunAsync(CheckContext context, CancellationToken ct)
+    {
+        var startTime = DateTimeOffset.UtcNow;
+        _logger.LogInformation("Checking existence of {FileCount} files", context.FilesToVerify.Length);
+        
+        var missingFiles = new List<string>();
+        
+        foreach (var file in context.FilesToVerify)
+        {
+            var fullPath = Path.Combine(context.WorkspacePath, file);
+            if (!File.Exists(fullPath))
+            {
+                missingFiles.Add(file);
+            }
+        }
+        
+        var duration = DateTimeOffset.UtcNow - startTime;
+        
+        if (missingFiles.Any())
+        {
+            return Task.FromResult(new CheckResult(
+                CheckName: Name,
+                Status: CheckStatus.Failed,
+                Details: string.Join(", ", missingFiles),
+                Reason: $"{missingFiles.Count} file(s) not found",
+                Duration: duration));
+        }
+        
+        return Task.FromResult(new CheckResult(
+            CheckName: Name,
+            Status: CheckStatus.Passed,
+            Details: $"All {context.FilesToVerify.Length} files exist",
+            Reason: null,
+            Duration: duration));
+    }
+}
+```
+
+### CompilationCheck Implementation
+
+```csharp
+namespace AgenticCoder.Application.Orchestration.Stages.Verifier.Checks;
+
+public sealed class CompilationCheck : ICheck
+{
+    private readonly IProcessRunner _processRunner;
+    private readonly ILogger<CompilationCheck> _logger;
+    
+    public string Name => "Compilation";
+    public CheckType Type => CheckType.Programmatic;
+    
+    public CompilationCheck(IProcessRunner processRunner, ILogger<CompilationCheck> logger)
+    {
+        _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    
+    public async Task<CheckResult> RunAsync(CheckContext context, CancellationToken ct)
+    {
+        var startTime = DateTimeOffset.UtcNow;
+        _logger.LogInformation("Running compilation check in {WorkspacePath}", context.WorkspacePath);
+        
+        var buildCommand = context.AdditionalData.GetValueOrDefault("BuildCommand", "dotnet build").ToString();
+        var parts = buildCommand.Split(' ', 2);
+        var command = parts[0];
+        var args = parts.Length > 1 ? parts[1] : string.Empty;
+        
+        try
+        {
+            var result = await _processRunner.RunAsync(command, args, context.WorkspacePath, ct);
+            var duration = DateTimeOffset.UtcNow - startTime;
+            
+            if (result.ExitCode == 0)
+            {
+                return new CheckResult(
+                    CheckName: Name,
+                    Status: CheckStatus.Passed,
+                    Details: "Compilation succeeded",
+                    Reason: null,
+                    Duration: duration);
+            }
+            
+            // Parse error output
+            var errors = ParseCompilationErrors(result.Error + result.Output);
+            
+            return new CheckResult(
+                CheckName: Name,
+                Status: CheckStatus.Failed,
+                Details: string.Join("; ", errors.Take(3)), // First 3 errors
+                Reason: $"{errors.Count} compilation error(s)",
+                Duration: duration);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Compilation check failed");
+            return new CheckResult(
+                CheckName: Name,
+                Status: CheckStatus.Failed,
+                Details: null,
+                Reason: $"Compilation failed: {ex.Message}",
+                Duration: DateTimeOffset.UtcNow - startTime);
+        }
+    }
+    
+    private List<string> ParseCompilationErrors(string output)
+    {
+        // Parse error format: "error CS1002: ; expected [/path/file.cs(15)]"
+        var errorRegex = new Regex(@"error\s+([A-Z]{2}\d{4}):\s+(.+?)\s*\[", RegexOptions.IgnoreCase);
+        var matches = errorRegex.Matches(output);
+        
+        return matches.Select(m => $"{m.Groups[1].Value}: {m.Groups[2].Value}").ToList();
+    }
+}
+
+public interface IProcessRunner
+{
+    Task<ProcessResult> RunAsync(string command, string args, string workingDirectory, CancellationToken ct);
+}
+
+public sealed record ProcessResult(int ExitCode, string Output, string Error);
 ```
 
 ### Error Codes
