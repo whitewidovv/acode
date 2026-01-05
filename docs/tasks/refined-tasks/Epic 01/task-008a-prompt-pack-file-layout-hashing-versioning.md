@@ -12,6 +12,28 @@
 
 Task 008.a defines the file layout, directory structure, content hashing, and versioning scheme for prompt packs. This subtask establishes the physical organization that enables prompt packs to be stored, validated, versioned, and distributed. A well-defined file layout is essential for tooling, validation, and user comprehension.
 
+Prompt packs are directories containing markdown files organized in a conventional structure. The structure is predictable—users and tools know exactly where to find system prompts, role-specific instructions, and language-specific patterns. This predictability reduces cognitive load and enables automation.
+
+The manifest file (manifest.yml) is the central metadata file for each pack. It describes the pack's identity, version, components, and content hash. The manifest enables tooling to understand pack contents without parsing every file. It also enables integrity verification through content hashing.
+
+Content hashing provides integrity verification. When a pack is loaded, the loader computes a hash of all component files and compares it against the manifest's recorded hash. A mismatch indicates that files have been modified since the hash was generated. This catches accidental corruption and unauthorized modifications.
+
+Versioning follows semantic versioning (SemVer). The pack version indicates compatibility—major version changes indicate breaking changes, minor versions add features, patch versions fix bugs. Version information enables users to understand pack evolution and enables tooling to handle version migration.
+
+The file layout supports multiple pack sources. Built-in packs are embedded in the application assembly. User packs reside in `.acode/prompts/` within the workspace. The loader discovers packs from all sources and presents a unified view through the registry.
+
+Component files use markdown format. Markdown is human-readable, version-controllable, and supports rich formatting. Component types (system, role, language, framework, custom) are identified by their location in the directory structure and by metadata in the manifest.
+
+File naming follows conventions for discoverability. Role prompts are named after their role (planner.md, coder.md, reviewer.md). Language prompts are named after their language (csharp.md, typescript.md). This consistency enables both human navigation and programmatic discovery.
+
+The layout supports extension. Custom component types can be added by placing files in appropriately named directories. The manifest lists all components explicitly, so custom components are fully supported without layout changes.
+
+Path handling is cross-platform. Paths in the manifest use forward slashes regardless of operating system. The loader normalizes paths when reading files. This ensures packs are portable between Windows, Linux, and macOS.
+
+The format version field in the manifest enables schema evolution. The current format version is 1.0. Future versions can add fields or change structure while maintaining backward compatibility through version-aware loaders.
+
+Hash generation is deterministic. The same pack contents always produce the same hash, regardless of file order or platform. This determinism is achieved by sorting component paths alphabetically before hashing and using consistent line endings during hash computation.
+
 ### Business Value and ROI
 
 Prompt packs are a significant productivity multiplier for development teams using Acode. By standardizing prompt organization and ensuring integrity through hashing, teams avoid the hidden costs of prompt management chaos:
