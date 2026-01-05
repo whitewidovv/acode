@@ -3,7 +3,6 @@ namespace Acode.Application.Tests.Tools;
 using System.Text.Json;
 using Acode.Application.Tools;
 using Acode.Domain.Models.Inference;
-using Acode.Domain.Tools;
 using FluentAssertions;
 using Xunit;
 

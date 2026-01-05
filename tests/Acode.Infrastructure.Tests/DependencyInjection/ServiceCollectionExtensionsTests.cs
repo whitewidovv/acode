@@ -1,8 +1,11 @@
 namespace Acode.Infrastructure.Tests.DependencyInjection;
 
 using Acode.Application.Inference;
+using Acode.Application.Tools;
+using Acode.Application.Tools.Retry;
 using Acode.Infrastructure.DependencyInjection;
 using Acode.Infrastructure.Ollama;
+using Acode.Infrastructure.Tools;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -87,5 +90,147 @@ public sealed class ServiceCollectionExtensionsTests
 
         // Assert
         provider1.Should().BeSameAs(provider2);
+    }
+
+    [Fact]
+    public void AddToolSchemaRegistry_RegistersIToolSchemaRegistry()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        // Act
+        services.AddToolSchemaRegistry();
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Assert
+        var registry = serviceProvider.GetService<IToolSchemaRegistry>();
+        registry.Should().NotBeNull();
+        registry.Should().BeOfType<ToolSchemaRegistry>();
+    }
+
+    [Fact]
+    public void AddToolSchemaRegistry_RegistryIsSingleton()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddToolSchemaRegistry();
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Act
+        var registry1 = serviceProvider.GetService<IToolSchemaRegistry>();
+        var registry2 = serviceProvider.GetService<IToolSchemaRegistry>();
+
+        // Assert
+        registry1.Should().BeSameAs(registry2);
+    }
+
+    [Fact]
+    public void AddToolSchemaRegistry_RegistryStartsEmpty()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddToolSchemaRegistry();
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Act
+        var registry = serviceProvider.GetRequiredService<IToolSchemaRegistry>();
+
+        // Assert
+        registry.Count.Should().Be(0);
+        registry.GetAllTools().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AddToolSchemaRegistry_WithNullServices_ThrowsArgumentNullException()
+    {
+        // Arrange
+        IServiceCollection? services = null;
+
+        // Act
+        var act = () => services!.AddToolSchemaRegistry();
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void AddToolValidationRetry_RegistersIValidationErrorFormatter()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddToolValidationRetry();
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Assert
+        var formatter = serviceProvider.GetService<IValidationErrorFormatter>();
+        formatter.Should().NotBeNull();
+        formatter.Should().BeOfType<ValidationErrorFormatter>();
+    }
+
+    [Fact]
+    public void AddToolValidationRetry_RegistersIRetryTracker()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddToolValidationRetry();
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Assert
+        var tracker = serviceProvider.GetService<IRetryTracker>();
+        tracker.Should().NotBeNull();
+        tracker.Should().BeOfType<RetryTracker>();
+    }
+
+    [Fact]
+    public void AddToolValidationRetry_RetryTrackerIsSingleton()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddToolValidationRetry();
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Act
+        var tracker1 = serviceProvider.GetService<IRetryTracker>();
+        var tracker2 = serviceProvider.GetService<IRetryTracker>();
+
+        // Assert
+        tracker1.Should().BeSameAs(tracker2);
+    }
+
+    [Fact]
+    public void AddToolValidationRetry_WithCustomConfig_UsesConfig()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        var config = new RetryConfiguration { MaxRetries = 5 };
+
+        // Act
+        services.AddToolValidationRetry(config);
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Assert
+        var registeredConfig = serviceProvider.GetService<RetryConfiguration>();
+        registeredConfig.Should().NotBeNull();
+        registeredConfig!.MaxRetries.Should().Be(5);
+    }
+
+    [Fact]
+    public void AddToolValidationRetry_WithNullServices_ThrowsArgumentNullException()
+    {
+        // Arrange
+        IServiceCollection? services = null;
+
+        // Act
+        var act = () => services!.AddToolValidationRetry();
+
+        // Assert
+        act.Should().Throw<ArgumentNullException>();
     }
 }
