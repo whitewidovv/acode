@@ -2434,279 +2434,2358 @@ Docker socket: /var/run/docker.sock connected
 
 ## Testing Requirements
 
-### Unit Tests
+### Unit Tests - Path Normalization
 
+```csharp
+using FluentAssertions;
+using Xunit;
+
+namespace AgenticCoder.Infrastructure.Tests.FileSystem;
+
+public sealed class PathNormalizerTests
+{
+    private readonly PathNormalizer _sut = new();
+
+    [Theory]
+    [InlineData("src/file.cs", "src/file.cs")]
+    [InlineData("src\\file.cs", "src/file.cs")]
+    [InlineData("src\\utils\\file.cs", "src/utils/file.cs")]
+    [InlineData("src/utils\\file.cs", "src/utils/file.cs")]
+    public void Normalize_Should_Convert_Backslashes_To_ForwardSlashes(
+        string input, string expected)
+    {
+        // Arrange & Act
+        var result = _sut.Normalize(input);
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("src//file.cs", "src/file.cs")]
+    [InlineData("src///file.cs", "src/file.cs")]
+    [InlineData("src////utils//file.cs", "src/utils/file.cs")]
+    public void Normalize_Should_Collapse_Multiple_Slashes(
+        string input, string expected)
+    {
+        // Arrange & Act
+        var result = _sut.Normalize(input);
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("./src/file.cs", "src/file.cs")]
+    [InlineData("././src/file.cs", "src/file.cs")]
+    [InlineData("./", "")]
+    public void Normalize_Should_Remove_Current_Directory_Prefix(
+        string input, string expected)
+    {
+        // Arrange & Act
+        var result = _sut.Normalize(input);
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("src/file.cs/", "src/file.cs")]
+    [InlineData("src/utils/", "src/utils")]
+    [InlineData("src///", "src")]
+    public void Normalize_Should_Remove_Trailing_Slashes(
+        string input, string expected)
+    {
+        // Arrange & Act
+        var result = _sut.Normalize(input);
+
+        // Assert
+        result.Should().Be(expected);
+    }
+}
 ```
-Tests/Unit/RepoFS/
-├── PathNormalizerTests.cs
-│   ├── Should_Normalize_Forward_Slashes()
-│   ├── Should_Normalize_Back_Slashes()
-│   ├── Should_Normalize_Mixed_Slashes()
-│   ├── Should_Handle_Relative_Paths()
-│   ├── Should_Handle_Current_Directory_Dot()
-│   ├── Should_Collapse_Double_Slashes()
-│   ├── Should_Preserve_Leading_Slash()
-│   └── Should_Trim_Trailing_Slashes()
-│
-├── PathValidatorTests.cs
-│   ├── Should_Accept_Valid_Relative_Path()
-│   ├── Should_Accept_Subdirectory_Path()
-│   ├── Should_Accept_Deep_Nested_Path()
-│   ├── Should_Reject_Parent_Traversal()
-│   ├── Should_Reject_Hidden_Parent_Traversal()
-│   ├── Should_Reject_Encoded_Traversal()
-│   ├── Should_Reject_Absolute_Path()
-│   ├── Should_Reject_UNC_Path()
-│   ├── Should_Reject_Null_Path()
-│   └── Should_Reject_Empty_Path()
-│
-├── LocalFileSystemTests.cs
-│   ├── ReadFileAsync_Should_Return_Content()
-│   ├── ReadFileAsync_Should_Handle_UTF8_BOM()
-│   ├── ReadFileAsync_Should_Handle_UTF16()
-│   ├── ReadFileAsync_Should_Throw_FileNotFound()
-│   ├── ReadFileAsync_Should_Support_Cancellation()
-│   ├── ReadLinesAsync_Should_Return_Lines()
-│   ├── ReadLinesAsync_Should_Handle_Empty_File()
-│   ├── ReadLinesAsync_Should_Handle_No_Trailing_Newline()
-│   ├── ReadBytesAsync_Should_Return_Binary()
-│   ├── WriteFileAsync_Should_Create_New_File()
-│   ├── WriteFileAsync_Should_Overwrite_Existing()
-│   ├── WriteFileAsync_Should_Create_Parent_Directories()
-│   ├── WriteFileAsync_Should_Use_UTF8_No_BOM()
-│   ├── WriteLinesAsync_Should_Write_With_Newlines()
-│   ├── WriteBytesAsync_Should_Write_Binary()
-│   ├── DeleteFileAsync_Should_Remove_File()
-│   ├── DeleteFileAsync_Should_Ignore_Missing()
-│   ├── DeleteDirectoryAsync_Should_Remove_Empty()
-│   ├── DeleteDirectoryAsync_Should_Remove_Recursive()
-│   ├── ExistsAsync_Should_Return_True_For_File()
-│   ├── ExistsAsync_Should_Return_True_For_Directory()
-│   ├── ExistsAsync_Should_Return_False_For_Missing()
-│   ├── GetMetadataAsync_Should_Return_Size()
-│   ├── GetMetadataAsync_Should_Return_LastModified()
-│   ├── GetMetadataAsync_Should_Return_CreatedDate()
-│   └── GetMetadataAsync_Should_Throw_FileNotFound()
-│
-├── EnumerationTests.cs
-│   ├── EnumerateFilesAsync_Should_List_Files()
-│   ├── EnumerateFilesAsync_Should_Skip_Directories()
-│   ├── EnumerateFilesAsync_Should_Support_Recursive()
-│   ├── EnumerateFilesAsync_Should_Apply_Filter()
-│   ├── EnumerateFilesAsync_Should_Respect_Ignores()
-│   ├── EnumerateFilesAsync_Should_Handle_Empty_Directory()
-│   ├── EnumerateDirectoriesAsync_Should_List_Directories()
-│   ├── EnumerateDirectoriesAsync_Should_Skip_Files()
-│   ├── EnumerateDirectoriesAsync_Should_Support_Recursive()
-│   └── EnumerateDirectoriesAsync_Should_Handle_Hidden()
-│
-├── TransactionTests.cs
-│   ├── BeginTransaction_Should_Create_Transaction()
-│   ├── Commit_Should_Finalize_Writes()
-│   ├── Commit_Should_Be_Atomic()
-│   ├── Rollback_Should_Undo_Writes()
-│   ├── Rollback_Should_Restore_Original()
-│   ├── AutoRollback_On_Exception()
-│   ├── AutoRollback_On_Dispose_Without_Commit()
-│   ├── Transaction_Should_Handle_Multiple_Files()
-│   ├── Transaction_Should_Handle_Create_And_Delete()
-│   └── Nested_Transaction_Should_Throw()
-│
-└── PatchApplicatorTests.cs
-    ├── ApplyPatch_Should_Add_Lines()
-    ├── ApplyPatch_Should_Remove_Lines()
-    ├── ApplyPatch_Should_Modify_Lines()
-    ├── ApplyPatch_Should_Handle_Context()
-    ├── ApplyPatch_Should_Handle_Multiple_Hunks()
-    ├── ApplyPatch_Should_Handle_Multiple_Files()
-    ├── ApplyPatch_Should_Create_New_File()
-    ├── ApplyPatch_Should_Delete_File()
-    ├── ApplyPatch_Should_Fail_On_Mismatch()
-    ├── ApplyPatch_Should_Fail_On_Missing_File()
-    ├── PreviewPatch_Should_Show_Changes()
-    ├── PreviewPatch_Should_Not_Modify()
-    ├── ValidatePatch_Should_Accept_Valid()
-    └── ValidatePatch_Should_Reject_Malformed()
+
+### Unit Tests - Path Validation
+
+```csharp
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace AgenticCoder.Infrastructure.Tests.FileSystem;
+
+public sealed class PathValidatorTests
+{
+    private readonly SecurePathValidator _sut;
+    private readonly string _rootPath;
+
+    public PathValidatorTests()
+    {
+        _rootPath = Path.GetTempPath();
+        _sut = new SecurePathValidator(
+            _rootPath,
+            NullLogger<SecurePathValidator>.Instance);
+    }
+
+    [Theory]
+    [InlineData("src/file.cs")]
+    [InlineData("src/utils/helpers.cs")]
+    [InlineData("README.md")]
+    [InlineData("docs/api/reference.md")]
+    public void Validate_Should_Accept_Valid_Relative_Paths(string path)
+    {
+        // Arrange & Act
+        var result = _sut.Validate(path);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.IsTraversalAttempt.Should().BeFalse();
+        result.NormalizedPath.Should().NotBeNullOrEmpty();
+    }
+
+    [Theory]
+    [InlineData("../secret.txt")]
+    [InlineData("../../etc/passwd")]
+    [InlineData("src/../../../outside.txt")]
+    [InlineData("src/utils/../../../../../../etc/passwd")]
+    public void Validate_Should_Reject_Parent_Traversal_Attempts(string path)
+    {
+        // Arrange & Act
+        var result = _sut.Validate(path);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.IsTraversalAttempt.Should().BeTrue();
+        result.ErrorMessage.Should().Contain("dangerous");
+    }
+
+    [Theory]
+    [InlineData("%2e%2e/secret.txt")]
+    [InlineData("%2e%2e%2fsecret.txt")]
+    [InlineData("src/%2e%2e/outside.txt")]
+    [InlineData("%252e%252e/double-encoded.txt")]
+    public void Validate_Should_Reject_URL_Encoded_Traversal(string path)
+    {
+        // Arrange & Act
+        var result = _sut.Validate(path);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.IsTraversalAttempt.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("/etc/passwd")]
+    [InlineData("/home/user/file.txt")]
+    [InlineData("C:\\Windows\\system32")]
+    [InlineData("D:\\Projects\\secret.txt")]
+    public void Validate_Should_Reject_Absolute_Paths(string path)
+    {
+        // Arrange & Act
+        var result = _sut.Validate(path);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("\\\\server\\share\\file.txt")]
+    [InlineData("\\\\192.168.1.1\\share")]
+    public void Validate_Should_Reject_UNC_Paths(string path)
+    {
+        // Arrange & Act
+        var result = _sut.Validate(path);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_Should_Reject_Null_Byte_Injection()
+    {
+        // Arrange
+        var path = "file.txt\0.exe";
+
+        // Act
+        var result = _sut.Validate(path);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("null");
+    }
+}
+```
+
+### Unit Tests - Local File System Operations
+
+```csharp
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace AgenticCoder.Infrastructure.Tests.FileSystem;
+
+public sealed class LocalFileSystemTests : IDisposable
+{
+    private readonly string _testRoot;
+    private readonly LocalFileSystem _sut;
+
+    public LocalFileSystemTests()
+    {
+        _testRoot = Path.Combine(Path.GetTempPath(), $"repofs_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testRoot);
+
+        _sut = new LocalFileSystem(
+            _testRoot,
+            NullLogger<LocalFileSystem>.Instance,
+            new PathNormalizer(),
+            new SecurePathValidator(_testRoot, NullLogger<SecurePathValidator>.Instance));
+    }
+
+    [Fact]
+    public async Task ReadFileAsync_Should_Return_File_Content()
+    {
+        // Arrange
+        var filePath = "test-file.txt";
+        var expectedContent = "Hello, RepoFS!\nLine 2\nLine 3";
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, filePath), expectedContent);
+
+        // Act
+        var result = await _sut.ReadFileAsync(filePath);
+
+        // Assert
+        result.Should().Be(expectedContent);
+    }
+
+    [Fact]
+    public async Task ReadFileAsync_Should_Handle_UTF8_With_BOM()
+    {
+        // Arrange
+        var filePath = "utf8-bom.txt";
+        var expectedContent = "Content with BOM";
+        var bytes = new byte[] { 0xEF, 0xBB, 0xBF }
+            .Concat(Encoding.UTF8.GetBytes(expectedContent))
+            .ToArray();
+        await File.WriteAllBytesAsync(Path.Combine(_testRoot, filePath), bytes);
+
+        // Act
+        var result = await _sut.ReadFileAsync(filePath);
+
+        // Assert
+        result.Should().Be(expectedContent);
+    }
+
+    [Fact]
+    public async Task ReadFileAsync_Should_Throw_FileNotFoundException_When_Missing()
+    {
+        // Arrange
+        var filePath = "nonexistent-file.txt";
+
+        // Act
+        var act = () => _sut.ReadFileAsync(filePath);
+
+        // Assert
+        await act.Should().ThrowAsync<FileNotFoundException>()
+            .WithMessage("*nonexistent-file.txt*");
+    }
+
+    [Fact]
+    public async Task ReadLinesAsync_Should_Return_Lines_As_List()
+    {
+        // Arrange
+        var filePath = "lines.txt";
+        var content = "Line 1\nLine 2\nLine 3";
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, filePath), content);
+
+        // Act
+        var result = await _sut.ReadLinesAsync(filePath);
+
+        // Assert
+        result.Should().HaveCount(3);
+        result[0].Should().Be("Line 1");
+        result[1].Should().Be("Line 2");
+        result[2].Should().Be("Line 3");
+    }
+
+    [Fact]
+    public async Task ReadLinesAsync_Should_Handle_Empty_File()
+    {
+        // Arrange
+        var filePath = "empty.txt";
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, filePath), "");
+
+        // Act
+        var result = await _sut.ReadLinesAsync(filePath);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WriteFileAsync_Should_Create_New_File()
+    {
+        // Arrange
+        var filePath = "new-file.txt";
+        var content = "New content";
+
+        // Act
+        await _sut.WriteFileAsync(filePath, content);
+
+        // Assert
+        var actualContent = await File.ReadAllTextAsync(Path.Combine(_testRoot, filePath));
+        actualContent.Should().Be(content);
+    }
+
+    [Fact]
+    public async Task WriteFileAsync_Should_Create_Parent_Directories()
+    {
+        // Arrange
+        var filePath = "deep/nested/path/file.txt";
+        var content = "Content in nested directory";
+
+        // Act
+        await _sut.WriteFileAsync(filePath, content);
+
+        // Assert
+        var fullPath = Path.Combine(_testRoot, filePath);
+        File.Exists(fullPath).Should().BeTrue();
+        (await File.ReadAllTextAsync(fullPath)).Should().Be(content);
+    }
+
+    [Fact]
+    public async Task WriteFileAsync_Should_Overwrite_Existing_File()
+    {
+        // Arrange
+        var filePath = "overwrite.txt";
+        var originalContent = "Original content";
+        var newContent = "New content";
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, filePath), originalContent);
+
+        // Act
+        await _sut.WriteFileAsync(filePath, newContent);
+
+        // Assert
+        var actualContent = await File.ReadAllTextAsync(Path.Combine(_testRoot, filePath));
+        actualContent.Should().Be(newContent);
+    }
+
+    [Fact]
+    public async Task DeleteFileAsync_Should_Remove_File_And_Return_True()
+    {
+        // Arrange
+        var filePath = "to-delete.txt";
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, filePath), "content");
+
+        // Act
+        var result = await _sut.DeleteFileAsync(filePath);
+
+        // Assert
+        result.Should().BeTrue();
+        File.Exists(Path.Combine(_testRoot, filePath)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteFileAsync_Should_Return_False_When_File_Missing()
+    {
+        // Arrange
+        var filePath = "nonexistent.txt";
+
+        // Act
+        var result = await _sut.DeleteFileAsync(filePath);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExistsAsync_Should_Return_True_For_Existing_File()
+    {
+        // Arrange
+        var filePath = "exists.txt";
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, filePath), "content");
+
+        // Act
+        var result = await _sut.ExistsAsync(filePath);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExistsAsync_Should_Return_False_For_Missing_File()
+    {
+        // Arrange
+        var filePath = "missing.txt";
+
+        // Act
+        var result = await _sut.ExistsAsync(filePath);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetMetadataAsync_Should_Return_File_Metadata()
+    {
+        // Arrange
+        var filePath = "metadata-test.txt";
+        var content = "Test content for metadata";
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, filePath), content);
+
+        // Act
+        var result = await _sut.GetMetadataAsync(filePath);
+
+        // Assert
+        result.Size.Should().Be(Encoding.UTF8.GetByteCount(content));
+        result.IsDirectory.Should().BeFalse();
+        result.LastModified.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_testRoot))
+            {
+                Directory.Delete(_testRoot, recursive: true);
+            }
+        }
+        catch { /* Ignore cleanup errors */ }
+    }
+}
+```
+
+### Unit Tests - Transaction Operations
+
+```csharp
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace AgenticCoder.Infrastructure.Tests.FileSystem;
+
+public sealed class TransactionTests : IDisposable
+{
+    private readonly string _testRoot;
+    private readonly LocalFileSystem _sut;
+
+    public TransactionTests()
+    {
+        _testRoot = Path.Combine(Path.GetTempPath(), $"tx_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testRoot);
+
+        _sut = new LocalFileSystem(
+            _testRoot,
+            NullLogger<LocalFileSystem>.Instance,
+            new PathNormalizer(),
+            new SecurePathValidator(_testRoot, NullLogger<SecurePathValidator>.Instance));
+    }
+
+    [Fact]
+    public async Task BeginTransactionAsync_Should_Return_Valid_Transaction()
+    {
+        // Arrange & Act
+        await using var transaction = await _sut.BeginTransactionAsync();
+
+        // Assert
+        transaction.Should().NotBeNull();
+        transaction.Should().BeAssignableTo<IRepoFSTransaction>();
+    }
+
+    [Fact]
+    public async Task Transaction_CommitAsync_Should_Apply_All_Changes()
+    {
+        // Arrange
+        var file1 = "tx-file1.txt";
+        var file2 = "tx-file2.txt";
+
+        await using var transaction = await _sut.BeginTransactionAsync();
+
+        // Act
+        await _sut.WriteFileAsync(file1, "Content 1");
+        await _sut.WriteFileAsync(file2, "Content 2");
+        await transaction.CommitAsync();
+
+        // Assert
+        File.Exists(Path.Combine(_testRoot, file1)).Should().BeTrue();
+        File.Exists(Path.Combine(_testRoot, file2)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Transaction_RollbackAsync_Should_Revert_All_Changes()
+    {
+        // Arrange
+        var filePath = "rollback-test.txt";
+        var originalContent = "Original";
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, filePath), originalContent);
+
+        await using var transaction = await _sut.BeginTransactionAsync();
+
+        // Act
+        await _sut.WriteFileAsync(filePath, "Modified content");
+        await transaction.RollbackAsync();
+
+        // Assert
+        var content = await File.ReadAllTextAsync(Path.Combine(_testRoot, filePath));
+        content.Should().Be(originalContent);
+    }
+
+    [Fact]
+    public async Task Transaction_Should_AutoRollback_On_Dispose_Without_Commit()
+    {
+        // Arrange
+        var filePath = "auto-rollback.txt";
+        var originalContent = "Original content";
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, filePath), originalContent);
+
+        // Act - using block without commit
+        await using (var transaction = await _sut.BeginTransactionAsync())
+        {
+            await _sut.WriteFileAsync(filePath, "Should be rolled back");
+            // Intentionally not calling CommitAsync
+        }
+
+        // Assert
+        var content = await File.ReadAllTextAsync(Path.Combine(_testRoot, filePath));
+        content.Should().Be(originalContent);
+    }
+
+    [Fact]
+    public async Task NestedTransaction_Should_Throw_NotSupportedException()
+    {
+        // Arrange
+        await using var transaction1 = await _sut.BeginTransactionAsync();
+
+        // Act
+        var act = () => _sut.BeginTransactionAsync();
+
+        // Assert
+        await act.Should().ThrowAsync<NotSupportedException>()
+            .WithMessage("*nested*");
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_testRoot))
+                Directory.Delete(_testRoot, recursive: true);
+        }
+        catch { /* Ignore */ }
+    }
+}
+```
+
+### Unit Tests - Patch Application
+
+```csharp
+using FluentAssertions;
+using Xunit;
+
+namespace AgenticCoder.Infrastructure.Tests.FileSystem;
+
+public sealed class PatchApplicatorTests : IDisposable
+{
+    private readonly string _testRoot;
+    private readonly UnifiedDiffApplicator _sut;
+
+    public PatchApplicatorTests()
+    {
+        _testRoot = Path.Combine(Path.GetTempPath(), $"patch_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testRoot);
+        _sut = new UnifiedDiffApplicator(_testRoot);
+    }
+
+    [Fact]
+    public async Task ApplyPatchAsync_Should_Add_Lines()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testRoot, "add-lines.cs");
+        await File.WriteAllTextAsync(filePath, "Line 1\nLine 2\nLine 3\n");
+
+        var patch = @"--- a/add-lines.cs
++++ b/add-lines.cs
+@@ -1,3 +1,4 @@
+ Line 1
++New Line
+ Line 2
+ Line 3
+";
+
+        // Act
+        var result = await _sut.ApplyAsync(patch);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var content = await File.ReadAllTextAsync(filePath);
+        content.Should().Contain("New Line");
+    }
+
+    [Fact]
+    public async Task ApplyPatchAsync_Should_Remove_Lines()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testRoot, "remove-lines.cs");
+        await File.WriteAllTextAsync(filePath, "Line 1\nLine to remove\nLine 3\n");
+
+        var patch = @"--- a/remove-lines.cs
++++ b/remove-lines.cs
+@@ -1,3 +1,2 @@
+ Line 1
+-Line to remove
+ Line 3
+";
+
+        // Act
+        var result = await _sut.ApplyAsync(patch);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var content = await File.ReadAllTextAsync(filePath);
+        content.Should().NotContain("Line to remove");
+    }
+
+    [Fact]
+    public async Task ValidatePatchAsync_Should_Reject_Malformed_Patch()
+    {
+        // Arrange
+        var malformedPatch = "This is not a valid patch";
+
+        // Act
+        var result = await _sut.ValidateAsync(malformedPatch);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Error.Should().Contain("Invalid");
+    }
+
+    [Fact]
+    public async Task PreviewPatchAsync_Should_Not_Modify_Files()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testRoot, "preview.cs");
+        var originalContent = "Original content";
+        await File.WriteAllTextAsync(filePath, originalContent);
+
+        var patch = @"--- a/preview.cs
++++ b/preview.cs
+@@ -1 +1 @@
+-Original content
++Modified content
+";
+
+        // Act
+        var preview = await _sut.PreviewAsync(patch);
+
+        // Assert
+        preview.Should().NotBeNull();
+        var currentContent = await File.ReadAllTextAsync(filePath);
+        currentContent.Should().Be(originalContent);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_testRoot))
+                Directory.Delete(_testRoot, recursive: true);
+        }
+        catch { /* Ignore */ }
+    }
+}
 ```
 
 ### Integration Tests
 
-```
-Tests/Integration/RepoFS/
-├── LocalFSIntegrationTests.cs
-│   ├── Should_Read_Large_File()
-│   ├── Should_Write_Large_File()
-│   ├── Should_Handle_Deep_Directory_Tree()
-│   ├── Should_Handle_Many_Files()
-│   ├── Should_Handle_Unicode_Filenames()
-│   ├── Should_Handle_Long_Paths()
-│   ├── Should_Handle_Special_Characters()
-│   ├── Should_Handle_Concurrent_Reads()
-│   ├── Should_Handle_Read_While_Write()
-│   └── Should_Survive_Disk_Full()
-│
-├── TransactionIntegrationTests.cs
-│   ├── Should_Rollback_On_Crash()
-│   ├── Should_Handle_Concurrent_Transactions()
-│   └── Should_Recover_From_Partial_Commit()
-│
-└── PatchIntegrationTests.cs
-    ├── Should_Apply_Real_Git_Diff()
-    ├── Should_Handle_Binary_Detection()
-    └── Should_Apply_Patch_Atomically()
-```
+```csharp
+using FluentAssertions;
+using Xunit;
 
-### E2E Tests
+namespace AgenticCoder.Infrastructure.Tests.FileSystem.Integration;
 
-```
-Tests/E2E/RepoFS/
-├── FileToolE2ETests.cs
-│   ├── Should_Read_File_Via_Agent_Tool()
-│   ├── Should_Write_File_Via_Agent_Tool()
-│   ├── Should_List_Directory_Via_Agent_Tool()
-│   ├── Should_Apply_Patch_Via_Agent_Tool()
-│   └── Should_Handle_Agent_Error_Recovery()
+[Collection("FileSystemIntegration")]
+public sealed class LocalFSIntegrationTests : IDisposable
+{
+    private readonly string _testRoot;
+    private readonly LocalFileSystem _sut;
+
+    public LocalFSIntegrationTests()
+    {
+        _testRoot = Path.Combine(Path.GetTempPath(), $"fs_int_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testRoot);
+        _sut = CreateFileSystem();
+    }
+
+    [Fact]
+    public async Task Should_Handle_Large_File_Operations()
+    {
+        // Arrange
+        var filePath = "large-file.bin";
+        var largeContent = new byte[10 * 1024 * 1024]; // 10MB
+        new Random(42).NextBytes(largeContent);
+
+        // Act
+        await _sut.WriteBytesAsync(filePath, largeContent);
+        var readBack = await _sut.ReadBytesAsync(filePath);
+
+        // Assert
+        readBack.Should().BeEquivalentTo(largeContent);
+    }
+
+    [Fact]
+    public async Task Should_Handle_Deep_Directory_Tree()
+    {
+        // Arrange
+        var deepPath = "a/b/c/d/e/f/g/h/i/j/file.txt";
+        var content = "Content in deep directory";
+
+        // Act
+        await _sut.WriteFileAsync(deepPath, content);
+        var readBack = await _sut.ReadFileAsync(deepPath);
+
+        // Assert
+        readBack.Should().Be(content);
+    }
+
+    [Fact]
+    public async Task Should_Enumerate_Many_Files_Efficiently()
+    {
+        // Arrange
+        for (int i = 0; i < 100; i++)
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(_testRoot, $"file_{i:D3}.txt"),
+                $"Content {i}");
+        }
+
+        // Act
+        var stopwatch = Stopwatch.StartNew();
+        var files = await _sut.EnumerateFilesAsync(".", recursive: true).ToListAsync();
+        stopwatch.Stop();
+
+        // Assert
+        files.Should().HaveCount(100);
+        stopwatch.ElapsedMilliseconds.Should().BeLessThan(500);
+    }
+
+    [Fact]
+    public async Task Transaction_Should_Be_Atomic_Under_Concurrent_Access()
+    {
+        // Arrange
+        var filePath = "concurrent.txt";
+        await File.WriteAllTextAsync(Path.Combine(_testRoot, filePath), "Initial");
+
+        // Act
+        var tasks = Enumerable.Range(0, 10).Select(async i =>
+        {
+            await using var tx = await _sut.BeginTransactionAsync();
+            await _sut.WriteFileAsync(filePath, $"Content from task {i}");
+            await tx.CommitAsync();
+        });
+
+        // Assert - Should not throw, one write should succeed
+        await Task.WhenAll(tasks);
+        var content = await File.ReadAllTextAsync(Path.Combine(_testRoot, filePath));
+        content.Should().StartWith("Content from task");
+    }
+
+    private LocalFileSystem CreateFileSystem() => new(
+        _testRoot,
+        NullLogger<LocalFileSystem>.Instance,
+        new PathNormalizer(),
+        new SecurePathValidator(_testRoot, NullLogger<SecurePathValidator>.Instance));
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_testRoot, true); } catch { }
+    }
+}
 ```
 
 ### Performance Benchmarks
 
-| Benchmark | Target | Maximum |
-|-----------|--------|---------|
-| 1KB file read | 5ms | 10ms |
-| 1MB file read | 50ms | 100ms |
-| 1000 file enum | 25ms | 50ms |
-| Patch apply | 10ms | 25ms |
+```csharp
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
+
+namespace AgenticCoder.Benchmarks.FileSystem;
+
+[MemoryDiagnoser]
+public class RepoFSBenchmarks
+{
+    private readonly string _testRoot;
+    private readonly LocalFileSystem _sut;
+    private readonly string _smallFilePath;
+    private readonly string _largeFilePath;
+
+    public RepoFSBenchmarks()
+    {
+        _testRoot = Path.Combine(Path.GetTempPath(), "repofs_bench");
+        Directory.CreateDirectory(_testRoot);
+
+        _sut = new LocalFileSystem(_testRoot, NullLogger<LocalFileSystem>.Instance,
+            new PathNormalizer(),
+            new SecurePathValidator(_testRoot, NullLogger<SecurePathValidator>.Instance));
+
+        _smallFilePath = "small.txt";
+        File.WriteAllText(Path.Combine(_testRoot, _smallFilePath),
+            new string('x', 1024)); // 1KB
+
+        _largeFilePath = "large.bin";
+        File.WriteAllBytes(Path.Combine(_testRoot, _largeFilePath),
+            new byte[1024 * 1024]); // 1MB
+    }
+
+    [Benchmark]
+    public async Task<string> ReadSmallFile() =>
+        await _sut.ReadFileAsync(_smallFilePath);
+
+    [Benchmark]
+    public async Task<byte[]> ReadLargeFile() =>
+        await _sut.ReadBytesAsync(_largeFilePath);
+
+    [Benchmark]
+    public async Task PathNormalization()
+    {
+        var normalizer = new PathNormalizer();
+        for (int i = 0; i < 1000; i++)
+        {
+            normalizer.Normalize($"src\\utils\\file_{i}.cs");
+        }
+    }
+
+    [Benchmark]
+    public async Task PathValidation()
+    {
+        var validator = new SecurePathValidator(_testRoot,
+            NullLogger<SecurePathValidator>.Instance);
+        for (int i = 0; i < 1000; i++)
+        {
+            validator.Validate($"src/utils/file_{i}.cs");
+        }
+    }
+}
+
+// Expected results:
+// | Method             | Mean      | Allocated |
+// |-------------------|-----------|-----------|
+// | ReadSmallFile     | 3.2 ms    | 1.2 KB    |
+// | ReadLargeFile     | 45 ms     | 1.1 MB    |
+// | PathNormalization | 0.8 ms    | 120 KB    |
+// | PathValidation    | 0.9 ms    | 150 KB    |
+```
 
 ---
 
 ## User Verification Steps
 
-### Scenario 1: Read File
+### Scenario 1: Basic File Read Operation
 
-1. Create test file
-2. Read via RepoFS
-3. Verify: Content matches
+**Objective:** Verify RepoFS can read existing files with correct encoding detection.
 
-### Scenario 2: Write File
+**Prerequisites:**
+- Acode installed and configured
+- Test repository with sample files created
 
-1. Write via RepoFS
-2. Read back
-3. Verify: Content matches
+**Steps:**
+1. Create a UTF-8 test file in your repository:
+   ```bash
+   echo "Hello, RepoFS! This is a test file with UTF-8 content." > test-read.txt
+   echo "Second line with special chars: café résumé" >> test-read.txt
+   ```
 
-### Scenario 3: Transaction
+2. Run the Acode agent with a read file request:
+   ```bash
+   acode run "Read the contents of test-read.txt"
+   ```
 
-1. Begin transaction
-2. Write file
-3. Rollback
-4. Verify: File unchanged
+3. Observe the agent output showing the tool invocation:
+   ```
+   [Tool: read_file]
+     Path: test-read.txt
+     Encoding: UTF-8 (detected)
+     Size: 98 bytes
+     Result: (content displayed)
+   ```
 
-### Scenario 4: Apply Patch
+4. Verify the output matches the original file content exactly, including special characters.
 
-1. Create file
-2. Apply patch
-3. Verify: Changes applied
+**Expected Outcome:**
+- File content displayed without corruption
+- Special characters (é) render correctly
+- No path traversal warnings in logs
+- Audit log shows: `READ test-read.txt SUCCESS`
 
-### Scenario 5: Path Traversal
+---
 
-1. Try reading ../outside.txt
-2. Verify: Exception thrown
+### Scenario 2: File Write with Directory Creation
+
+**Objective:** Verify RepoFS creates parent directories and writes files atomically.
+
+**Prerequisites:**
+- Acode running with write permissions
+
+**Steps:**
+1. Issue a write command to a nested path that doesn't exist:
+   ```bash
+   acode run "Create a new file at output/reports/summary.txt with content 'Report generated successfully'"
+   ```
+
+2. Verify the agent creates the directories and file:
+   ```
+   [Tool: write_file]
+     Path: output/reports/summary.txt
+     Action: Created parent directories
+     Bytes written: 31
+     Atomic: Yes (temp file + rename)
+   ```
+
+3. Check the file system directly:
+   ```bash
+   cat output/reports/summary.txt
+   # Should output: Report generated successfully
+   ```
+
+4. Verify audit log entry:
+   ```bash
+   grep "WRITE output/reports/summary.txt" .agent/logs/audit.log
+   # Should show: WRITE output/reports/summary.txt SUCCESS
+   ```
+
+**Expected Outcome:**
+- Directory `output/reports/` created automatically
+- File contains exact content requested
+- Original file not corrupted during write (atomic)
+- Audit trail complete
+
+---
+
+### Scenario 3: Transaction Commit and Rollback
+
+**Objective:** Verify transaction atomicity - all changes apply or none apply.
+
+**Prerequisites:**
+- Two existing files in repository: `config-a.json`, `config-b.json`
+
+**Steps:**
+1. Create test configuration files:
+   ```bash
+   echo '{"version": 1}' > config-a.json
+   echo '{"version": 1}' > config-b.json
+   ```
+
+2. Start the agent in interactive mode and begin a transaction:
+   ```bash
+   acode debug fs begin-transaction
+   # Transaction ID: tx-abc123 started
+   ```
+
+3. Make changes within the transaction:
+   ```bash
+   acode debug fs write config-a.json '{"version": 2}'
+   acode debug fs write config-b.json '{"version": 2}'
+   ```
+
+4. Rollback the transaction:
+   ```bash
+   acode debug fs rollback tx-abc123
+   # Transaction rolled back. 2 files restored.
+   ```
+
+5. Verify original content preserved:
+   ```bash
+   cat config-a.json  # Should show {"version": 1}
+   cat config-b.json  # Should show {"version": 1}
+   ```
+
+6. Repeat steps 2-3, then commit instead:
+   ```bash
+   acode debug fs commit tx-abc123
+   # Transaction committed. 2 files updated.
+   ```
+
+7. Verify new content applied:
+   ```bash
+   cat config-a.json  # Should show {"version": 2}
+   cat config-b.json  # Should show {"version": 2}
+   ```
+
+**Expected Outcome:**
+- Rollback restores all files to pre-transaction state
+- Commit applies all changes atomically
+- Backup files cleaned up after commit
+- Transaction logs show complete audit trail
+
+---
+
+### Scenario 4: Unified Diff Patch Application
+
+**Objective:** Verify patch application adds/removes lines correctly.
+
+**Prerequisites:**
+- Source file with known content
+
+**Steps:**
+1. Create a source file:
+   ```bash
+   cat > Calculator.cs << 'EOF'
+   public class Calculator
+   {
+       public int Add(int a, int b)
+       {
+           return a + b;
+       }
+   }
+   EOF
+   ```
+
+2. Request the agent to add input validation:
+   ```bash
+   acode run "Add argument validation to the Add method in Calculator.cs to throw if inputs are negative"
+   ```
+
+3. Observe the patch being applied:
+   ```
+   [Tool: apply_patch]
+     File: Calculator.cs
+     Hunks: 1
+     Lines added: 2
+     Lines removed: 0
+     Preview:
+       @@ -3,6 +3,8 @@ public class Calculator
+        public int Add(int a, int b)
+        {
+       +    if (a < 0) throw new ArgumentOutOfRangeException(nameof(a));
+       +    if (b < 0) throw new ArgumentOutOfRangeException(nameof(b));
+            return a + b;
+        }
+   ```
+
+4. Verify the file was modified correctly:
+   ```bash
+   cat Calculator.cs
+   # Should contain the validation lines
+   ```
+
+**Expected Outcome:**
+- Patch preview shows exact changes before apply
+- Validation lines inserted at correct location
+- Context lines match (patch applied cleanly)
+- Backup created before modification
+
+---
+
+### Scenario 5: Path Traversal Attack Prevention
+
+**Objective:** Verify security controls reject path traversal attempts.
+
+**Prerequisites:**
+- Agent running with default security configuration
+
+**Steps:**
+1. Attempt to read a file outside the repository:
+   ```bash
+   acode run "Read the file at ../../../etc/passwd"
+   ```
+
+2. Verify the agent rejects the request:
+   ```
+   [Tool: read_file]
+     Path: ../../../etc/passwd
+     Status: REJECTED
+     Error: ACODE-FS-003 - Invalid path: Path must be within the repository
+   ```
+
+3. Check security audit log for the rejection:
+   ```bash
+   grep "SECURITY.*traversal" .agent/logs/audit.log
+   # Should show: SECURITY: Path traversal pattern detected
+   ```
+
+4. Attempt URL-encoded traversal:
+   ```bash
+   acode run "Read file at src%2f..%2f..%2fetc%2fpasswd"
+   ```
+
+5. Verify encoded traversal also rejected:
+   ```
+   Status: REJECTED
+   Error: ACODE-FS-003 - Invalid path: Path contains dangerous sequences
+   ```
+
+**Expected Outcome:**
+- All traversal attempts rejected before file system access
+- Security events logged with full context
+- Error message does not expose system paths
+- Agent continues operating normally after rejection
+
+---
+
+### Scenario 6: File Enumeration with Filters
+
+**Objective:** Verify directory listing respects ignore patterns and filters.
+
+**Prerequisites:**
+- Repository with mixed file types and a `.gitignore`
+
+**Steps:**
+1. Set up test structure:
+   ```bash
+   mkdir -p src tests node_modules
+   touch src/main.cs src/utils.cs tests/test.cs
+   touch node_modules/package.json
+   echo "node_modules/" > .gitignore
+   ```
+
+2. List all C# files in repository:
+   ```bash
+   acode run "List all .cs files in the repository"
+   ```
+
+3. Verify output shows only source files:
+   ```
+   [Tool: list_directory]
+     Pattern: **/*.cs
+     Respecting: .gitignore, .agentignore
+     Results:
+       - src/main.cs (0 bytes)
+       - src/utils.cs (0 bytes)
+       - tests/test.cs (0 bytes)
+   ```
+
+4. Verify `node_modules/` was excluded:
+   ```bash
+   # node_modules should NOT appear in results
+   ```
+
+**Expected Outcome:**
+- `.gitignore` patterns respected
+- Glob pattern filtering works correctly
+- Hidden files excluded by default
+- Results sorted by path
+
+---
+
+### Scenario 7: Large File Handling
+
+**Objective:** Verify RepoFS handles large files without memory exhaustion.
+
+**Prerequisites:**
+- Sufficient disk space (50MB+)
+
+**Steps:**
+1. Create a large test file (10MB):
+   ```bash
+   dd if=/dev/urandom of=large-file.bin bs=1M count=10
+   ```
+
+2. Request the agent to check file size:
+   ```bash
+   acode run "What is the size of large-file.bin?"
+   ```
+
+3. Verify metadata retrieval succeeds:
+   ```
+   [Tool: get_metadata]
+     Path: large-file.bin
+     Size: 10,485,760 bytes (10.0 MB)
+     Type: Binary
+     Last Modified: 2024-01-15T10:30:00Z
+   ```
+
+4. Request file read with streaming:
+   ```bash
+   acode debug fs read large-file.bin --first-bytes 1024
+   # Should show first 1KB as hex dump
+   ```
+
+5. Monitor memory during operation:
+   ```bash
+   # Memory usage should not spike to 10MB+
+   ```
+
+**Expected Outcome:**
+- Metadata retrieval instant (< 5ms)
+- Binary detection accurate
+- Streaming read prevents memory bloat
+- Large file operations complete within timeout
+
+---
+
+### Scenario 8: Docker Volume File Operations
+
+**Objective:** Verify RepoFS works correctly with Docker-mounted volumes.
+
+**Prerequisites:**
+- Docker installed and running
+- Container with mounted workspace
+
+**Steps:**
+1. Start a container with workspace mount:
+   ```bash
+   docker run -d --name test-agent \
+     -v $(pwd):/workspace \
+     alpine tail -f /dev/null
+   ```
+
+2. Configure Acode for Docker mode:
+   ```yaml
+   # .agent/config.yml
+   repo:
+     fs_type: docker
+     docker:
+       container: test-agent
+       mount_path: /workspace
+   ```
+
+3. Run file operation through Docker:
+   ```bash
+   acode run "Create a file hello.txt with content 'Hello from Docker'"
+   ```
+
+4. Verify file exists on host:
+   ```bash
+   cat hello.txt  # Should show: Hello from Docker
+   ```
+
+5. Verify audit shows Docker context:
+   ```bash
+   grep "WRITE hello.txt" .agent/logs/audit.log
+   # Should include container=test-agent
+   ```
+
+6. Clean up:
+   ```bash
+   docker stop test-agent && docker rm test-agent
+   ```
+
+**Expected Outcome:**
+- File operations work transparently in Docker
+- Host filesystem reflects changes
+- Container ID logged in audit
+- Timeout handling if container unavailable
+
+---
+
+### Scenario 9: Concurrent Access Safety
+
+**Objective:** Verify RepoFS handles concurrent file access safely.
+
+**Prerequisites:**
+- Multi-threaded test capability
+
+**Steps:**
+1. Create a shared test file:
+   ```bash
+   echo "Initial content" > shared.txt
+   ```
+
+2. Run concurrent write test:
+   ```bash
+   acode debug fs concurrent-test shared.txt --writers 5 --iterations 10
+   ```
+
+3. Observe locking behavior:
+   ```
+   [Concurrent Test Results]
+     Writers: 5
+     Iterations: 10 each
+     Total writes: 50
+     Lock contentions: 3
+     Lock timeouts: 0
+     Data corruptions: 0
+   ```
+
+4. Verify file integrity:
+   ```bash
+   cat shared.txt
+   # Should contain valid content (last write wins)
+   ```
+
+**Expected Outcome:**
+- No data corruption under concurrent access
+- Lock timeouts handled gracefully
+- Atomic writes prevent partial updates
+- Performance degrades gracefully under contention
+
+---
+
+### Scenario 10: Error Recovery and Resilience
+
+**Objective:** Verify RepoFS recovers gracefully from errors.
+
+**Prerequisites:**
+- Ability to simulate disk errors (or use a restricted file)
+
+**Steps:**
+1. Create a read-only file:
+   ```bash
+   echo "Protected content" > protected.txt
+   chmod 444 protected.txt
+   ```
+
+2. Attempt to modify the protected file:
+   ```bash
+   acode run "Append 'new content' to protected.txt"
+   ```
+
+3. Verify graceful error handling:
+   ```
+   [Tool: write_file]
+     Path: protected.txt
+     Status: FAILED
+     Error: ACODE-FS-002 - Permission denied: Cannot write 'protected.txt'
+     Suggestion: Check file permissions or run with elevated privileges
+   ```
+
+4. Verify the agent continues operating:
+   ```bash
+   acode run "Read protected.txt"
+   # Should succeed - read is allowed
+   ```
+
+5. Clean up:
+   ```bash
+   chmod 644 protected.txt
+   ```
+
+**Expected Outcome:**
+- Error message is clear and actionable
+- System paths not exposed in error
+- Agent recovers and continues operating
+- Audit log captures the failure
 
 ---
 
 ## Implementation Prompt
 
-### File Structure
+Implement the RepoFS abstraction layer following these specifications. Write tests first (TDD), then implement each component.
 
-```
-src/AgenticCoder.Domain/
-├── FileSystem/
-│   ├── IRepoFS.cs
-│   ├── FileMetadata.cs
-│   └── PatchResult.cs
-│
-src/AgenticCoder.Application/
-├── FileSystem/
-│   └── IRepoFSFactory.cs
-│
-src/AgenticCoder.Infrastructure/
-├── FileSystem/
-│   ├── RepoFSFactory.cs
-│   ├── PathNormalizer.cs
-│   ├── PathValidator.cs
-│   ├── Local/
-│   │   └── LocalFileSystem.cs
-│   ├── Docker/
-│   │   └── DockerFileSystem.cs
-│   └── Patching/
-│       └── UnifiedDiffApplicator.cs
+### Step 1: Domain Layer - IRepoFS Interface
+
+**File:** `src/AgenticCoder.Domain/FileSystem/IRepoFS.cs`
+
+```csharp
+using System.Runtime.CompilerServices;
+
+namespace AgenticCoder.Domain.FileSystem;
+
+/// <summary>
+/// Repository file system abstraction providing safe, transactional file operations
+/// constrained to the repository boundary.
+/// </summary>
+public interface IRepoFS : IAsyncDisposable
+{
+    /// <summary>
+    /// Gets the absolute path to the repository root directory.
+    /// </summary>
+    string RootPath { get; }
+
+    /// <summary>
+    /// Gets the capabilities of this file system implementation.
+    /// </summary>
+    RepoFSCapabilities Capabilities { get; }
+
+    // ============ READING OPERATIONS ============
+
+    /// <summary>
+    /// Reads the entire content of a file as a string with automatic encoding detection.
+    /// </summary>
+    /// <param name="path">Relative path from repository root.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>File content as string.</returns>
+    /// <exception cref="FileNotFoundException">File does not exist.</exception>
+    /// <exception cref="PathTraversalException">Path escapes repository boundary.</exception>
+    Task<string> ReadFileAsync(string path, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads a file as a list of lines, handling all line ending formats.
+    /// </summary>
+    Task<IReadOnlyList<string>> ReadLinesAsync(string path, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads a file as raw bytes without encoding transformation.
+    /// </summary>
+    Task<byte[]> ReadBytesAsync(string path, CancellationToken ct = default);
+
+    // ============ WRITING OPERATIONS ============
+
+    /// <summary>
+    /// Writes string content to a file atomically, creating parent directories if needed.
+    /// </summary>
+    /// <param name="path">Relative path from repository root.</param>
+    /// <param name="content">Content to write.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task WriteFileAsync(string path, string content, CancellationToken ct = default);
+
+    /// <summary>
+    /// Writes lines to a file with configurable line endings.
+    /// </summary>
+    Task WriteLinesAsync(
+        string path,
+        IEnumerable<string> lines,
+        LineEnding lineEnding = LineEnding.Platform,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Writes raw bytes to a file atomically.
+    /// </summary>
+    Task WriteBytesAsync(string path, byte[] bytes, CancellationToken ct = default);
+
+    // ============ DELETION OPERATIONS ============
+
+    /// <summary>
+    /// Deletes a file. Returns true if file was deleted, false if it didn't exist.
+    /// </summary>
+    Task<bool> DeleteFileAsync(string path, CancellationToken ct = default);
+
+    /// <summary>
+    /// Deletes a directory. Fails on non-empty unless recursive is true.
+    /// </summary>
+    Task DeleteDirectoryAsync(string path, bool recursive = false, CancellationToken ct = default);
+
+    // ============ ENUMERATION OPERATIONS ============
+
+    /// <summary>
+    /// Enumerates files in a directory, respecting ignore patterns.
+    /// </summary>
+    IAsyncEnumerable<FileEntry> EnumerateFilesAsync(
+        string path,
+        bool recursive = false,
+        string? pattern = null,
+        [EnumeratorCancellation] CancellationToken ct = default);
+
+    /// <summary>
+    /// Enumerates directories within a path.
+    /// </summary>
+    IAsyncEnumerable<DirectoryEntry> EnumerateDirectoriesAsync(
+        string path,
+        bool recursive = false,
+        [EnumeratorCancellation] CancellationToken ct = default);
+
+    // ============ METADATA OPERATIONS ============
+
+    /// <summary>
+    /// Checks if a file or directory exists at the given path.
+    /// </summary>
+    Task<bool> ExistsAsync(string path, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets metadata for a file or directory.
+    /// </summary>
+    Task<FileMetadata> GetMetadataAsync(string path, CancellationToken ct = default);
+
+    // ============ TRANSACTION OPERATIONS ============
+
+    /// <summary>
+    /// Begins a new transaction. All writes within the transaction are buffered
+    /// and applied atomically on commit, or discarded on rollback.
+    /// </summary>
+    Task<IRepoFSTransaction> BeginTransactionAsync(CancellationToken ct = default);
+
+    // ============ PATCH OPERATIONS ============
+
+    /// <summary>
+    /// Applies a unified diff patch to the repository.
+    /// </summary>
+    Task<PatchResult> ApplyPatchAsync(string patch, CancellationToken ct = default);
+
+    /// <summary>
+    /// Previews patch changes without applying them.
+    /// </summary>
+    Task<PatchPreview> PreviewPatchAsync(string patch, CancellationToken ct = default);
+
+    /// <summary>
+    /// Validates that a patch can be applied cleanly.
+    /// </summary>
+    Task<PatchValidationResult> ValidatePatchAsync(string patch, CancellationToken ct = default);
+}
+
+/// <summary>
+/// Line ending style for write operations.
+/// </summary>
+public enum LineEnding
+{
+    /// <summary>Use platform-specific line endings.</summary>
+    Platform,
+    /// <summary>Use Unix LF line endings.</summary>
+    Lf,
+    /// <summary>Use Windows CRLF line endings.</summary>
+    CrLf,
+    /// <summary>Use legacy Mac CR line endings.</summary>
+    Cr
+}
 ```
 
-### IRepoFS Interface
+### Step 2: Domain Layer - Value Objects and Records
+
+**File:** `src/AgenticCoder.Domain/FileSystem/FileMetadata.cs`
 
 ```csharp
 namespace AgenticCoder.Domain.FileSystem;
 
-public interface IRepoFS
+/// <summary>
+/// Metadata about a file or directory in the repository.
+/// </summary>
+public sealed record FileMetadata
 {
-    // Reading
-    Task<string> ReadFileAsync(string path, CancellationToken ct = default);
-    Task<IReadOnlyList<string>> ReadLinesAsync(string path, CancellationToken ct = default);
-    Task<byte[]> ReadBytesAsync(string path, CancellationToken ct = default);
-    
-    // Writing
-    Task WriteFileAsync(string path, string content, CancellationToken ct = default);
-    Task WriteLinesAsync(string path, IEnumerable<string> lines, CancellationToken ct = default);
-    Task WriteBytesAsync(string path, byte[] bytes, CancellationToken ct = default);
-    
-    // Deletion
-    Task DeleteFileAsync(string path, CancellationToken ct = default);
-    Task DeleteDirectoryAsync(string path, bool recursive, CancellationToken ct = default);
-    
-    // Enumeration
-    IAsyncEnumerable<FileEntry> EnumerateFilesAsync(string path, bool recursive = false);
-    IAsyncEnumerable<DirectoryEntry> EnumerateDirectoriesAsync(string path, bool recursive = false);
-    
-    // Metadata
-    Task<bool> ExistsAsync(string path, CancellationToken ct = default);
-    Task<FileMetadata> GetMetadataAsync(string path, CancellationToken ct = default);
-    
-    // Transactions
-    Task<IRepoFSTransaction> BeginTransactionAsync(CancellationToken ct = default);
-    
-    // Patching
-    Task<PatchResult> ApplyPatchAsync(string patch, CancellationToken ct = default);
-    Task<PatchPreview> PreviewPatchAsync(string patch, CancellationToken ct = default);
+    /// <summary>Path relative to repository root.</summary>
+    public required string Path { get; init; }
+
+    /// <summary>File size in bytes (0 for directories).</summary>
+    public required long Size { get; init; }
+
+    /// <summary>Last modification timestamp in UTC.</summary>
+    public required DateTimeOffset LastModified { get; init; }
+
+    /// <summary>Creation timestamp in UTC.</summary>
+    public required DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>Whether this is a directory.</summary>
+    public required bool IsDirectory { get; init; }
+
+    /// <summary>Whether this file is read-only.</summary>
+    public required bool IsReadOnly { get; init; }
+
+    /// <summary>Whether this is a hidden file.</summary>
+    public required bool IsHidden { get; init; }
+}
+
+/// <summary>
+/// Entry for an enumerated file.
+/// </summary>
+public sealed record FileEntry
+{
+    /// <summary>Path relative to repository root.</summary>
+    public required string Path { get; init; }
+
+    /// <summary>File name without directory.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>File size in bytes.</summary>
+    public long? Size { get; init; }
+
+    /// <summary>Last modification time.</summary>
+    public DateTimeOffset? LastModified { get; init; }
+}
+
+/// <summary>
+/// Entry for an enumerated directory.
+/// </summary>
+public sealed record DirectoryEntry
+{
+    /// <summary>Path relative to repository root.</summary>
+    public required string Path { get; init; }
+
+    /// <summary>Directory name.</summary>
+    public required string Name { get; init; }
+}
+
+/// <summary>
+/// Capabilities of a RepoFS implementation.
+/// </summary>
+public sealed record RepoFSCapabilities
+{
+    /// <summary>Whether this file system is read-only.</summary>
+    public required bool IsReadOnly { get; init; }
+
+    /// <summary>Whether transactions are supported.</summary>
+    public required bool SupportsTransactions { get; init; }
+
+    /// <summary>Whether file watching is supported.</summary>
+    public required bool SupportsWatch { get; init; }
+
+    /// <summary>Maximum file size supported (bytes).</summary>
+    public long MaxFileSize { get; init; } = long.MaxValue;
 }
 ```
 
-### Error Codes
+**File:** `src/AgenticCoder.Domain/FileSystem/PatchResult.cs`
 
-| Code | Meaning |
-|------|---------|
-| ACODE-FS-001 | File not found |
-| ACODE-FS-002 | Permission denied |
-| ACODE-FS-003 | Path traversal |
-| ACODE-FS-004 | Transaction failed |
-| ACODE-FS-005 | Patch failed |
+```csharp
+namespace AgenticCoder.Domain.FileSystem;
+
+/// <summary>
+/// Result of a patch application operation.
+/// </summary>
+public sealed record PatchResult
+{
+    /// <summary>Whether the patch was applied successfully.</summary>
+    public required bool Success { get; init; }
+
+    /// <summary>List of files affected by the patch.</summary>
+    public required IReadOnlyList<string> AffectedFiles { get; init; }
+
+    /// <summary>Number of lines added.</summary>
+    public int LinesAdded { get; init; }
+
+    /// <summary>Number of lines removed.</summary>
+    public int LinesRemoved { get; init; }
+
+    /// <summary>Error message if failed.</summary>
+    public string? Error { get; init; }
+
+    /// <summary>Path where conflict occurred, if any.</summary>
+    public string? ConflictPath { get; init; }
+
+    public static PatchResult Succeeded(IReadOnlyList<string> files, int added, int removed) =>
+        new()
+        {
+            Success = true,
+            AffectedFiles = files,
+            LinesAdded = added,
+            LinesRemoved = removed
+        };
+
+    public static PatchResult Failed(string error, string? conflictPath = null) =>
+        new()
+        {
+            Success = false,
+            AffectedFiles = Array.Empty<string>(),
+            Error = error,
+            ConflictPath = conflictPath
+        };
+}
+
+/// <summary>
+/// Preview of changes a patch would make.
+/// </summary>
+public sealed record PatchPreview
+{
+    public required IReadOnlyList<PatchFileChange> Changes { get; init; }
+    public int TotalLinesAdded => Changes.Sum(c => c.LinesAdded);
+    public int TotalLinesRemoved => Changes.Sum(c => c.LinesRemoved);
+}
+
+public sealed record PatchFileChange
+{
+    public required string Path { get; init; }
+    public required PatchChangeType ChangeType { get; init; }
+    public required int LinesAdded { get; init; }
+    public required int LinesRemoved { get; init; }
+    public required IReadOnlyList<string> HunkPreviews { get; init; }
+}
+
+public enum PatchChangeType
+{
+    Modified,
+    Added,
+    Deleted
+}
+
+public sealed record PatchValidationResult
+{
+    public required bool IsValid { get; init; }
+    public string? Error { get; init; }
+    public IReadOnlyList<string>? MissingFiles { get; init; }
+    public IReadOnlyList<string>? ContextMismatches { get; init; }
+}
+```
+
+### Step 3: Domain Layer - Transaction Interface
+
+**File:** `src/AgenticCoder.Domain/FileSystem/IRepoFSTransaction.cs`
+
+```csharp
+namespace AgenticCoder.Domain.FileSystem;
+
+/// <summary>
+/// Represents a file system transaction that groups operations atomically.
+/// </summary>
+public interface IRepoFSTransaction : IAsyncDisposable
+{
+    /// <summary>Unique identifier for this transaction.</summary>
+    string TransactionId { get; }
+
+    /// <summary>When the transaction was started.</summary>
+    DateTimeOffset StartedAt { get; }
+
+    /// <summary>Whether the transaction has been committed.</summary>
+    bool IsCommitted { get; }
+
+    /// <summary>Whether the transaction has been rolled back.</summary>
+    bool IsRolledBack { get; }
+
+    /// <summary>
+    /// Commits all buffered changes atomically.
+    /// </summary>
+    /// <exception cref="TransactionException">Commit failed.</exception>
+    Task CommitAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Rolls back all changes, restoring original file states.
+    /// </summary>
+    Task RollbackAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the list of files modified in this transaction.
+    /// </summary>
+    IReadOnlyList<string> AffectedFiles { get; }
+}
+```
+
+### Step 4: Infrastructure Layer - Path Normalizer
+
+**File:** `src/AgenticCoder.Infrastructure/FileSystem/PathNormalizer.cs`
+
+```csharp
+namespace AgenticCoder.Infrastructure.FileSystem;
+
+/// <summary>
+/// Normalizes file paths to a consistent format.
+/// </summary>
+public sealed class PathNormalizer
+{
+    /// <summary>
+    /// Normalizes a path to use forward slashes, collapse duplicates,
+    /// and remove current directory prefixes.
+    /// </summary>
+    public string Normalize(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return string.Empty;
+
+        // Convert all backslashes to forward slashes
+        var normalized = path.Replace('\\', '/');
+
+        // Collapse multiple consecutive slashes
+        while (normalized.Contains("//"))
+            normalized = normalized.Replace("//", "/");
+
+        // Remove current directory prefix (./)
+        while (normalized.StartsWith("./"))
+            normalized = normalized.Substring(2);
+
+        // Remove trailing slash
+        normalized = normalized.TrimEnd('/');
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// Combines two path segments safely.
+    /// </summary>
+    public string Combine(string basePath, string relativePath)
+    {
+        var normalizedBase = Normalize(basePath);
+        var normalizedRelative = Normalize(relativePath);
+
+        if (string.IsNullOrEmpty(normalizedBase))
+            return normalizedRelative;
+        if (string.IsNullOrEmpty(normalizedRelative))
+            return normalizedBase;
+
+        return $"{normalizedBase}/{normalizedRelative}";
+    }
+
+    /// <summary>
+    /// Gets the line ending string for the specified type.
+    /// </summary>
+    public static string GetLineEndingString(LineEnding lineEnding) => lineEnding switch
+    {
+        LineEnding.Lf => "\n",
+        LineEnding.CrLf => "\r\n",
+        LineEnding.Cr => "\r",
+        LineEnding.Platform => Environment.NewLine,
+        _ => Environment.NewLine
+    };
+}
+```
+
+### Step 5: Infrastructure Layer - Local File System Implementation
+
+**File:** `src/AgenticCoder.Infrastructure/FileSystem/Local/LocalFileSystem.cs`
+
+```csharp
+using System.Runtime.CompilerServices;
+using System.Text;
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.FileSystem.Local;
+
+/// <summary>
+/// Local file system implementation of IRepoFS.
+/// </summary>
+public sealed class LocalFileSystem : IRepoFS
+{
+    private readonly string _rootPath;
+    private readonly ILogger<LocalFileSystem> _logger;
+    private readonly PathNormalizer _normalizer;
+    private readonly SecurePathValidator _validator;
+    private readonly IAuditLogger _auditLogger;
+    private readonly RepoFSOptions _options;
+    private IRepoFSTransaction? _activeTransaction;
+    private bool _disposed;
+
+    public LocalFileSystem(
+        string rootPath,
+        ILogger<LocalFileSystem> logger,
+        PathNormalizer normalizer,
+        SecurePathValidator validator,
+        IAuditLogger auditLogger,
+        RepoFSOptions? options = null)
+    {
+        _rootPath = Path.GetFullPath(rootPath);
+        _logger = logger;
+        _normalizer = normalizer;
+        _validator = validator;
+        _auditLogger = auditLogger;
+        _options = options ?? new RepoFSOptions();
+
+        if (!Directory.Exists(_rootPath))
+            throw new DirectoryNotFoundException($"Repository root not found: {_rootPath}");
+    }
+
+    public string RootPath => _rootPath;
+
+    public RepoFSCapabilities Capabilities => new()
+    {
+        IsReadOnly = _options.ReadOnly,
+        SupportsTransactions = true,
+        SupportsWatch = true,
+        MaxFileSize = _options.MaxFileSizeBytes
+    };
+
+    public async Task<string> ReadFileAsync(string path, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        var fullPath = ValidateAndResolvePath(path);
+
+        _logger.LogDebug("Reading file: {Path}", path);
+
+        if (!File.Exists(fullPath))
+        {
+            await _auditLogger.LogAsync(FileSystemOperation.Read, path, false, "File not found");
+            throw new FileNotFoundException($"File not found: {path}", path);
+        }
+
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(fullPath, ct);
+            var encoding = DetectEncoding(bytes);
+            var content = encoding.GetString(bytes);
+
+            // Strip BOM if present
+            if (content.Length > 0 && content[0] == '\uFEFF')
+                content = content.Substring(1);
+
+            await _auditLogger.LogAsync(FileSystemOperation.Read, path, true);
+            return content;
+        }
+        catch (Exception ex) when (ex is not FileNotFoundException)
+        {
+            await _auditLogger.LogAsync(FileSystemOperation.Read, path, false, ex.Message);
+            throw;
+        }
+    }
+
+    public async Task<IReadOnlyList<string>> ReadLinesAsync(string path, CancellationToken ct = default)
+    {
+        var content = await ReadFileAsync(path, ct);
+        if (string.IsNullOrEmpty(content))
+            return Array.Empty<string>();
+
+        // Handle all line ending types
+        var lines = content
+            .Replace("\r\n", "\n")
+            .Replace("\r", "\n")
+            .Split('\n');
+
+        // Remove trailing empty line if content ended with newline
+        if (lines.Length > 0 && string.IsNullOrEmpty(lines[^1]))
+            return lines[..^1];
+
+        return lines;
+    }
+
+    public async Task<byte[]> ReadBytesAsync(string path, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        var fullPath = ValidateAndResolvePath(path);
+
+        if (!File.Exists(fullPath))
+            throw new FileNotFoundException($"File not found: {path}", path);
+
+        return await File.ReadAllBytesAsync(fullPath, ct);
+    }
+
+    public async Task WriteFileAsync(string path, string content, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        ThrowIfReadOnly();
+
+        var fullPath = ValidateAndResolvePath(path);
+
+        // Create parent directories if needed
+        var directory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+            _logger.LogDebug("Created directory: {Directory}", directory);
+        }
+
+        // Atomic write using temp file + rename
+        var tempPath = fullPath + $".tmp.{Guid.NewGuid():N}";
+        try
+        {
+            await File.WriteAllTextAsync(tempPath, content, Encoding.UTF8, ct);
+            File.Move(tempPath, fullPath, overwrite: true);
+
+            await _auditLogger.LogAsync(FileSystemOperation.Write, path, true);
+            _logger.LogDebug("Wrote file: {Path} ({Bytes} bytes)", path, content.Length);
+        }
+        catch (Exception ex)
+        {
+            // Clean up temp file on failure
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+
+            await _auditLogger.LogAsync(FileSystemOperation.Write, path, false, ex.Message);
+            throw;
+        }
+    }
+
+    public async Task WriteLinesAsync(
+        string path,
+        IEnumerable<string> lines,
+        LineEnding lineEnding = LineEnding.Platform,
+        CancellationToken ct = default)
+    {
+        var ending = PathNormalizer.GetLineEndingString(lineEnding);
+        var content = string.Join(ending, lines) + ending;
+        await WriteFileAsync(path, content, ct);
+    }
+
+    public async Task WriteBytesAsync(string path, byte[] bytes, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        ThrowIfReadOnly();
+
+        var fullPath = ValidateAndResolvePath(path);
+        var directory = Path.GetDirectoryName(fullPath);
+
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            Directory.CreateDirectory(directory);
+
+        var tempPath = fullPath + $".tmp.{Guid.NewGuid():N}";
+        try
+        {
+            await File.WriteAllBytesAsync(tempPath, bytes, ct);
+            File.Move(tempPath, fullPath, overwrite: true);
+            await _auditLogger.LogAsync(FileSystemOperation.Write, path, true);
+        }
+        catch
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+            throw;
+        }
+    }
+
+    public async Task<bool> DeleteFileAsync(string path, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        ThrowIfReadOnly();
+
+        var fullPath = ValidateAndResolvePath(path);
+
+        if (!File.Exists(fullPath))
+        {
+            _logger.LogDebug("Delete skipped - file not found: {Path}", path);
+            return false;
+        }
+
+        File.Delete(fullPath);
+        await _auditLogger.LogAsync(FileSystemOperation.Delete, path, true);
+        _logger.LogDebug("Deleted file: {Path}", path);
+        return true;
+    }
+
+    public async Task DeleteDirectoryAsync(string path, bool recursive = false, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        ThrowIfReadOnly();
+
+        var fullPath = ValidateAndResolvePath(path);
+
+        if (!Directory.Exists(fullPath))
+            return;
+
+        Directory.Delete(fullPath, recursive);
+        await _auditLogger.LogAsync(FileSystemOperation.Delete, path, true);
+    }
+
+    public async IAsyncEnumerable<FileEntry> EnumerateFilesAsync(
+        string path,
+        bool recursive = false,
+        string? pattern = null,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        var fullPath = ValidateAndResolvePath(path);
+
+        if (!Directory.Exists(fullPath))
+            yield break;
+
+        var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        var searchPattern = pattern ?? "*";
+
+        foreach (var file in Directory.EnumerateFiles(fullPath, searchPattern, searchOption))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var relativePath = Path.GetRelativePath(_rootPath, file).Replace('\\', '/');
+            var info = new FileInfo(file);
+
+            yield return new FileEntry
+            {
+                Path = relativePath,
+                Name = info.Name,
+                Size = info.Length,
+                LastModified = info.LastWriteTimeUtc
+            };
+        }
+    }
+
+    public async IAsyncEnumerable<DirectoryEntry> EnumerateDirectoriesAsync(
+        string path,
+        bool recursive = false,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        var fullPath = ValidateAndResolvePath(path);
+
+        if (!Directory.Exists(fullPath))
+            yield break;
+
+        var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+
+        foreach (var dir in Directory.EnumerateDirectories(fullPath, "*", searchOption))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var relativePath = Path.GetRelativePath(_rootPath, dir).Replace('\\', '/');
+
+            yield return new DirectoryEntry
+            {
+                Path = relativePath,
+                Name = Path.GetFileName(dir)
+            };
+        }
+    }
+
+    public Task<bool> ExistsAsync(string path, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        var fullPath = ValidateAndResolvePath(path);
+        return Task.FromResult(File.Exists(fullPath) || Directory.Exists(fullPath));
+    }
+
+    public Task<FileMetadata> GetMetadataAsync(string path, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        var fullPath = ValidateAndResolvePath(path);
+
+        if (File.Exists(fullPath))
+        {
+            var info = new FileInfo(fullPath);
+            return Task.FromResult(new FileMetadata
+            {
+                Path = path,
+                Size = info.Length,
+                LastModified = info.LastWriteTimeUtc,
+                CreatedAt = info.CreationTimeUtc,
+                IsDirectory = false,
+                IsReadOnly = info.IsReadOnly,
+                IsHidden = info.Attributes.HasFlag(FileAttributes.Hidden)
+            });
+        }
+
+        if (Directory.Exists(fullPath))
+        {
+            var info = new DirectoryInfo(fullPath);
+            return Task.FromResult(new FileMetadata
+            {
+                Path = path,
+                Size = 0,
+                LastModified = info.LastWriteTimeUtc,
+                CreatedAt = info.CreationTimeUtc,
+                IsDirectory = true,
+                IsReadOnly = false,
+                IsHidden = info.Attributes.HasFlag(FileAttributes.Hidden)
+            });
+        }
+
+        throw new FileNotFoundException($"Path not found: {path}", path);
+    }
+
+    public Task<IRepoFSTransaction> BeginTransactionAsync(CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        ThrowIfReadOnly();
+
+        if (_activeTransaction != null)
+            throw new NotSupportedException("Nested transactions are not supported");
+
+        _activeTransaction = new LocalFSTransaction(this, _logger, _auditLogger);
+        return Task.FromResult(_activeTransaction);
+    }
+
+    public Task<PatchResult> ApplyPatchAsync(string patch, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        ThrowIfReadOnly();
+        // Delegate to PatchApplicator (implemented in subtask 014c)
+        throw new NotImplementedException("Implemented in Task 014c");
+    }
+
+    public Task<PatchPreview> PreviewPatchAsync(string patch, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("Implemented in Task 014c");
+    }
+
+    public Task<PatchValidationResult> ValidatePatchAsync(string patch, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("Implemented in Task 014c");
+    }
+
+    private string ValidateAndResolvePath(string path)
+    {
+        var normalized = _normalizer.Normalize(path);
+        var result = _validator.Validate(normalized);
+
+        if (!result.IsValid)
+        {
+            if (result.IsTraversalAttempt)
+                throw new PathTraversalException(result.ErrorMessage ?? "Path traversal detected");
+
+            throw new PathValidationException(result.ErrorMessage ?? "Invalid path");
+        }
+
+        return result.FullPath!;
+    }
+
+    private static Encoding DetectEncoding(byte[] bytes)
+    {
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            return Encoding.UTF8;
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            return Encoding.Unicode; // UTF-16 LE
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+            return Encoding.BigEndianUnicode; // UTF-16 BE
+
+        return Encoding.UTF8; // Default
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(LocalFileSystem));
+    }
+
+    private void ThrowIfReadOnly()
+    {
+        if (_options.ReadOnly)
+            throw new InvalidOperationException("File system is in read-only mode");
+    }
+
+    internal void ClearTransaction() => _activeTransaction = null;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        if (_activeTransaction != null)
+        {
+            await _activeTransaction.DisposeAsync();
+            _activeTransaction = null;
+        }
+    }
+}
+
+public sealed class RepoFSOptions
+{
+    public bool ReadOnly { get; init; }
+    public long MaxFileSizeBytes { get; init; } = 100 * 1024 * 1024; // 100MB
+    public TimeSpan TransactionTimeout { get; init; } = TimeSpan.FromMinutes(5);
+    public TimeSpan LockTimeout { get; init; } = TimeSpan.FromSeconds(30);
+}
+```
+
+### Step 6: Infrastructure Layer - Factory
+
+**File:** `src/AgenticCoder.Infrastructure/FileSystem/RepoFSFactory.cs`
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace AgenticCoder.Infrastructure.FileSystem;
+
+public interface IRepoFSFactory
+{
+    Task<IRepoFS> CreateAsync(RepoFSConfiguration config, CancellationToken ct = default);
+}
+
+public sealed class RepoFSFactory : IRepoFSFactory
+{
+    private readonly IServiceProvider _services;
+    private readonly ILogger<RepoFSFactory> _logger;
+
+    public RepoFSFactory(IServiceProvider services, ILogger<RepoFSFactory> logger)
+    {
+        _services = services;
+        _logger = logger;
+    }
+
+    public async Task<IRepoFS> CreateAsync(RepoFSConfiguration config, CancellationToken ct = default)
+    {
+        var fsType = config.FsType;
+
+        // Auto-detect file system type if not specified
+        if (fsType == FileSystemType.Auto)
+        {
+            fsType = DetectFileSystemType();
+            _logger.LogInformation("Auto-detected file system type: {Type}", fsType);
+        }
+
+        var rootPath = Path.GetFullPath(config.RootPath ?? ".");
+
+        if (!Directory.Exists(rootPath))
+            throw new DirectoryNotFoundException($"Repository root not found: {rootPath}");
+
+        _logger.LogInformation(
+            "Creating {Type} file system at {Root} (ReadOnly: {ReadOnly})",
+            fsType, rootPath, config.ReadOnly);
+
+        return fsType switch
+        {
+            FileSystemType.Local => CreateLocalFileSystem(rootPath, config),
+            FileSystemType.Docker => await CreateDockerFileSystemAsync(rootPath, config, ct),
+            _ => throw new NotSupportedException($"File system type not supported: {fsType}")
+        };
+    }
+
+    private IRepoFS CreateLocalFileSystem(string rootPath, RepoFSConfiguration config)
+    {
+        var logger = _services.GetRequiredService<ILogger<LocalFileSystem>>();
+        var normalizer = _services.GetRequiredService<PathNormalizer>();
+        var validatorLogger = _services.GetRequiredService<ILogger<SecurePathValidator>>();
+        var validator = new SecurePathValidator(rootPath, validatorLogger);
+        var auditLogger = _services.GetRequiredService<IAuditLogger>();
+
+        var options = new RepoFSOptions
+        {
+            ReadOnly = config.ReadOnly,
+            TransactionTimeout = TimeSpan.FromSeconds(config.TransactionTimeoutSeconds),
+            LockTimeout = TimeSpan.FromSeconds(config.LockTimeoutSeconds)
+        };
+
+        return new LocalFileSystem(rootPath, logger, normalizer, validator, auditLogger, options);
+    }
+
+    private Task<IRepoFS> CreateDockerFileSystemAsync(
+        string rootPath,
+        RepoFSConfiguration config,
+        CancellationToken ct)
+    {
+        // Implemented in Task 014b
+        throw new NotImplementedException("Docker file system implemented in Task 014b");
+    }
+
+    private static FileSystemType DetectFileSystemType()
+    {
+        // Check for Docker environment indicators
+        if (File.Exists("/.dockerenv") ||
+            Environment.GetEnvironmentVariable("DOCKER_CONTAINER") != null)
+        {
+            return FileSystemType.Docker;
+        }
+
+        return FileSystemType.Local;
+    }
+}
+
+public sealed class RepoFSConfiguration
+{
+    public FileSystemType FsType { get; init; } = FileSystemType.Auto;
+    public string? RootPath { get; init; }
+    public bool ReadOnly { get; init; }
+    public int TransactionTimeoutSeconds { get; init; } = 300;
+    public int LockTimeoutSeconds { get; init; } = 30;
+    public bool WatchEnabled { get; init; }
+    public List<string> IgnorePatterns { get; init; } = new();
+    public DockerConfiguration? Docker { get; init; }
+}
+
+public sealed class DockerConfiguration
+{
+    public required string Container { get; init; }
+    public required string MountPath { get; init; }
+    public int TimeoutSeconds { get; init; } = 10;
+}
+
+public enum FileSystemType
+{
+    Auto,
+    Local,
+    Docker
+}
+```
+
+### Step 7: DI Registration
+
+**File:** `src/AgenticCoder.Infrastructure/FileSystem/ServiceCollectionExtensions.cs`
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+
+namespace AgenticCoder.Infrastructure.FileSystem;
+
+public static class ServiceCollectionExtensions
+{
+    public static IServiceCollection AddRepoFS(this IServiceCollection services)
+    {
+        services.AddSingleton<PathNormalizer>();
+        services.AddSingleton<IRepoFSFactory, RepoFSFactory>();
+        services.AddScoped<IAuditLogger, FileAuditLogger>();
+
+        return services;
+    }
+}
+```
 
 ### Implementation Checklist
 
-1. [ ] Create IRepoFS interface
-2. [ ] Create path normalizer
-3. [ ] Create path validator
-4. [ ] Implement local FS
-5. [ ] Implement transactions
-6. [ ] Implement patching
-7. [ ] Create factory
-8. [ ] Write tests
+1. [ ] Create IRepoFS interface in Domain layer
+2. [ ] Create FileMetadata, PatchResult value objects
+3. [ ] Create IRepoFSTransaction interface
+4. [ ] Implement PathNormalizer with tests
+5. [ ] Implement SecurePathValidator with tests (from Security section)
+6. [ ] Implement LocalFileSystem with tests
+7. [ ] Implement LocalFSTransaction with tests
+8. [ ] Implement RepoFSFactory with tests
+9. [ ] Add DI registration
+10. [ ] Complete integration tests
+11. [ ] Run all tests: `dotnet test`
+12. [ ] Verify 80%+ code coverage
 
-### Rollout Plan
+### Error Codes Reference
 
-1. **Phase 1:** Interface and path handling
-2. **Phase 2:** Local FS implementation
-3. **Phase 3:** Transactions
-4. **Phase 4:** Patching
-5. **Phase 5:** Factory and DI
+| Code | Meaning | HTTP Equivalent |
+|------|---------|----------------|
+| ACODE-FS-001 | File not found | 404 |
+| ACODE-FS-002 | Permission denied | 403 |
+| ACODE-FS-003 | Path traversal attempt | 400 |
+| ACODE-FS-004 | Transaction failed | 500 |
+| ACODE-FS-005 | Patch application failed | 422 |
+| ACODE-FS-006 | Read-only mode violation | 403 |
+| ACODE-FS-007 | Lock timeout | 408 |
+| ACODE-FS-008 | Encoding detection failed | 415 |
+| ACODE-FS-009 | File too large | 413 |
+| ACODE-FS-010 | General I/O error | 500 |
 
 ---
 
