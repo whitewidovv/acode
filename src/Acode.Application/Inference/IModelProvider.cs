@@ -70,4 +70,16 @@ public interface IModelProvider
     /// FR-004-90: GetSupportedModels method returning string array.
     /// </remarks>
     string[] GetSupportedModels();
+
+    /// <summary>
+    /// Gets metadata information for a specific model.
+    /// </summary>
+    /// <param name="modelId">The model identifier to get metadata for.</param>
+    /// <returns>Model metadata including local/network requirements.</returns>
+    /// <remarks>
+    /// FR-004-19: GetModelInfo MUST return available model metadata.
+    /// Providers must return metadata indicating whether models are local and require network.
+    /// This enables operating mode constraint validation (FR-009c-081 through FR-009c-085).
+    /// </remarks>
+    ModelInfo GetModelInfo(string modelId);
 }
