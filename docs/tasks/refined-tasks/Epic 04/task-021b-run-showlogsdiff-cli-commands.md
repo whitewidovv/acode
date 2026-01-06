@@ -1308,6 +1308,546 @@ public class SecretRedactor : ISecretRedactor
 
 ---
 
+## Troubleshooting
+
+### Issue 1: Run ID Not Found Despite Run Existing in Database
+
+**Symptoms:**
+- `acode runs show <run-id>` returns "Run not found: <run-id>"
+- `acode runs list` shows the run in the list
+- Error: "Run ID '<run-id>' does not exist in workspace"
+- Artifacts visible in filesystem: `.acode/artifacts/<run-id>/` exists
+- Database queries show run present
+
+**Causes:**
+1. Partial run ID provided, multiple matches exist (ambiguous ID)
+2. Run ID format mismatch (hyphen vs underscore, case sensitivity)
+3. Workspace database out of sync with active workspace
+4. Run ID contains special characters not escaped in query
+5. Database index corruption causing lookup failures
+6. Whitespace or invisible characters in provided run ID
+7. Run exists in different workspace than currently active
+
+**Solutions:**
+
+```bash
+# Solution 1: Use full run ID instead of partial
+# If you used: acode runs show abc123
+# Error: "Multiple runs match 'abc123': run-abc123-build, run-abc123-test"
+
+# Use full ID:
+acode runs show run-abc123-build-20240115
+
+# List all runs matching prefix:
+acode runs list --id-prefix abc123
+
+# Solution 2: Check exact run ID format in database
+acode db query "SELECT id FROM runs WHERE id LIKE '%abc123%'"
+# Example output: run-abc123-build-20240115
+
+# Copy exact ID from output:
+acode runs show run-abc123-build-20240115
+
+# Solution 3: Verify active workspace
+acode workspace current
+# Output: workspace-name: my-project
+
+# List all workspaces:
+acode workspace list
+# Output:
+#   * my-project (active)
+#     legacy-project
+#     temp-workspace
+
+# Switch if run is in different workspace:
+acode workspace switch legacy-project
+acode runs show <run-id>
+
+# Solution 4: Check for whitespace in run ID
+# If copy-pasted from terminal, may include trailing space
+echo "<run-id>" | cat -A
+# Shows: run-abc123$ ($ indicates newline)
+
+# Trim whitespace:
+run_id=$(echo "run-abc123" | tr -d '[:space:]')
+acode runs show "$run_id"
+
+# Solution 5: Rebuild run index from filesystem
+acode runs reindex
+# Scans .acode/artifacts/ and syncs database
+
+# Output:
+# Reindexing workspace...
+# Found 145 run directories
+# Database has 143 runs
+# Adding 2 missing runs to database...
+# Done.
+
+# Retry query:
+acode runs show <run-id>
+
+# Solution 6: Query database directly to verify run exists
+acode db query "SELECT id, task, status, started_at FROM runs WHERE id = '<run-id>'"
+# If no results, run genuinely missing from DB
+
+# If results returned but "runs show" fails, report bug:
+acode debug run-lookup <run-id>
+
+# Solution 7: Check for database corruption
+acode db integrity-check
+# Runs PRAGMA integrity_check on SQLite database
+
+# If corrupted, restore from backup:
+ls -lt .acode/backups/*.db | head -5
+# Shows recent backups
+
+cp .acode/backups/workspace-20240115.db .acode/workspace.db
+# Warning: Loses runs created after backup date
+
+# Solution 8: Use verbose mode to see detailed error
+acode runs show <run-id> --verbose
+# Shows full error stack trace and database query
+```
+
+---
+
+### Issue 2: Permission Denied When Reading Log Files
+
+**Symptoms:**
+- `acode runs logs <run-id>` fails with "Permission denied"
+- Error: "Cannot read file: .acode/artifacts/<run-id>/stdout.txt (EACCES)"
+- `acode runs show` works fine (metadata accessible)
+- File exists but content inaccessible
+- Logs show: "Failed to open log file: permission error"
+
+**Causes:**
+1. Log file owned by different user (run created with sudo or different account)
+2. File permissions too restrictive (e.g., 600 instead of 644)
+3. Parent directory permissions block traversal (no execute permission)
+4. SELinux or AppArmor policies blocking read access
+5. File locked by another process (exclusive lock)
+6. NFS/network filesystem permission issues
+7. Antivirus software quarantined the file
+
+**Solutions:**
+
+```bash
+# Solution 1: Check file ownership and permissions
+ls -la .acode/artifacts/<run-id>/stdout.txt
+# Example output:
+# -rw------- 1 root root 4096 Jan 15 10:00 stdout.txt
+# Problem: Owned by root, not current user
+
+# Fix ownership:
+sudo chown $USER:$USER .acode/artifacts/<run-id>/stdout.txt
+
+# Fix permissions:
+chmod 644 .acode/artifacts/<run-id>/stdout.txt
+
+# Verify:
+cat .acode/artifacts/<run-id>/stdout.txt
+# Should now work
+
+# Solution 2: Check parent directory permissions
+ls -ld .acode/artifacts/<run-id>/
+# Expected: drwxr-xr-x (755)
+
+# If missing execute permission:
+# drwxr--r-- (644) - WRONG, no execute
+chmod 755 .acode/artifacts/<run-id>/
+
+# Solution 3: Recursively fix all permissions in artifacts directory
+find .acode/artifacts/ -type d -exec chmod 755 {} \;
+find .acode/artifacts/ -type f -exec chmod 644 {} \;
+
+# Then retry:
+acode runs logs <run-id>
+
+# Solution 4: Check for file locks
+lsof .acode/artifacts/<run-id>/stdout.txt
+# Example output:
+# COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+# tail     1234 user    3r   REG  259,2     4096  123 stdout.txt
+
+# If locked by another process, kill it (if safe):
+kill 1234
+
+# Or wait for process to finish:
+while lsof .acode/artifacts/<run-id>/stdout.txt; do sleep 1; done
+acode runs logs <run-id>
+
+# Solution 5: Check SELinux context (RHEL/CentOS/Fedora)
+ls -Z .acode/artifacts/<run-id>/stdout.txt
+# Example: -rw-r--r--. user user unconfined_u:object_r:user_tmp_t:s0 stdout.txt
+
+# If context wrong, restore:
+sudo restorecon -R .acode/artifacts/
+
+# Temporarily disable SELinux to test:
+sudo setenforce 0
+acode runs logs <run-id>
+# If works, create SELinux policy for acode
+
+# Re-enable:
+sudo setenforce 1
+
+# Solution 6: Check NFS mount options (if on network filesystem)
+mount | grep .acode
+# Look for "ro" (read-only) or missing exec permissions
+
+# Remount with proper options:
+sudo mount -o remount,rw,exec /path/to/mount
+
+# Solution 7: Read with elevated privileges (LAST RESORT)
+# Only if file legitimately requires elevated access:
+sudo acode runs logs <run-id>
+
+# Better: Fix ownership to avoid needing sudo:
+sudo chown -R $USER:$USER .acode/
+
+# Solution 8: Copy file to temp location with proper permissions
+cp .acode/artifacts/<run-id>/stdout.txt /tmp/debug-stdout.txt
+chmod 644 /tmp/debug-stdout.txt
+cat /tmp/debug-stdout.txt
+# Workaround to read content, but doesn't fix root cause
+```
+
+---
+
+### Issue 3: Diff Output Shows Garbled Characters (Encoding Issues)
+
+**Symptoms:**
+- `acode runs diff <run1> <run2>` displays garbled text: `�����` or `\x00\x1F`
+- Non-ASCII characters appear as question marks or boxes
+- ANSI color codes visible as text: `^[[31mError^[[0m`
+- Unicode emojis broken: `\uD83D\uDE00` instead of 😀
+- Diff output unreadable in terminal
+
+**Causes:**
+1. Log files contain binary data (compressed, encrypted, or raw binary)
+2. Mixed encodings in log files (UTF-8, Latin-1, Windows-1252)
+3. Terminal doesn't support UTF-8 encoding
+4. ANSI color codes embedded in logs (not interpreted by terminal)
+5. Null bytes or control characters in log output
+6. File incorrectly detected as text when it's binary
+7. Diff tool doesn't handle non-UTF-8 encodings
+
+**Solutions:**
+
+```bash
+# Solution 1: Check if file is binary
+file .acode/artifacts/<run-id>/stdout.txt
+# Expected: "stdout.txt: UTF-8 Unicode text"
+# Problem: "stdout.txt: data" (binary)
+
+# If binary, don't diff content:
+acode runs diff <run1> <run2> --metadata-only
+# Shows only metadata differences, skips artifact content
+
+# Solution 2: Verify file encoding
+file -i .acode/artifacts/<run-id>/stdout.txt
+# Example output: "text/plain; charset=iso-8859-1"
+
+# Convert to UTF-8:
+iconv -f ISO-8859-1 -t UTF-8 .acode/artifacts/<run-id>/stdout.txt > /tmp/converted.txt
+# View converted file to verify
+
+# Permanently fix: Configure acode to force UTF-8:
+acode config set runs.artifacts.force-utf8-encoding true
+
+# Solution 3: Check terminal encoding
+echo $LANG
+# Expected: "en_US.UTF-8"
+
+# If not UTF-8, set it:
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+
+# Retry diff:
+acode runs diff <run1> <run2>
+
+# Solution 4: Strip ANSI color codes from logs before diffing
+# If logs contain raw ANSI codes that aren't interpreted:
+
+# Strip codes using sed:
+sed 's/\x1b\[[0-9;]*m//g' .acode/artifacts/<run-id>/stdout.txt > /tmp/clean.txt
+
+# Or use acode option:
+acode runs diff <run1> <run2> --no-color --strip-ansi
+# Removes ANSI codes before diff
+
+# Solution 5: Detect and skip binary artifacts
+acode runs diff <run1> <run2> --skip-binary
+# Automatically skips files detected as binary
+
+# Example output:
+# Comparing runs:
+#   Metadata: 3 differences
+#   stdout.txt: SKIPPED (binary)
+#   stderr.txt: 12 differences
+
+# Solution 6: View raw hex dump for debugging
+xxd .acode/artifacts/<run-id>/stdout.txt | head -20
+# Shows first 20 lines of hex dump
+
+# Identify problematic bytes:
+# 00000000: 1f8b 0808 ... (gzip compressed data)
+# 00000000: 504b 0304 ... (ZIP archive)
+
+# If compressed, decompress first:
+gunzip < .acode/artifacts/<run-id>/stdout.txt | acode runs logs --stdin
+
+# Solution 7: Configure diff to handle encoding gracefully
+acode config set runs.diff.encoding-handling "replace"
+# Options: "strict" (fail on errors), "replace" (? for unknown chars), "ignore" (skip)
+
+# Retry:
+acode runs diff <run1> <run2>
+# Unknown characters shown as "?"
+
+# Solution 8: Use external diff tool with better encoding support
+acode runs export <run1> --output /tmp/run1.zip
+acode runs export <run2> --output /tmp/run2.zip
+
+unzip /tmp/run1.zip -d /tmp/run1
+unzip /tmp/run2.zip -d /tmp/run2
+
+# Use diff with locale settings:
+LC_ALL=C diff -ur /tmp/run1/ /tmp/run2/
+# C locale treats files as bytes, no encoding issues
+```
+
+---
+
+### Issue 4: "runs list" Query Timeout with Large Datasets
+
+**Symptoms:**
+- `acode runs list` hangs for 30+ seconds before returning results
+- Error after 60s: "Query timeout exceeded"
+- Database file `.acode/workspace.db` is 500MB+
+- `top` shows `acode` process at 100% CPU during query
+- Listing filtered runs still slow: `acode runs list --status failed` takes 20 seconds
+
+**Causes:**
+1. No database indexes on frequently queried columns (task, status, started_at)
+2. Thousands of runs in database without pagination
+3. Full table scan for each query (missing WHERE optimization)
+4. Database fragmentation after many deletions
+5. Inefficient query plan (multiple JOINs on large tables)
+6. Slow disk I/O (HDD instead of SSD, network filesystem)
+7. SQLite database not optimized (default settings)
+
+**Solutions:**
+
+```bash
+# Solution 1: Check database size and run count
+du -sh .acode/workspace.db
+# Example: 523M .acode/workspace.db
+
+acode db query "SELECT COUNT(*) FROM runs"
+# Example: 15234 runs
+
+# If >10,000 runs, consider archiving old runs:
+acode runs archive --older-than 90d --output old-runs.zip
+# Archives runs older than 90 days to ZIP file
+# Removes from active database
+
+# Solution 2: Verify database indexes exist
+acode db query "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='runs'"
+# Expected indexes:
+#   idx_runs_started_at
+#   idx_runs_status
+#   idx_runs_task
+
+# If missing, create indexes:
+acode db migrate
+# Runs schema migrations including index creation
+
+# Or manually create:
+acode db query "CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at DESC)"
+acode db query "CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)"
+acode db query "CREATE INDEX IF NOT EXISTS idx_runs_task ON runs(task)"
+
+# Verify query plan uses index:
+acode db query "EXPLAIN QUERY PLAN SELECT * FROM runs WHERE status='failed' ORDER BY started_at DESC LIMIT 50"
+# Should show "USING INDEX idx_runs_status"
+
+# Solution 3: Always use pagination (limit results)
+# Bad: acode runs list (returns ALL runs, slow)
+# Good:
+acode runs list --limit 50
+# Returns only 50 most recent
+
+# Page through results:
+acode runs list --limit 50 --offset 0   # Page 1
+acode runs list --limit 50 --offset 50  # Page 2
+acode runs list --limit 50 --offset 100 # Page 3
+
+# Solution 4: Optimize database (VACUUM)
+# Rebuild database to remove fragmentation:
+acode db vacuum
+# Warning: May take several minutes, locks database during operation
+
+# Example output:
+# Vacuuming workspace database...
+# Before: 523 MB
+# After: 287 MB (45% reduction)
+# Done.
+
+# Retry query:
+acode runs list --status failed
+# Should be significantly faster
+
+# Solution 5: Use covering indexes for common queries
+# If frequently querying: task + status + started_at
+acode db query "CREATE INDEX idx_runs_covering ON runs(task, status, started_at DESC)"
+# Allows query to read only index, not table (faster)
+
+# Solution 6: Increase SQLite cache size
+acode config set database.cache-size-mb 100
+# Allocates 100MB RAM for database cache (default: 2MB)
+
+# Verify setting:
+acode db query "PRAGMA cache_size"
+# Output: -102400 (negative = kibibytes, 100MB)
+
+# Solution 7: Move database to faster storage
+# If on HDD:
+mv .acode/workspace.db /tmp/workspace.db
+ln -s /tmp/workspace.db .acode/workspace.db
+# Links database to tmpfs (RAM disk, very fast)
+
+# Warning: Data lost on reboot unless backed up
+
+# Better: Move to SSD:
+mv .acode/ /mnt/ssd/acode
+ln -s /mnt/ssd/acode .acode
+
+# Solution 8: Use query timeout with retry
+# Set reasonable timeout:
+acode config set database.query-timeout-sec 10
+# Fails fast instead of hanging
+
+# Add retry logic in scripts:
+for i in {1..3}; do
+  if acode runs list --status failed; then
+    break
+  fi
+  echo "Retry $i..."
+  sleep 2
+done
+```
+
+---
+
+### Issue 5: Log Streaming Stops Prematurely (Incomplete Output)
+
+**Symptoms:**
+- `acode runs logs <run-id>` displays only first 1000 lines, then exits
+- Expected 50,000 line log, but only see first portion
+- No error message, just stops mid-stream
+- `Ctrl-C` not pressed, stream ends unexpectedly
+- File exists and is complete (verified with `wc -l`)
+
+**Causes:**
+1. Default output limit configured (MAX_LOG_LINES setting)
+2. Pipe buffer full, consuming process can't keep up
+3. Terminal output paused (Ctrl-S accidentally pressed)
+4. Streaming timeout configured (stops after N seconds)
+5. Memory limit reached when buffering output
+6. Broken pipe error (stdout closed by parent process)
+7. File watcher limit reached (inotify watches exhausted on Linux)
+
+**Solutions:**
+
+```bash
+# Solution 1: Check configured log line limit
+acode config get runs.logs.max-lines
+# Example: 1000 (default limit)
+
+# Increase or remove limit:
+acode config set runs.logs.max-lines 0
+# 0 = unlimited
+
+# Retry:
+acode runs logs <run-id>
+# Should now stream all lines
+
+# Solution 2: Use --tail or --head for large logs
+# If log is 50,000 lines, don't stream all:
+
+# Last 100 lines:
+acode runs logs <run-id> --tail 100
+
+# First 100 lines:
+acode runs logs <run-id> --head 100
+
+# Lines 1000-2000:
+acode runs logs <run-id> --offset 1000 --limit 1000
+
+# Solution 3: Check if terminal output paused
+# Press Ctrl-Q to resume (if Ctrl-S accidentally pressed)
+# Ctrl-S pauses terminal output, Ctrl-Q resumes
+
+# Test:
+echo "test"
+# If "test" appears, terminal not paused
+
+# Solution 4: Stream to file instead of terminal
+acode runs logs <run-id> > /tmp/full-log.txt
+# Bypasses terminal buffer limits
+
+# View file:
+less /tmp/full-log.txt
+
+# Solution 5: Increase streaming timeout
+acode config get runs.logs.stream-timeout-sec
+# Example: 30 (stops after 30 seconds of streaming)
+
+# Increase for large logs:
+acode config set runs.logs.stream-timeout-sec 300
+# 5 minutes
+
+# Or disable timeout:
+acode config set runs.logs.stream-timeout-sec 0
+
+# Solution 6: Check for broken pipe errors in verbose mode
+acode runs logs <run-id> --verbose 2>&1 | tee /tmp/debug.log
+# Captures both stdout and stderr
+
+# Look for errors:
+grep -i "broken pipe\|connection reset" /tmp/debug.log
+
+# If broken pipe, consuming process died:
+# Don't pipe to commands that exit early:
+acode runs logs <run-id> | head -100  # BAD: head closes pipe after 100 lines
+acode runs logs <run-id> --head 100   # GOOD: acode controls limit
+
+# Solution 7: Paginate large logs
+# Instead of streaming 50,000 lines:
+acode runs logs <run-id> --page-size 1000
+# Shows 1000 lines at a time, press Enter for next page
+
+# Example interaction:
+# [Lines 1-1000]
+# --- Press Enter for next 1000 lines, Q to quit ---
+# [User presses Enter]
+# [Lines 1001-2000]
+# ...
+
+# Solution 8: Use follow mode for real-time streaming
+# If run is still in progress:
+acode runs logs <run-id> --follow
+# Streams lines as they're written (like tail -f)
+
+# Stops automatically when run completes
+
+# For completed runs, just read full file:
+cat .acode/artifacts/<run-id>/stdout.txt
+```
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
