@@ -1,4 +1,4 @@
-namespace Acode.Application.PromptPacks;
+namespace Acode.Domain.PromptPacks;
 
 /// <summary>
 /// Represents a validation error encountered during pack validation.

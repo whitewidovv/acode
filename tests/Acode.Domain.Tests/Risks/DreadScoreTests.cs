@@ -2,7 +2,6 @@ namespace Acode.Domain.Tests.Risks;
 
 using Acode.Domain.Risks;
 using FluentAssertions;
-using Xunit;
 
 public class DreadScoreTests
 {

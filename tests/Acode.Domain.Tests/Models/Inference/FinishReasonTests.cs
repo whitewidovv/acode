@@ -3,7 +3,6 @@ namespace Acode.Domain.Tests.Models.Inference;
 using System.Text.Json;
 using Acode.Domain.Models.Inference;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for FinishReason enum following TDD (RED phase).

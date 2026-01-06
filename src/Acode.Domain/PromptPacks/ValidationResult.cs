@@ -1,4 +1,4 @@
-namespace Acode.Application.PromptPacks;
+namespace Acode.Domain.PromptPacks;
 
 /// <summary>
 /// Represents the result of a validation operation.
