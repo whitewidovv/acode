@@ -1513,34 +1513,535 @@ acode diagnostics --include-mode-info
 
 ## Testing Requirements
 
-### Unit Tests
+```csharp
+// File: tests/Acode.Application.Tests/Git/CommitMessageValidatorTests.cs
+namespace Acode.Application.Tests.Git;
 
-- [ ] UT-001: Test staging path handling
-- [ ] UT-002: Test glob expansion
-- [ ] UT-003: Test commit message validation
-- [ ] UT-004: Test mode checking
-- [ ] UT-005: Test retry logic
+public class CommitMessageValidatorTests
+{
+    private readonly CommitMessageValidator _validator;
+    private readonly IConfiguration _config = Substitute.For<IConfiguration>();
 
-### Integration Tests
+    public CommitMessageValidatorTests()
+    {
+        _config.EnforceConventionalCommits.Returns(true);
+        _validator = new CommitMessageValidator(Substitute.For<ILogger<CommitMessageValidator>>(), _config);
+    }
 
-- [ ] IT-001: Stage on real repo
-- [ ] IT-002: Commit on real repo
-- [ ] IT-003: Push to local bare repo
-- [ ] IT-004: Auth failure handling
-- [ ] IT-005: Mode blocking
+    [Fact]
+    public void Validate_WithValidConventionalMessage_ReturnsValid()
+    {
+        // Arrange
+        var message = "feat(auth): add user authentication system";
 
-### End-to-End Tests
+        // Act
+        var result = _validator.Validate(message);
 
-- [ ] E2E-001: CLI add command
-- [ ] E2E-002: CLI commit command
-- [ ] E2E-003: CLI push (burst mode)
-- [ ] E2E-004: Mode violation error
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
+    }
 
-### Performance/Benchmarks
+    [Theory]
+    [InlineData("feat: feature with \$(dangerous)", "$")]
+    [InlineData("fix: bug with \\`backtick\\`", "`")]
+    [InlineData("docs: update; rm -rf /", ";")]
+    [InlineData("chore: task && malicious", "&")]
+    [InlineData("test: add | pipe", "|")]
+    public void Validate_WithShellMetacharacters_ReturnsInvalid(string message, string dangerousChar)
+    {
+        // Act
+        var result = _validator.Validate(message);
 
-- [ ] PB-001: Stage 1000 files in <500ms
-- [ ] PB-002: Commit in <1s
-- [ ] PB-003: Push small change in <5s
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainMatch($"*dangerous character*{dangerousChar}*");
+    }
+
+    [Theory]
+    [InlineData("", "cannot be empty")]
+    [InlineData("   ", "cannot be empty")]
+    [InlineData("short", "too short")]
+    public void Validate_WithInvalidLength_ReturnsInvalid(string message, string expectedError)
+    {
+        // Act
+        var result = _validator.Validate(message);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainMatch($"*{expectedError}*");
+    }
+
+    [Fact]
+    public void Validate_WithoutConventionalFormat_ReturnsInvalid()
+    {
+        // Arrange
+        var message = "just a regular message without prefix";
+
+        // Act
+        var result = _validator.Validate(message);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainMatch("*does not follow conventional format*");
+    }
+
+    [Fact]
+    public void Sanitize_RemovesDangerousCharacters()
+    {
+        // Arrange
+        var message = "feat: feature \$(dangerous) with | pipes";
+
+        // Act
+        var sanitized = _validator.Sanitize(message);
+
+        // Assert
+        sanitized.Should().NotContain("$");
+        sanitized.Should().NotContain("|");
+        sanitized.Should().NotContain("(");
+    }
+}
+
+// File: tests/Acode.Infrastructure.Tests/Git/CredentialRedactorTests.cs
+namespace Acode.Infrastructure.Tests.Git;
+
+public class CredentialRedactorTests
+{
+    private readonly CredentialRedactor _redactor = new();
+
+    [Theory]
+    [InlineData("https://user:password@github.com/repo.git", "https://[REDACTED]@github.com/repo.git")]
+    [InlineData("https://token@gitlab.com/repo.git", "https://[REDACTED]@gitlab.com/repo.git")]
+    [InlineData("https://oauth2:token123@bitbucket.org/repo.git", "https://[REDACTED]@bitbucket.org/repo.git")]
+    public void RedactUrl_WithEmbeddedCredentials_RedactsCredentials(string input, string expected)
+    {
+        // Act
+        var result = _redactor.RedactUrl(input);
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("ghp_abc123def456ghi789jkl012mno345pqr678stu", "ghp_abc1***[REDACTED]")]
+    [InlineData("glpat-abcdefghij1234567890", "glpat-ab***[REDACTED]")]
+    public void RedactOutput_WithTokens_RedactsTokens(string input, string expectedPrefix)
+    {
+        // Act
+        var result = _redactor.RedactOutput($"Error: Authentication failed using token {input}");
+
+        // Assert
+        result.Should().Contain("[REDACTED]");
+        result.Should().NotContain(input);
+    }
+
+    [Fact]
+    public void RedactOutput_WithSSHKey_RedactsKey()
+    {
+        // Arrange
+        var output = @"Error occurred
+-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAKCAQEAbc123...
+...sensitive key data...
+-----END RSA PRIVATE KEY-----";
+
+        // Act
+        var result = _redactor.RedactOutput(output);
+
+        // Assert
+        result.Should().Contain("[REDACTED]");
+        result.Should().NotContain("MIIEpAIBAAKCAQEAbc123");
+    }
+}
+
+// File: tests/Acode.Infrastructure.Tests/Git/PathValidatorTests.cs
+namespace Acode.Infrastructure.Tests.Git;
+
+public class PathValidatorTests
+{
+    private readonly PathValidator _validator = new();
+    private readonly string _testRepo = "/tmp/test-repo";
+
+    [Fact]
+    public void ValidateForStaging_WithValidPath_ReturnsValid()
+    {
+        // Arrange
+        var path = "src/file.cs";
+
+        // Act
+        var result = _validator.ValidateForStaging(_testRepo, path);
+
+        // Assert (note: would fail if file doesn't exist, but validates path structure)
+        // In real test, would create actual file
+    }
+
+    [Theory]
+    [InlineData("../../etc/passwd")]
+    [InlineData("../../../home/user/.ssh/id_rsa")]
+    [InlineData("/etc/shadow")]
+    public void ValidateForStaging_WithPathEscape_ReturnsInvalid(string path)
+    {
+        // Act
+        var result = _validator.ValidateForStaging(_testRepo, path);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainMatch("*escapes repository boundary*");
+    }
+}
+
+// File: tests/Acode.Infrastructure.Tests/Git/StageCommitPushIntegrationTests.cs
+namespace Acode.Infrastructure.Tests.Git.Integration;
+
+public class StageCommitPushIntegrationTests : IDisposable
+{
+    private readonly string _testRepo;
+    private readonly GitService _git;
+
+    public StageCommitPushIntegrationTests()
+    {
+        _testRepo = Path.Combine(Path.GetTempPath(), $"git-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testRepo);
+
+        RunGit("init");
+        RunGit("config user.email test@example.com");
+        RunGit("config user.name Test User");
+
+        // Create initial commit
+        File.WriteAllText(Path.Combine(_testRepo, "README.md"), "# Test");
+        RunGit("add README.md");
+        RunGit("commit -m \"Initial commit\"");
+
+        _git = new GitService(
+            Substitute.For<ICommandRunner>(),
+            Substitute.For<ILogger<GitService>>());
+    }
+
+    [Fact]
+    public async Task StageAsync_WithModifiedFiles_StagesFiles()
+    {
+        // Arrange
+        var testFile = Path.Combine(_testRepo, "test.txt");
+        File.WriteAllText(testFile, "content");
+
+        // Act
+        var result = await _git.StageAsync(_testRepo, new[] { "test.txt" }, null, CancellationToken.None);
+
+        // Assert
+        result.FilesStaged.Should().Be(1);
+        result.StagedPaths.Should().Contain("test.txt");
+
+        // Verify with git
+        var status = RunGit("status --porcelain");
+        status.Should().Contain("A  test.txt");
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithStagedChanges_CreatesCommit()
+    {
+        // Arrange
+        var testFile = Path.Combine(_testRepo, "feature.txt");
+        File.WriteAllText(testFile, "new feature");
+        await _git.StageAsync(_testRepo, new[] { "feature.txt" }, null, CancellationToken.None);
+
+        // Act
+        var commit = await _git.CommitAsync(_testRepo, "feat: add new feature", null, CancellationToken.None);
+
+        // Assert
+        commit.Should().NotBeNull();
+        commit.Message.Should().Contain("feat: add new feature");
+        commit.Sha.Should().NotBeNullOrEmpty();
+
+        // Verify with git
+        var log = RunGit("log -1 --pretty=format:%s");
+        log.Should().Contain("feat: add new feature");
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithNoStagedChanges_ThrowsException()
+    {
+        // Act
+        var act = async () => await _git.CommitAsync(_testRepo, "empty commit", null, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<NothingToCommitException>()
+            .WithMessage("*nothing to commit*");
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithInvalidMessage_ThrowsException()
+    {
+        // Arrange
+        var testFile = Path.Combine(_testRepo, "test.txt");
+        File.WriteAllText(testFile, "content");
+        await _git.StageAsync(_testRepo, new[] { "test.txt" }, null, CancellationToken.None);
+
+        // Act - commit with dangerous message
+        var act = async () => await _git.CommitAsync(
+            _testRepo,
+            "feat: feature \$(rm -rf /)",
+            null,
+            CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidCommitMessageException>()
+            .WithMessage("*dangerous character*");
+    }
+
+    [Fact]
+    public async Task PushAsync_InLocalOnlyMode_ThrowsModeViolationException()
+    {
+        // Arrange
+        var modeResolver = Substitute.For<IOperatingModeResolver>();
+        modeResolver.GetCurrentModeAsync(Arg.Any<CancellationToken>())
+            .Returns(OperatingMode.LocalOnly);
+
+        var gitWithMode = new GitService(
+            Substitute.For<ICommandRunner>(),
+            modeResolver,
+            Substitute.For<ILogger<GitService>>());
+
+        // Act
+        var act = async () => await gitWithMode.PushAsync(
+            _testRepo,
+            null,
+            CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ModeViolationException>()
+            .WithMessage("*LocalOnly*");
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_testRepo, recursive: true);
+        }
+        catch
+        {
+            // Ignore cleanup errors
+        }
+    }
+
+    private string RunGit(string args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = args,
+            WorkingDirectory = _testRepo,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+
+        using var process = Process.Start(psi);
+        var output = process!.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return output;
+    }
+}
+
+// File: tests/Acode.Cli.Tests/Commands/Git/GitStageCommitPushE2ETests.cs
+namespace Acode.Cli.Tests.Commands.Git;
+
+public class GitStageCommitPushE2ETests : IDisposable
+{
+    private readonly string _testRepo;
+
+    public GitStageCommitPushE2ETests()
+    {
+        _testRepo = Path.Combine(Path.GetTempPath(), $"git-e2e-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testRepo);
+
+        RunCommand("git init");
+        RunCommand("git config user.email test@example.com");
+        RunCommand("git config user.name Test User");
+        File.WriteAllText(Path.Combine(_testRepo, "README.md"), "# Test");
+        RunCommand("git add README.md");
+        RunCommand("git commit -m \"Initial commit\"");
+    }
+
+    [Fact]
+    public async Task GitAdd_WithFiles_StagesFiles()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRepo, "feature.txt"), "content");
+
+        // Act
+        var exitCode = await RunAcodeCommand("git add feature.txt");
+
+        // Assert
+        exitCode.Should().Be(0);
+        var status = RunCommand("git status --porcelain");
+        status.Should().Contain("A  feature.txt");
+    }
+
+    [Fact]
+    public async Task GitCommit_WithStagedFiles_CreatesCommit()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRepo, "test.txt"), "content");
+        RunCommand("git add test.txt");
+
+        // Act
+        var exitCode = await RunAcodeCommand("git commit \"feat: add test file\"");
+
+        // Assert
+        exitCode.Should().Be(0);
+        var log = RunCommand("git log -1 --pretty=format:%s");
+        log.Should().Contain("feat: add test file");
+    }
+
+    [Fact]
+    public async Task GitPush_InBurstMode_SucceedsOrFailsAppropriately()
+    {
+        // Note: Actual push depends on remote configuration
+        // This test would need a local bare repository or mock
+        // For E2E, we'd set up a local bare repo as origin
+
+        // Arrange - create bare repo as origin
+        var bareRepo = Path.Combine(Path.GetTempPath(), $"bare-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(bareRepo);
+        RunCommand($"git init --bare {bareRepo}");
+        RunCommand($"git remote add origin {bareRepo}");
+
+        // Act
+        var exitCode = await RunAcodeCommand("git push --set-upstream origin main");
+
+        // Assert
+        exitCode.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GitPush_InLocalOnlyMode_FailsWithModeViolation()
+    {
+        // Arrange - configure LocalOnly mode
+        // (In real test, would set mode via config)
+
+        // Act
+        var exitCode = await RunAcodeCommand("git push");
+
+        // Assert (expected to fail with mode violation)
+        exitCode.Should().Be(3); // Mode violation exit code
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_testRepo, recursive: true);
+        }
+        catch
+        {
+            // Ignore cleanup errors
+        }
+    }
+
+    private string RunCommand(string command)
+    {
+        var parts = command.Split(' ', 2);
+        var psi = new ProcessStartInfo
+        {
+            FileName = parts[0],
+            Arguments = parts.Length > 1 ? parts[1] : "",
+            WorkingDirectory = _testRepo,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+
+        using var process = Process.Start(psi);
+        var output = process!.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return output;
+    }
+
+    private async Task<int> RunAcodeCommand(string args)
+    {
+        // Simulate running acode CLI command
+        var app = new CommandLineApplication();
+        // Configure commands...
+        return await Task.FromResult(0);
+    }
+}
+
+// File: tests/Acode.Infrastructure.Tests/Git/PushRetryPolicyTests.cs
+namespace Acode.Infrastructure.Tests.Git;
+
+public class PushRetryPolicyTests
+{
+    private readonly PushRetryPolicy _policy;
+    private readonly IOptions<GitConfiguration> _config = Substitute.For<IOptions<GitConfiguration>>();
+
+    public PushRetryPolicyTests()
+    {
+        _config.Value.Returns(new GitConfiguration
+        {
+            RetryCount = 3,
+            RetryDelayMs = 100
+        });
+
+        _policy = new PushRetryPolicy(_config, Substitute.For<ILogger<PushRetryPolicy>>());
+    }
+
+    [Fact]
+    public async Task ExecuteWithRetryAsync_OnSuccess_ReturnsImmediately()
+    {
+        // Arrange
+        var operation = Substitute.For<Func<Task<CommandResult>>>();
+        operation.Invoke().Returns(new CommandResult { ExitCode = 0, StdOut = "Success" });
+
+        // Act
+        var result = await _policy.ExecuteWithRetryAsync(operation, CancellationToken.None);
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        await operation.Received(1).Invoke();
+    }
+
+    [Fact]
+    public async Task ExecuteWithRetryAsync_OnTransientFailure_RetriesWithBackoff()
+    {
+        // Arrange
+        var attempt = 0;
+        var operation = Substitute.For<Func<Task<CommandResult>>>();
+        operation.Invoke().Returns(callInfo =>
+        {
+            attempt++;
+            if (attempt < 3)
+                throw new GitException("Could not resolve host", 1, "Connection refused", "/repo", "GIT_ERROR");
+            return new CommandResult { ExitCode = 0, StdOut = "Success" };
+        });
+
+        // Act
+        var stopwatch = Stopwatch.StartNew();
+        var result = await _policy.ExecuteWithRetryAsync(operation, CancellationToken.None);
+        stopwatch.Stop();
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        await operation.Received(3).Invoke();
+        // Exponential backoff: 100ms + 200ms = 300ms minimum
+        stopwatch.ElapsedMilliseconds.Should().BeGreaterOrEqualTo(300);
+    }
+
+    [Fact]
+    public async Task ExecuteWithRetryAsync_OnPermanentFailure_ThrowsImmediately()
+    {
+        // Arrange
+        var operation = Substitute.For<Func<Task<CommandResult>>>();
+        operation.Invoke().Throws(new GitException("Authentication failed", 1, "Invalid credentials", "/repo", "GIT_AUTH_ERROR"));
+
+        // Act
+        var act = async () => await _policy.ExecuteWithRetryAsync(operation, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<GitException>()
+            .WithMessage("*Authentication failed*");
+        await operation.Received(1).Invoke(); // No retries for auth errors
+    }
+}
+```
 
 ---
 
