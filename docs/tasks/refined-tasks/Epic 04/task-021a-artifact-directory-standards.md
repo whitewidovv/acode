@@ -78,6 +78,205 @@ This task encompasses:
 
 ---
 
+## Use Cases
+
+### Use Case 1: DevBot Automated Testing Artifact Inspection
+
+**Persona:** DevBot (CI/CD Automation Agent)
+**Scenario:** Test suite fails in CI, developer needs to inspect test results and logs
+
+**Before Standardized Directory Structure:**
+- Test outputs scattered: some in `./test-results/`, some in `./output/`, some in `/tmp/`
+- Each test framework uses different directory structure
+- Developer searches 4-5 different locations to find artifacts
+- Time wasted: 5 minutes per test failure × 20 failures/day = 100 minutes/day
+- Cost: 100 min/day × 21 days/month × $75/hour ÷ 60 min/hour = $2,625/month
+
+**After Standardized Directory Structure:**
+- All artifacts in `.acode/artifacts/{run-id}/`
+- Predictable locations: `stdout.txt`, `stderr.txt`, `test-results.trx`
+- Developer runs: `acode artifact list {run-id}` to see all artifacts
+- Single command to view: `acode artifact cat {run-id} test-results.trx`
+- Time wasted: 30 seconds per failure × 20 failures/day = 10 minutes/day
+- Cost: 10 min/day × 21 days/month × $75/hour ÷ 60 min/hour = $262.50/month
+
+**Savings:** $2,362.50/month per developer, $28,350/year
+
+**Commands Used:**
+```bash
+# CI run fails, developer inspects
+acode run list --status failed --last 1h
+# Returns: run-abc-123 (2024-12-01 14:32:15, exit 1)
+
+# List all artifacts for the failed run
+acode artifact list run-abc-123
+# Returns: stdout.txt, stderr.txt, test-results.trx, coverage.json
+
+# View test results directly
+acode artifact cat run-abc-123 test-results.trx
+# Shows XML test results with failures highlighted
+
+# View stderr for error details
+acode artifact cat run-abc-123 stderr.txt
+# Shows stack traces and error messages
+```
+
+---
+
+### Use Case 2: Jordan Compliance Audit Trail Verification
+
+**Persona:** Jordan (Security Compliance Officer)
+**Scenario:** SOC 2 audit requires proof that all agent operations are logged and artifacts retained
+
+**Before Standardized Directory Structure:**
+- Audit log files mixed with application logs
+- No clear mapping between runs and their outputs
+- Manual reconstruction of "what happened when" from scattered logs
+- Audit preparation time: 60 hours per audit
+- Cost: 60 hours × $100/hour = $6,000 per audit
+
+**After Standardized Directory Structure:**
+- Each run has isolated directory with complete audit trail
+- Metadata file (`run.json`) contains execution context, timing, command
+- Artifacts immutable once written (append-only)
+- Directory structure serves as self-documenting audit trail
+- Audit preparation time: 3 hours per audit (automated export)
+- Cost: 3 hours × $100/hour = $300 per audit
+
+**Savings:** $5,700 per audit, $5,700/year (1 audit/year)
+
+**Audit Workflow:**
+```bash
+# Export all runs from audit period
+acode run list --from 2024-01-01 --to 2024-12-31 --format jsonl > audit-2024.jsonl
+
+# Verify artifact completeness
+for run_id in $(jq -r '.run_id' audit-2024.jsonl); do
+  acode artifact verify $run_id || echo "AUDIT FAILURE: $run_id incomplete"
+done
+
+# Check directory structure compliance
+ls -la .acode/artifacts/ | head -20
+# Expected: Each directory is run-XXXXX with predictable structure
+
+# Sample random run for detailed inspection
+random_run=$(jq -r '.run_id' audit-2024.jsonl | shuf -n 1)
+tree .acode/artifacts/$random_run/
+# Expected: stdout.txt, stderr.txt, run.json, plus task-specific artifacts
+
+# Verify metadata integrity
+jq . .acode/artifacts/$random_run/run.json
+# Expected: Complete execution context with timestamps, command, exit code
+```
+
+---
+
+### Use Case 3: Alex Historical Performance Analysis
+
+**Persona:** Alex (DevOps Performance Engineer)
+**Scenario:** Analyze build performance trends over time to identify optimization opportunities
+
+**Before Standardized Directory Structure:**
+- Build logs in different formats across different periods
+- No consistent metadata schema
+- Manual parsing of logs to extract timing information
+- Analysis script breaks when log format changes
+- Analysis time: 2 days per month
+- Cost: 16 hours × $125/hour = $2,000/month
+
+**After Standardized Directory Structure:**
+- Every run has `run.json` with consistent schema: start_time, end_time, duration_ms
+- Artifacts in predictable locations enable automated analysis
+- Historical data queryable without parsing log formats
+- Analysis script works reliably across all runs
+- Analysis time: 2 hours per month (automated)
+- Cost: 2 hours × $125/hour = $250/month
+
+**Savings:** $1,750/month, $21,000/year per engineer
+
+**Analysis Workflow:**
+```bash
+# Extract build durations from last 90 days
+for run_dir in .acode/artifacts/run-*; do
+  if [[ -f "$run_dir/run.json" ]]; then
+    jq -r '[.run_id, .command, .duration_ms] | @csv' "$run_dir/run.json"
+  fi
+done > build-durations.csv
+
+# Analyze with standard tools
+cat build-durations.csv | \
+  awk -F',' '$2 ~ /dotnet build/ {sum+=$3; count++} END {print "Avg build time:", sum/count/1000 "s"}'
+
+# Identify slowest builds
+sort -t',' -k3 -n build-durations.csv | tail -10
+# Returns: Top 10 slowest builds with run IDs for detailed inspection
+
+# Deep-dive into slowest build
+slowest_run=$(sort -t',' -k3 -n build-durations.csv | tail -1 | cut -d',' -f1)
+acode artifact cat $slowest_run stdout.txt | grep "Time Elapsed"
+# Shows MSBuild timing breakdown for optimization targets
+```
+
+---
+
+### Aggregate ROI Summary
+
+| Use Case | Persona | Annual Savings | Team Savings (10) |
+|----------|---------|----------------|-------------------|
+| Test Artifact Inspection | DevBot | $28,350 | $283,500 |
+| Compliance Audit Trail | Jordan | $5,700 | $5,700 |
+| Performance Analysis | Alex | $21,000 | $210,000 |
+| **Total** | | **$55,050** | **$499,200** |
+
+---
+
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **Artifact Directory** | Root directory `.acode/artifacts/` containing all run subdirectories. Must be in `.gitignore`. Created automatically on first use with 755 permissions. |
+| **Run Directory** | Subdirectory `.acode/artifacts/{run-id}/` containing all artifacts for a single command execution. Named using unique run identifier (UUID/ULID). |
+| **Run ID** | Unique identifier for a command execution. Format: `run-01HQRS7TGKMWXY123` (ULID) or UUID v4. Used as directory name and database primary key. |
+| **Artifact** | Output file produced during command execution: logs, test results, coverage reports, build outputs. Stored in run directory with standard names. |
+| **Standard Artifact** | Well-known artifact with reserved name: `stdout.txt` (process output), `stderr.txt` (error output), `run.json` (metadata), `combined.txt` (interleaved streams). |
+| **Custom Artifact** | Task-specific artifact beyond standard set: test results XML, coverage JSON, build logs, generated code. Stored alongside standard artifacts. |
+| **Metadata File** | JSON file `run.json` in each run directory containing execution context: command, timestamps, exit code, environment variables, workspace info. |
+| **Retention Policy** | Rules determining when artifacts are deleted: age-based (30 days), count-based (max 10,000 runs), size-based (max 50GB), status-based (keep failures longer). |
+| **Artifact Manifest** | Optional JSON file listing all artifacts in run directory with checksums (SHA-256), sizes, timestamps. Enables integrity verification and export. |
+| **Path Resolution** | Process of converting relative artifact references to absolute filesystem paths. Handled by `IArtifactPathResolver` service. Cross-platform (Windows/Linux/Mac). |
+| **Run Isolation** | Guarantee that artifacts from different runs never interfere. Each run has isolated directory preventing overwrites, race conditions, or cross-contamination. |
+| **Artifact Pruning** | Automated deletion of old artifacts according to retention policy. Runs as scheduled background job. Removes run directory and database record atomically. |
+| **Workspace Scoping** | Artifacts are scoped to workspace: different workspaces have separate artifact directories. Path: `{workspace-root}/.acode/artifacts/`. |
+| **Artifact Collection** | Automatic capture of command outputs during execution. Implemented by `ArtifactCollector` service that streams stdout/stderr to files as process runs. |
+| **Directory Layout** | Standard structure within run directory: flat (all files at root) vs nested (organized by type: `logs/`, `tests/`, `coverage/`). This task specifies flat layout. |
+| **Gitignore Integration** | Ensuring `.acode/artifacts/` directory is excluded from version control. Agent adds entry to `.gitignore` on first run if not present. |
+| **Artifact Reference** | Pointer from run record (database) to artifact file (filesystem). Includes relative path, size, content type, checksum. Stored in run metadata. |
+| **Run Summary** | Lightweight view of run record with essential fields: run ID, timestamp, exit code, command. Used for listing runs without loading full artifacts. |
+
+---
+
+## Out of Scope
+
+This task explicitly does NOT include the following capabilities (deferred to other tasks or future work):
+
+1. **Artifact Compression** — No automatic gzip/brotli compression of artifacts. Files stored uncompressed. Compression happens only in export bundles (Task 021c).
+2. **Artifact Deduplication** — No content-addressed storage or deduplication across runs. Each run stores complete artifacts even if identical to previous runs.
+3. **Artifact Encryption** — No encryption of artifacts at rest. Use filesystem-level encryption (LUKS, BitLocker, FileVault) if needed. Export bundles (Task 021c) can be password-protected.
+4. **Distributed Storage** — No object storage (S3, Azure Blob, GCS) integration. All artifacts stored on local filesystem. Cloud storage deferred to Epic 07 (Cloud Burst Compute).
+5. **Artifact Streaming** — No real-time streaming of artifacts during execution (like `docker logs -f`). Artifacts written to files, then displayed after completion.
+6. **Artifact Search Content** — No full-text search inside artifact files. Search by run metadata only (command, timestamp, status). Content search deferred to Epic 03 (Repo Intelligence).
+7. **Artifact Annotations** — No user comments, tags, or labels on individual artifacts. Annotations on run records only, via metadata JSON.
+8. **Artifact Versioning** — No version history for artifacts. Each run creates new artifacts; no updates or patches to existing artifacts.
+9. **Artifact Access Control** — No fine-grained permissions per artifact or per run. Workspace-level access only. ACLs deferred to Epic 09 (Safety/Policy).
+10. **Artifact Preview** — No syntax highlighting, image thumbnails, PDF rendering in CLI. Use `acode artifact cat` and pipe to external viewers (`bat`, `imgcat`, `pdftotext`).
+11. **Artifact Diff UI** — No built-in diff visualization between artifacts from different runs. Export artifacts and use external diff tools (`diff`, `vimdiff`, `Beyond Compare`).
+12. **Artifact Download Protocol** — No HTTP API or download protocol for remote artifact access. Local filesystem only. REST API deferred to Epic 10 (Telemetry/Dashboard).
+13. **Artifact Quota Enforcement** — No per-user or per-workspace storage quotas. Global retention policy only. User quotas deferred to Epic 09 (Policy Engine).
+14. **Artifact Lifecycle Hooks** — No custom scripts triggered on artifact creation, deletion, or access. Hooks deferred to Epic 08 (CI/CD Authoring).
+15. **Artifact Replication** — No automatic replication to backup locations or secondary storage. Manual backup via export bundles (Task 021c) or filesystem tools (`rsync`, `tar`).
+
+---
+
 ## Functional Requirements
 
 ### Base Directory Structure
