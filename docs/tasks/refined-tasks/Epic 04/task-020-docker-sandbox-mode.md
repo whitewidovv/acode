@@ -471,23 +471,110 @@ After (0 hours monitoring):
 
 | Term | Definition |
 |------|------------|
-| Sandbox | Isolated execution environment |
-| Container | Docker container instance |
-| Image | Container template |
-| Mount | Filesystem binding |
-| Resource Limit | CPU/memory constraint |
-| Network Policy | Allowed connections |
-| Lifecycle | Create, run, cleanup phases |
+| **Sandbox** | An isolated execution environment that prevents code from affecting the host system. In this context, Docker containers provide sandboxing through Linux namespaces, cgroups, and seccomp. |
+| **Container** | A Docker container instance - a running process with isolated filesystem, network, and process namespaces. Containers are created from images and destroyed after execution. |
+| **Image** | A read-only template used to create containers. Images contain the filesystem snapshot (OS, runtimes, dependencies). Examples: `mcr.microsoft.com/dotnet/sdk:8.0`, `node:20-alpine`. |
+| **Mount** | A filesystem binding that makes host directories accessible inside the container. Bind mounts attach host paths (e.g., `/home/user/repo` → `/workspace`), while volume mounts use Docker-managed storage. |
+| **Bind Mount** | A type of mount that directly maps a host directory path into the container. Changes in either location are immediately visible in both. Used for repository mounting. |
+| **Volume Mount** | A type of mount using Docker-managed storage volumes. Persists across container deletions. Used for caches (NuGet, npm) that should survive container lifecycle. |
+| **Resource Limit** | Constraints on CPU, memory, PIDs, and I/O enforced by Linux cgroups. Prevents runaway processes from exhausting host resources. Example: `memory: 512m` limits RAM to 512MB. |
+| **Network Policy** | Rules governing container network access. `network: none` disables all networking. `network: bridge` enables connectivity through Docker's bridge network. Air-gapped mode enforces `none`. |
+| **Container Lifecycle** | The sequence of states: create → start → run → stop → remove. Each command execution creates a fresh container and removes it after completion. |
+| **Namespace** | A Linux kernel feature that isolates system resources (PID, network, mount, IPC, UTS, user). Containers use namespaces to create isolated views of the system. |
+| **cgroups** | Control Groups - Linux kernel feature limiting and accounting resource usage (CPU, memory, I/O). Docker uses cgroups to enforce container resource limits. |
+| **Seccomp** | Secure Computing mode - Linux kernel feature restricting system calls available to a process. Docker applies seccomp profiles to limit dangerous syscalls in containers. |
+| **Capabilities** | Linux security feature dividing root privileges into distinct units (e.g., CAP_NET_BIND_SERVICE for binding privileged ports). Containers drop all capabilities by default for security. |
+| **Overlay Filesystem (Overlay2)** | Docker's storage driver using layered filesystem. Image layers are read-only, container layer is writable. Changes are Copy-on-Write, making containers fast to create. |
+| **Docker Daemon (dockerd)** | The background service managing containers on the host. Listens on `/var/run/docker.sock` (Linux) or named pipe (Windows). Acode communicates with daemon via Docker API. |
+| **Docker.DotNet** | Official .NET library for Docker API communication. Provides type-safe API client for creating, managing, and monitoring containers programmatically. |
+| **ISandbox** | Domain interface abstracting sandboxed execution. Implementations can use Docker, VMs, or other isolation mechanisms. Enables mocking for tests and alternative sandbox backends. |
+| **Orphaned Container** | A container left running after unexpected termination of the parent process. Acode detects orphans using labels (`acode.managed=true`) and cleans them up on startup. |
+| **Air-Gapped Mode** | Execution environment with zero network access, preventing all external communication. Enforced by setting container network mode to "none". Required for classified/sensitive environments. |
+| **OOM Kill** | Out-Of-Memory Kill - when a container exceeds its memory limit, the kernel kills it with signal SIGKILL (exit code 137). Detected by checking container exit status. |
 
 ---
 
 ## Out of Scope
 
-- **Container orchestration** - Single container only
-- **Container building** - Pre-built images only
-- **Registry authentication** - Public images only for v1
-- **GPU passthrough** - CPU only
-- **Windows containers** - Linux containers only
+1. **Container Orchestration (Kubernetes, Docker Swarm)** - This task focuses on single-container execution per command. Multi-container orchestration, service meshes, and cluster management are beyond scope. Rationale: Agentic coding tasks are inherently sequential and single-threaded per execution.
+
+2. **Custom Image Building (Dockerfile, BuildKit)** - Only pre-built images from registries are supported. Acode will not dynamically build images from Dockerfiles. Rationale: Image building adds 30s-10min overhead per execution, violating performance requirements. Users must pre-build and push images.
+
+3. **Private Registry Authentication (Docker login)** - Initial version supports only public images from Docker Hub and other public registries. No support for authenticated registries (GitHub Container Registry with token, AWS ECR, Azure ACR). Rationale: Credential management adds security complexity deferred to future iteration.
+
+4. **GPU Passthrough (NVIDIA CUDA, AMD ROCm)** - Only CPU and memory resources are managed. No support for GPU allocation, CUDA toolkit, or ML/AI workloads requiring GPU acceleration. Rationale: GPU passthrough requires privileged mode and host driver dependencies, violating security constraints.
+
+5. **Windows Containers (mcr.microsoft.com/windows/*)** - Only Linux containers are supported, even when running on Windows hosts (via WSL2 or Hyper-V). Windows containers require Windows Server host or special licensing. Rationale: Linux containers are ubiquitous, faster, and smaller. Windows-specific code can be cross-compiled or built in CI.
+
+6. **Container Composition (docker-compose, multi-container stacks)** - No support for defining multi-container applications with dependencies (e.g., web + database + redis). Each execution uses exactly one container. Rationale: Agentic coding tasks execute atomically without external service dependencies. If needed, services can be mocked or started in test code.
+
+7. **Host Network Mode (--network=host)** - Containers cannot use host network stack directly. Only `none` (default) and `bridge` modes are supported. Rationale: Host network mode bypasses network isolation, violating security requirements. Port publishing on bridge network provides necessary connectivity.
+
+8. **Privileged Mode (--privileged)** - Containers MUST NOT run in privileged mode, which disables all security constraints. This is a hard security requirement with no exceptions. Rationale: Privileged containers can trivially escape to host, rendering sandboxing pointless.
+
+9. **Docker-in-Docker (DinD, mounting Docker socket)** - Containers cannot build or run other containers. The Docker socket (`/var/run/docker.sock`) is never mounted into sandbox containers. Rationale: Docker socket access grants full host control, equivalent to privileged mode. If Docker is needed, use kaniko for building or `docker run` before sandbox execution.
+
+10. **Persistent Container State Across Executions** - Containers are ephemeral. File changes inside container (outside mounted `/workspace`) are lost after execution. No support for "resuming" a container. Rationale: Persistent state violates reproducibility and complicates cleanup. Use volume mounts for data that must persist.
+
+11. **Interactive Container Sessions (TTY, stdin)** - Containers run in non-interactive mode only. No support for `docker exec -it` style interactive shells or stdin redirection. Rationale: Agentic execution is batch-mode, not interactive. If debugging is needed, use `acode sandbox exec --image <img> -- bash -c "commands"` for one-shot execution.
+
+12. **Custom Seccomp/AppArmor Profiles** - Only the default Docker seccomp profile is supported. Users cannot provide custom seccomp JSON or AppArmor policies. Rationale: Custom profiles require deep Linux security expertise and could accidentally weaken isolation. Default profile is sufficient for 99% of workloads.
+
+13. **Container Snapshotting/Checkpointing (CRIU)** - No support for checkpoint/restore of running containers to save and resume execution state. Rationale: Adds complexity and CRIU has limited Docker integration. If long-running tasks need resumability, implement application-level checkpointing.
+
+14. **Multi-Architecture Images (ARM64, s390x, ppc64le)** - Only x86_64 (amd64) images are tested and officially supported. Other architectures may work but are not guaranteed. Rationale: Developer workstations are predominantly x86_64. ARM support (Apple Silicon) is possible via Rosetta emulation but performance is degraded.
+
+15. **Real-Time Container Monitoring (Stats API streaming)** - Resource usage stats are captured at end of execution only, not streamed during. No live dashboard of CPU/memory graphs during build. Rationale: Streaming stats API adds complexity and overhead. Post-execution summary (peak memory, average CPU) is sufficient for resource planning.
+
+---
+
+## Assumptions
+
+### Technical Assumptions
+
+1. **Docker Installed and Running** - Docker Engine (Linux) or Docker Desktop (Windows/macOS) is installed on the host system and the daemon is running at the time of execution.
+
+2. **Docker API Version 1.41+** - The Docker daemon supports API version 1.41 or later (Docker 20.10+). Older versions may lack required features (seccomp, PID limits, etc.).
+
+3. **User Has Docker Permissions** - The user running Acode is a member of the `docker` group (Linux) or has Docker Desktop running with appropriate permissions (Windows/macOS). No elevation required.
+
+4. **Sufficient Disk Space for Images** - The host has at least 10GB free disk space for Docker images. Base images (dotnet SDK, node) range from 200MB to 2GB each.
+
+5. **Sufficient Disk Space for Containers** - The host has at least 5GB free space for container filesystem layers and logs. Containers themselves use minimal space (10-50MB) but build outputs can be large.
+
+6. **Linux Kernel with Namespace Support** - The host kernel supports required Linux namespaces (PID, network, mount, IPC, UTS, user). Kernel 4.4+ on Linux, WSL2 on Windows.
+
+7. **cgroups v1 or v2 Available** - The system has cgroups (control groups) enabled for resource limiting. Most modern Linux distributions enable this by default.
+
+8. **Overlay2 Storage Driver** - Docker is configured to use overlay2 storage driver (default on most systems). Other drivers (aufs, btrfs) may have different performance characteristics.
+
+9. **No Conflicting Container Names** - Container names are generated with GUIDs (`acode-{guid}`), making conflicts extremely unlikely (< 1 in 10^36).
+
+10. **Host Clock Synchronized** - The host system clock is reasonably accurate. Container timestamps and timeout calculations rely on system time.
+
+### Operational Assumptions
+
+11. **Repository Path is Accessible** - The repository being mounted exists on the local filesystem and is readable by the Docker daemon. No network mounts (NFS, SMB) are used for repository source.
+
+12. **Repository Fits in Memory** - The repository size is reasonable (<10GB). While bind mounts don't copy data, extremely large repos (100GB+) may cause filesystem performance issues on macOS/Windows.
+
+13. **Commands Complete Within Timeout** - Build and test commands complete within configured timeouts (default 5 minutes). Commands exceeding timeout are killed, which may leave incomplete outputs.
+
+14. **Network Bandwidth for Image Pulls** - Adequate internet bandwidth exists for pulling Docker images (typically 200MB-2GB per image). Initial image pull may take 1-10 minutes.
+
+15. **No Antivirus/EDR Interference** - Antivirus or Endpoint Detection and Response (EDR) software does not block Docker operations. On Windows, Defender may scan container filesystems, causing slowdowns.
+
+16. **User Understands Docker Basics** - Users have basic Docker knowledge (images vs containers, volumes, networking). This is not a Docker tutorial; familiarity is assumed for troubleshooting.
+
+17. **Cleanup Runs on Startup** - Orphaned containers from previous crashes are cleaned up on Acode startup. Users should not manually manage acode-labeled containers.
+
+### Integration Assumptions
+
+18. **Task 018 Command Executor Exists** - The structured command runner (Task 018) is implemented and provides the interface for delegating to ISandbox when sandbox mode is enabled.
+
+19. **Task 001 Operating Modes Configured** - The OperatingMode enum (LocalOnly, Burst, Airgapped) is implemented and air-gapped mode correctly disables network at the policy level.
+
+20. **Task 002 Configuration Loader Available** - The YAML configuration loader parses `.agent/config.yml` and provides SandboxConfiguration with validated settings (image names, resource limits, etc.).
 
 ---
 
