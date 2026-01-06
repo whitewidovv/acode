@@ -92,6 +92,197 @@ This task delivers:
 
 ---
 
+## Use Cases
+
+### Use Case 1: Samantha the DevOps Engineer — Automating Build Pipeline Discovery
+
+**Persona:** Samantha is a DevOps engineer setting up CI/CD pipelines for a newly acquired codebase. She needs to quickly identify which projects to build, which are tests, and their dependencies without manually reading every .csproj file.
+
+**Before (Manual Discovery):**
+Samantha must manually:
+1. Search the repository for .sln files (15 minutes)
+2. Open each solution in Visual Studio to see contained projects (10 minutes)
+3. Click through each project to check if it's a test project (20 minutes)
+4. Manually map project dependencies by reading .csproj XML (30 minutes)
+5. Document findings in a spreadsheet for CI pipeline configuration (15 minutes)
+
+**Total time:** 90 minutes per repository
+
+**Challenges:**
+- Prone to human error (missing projects, wrong test identification)
+- Time-consuming for large repositories with many solutions
+- Manual mapping of dependencies error-prone
+- Documentation becomes stale as projects are added/removed
+
+**After (Automated Layout Detection):**
+Samantha runs:
+```bash
+$ acode detect --json > layout.json
+Detection completed: 25 projects found (8 test projects)
+Duration: 1.2s
+```
+
+Then uses the JSON output to automatically configure the CI pipeline:
+```yaml
+# .github/workflows/build.yml (auto-generated from layout.json)
+jobs:
+  build:
+    steps:
+      - run: dotnet build MySolution.sln --configuration Release
+  test:
+    needs: build
+    strategy:
+      matrix:
+        test-project:
+          - tests/MyApp.UnitTests/MyApp.UnitTests.csproj
+          - tests/MyApp.IntegrationTests/MyApp.IntegrationTests.csproj
+          # ... 6 more test projects auto-discovered
+    steps:
+      - run: dotnet test ${{ matrix.test-project }}
+```
+
+**Benefits:**
+- Discovery time: 90 minutes → 1.2 seconds (99.9% reduction)
+- Error rate: ~10% human errors → 0% (automated)
+- CI pipeline configuration: auto-generated from detection results
+- Stays current: re-run detection when projects added/removed
+
+**Quantified Improvement:**
+- **Time saved:** 88.98 minutes per repository × 12 repositories/year = 17.8 hours/year
+- **Cost savings:** 17.8 hours × $100/hour = **$1,780/year**
+- **Accuracy:** 100% vs 90% manual accuracy
+- **Setup speed:** New repository CI ready in <5 minutes vs 2 hours
+
+---
+
+### Use Case 2: Marcus the AI Coding Agent — Understanding Codebase Structure
+
+**Persona:** Marcus is an AI coding agent (like Agentic Coding Bot) tasked with implementing a new feature across a monorepo containing both .NET microservices and React frontends. He needs to understand the project structure to know where to make code changes.
+
+**Before (No Layout Detection):**
+Marcus has hardcoded heuristics:
+```python
+# agent_understanding.py (brittle and incomplete)
+def find_project_for_feature(feature_name):
+    # Hardcoded assumptions - breaks easily
+    if "api" in feature_name.lower():
+        return "src/Backend/Api/Api.csproj"  # Might not exist!
+    elif "frontend" in feature_name.lower():
+        return "frontend/package.json"  # Wrong path!
+    else:
+        raise Exception("Can't determine project location")
+```
+
+**Challenges:**
+- Hardcoded paths break when repository restructures
+- No understanding of project dependencies (can't build in correct order)
+- No test project awareness (can't run relevant tests after changes)
+- Monorepo workspaces not understood (applies changes to wrong package)
+
+**After (Layout Detection API):**
+Marcus queries the detection API:
+```csharp
+// agent_understanding.cs (adaptive and accurate)
+async Task<ProjectInfo> FindProjectForFeature(string featureName)
+{
+    var layout = await _layoutDetector.DetectAsync(_repoRoot, ct: default);
+
+    // Intelligent search using actual repository structure
+    if (featureName.Contains("auth", StringComparison.OrdinalIgnoreCase))
+    {
+        // Find project by actual name/type, not hardcoded path
+        return layout.Projects.FirstOrDefault(p =>
+            p.Name.Contains("Auth") &&
+            p.Type == ProjectType.DotNetWebProject);
+    }
+
+    // Can also find test projects to validate changes
+    var testProjects = layout.TestProjects
+        .Where(t => t.ProjectReferences.Contains(mainProject.Path));
+
+    return mainProject;
+}
+```
+
+**Benefits:**
+- Adapts to repository structure automatically (no hardcoded paths)
+- Understands project dependencies (can build in correct order)
+- Finds related test projects (can run relevant tests)
+- Works with monorepos (understands workspace structure)
+
+**Quantified Improvement:**
+- **Correctness:** 60% success rate (hardcoded paths) → 98% success rate (dynamic detection)
+- **Repository changes handled:** 0% (breaks on restructure) → 100% (adapts automatically)
+- **Time to fix broken assumptions:** 2 hours/month (fixing hardcoded paths) → 0 hours (self-healing)
+- **Task completion rate:** 6 successful tasks/10 attempts (60%) → 9.8 successful tasks/10 attempts (98%)
+
+---
+
+### Use Case 3: Jordan the Junior Developer — Onboarding to Complex Monorepo
+
+**Persona:** Jordan just joined a company with a large .NET/Node.js monorepo containing 50+ projects across 8 solutions. They need to understand the codebase structure to contribute but the documentation is outdated.
+
+**Before (Manual Exploration + Outdated Docs):**
+Jordan's onboarding involves:
+1. Read the "Repository Structure" wiki page (last updated 6 months ago) - 30 minutes
+2. Discover page lists projects that no longer exist - confusion ensues
+3. Manually explore directories looking for .sln files - 1 hour
+4. Open each solution in VS to see what's inside - 1.5 hours
+5. Try to figure out which projects are tests - 30 minutes
+6. Ask senior developer "Where's the authentication code?" - 30 minutes (blocking senior)
+7. Build wrong project, wait for build, realize mistake - 15 minutes
+
+**Total onboarding time:** 4.5 hours + 30 minutes senior dev time
+
+**After (Detection-Driven Onboarding):**
+Jordan runs:
+```bash
+$ acode detect --verbose
+
+Repository Layout
+─────────────────
+
+.NET Projects:
+  Backend.sln (Solution)
+  ├── src/AuthService/AuthService.csproj
+  │   Type: Web API
+  │   Framework: net8.0
+  │   Dependencies: IdentityCore, DatabaseLayer
+  ├── src/PaymentService/PaymentService.csproj
+  │   Type: Web API
+  │   Framework: net8.0
+  │   Dependencies: DatabaseLayer
+  ... (48 more projects with clear hierarchy)
+
+Node.js Projects:
+  frontend/package.json (Workspace Root)
+  ├── Workspaces: packages/*
+  └── Members:
+      ├── packages/customer-portal/package.json (React app)
+      ├── packages/admin-dashboard/package.json (React app)
+      └── packages/shared-components/package.json (Library)
+
+Summary:
+  .NET: 3 solutions, 42 projects (15 test projects)
+  Node: 1 workspace with 8 packages
+```
+
+Jordan immediately understands:
+- AuthService is in src/AuthService (found authentication code in 10 seconds)
+- Test projects clearly marked (knows where to add tests)
+- Project dependencies shown (understands architecture)
+- Frontend is workspace-based (knows to use workspace commands)
+
+**Total onboarding time:** 15 minutes + 0 senior dev time
+
+**Quantified Improvement:**
+- **Onboarding time:** 4.5 hours → 15 minutes (94.4% reduction)
+- **Senior dev interruptions:** 30 minutes → 0 minutes (100% elimination)
+- **Time to first correct code change:** Day 2 → Day 1 (2x faster)
+- **Accuracy of mental model:** 70% (outdated docs) → 100% (real-time accurate)
+
+---
+
 ## Out of Scope
 
 The following items are explicitly excluded from Task 019.a:
