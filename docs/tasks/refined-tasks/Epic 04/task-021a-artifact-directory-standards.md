@@ -76,6 +76,202 @@ This task encompasses:
 | Metadata | run.json | Execution context and summary |
 | Custom | *.txt, *.json | Task-specific artifacts |
 
+### ROI Calculation
+
+**Problem Cost (Without Standardization):**
+- Developer time searching for artifacts: 5 min/failure × 20 failures/day × 250 days/year = 416 hours/year
+- At $75/hour: **$31,200/year per developer**
+- Audit preparation with scattered artifacts: 60 hours/audit × $100/hour = $6,000/audit
+- Performance analysis with inconsistent data: 16 hours/month × 12 months × $125/hour = $24,000/year
+- **Total cost per developer: $61,200/year**
+
+**Solution Benefit (With Standardization):**
+- Artifact search time: 30 sec/failure × 20 failures/day × 250 days/year = 42 hours/year (90% reduction)
+- At $75/hour: **$3,150/year** (saves $28,050)
+- Audit preparation automated: 3 hours/audit × $100/hour = $300/audit (saves $5,700)
+- Performance analysis automated: 2 hours/month × 12 months × $125/hour = $3,000/year (saves $21,000)
+- **Total cost per developer: $6,450/year**
+
+**Net Savings: $54,750/year per developer**
+**Team of 10: $547,500/year**
+
+**Implementation Cost:**
+- Development: 3 days × $125/hour × 8 hours = $3,000
+- Testing: 1 day × $125/hour × 8 hours = $1,000
+- Documentation: 0.5 day × $125/hour × 8 hours = $500
+- **Total: $4,500**
+
+**ROI: ($547,500 - $4,500) / $4,500 = 12,067% return**
+**Payback period: 3 days**
+
+### Technical Architecture
+
+**Directory Structure:**
+
+```
+workspace-root/
+└── .acode/
+    └── artifacts/
+        ├── run-01HQRS7TGKMWXY123/
+        │   ├── run.json               # Metadata (required)
+        │   ├── stdout.txt             # Process output (required)
+        │   ├── stderr.txt             # Error output (required)
+        │   ├── combined.txt           # Interleaved streams (optional)
+        │   ├── build.log              # Build-specific logs (optional)
+        │   ├── test-results.trx       # Test results (optional)
+        │   └── coverage.json          # Coverage data (optional)
+        │
+        ├── run-01HQRS8UGKLNPQ456/
+        │   └── ...
+        │
+        └── .gitignore                 # Ensures artifacts not committed
+```
+
+**Path Resolution Service:**
+
+```
+IArtifactPathResolver (Domain Interface)
+    ↓
+ArtifactPathResolver (Infrastructure Implementation)
+    ↓
+Uses: IWorkspaceContext for workspace root
+Uses: IRunIdGenerator for unique identifiers
+Returns: Absolute paths for artifacts
+```
+
+**Component Interactions:**
+
+```
+CommandExecutor
+    ↓ (execution result)
+ArtifactCollector
+    ↓ (write artifacts)
+ArtifactPathResolver.GetRunDirectory(runId)
+    ↓
+Filesystem (creates .acode/artifacts/{runId}/)
+    ↓
+ArtifactWriter.WriteStdout(runId, stdout)
+ArtifactWriter.WriteStderr(runId, stderr)
+ArtifactWriter.WriteMetadata(runId, metadata)
+    ↓
+Files: stdout.txt, stderr.txt, run.json
+```
+
+**Metadata Schema (run.json):**
+
+```json
+{
+  "run_id": "run-01HQRS7TGKMWXY123",
+  "command": "dotnet test",
+  "arguments": ["--configuration", "Release"],
+  "working_directory": "/workspace/MyProject",
+  "start_time": "2024-12-01T14:32:15.123Z",
+  "end_time": "2024-12-01T14:35:42.789Z",
+  "duration_ms": 207666,
+  "exit_code": 0,
+  "status": "Success",
+  "environment": {
+    "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+    "PATH": "/usr/local/bin:/usr/bin:/bin"
+  },
+  "artifacts": [
+    {
+      "path": "stdout.txt",
+      "size_bytes": 45123,
+      "checksum_sha256": "abc123...",
+      "content_type": "text/plain"
+    },
+    {
+      "path": "test-results.trx",
+      "size_bytes": 12456,
+      "checksum_sha256": "def456...",
+      "content_type": "application/xml"
+    }
+  ],
+  "workspace_id": "workspace-abc",
+  "session_id": "session-xyz",
+  "agent_version": "1.0.0"
+}
+```
+
+### Integration Details
+
+**Task 021 (Parent) Integration:**
+- Provides IRunStore interface for persisting run records
+- Defines RunRecord domain entity with artifact references
+- Specifies artifact collection triggers and lifecycle
+
+**Task 050 (Workspace Database) Integration:**
+- Stores run metadata in `runs` table
+- Maintains FK relationship: `runs.workspace_id → workspaces.id`
+- Indexes on `runs.start_time`, `runs.status` for efficient queries
+- Artifact paths stored as JSON blob in `runs.artifacts` column
+
+**Task 018 (Command Runner) Integration:**
+- CommandRunner executes process and captures stdout/stderr streams
+- Invokes IArtifactCollector.CollectAsync(runId, streams)
+- Passes structured CommandResult with exit code, timing, output
+- ArtifactCollector writes streams to files in real-time
+
+**Task 020 (Docker Sandbox) Integration:**
+- Container stdout/stderr mapped to artifact files
+- Docker logs extracted and stored as combined.txt
+- Container exit code stored in run.json metadata
+- Volume mount points recorded in metadata for reproducibility
+
+**Task 021b (CLI Inspection) Integration:**
+- `acode run list` queries runs table, displays run IDs
+- `acode run show {id}` reads run.json from artifacts directory
+- `acode artifact cat {id} {file}` reads specific artifact file
+- CLI resolves paths via IArtifactPathResolver
+
+**Task 021c (Export Bundle) Integration:**
+- Export reads artifact directory structure
+- Creates ZIP with artifacts/ subdirectory preserving structure
+- Includes manifest.json with checksums for integrity
+- Bundle can be imported to reconstruct run history
+
+### Constraints and Limitations
+
+1. **Filesystem Performance** — Large numbers of run directories (>100,000) may slow directory listings on some filesystems (ext4, NTFS). Mitigation: Implement sharding (`.acode/artifacts/01/HQ/run-01HQRS...`) if needed.
+
+2. **Disk Space Growth** — Unbounded artifact storage will exhaust disk. Mitigation: Retention policy automatically prunes old runs (Task 021 parent specifies policy).
+
+3. **Path Length Limits** — Windows MAX_PATH (260 chars) may be exceeded with deep nesting. Mitigation: Use flat structure (no subdirectories within run directory) and short run IDs (26 chars ULID).
+
+4. **Concurrent Access** — Multiple processes writing to same run directory causes race conditions. Mitigation: Run IDs must be globally unique; database constraint prevents duplicate IDs.
+
+5. **Network Filesystems** — NFS/SMB may have different locking semantics causing issues. Mitigation: Document that `.acode/` must be on local filesystem, not network mount.
+
+6. **Case-Insensitive Filesystems** — macOS APFS (default) is case-insensitive, Windows NTFS is case-insensitive. Mitigation: Use lowercase-only run IDs to avoid `Run-123` vs `run-123` collisions.
+
+### Trade-Offs and Alternatives
+
+**Trade-Off 1: Flat vs Nested Run Directory Structure**
+- **Chosen: Flat** — All artifacts at root of run directory (stdout.txt, test-results.trx)
+- **Alternative: Nested** — Subdirectories by type (logs/, tests/, coverage/)
+- **Rationale:** Flat structure is simpler, easier to browse, fewer path resolution issues. Nested structure would complicate path resolution and gitignore patterns.
+
+**Trade-Off 2: ULID vs UUID for Run IDs**
+- **Chosen: ULID** — Time-ordered, sortable, 26 characters
+- **Alternative: UUID v4** — Standard, 36 characters with hyphens
+- **Rationale:** ULID provides natural chronological ordering in directory listings (`ls -l` shows newest first). UUID requires separate timestamp field for ordering.
+
+**Trade-Off 3: JSON vs YAML for Metadata**
+- **Chosen: JSON** — Ubiquitous, fast parsing, compact
+- **Alternative: YAML** — Human-readable, supports comments
+- **Rationale:** JSON has better .NET support (System.Text.Json), smaller file size, no ambiguity in parsing. YAML comments not needed for machine-generated metadata.
+
+**Trade-Off 4: Artifact Directory in Workspace Root vs Hidden**
+- **Chosen: `.acode/artifacts/`** — Hidden directory (dot prefix)
+- **Alternative: `acode-artifacts/`** — Visible directory
+- **Rationale:** Hidden directory reduces clutter in workspace root, follows convention of `.git/`, `.vscode/`. Visible directory might be accidentally committed or deleted.
+
+**Trade-Off 5: Gitignore Auto-Update vs Manual**
+- **Chosen: Auto-Update** — Agent adds `.acode/artifacts/` to .gitignore on first run
+- **Alternative: Manual** — User must add pattern themselves
+- **Rationale:** Auto-update ensures artifacts never accidentally committed, reduces user error. Risk: Modifying user's .gitignore without permission (mitigated by logging action).
+
 ---
 
 ## Use Cases
