@@ -105,32 +105,24 @@ public sealed partial class PackValidator : IPackValidator
         // Find all potential template variables (anything between {{ and }})
         var matches = Regex.Matches(content, @"\{\{([^}]*)\}\}");
 
-        foreach (Match match in matches)
-        {
-            var variableName = match.Groups[1].Value.Trim();
+        var invalidVariables = matches.Cast<Match>()
+            .Select(match => match.Groups[1].Value.Trim())
+            .Where(variableName => !TemplateVariableRegex.IsMatch(variableName));
 
-            // Validate variable name format (alphanumeric and underscores only)
-            if (!TemplateVariableRegex.IsMatch(variableName))
-            {
-                errors.Add(new ValidationError(
-                    "INVALID_TEMPLATE_VARIABLE",
-                    $"Invalid template variable syntax: '{{{{{variableName}}}}}'. Variables must contain only letters, numbers, and underscores.",
-                    componentPath));
-            }
+        foreach (var variableName in invalidVariables)
+        {
+            errors.Add(new ValidationError(
+                "INVALID_TEMPLATE_VARIABLE",
+                $"Invalid template variable syntax: '{{{{{variableName}}}}}'. Variables must contain only letters, numbers, and underscores.",
+                componentPath));
         }
     }
 
     private static void ValidateTotalSize(PromptPack pack, List<ValidationError> errors)
     {
-        long totalBytes = 0;
-
-        foreach (var component in pack.Components.Values)
-        {
-            if (!string.IsNullOrEmpty(component.Content))
-            {
-                totalBytes += Encoding.UTF8.GetByteCount(component.Content);
-            }
-        }
+        long totalBytes = pack.Components.Values
+            .Where(component => !string.IsNullOrEmpty(component.Content))
+            .Sum(component => (long)Encoding.UTF8.GetByteCount(component.Content!));
 
         if (totalBytes > MaxPackSizeBytes)
         {
