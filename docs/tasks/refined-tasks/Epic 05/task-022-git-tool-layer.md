@@ -1613,61 +1613,459 @@ git worktree remove ../feature-branch-work
 
 ## Testing Requirements
 
-### Unit Tests
+```csharp
+using Xunit;
+using FluentAssertions;
+using NSubstitute;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Application.Git;
+using Acode.Domain.Git;
+using Acode.Infrastructure.Git;
 
-- [ ] UT-001: Test GitStatus parsing from git output
-- [ ] UT-002: Test FileStatus enum mapping
-- [ ] UT-003: Test GitCommit parsing from log output
-- [ ] UT-004: Test branch name parsing
-- [ ] UT-005: Test remote URL parsing
-- [ ] UT-006: Test exit code to exception mapping
-- [ ] UT-007: Test stderr pattern matching for auth errors
-- [ ] UT-008: Test stderr pattern matching for network errors
-- [ ] UT-009: Test configuration loading
-- [ ] UT-010: Test configuration defaults
-- [ ] UT-011: Test mode validation logic
-- [ ] UT-012: Test credential redaction
-- [ ] UT-013: Test path sanitization
-- [ ] UT-014: Test timeout handling
-- [ ] UT-015: Test retry logic
+namespace Acode.Infrastructure.Tests.Git
+{
+    // Unit Tests - Git Output Parsing
 
-### Integration Tests
+    public class GitOutputParserTests
+    {
+        private readonly GitOutputParser _parser = new();
 
-- [ ] IT-001: Test status on real repository
-- [ ] IT-002: Test diff generation on real changes
-- [ ] IT-003: Test log retrieval on real commits
-- [ ] IT-004: Test branch creation on real repo
-- [ ] IT-005: Test checkout on real repo
-- [ ] IT-006: Test staging on real files
-- [ ] IT-007: Test commit on real changes
-- [ ] IT-008: Test concurrent operations
-- [ ] IT-009: Test operation cancellation
-- [ ] IT-010: Test with various git versions
+        [Fact]
+        public void ParseStatus_WithCleanBranch_ReturnsCleanStatus()
+        {
+            // Arrange
+            var output = @"# branch.oid abc123
+# branch.head main
+# branch.upstream origin/main
+# branch.ab +0 -0";
 
-### End-to-End Tests
+            // Act
+            var status = _parser.ParseStatus(output);
 
-- [ ] E2E-001: CLI status command works
-- [ ] E2E-002: CLI log command works
-- [ ] E2E-003: CLI branch create works
-- [ ] E2E-004: CLI checkout works
-- [ ] E2E-005: CLI add/commit workflow works
-- [ ] E2E-006: Mode blocking prevents push
-- [ ] E2E-007: Error messages are clear
-- [ ] E2E-008: Exit codes are correct
+            // Assert
+            status.Branch.Should().Be("main");
+            status.IsClean.Should().BeTrue();
+            status.UpstreamBranch.Should().Be("origin/main");
+            status.AheadBy.Should().Be(0);
+            status.BehindBy.Should().Be(0);
+        }
 
-### Performance/Benchmarks
+        [Fact]
+        public void ParseStatus_WithModifiedFiles_ParsesCorrectly()
+        {
+            // Arrange
+            var output = @"# branch.head feature/test
+1 .M N... 100644 100644 100644 abc123 def456 file.cs
+? untracked.txt";
 
-- [ ] PB-001: Status in <500ms for 10000 files
-- [ ] PB-002: Log 1000 commits in <1s
-- [ ] PB-003: Diff 10MB in <2s
-- [ ] PB-004: Branch create in <200ms
-- [ ] PB-005: Memory under 50MB for all operations
+            // Act
+            var status = _parser.ParseStatus(output);
 
-### Regression
+            // Assert
+            status.Branch.Should().Be("feature/test");
+            status.IsClean.Should().BeFalse();
+            status.UnstagedFiles.Should().HaveCount(1);
+            status.UnstagedFiles[0].Path.Should().Be("file.cs");
+            status.UnstagedFiles[0].State.Should().Be(GitFileState.Modified);
+            status.UntrackedFiles.Should().ContainSingle("untracked.txt");
+        }
 
-- [ ] RG-001: Verify Task 018 command execution compatibility
-- [ ] RG-002: Verify Task 001 mode integration
-- [ ] RG-003: Verify Task 002 config integration
+        [Fact]
+        public void ParseStatus_WithAheadBehind_ParsesTracking()
+        {
+            // Arrange
+            var output = @"# branch.head main
+# branch.upstream origin/main
+# branch.ab +3 -5";
+
+            // Act
+            var status = _parser.ParseStatus(output);
+
+            // Assert
+            status.AheadBy.Should().Be(3);
+            status.BehindBy.Should().Be(5);
+        }
+
+        [Fact]
+        public void ParseLog_WithMultipleCommits_ParsesAll()
+        {
+            // Arrange
+            var output = @"abc123|John Doe|john@example.com|2025-01-06T12:00:00Z|feat: add feature
+def456|Jane Smith|jane@example.com|2025-01-05T10:30:00Z|fix: bug fix";
+
+            // Act
+            var commits = _parser.ParseLog(output, "--format=%H|%an|%ae|%aI|%s");
+
+            // Assert
+            commits.Should().HaveCount(2);
+            commits[0].Sha.Should().Be("abc123");
+            commits[0].Author.Should().Be("John Doe");
+            commits[0].Subject.Should().Be("feat: add feature");
+            commits[1].Sha.Should().Be("def456");
+        }
+    }
+
+    public class CredentialRedactorTests
+    {
+        private readonly CredentialRedactor _redactor = new();
+
+        [Theory]
+        [InlineData(
+            "https://token:ghp_abc123@github.com/repo.git",
+            "https://[REDACTED]@github.com/repo.git")]
+        [InlineData(
+            "ssh://user:password@host.com/repo.git",
+            "ssh://[REDACTED]@host.com/repo.git")]
+        [InlineData(
+            "API_KEY=sk_live_abc123def456",
+            "API_KEY=[REDACTED]")]
+        public void Redact_WithCredentials_RedactsCorrectly(string input, string expected)
+        {
+            // Act
+            var result = _redactor.Redact(input);
+
+            // Assert
+            result.Should().Be(expected);
+        }
+
+        [Fact]
+        public void Redact_WithoutCredentials_ReturnsUnchanged()
+        {
+            // Arrange
+            var input = "https://github.com/user/repo.git";
+
+            // Act
+            var result = _redactor.Redact(input);
+
+            // Assert
+            result.Should().Be(input);
+        }
+
+        [Fact]
+        public void RedactUrl_WithEmbeddedToken_RedactsToken()
+        {
+            // Arrange
+            var url = "https://oauth2:ghp_abc123@github.com/user/repo.git";
+
+            // Act
+            var result = _redactor.RedactUrl(url);
+
+            // Assert
+            result.Should().Be("https://[REDACTED]@github.com/user/repo.git");
+            result.Should().NotContain("ghp_abc123");
+        }
+    }
+
+    public class PathSanitizerTests
+    {
+        private readonly PathSanitizer _sanitizer = new();
+
+        [Theory]
+        [InlineData("feature/my-branch")]
+        [InlineData("main")]
+        [InlineData("release/v1.0.0")]
+        [InlineData("fix/issue-123")]
+        public void SanitizeBranchName_WithValidName_ReturnsUnchanged(string branchName)
+        {
+            // Act
+            var result = _sanitizer.SanitizeBranchName(branchName);
+
+            // Assert
+            result.Should().Be(branchName);
+        }
+
+        [Theory]
+        [InlineData("feature; rm -rf /")]
+        [InlineData("main && malicious")]
+        [InlineData("branch|pipe")]
+        [InlineData("test`backtick`")]
+        public void SanitizeBranchName_WithShellMetacharacters_ThrowsException(string malicious)
+        {
+            // Act & Assert
+            var act = () => _sanitizer.SanitizeBranchName(malicious);
+            act.Should().Throw<GitException>()
+                .WithMessage("*invalid characters*");
+        }
+
+        [Fact]
+        public void SanitizePath_WithTraversal_ThrowsException()
+        {
+            // Arrange
+            var maliciousPath = "../../etc/passwd";
+
+            // Act & Assert
+            var act = () => _sanitizer.SanitizePath(maliciousPath);
+            act.Should().Throw<GitException>()
+                .WithMessage("*traversal*");
+        }
+    }
+
+    public class ModeEnforcementServiceTests
+    {
+        private readonly IModeResolver _modeResolver = Substitute.For<IModeResolver>();
+        private readonly IConfigurationValidator _configValidator = Substitute.For<IConfigurationValidator>();
+        private readonly ModeEnforcementService _service;
+
+        public ModeEnforcementServiceTests()
+        {
+            _service = new ModeEnforcementService(_modeResolver, _configValidator, Substitute.For<ILogger<ModeEnforcementService>>());
+        }
+
+        [Fact]
+        public async Task ValidateNetworkOperationAsync_InBurstMode_Succeeds()
+        {
+            // Arrange
+            _modeResolver.GetCurrentModeAsync(Arg.Any<CancellationToken>())
+                .Returns(OperatingMode.Burst);
+
+            // Act
+            var act = async () => await _service.ValidateNetworkOperationAsync("push", CancellationToken.None);
+
+            // Assert
+            await act.Should().NotThrowAsync();
+        }
+
+        [Theory]
+        [InlineData(OperatingMode.LocalOnly)]
+        [InlineData(OperatingMode.Airgapped)]
+        public async Task ValidateNetworkOperationAsync_InRestrictiveMode_ThrowsModeViolation(OperatingMode mode)
+        {
+            // Arrange
+            _modeResolver.GetCurrentModeAsync(Arg.Any<CancellationToken>())
+                .Returns(mode);
+
+            // Act & Assert
+            var act = async () => await _service.ValidateNetworkOperationAsync("push", CancellationToken.None);
+            await act.Should().ThrowAsync<ModeViolationException>()
+                .WithMessage($"*{mode}*");
+        }
+    }
+}
+
+namespace Acode.Infrastructure.Tests.Git.Integration
+{
+    // Integration Tests - Real Git Operations
+
+    public class GitServiceIntegrationTests : IDisposable
+    {
+        private readonly string _testRepoPath;
+        private readonly GitService _gitService;
+
+        public GitServiceIntegrationTests()
+        {
+            _testRepoPath = Path.Combine(Path.GetTempPath(), $"git-test-{Guid.NewGuid()}");
+            Directory.CreateDirectory(_testRepoPath);
+
+            // Initialize test repository
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "init",
+                WorkingDirectory = _testRepoPath,
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            })?.WaitForExit();
+
+            // Configure git
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "config user.email 'test@example.com'",
+                WorkingDirectory = _testRepoPath,
+                UseShellExecute = false
+            })?.WaitForExit();
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "config user.name 'Test User'",
+                WorkingDirectory = _testRepoPath,
+                UseShellExecute = false
+            })?.WaitForExit();
+
+            // Create initial commit
+            File.WriteAllText(Path.Combine(_testRepoPath, "README.md"), "# Test");
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "add README.md",
+                WorkingDirectory = _testRepoPath,
+                UseShellExecute = false
+            })?.WaitForExit();
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "commit -m 'Initial commit'",
+                WorkingDirectory = _testRepoPath,
+                UseShellExecute = false
+            })?.WaitForExit();
+
+            _gitService = new GitService(
+                Substitute.For<ICommandExecutor>(),
+                Substitute.For<IGitOutputParser>(),
+                Substitute.For<ICredentialRedactor>(),
+                Substitute.For<IModeResolver>(),
+                Options.Create(new GitConfiguration()),
+                Substitute.For<ILogger<GitService>>());
+        }
+
+        [Fact]
+        public async Task GetStatusAsync_OnCleanRepo_ReturnsCleanStatus()
+        {
+            // Act
+            var status = await _gitService.GetStatusAsync(_testRepoPath, CancellationToken.None);
+
+            // Assert
+            status.IsClean.Should().BeTrue();
+            status.Branch.Should().NotBeNullOrEmpty();
+        }
+
+        [Fact]
+        public async Task CreateBranchAsync_WithValidName_CreatesBranch()
+        {
+            // Act
+            var branch = await _gitService.CreateBranchAsync(_testRepoPath, "feature/test", null, CancellationToken.None);
+
+            // Assert
+            branch.Name.Should().Be("feature/test");
+            branch.IsRemote.Should().BeFalse();
+
+            // Verify branch exists
+            var branches = await _gitService.GetBranchesAsync(_testRepoPath, null, CancellationToken.None);
+            branches.Should().Contain(b => b.Name == "feature/test");
+        }
+
+        [Fact]
+        public async Task CommitAsync_WithStagedChanges_CreatesCommit()
+        {
+            // Arrange
+            File.WriteAllText(Path.Combine(_testRepoPath, "test.txt"), "test content");
+            await _gitService.StageAsync(_testRepoPath, new[] { "test.txt" }, CancellationToken.None);
+
+            // Act
+            var commit = await _gitService.CommitAsync(_testRepoPath, "test: add test file", null, CancellationToken.None);
+
+            // Assert
+            commit.Subject.Should().Be("test: add test file");
+            commit.Sha.Should().NotBeNullOrEmpty();
+
+            // Verify commit in log
+            var log = await _gitService.GetLogAsync(_testRepoPath, new LogOptions { Limit = 1 }, CancellationToken.None);
+            log.First().Sha.Should().Be(commit.Sha);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(_testRepoPath))
+                Directory.Delete(_testRepoPath, true);
+        }
+    }
+}
+
+namespace Acode.Cli.Tests.Commands.Git
+{
+    // End-to-End Tests - CLI Commands
+
+    public class GitCliE2ETests
+    {
+        [Fact]
+        public async Task GitStatusCommand_OnValidRepo_DisplaysStatus()
+        {
+            // Arrange
+            var git = Substitute.For<IGitService>();
+            git.GetStatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(new GitStatus
+                {
+                    Branch = "main",
+                    IsClean = true,
+                    IsDetachedHead = false,
+                    StagedFiles = Array.Empty<FileStatus>(),
+                    UnstagedFiles = Array.Empty<FileStatus>(),
+                    UntrackedFiles = Array.Empty<string>()
+                });
+
+            var console = Substitute.For<IConsole>();
+            var command = new GitStatusCommand();
+
+            // Act
+            var exitCode = await command.ExecuteAsync(git, console, CancellationToken.None);
+
+            // Assert
+            exitCode.Should().Be(0);
+            console.Received().WriteLine(Arg.Is<string>(s => s.Contains("main")));
+            console.Received().WriteLine(Arg.Is<string>(s => s.Contains("clean")));
+        }
+
+        [Fact]
+        public async Task GitStatusCommand_OnNonRepo_Returns128()
+        {
+            // Arrange
+            var git = Substitute.For<IGitService>();
+            git.GetStatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Throws(new NotARepositoryException("/invalid/path"));
+
+            var console = Substitute.For<IConsole>();
+            var command = new GitStatusCommand();
+
+            // Act
+            var exitCode = await command.ExecuteAsync(git, console, CancellationToken.None);
+
+            // Assert
+            exitCode.Should().Be(128);
+            console.Error.Received().WriteLine(Arg.Is<string>(s => s.Contains("not a git repository")));
+        }
+    }
+
+    public class GitModeBlockingE2ETests
+    {
+        [Fact]
+        public async Task PushCommand_InLocalOnlyMode_BlocksWithError()
+        {
+            // Arrange
+            var git = Substitute.For<IGitService>();
+            git.PushAsync(Arg.Any<string>(), Arg.Any<PushOptions>(), Arg.Any<CancellationToken>())
+                .Throws(new ModeViolationException("local-only", "push"));
+
+            var command = new GitPushCommand();
+
+            // Act
+            var exitCode = await command.ExecuteAsync(git, Substitute.For<IConsole>(), CancellationToken.None);
+
+            // Assert
+            exitCode.Should().Be(3); // Mode violation exit code
+        }
+    }
+}
+
+namespace Acode.Infrastructure.Tests.Git.Performance
+{
+    // Performance/Benchmark Tests
+
+    public class GitPerformanceTests
+    {
+        [Fact(Skip = "Performance benchmark")]
+        public async Task GetStatusAsync_On10kFiles_CompletesUnder500ms()
+        {
+            // Benchmark: Status check on 10,000 file repository should complete <500ms
+            // Implementation would measure execution time
+            await Task.CompletedTask;
+        }
+
+        [Fact(Skip = "Performance benchmark")]
+        public async Task GetLogAsync_1000Commits_CompletesUnder1Second()
+        {
+            // Benchmark: Log retrieval for 1000 commits should complete <1s
+            await Task.CompletedTask;
+        }
+    }
+}
+```
 
 ---
 
