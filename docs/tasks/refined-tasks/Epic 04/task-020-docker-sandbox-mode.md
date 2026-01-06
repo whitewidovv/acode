@@ -2130,150 +2130,594 @@ public sealed class ImageVerifier
 
 ## Testing Requirements
 
-### Unit Tests
+**File:** `tests/Acode.Infrastructure.Tests/Sandbox/DockerSandboxTests.cs`
 
-#### DockerSandboxTests
-- DockerSandbox_Constructor_ValidatesDockerClient
-- DockerSandbox_Constructor_AcceptsNullLoggerGracefully
-- DockerSandbox_IsAvailable_ReturnsTrueWhenDockerResponds
-- DockerSandbox_IsAvailable_ReturnsFalseWhenDockerUnreachable
-- DockerSandbox_IsAvailable_CachesResultForConfiguredDuration
-- DockerSandbox_RunAsync_ThrowsWhenNotAvailable
-- DockerSandbox_RunAsync_CreatesContainerWithCorrectImage
-- DockerSandbox_RunAsync_AppliesResourceLimits
-- DockerSandbox_RunAsync_DisablesNetworkByDefault
-- DockerSandbox_RunAsync_MountsWorkspaceCorrectly
-- DockerSandbox_RunAsync_SetsWorkingDirectory
-- DockerSandbox_RunAsync_ReturnsStdoutContent
-- DockerSandbox_RunAsync_ReturnsStderrContent
-- DockerSandbox_RunAsync_ReturnsExitCode
-- DockerSandbox_RunAsync_ReturnsExecutionDuration
-- DockerSandbox_RunAsync_RemovesContainerAfterExecution
-- DockerSandbox_RunAsync_HandlesTimeoutGracefully
-- DockerSandbox_RunAsync_KillsContainerOnTimeout
-- DockerSandbox_RunAsync_CleansUpOnCancellation
-- DockerSandbox_RunAsync_PropagatesDockerExceptions
-- DockerSandbox_CleanupAsync_RemovesAllManagedContainers
-- DockerSandbox_CleanupAsync_HandlesAlreadyRemovedContainers
+```csharp
+using Acode.Domain.Execution;
+using Acode.Infrastructure.Sandbox;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using NSubstitute.ExceptionExtensions;
+using Xunit;
 
-#### ContainerLifecycleTests
-- ContainerLifecycle_Create_GeneratesUniqueContainerId
-- ContainerLifecycle_Create_AppliesLabelsForTracking
-- ContainerLifecycle_Create_SetsRestartPolicyToNo
-- ContainerLifecycle_Create_SetsAutoRemoveToFalse
-- ContainerLifecycle_Create_ConfiguresEntrypoint
-- ContainerLifecycle_Create_SetsEnvironmentVariables
-- ContainerLifecycle_Create_HandlesCreateContainerException
-- ContainerLifecycle_Start_StartsCreatedContainer
-- ContainerLifecycle_Start_WaitsForContainerRunning
-- ContainerLifecycle_Start_ThrowsOnStartFailure
-- ContainerLifecycle_Wait_ReturnsExitCode
-- ContainerLifecycle_Wait_RespectsTimeout
-- ContainerLifecycle_Wait_ReturnsCancelledOnCancellation
-- ContainerLifecycle_Logs_ReturnsStdout
-- ContainerLifecycle_Logs_ReturnsStderr
-- ContainerLifecycle_Logs_HandlesMissingLogs
-- ContainerLifecycle_Remove_RemovesContainer
-- ContainerLifecycle_Remove_ForcesRemovalIfRunning
-- ContainerLifecycle_Remove_RemovesAssociatedVolumes
-- ContainerLifecycle_Remove_IgnoresNotFoundError
+namespace Acode.Infrastructure.Tests.Sandbox;
 
-#### MountManagerTests
-- MountManager_ValidatePath_AllowsWorkspaceSubpaths
-- MountManager_ValidatePath_RejectsParentTraversal
-- MountManager_ValidatePath_RejectsSymlinksOutsideWorkspace
-- MountManager_ValidatePath_RejectsAbsolutePathsOutsideWorkspace
-- MountManager_ValidatePath_RejectsSensitivePaths
-- MountManager_CreateBind_CreatesReadOnlyBindByDefault
-- MountManager_CreateBind_SupportsReadWriteOption
-- MountManager_CreateBind_NormalizesPathsCorrectly
-- MountManager_CreateBind_HandlesSpacesInPaths
-- MountManager_CreateBind_ConvertsWindowsPathsToLinux
-- MountManager_ResolveOutputPath_CreatesOutputDirectory
-- MountManager_ResolveOutputPath_CalculatesContainerPath
-- MountManager_SensitivePaths_IncludesHomeDirectory
-- MountManager_SensitivePaths_IncludesCredentialStores
-- MountManager_SensitivePaths_IncludesDockerSocket
+public sealed class DockerSandboxTests
+{
+    private readonly IDockerClient _mockDockerClient;
+    private readonly DockerSandbox _sandbox;
 
-#### ResourceLimiterTests
-- ResourceLimiter_Configure_SetsCpuLimit
-- ResourceLimiter_Configure_SetsCpuPeriod
-- ResourceLimiter_Configure_SetsCpuQuota
-- ResourceLimiter_Configure_SetsMemoryLimit
-- ResourceLimiter_Configure_SetsMemorySwap
-- ResourceLimiter_Configure_SetsMemorySwappiness
-- ResourceLimiter_Configure_SetsPidsLimit
-- ResourceLimiter_Configure_DisablesOOMKillByDefault
-- ResourceLimiter_Configure_SetsUlimits
-- ResourceLimiter_MergeOverrides_AppliesPerCommandLimits
-- ResourceLimiter_MergeOverrides_PreservesUnspecifiedDefaults
-- ResourceLimiter_Validate_RejectsNegativeLimits
-- ResourceLimiter_Validate_RejectsZeroCpu
-- ResourceLimiter_Validate_RejectsUnreasonableMemory
-- ResourceLimiter_GetResourceStats_ReturnsContainerStats
-- ResourceLimiter_GetResourceStats_CalculatesCpuPercentage
-- ResourceLimiter_GetResourceStats_CalculatesMemoryUsage
+    public DockerSandboxTests()
+    {
+        _mockDockerClient = Substitute.For<IDockerClient>();
+        _sandbox = new DockerSandbox(_mockDockerClient, NullLogger<DockerSandbox>.Instance);
+    }
 
-#### NetworkPolicyTests
-- NetworkPolicy_DisabledByDefault_SetsNetworkModeNone
-- NetworkPolicy_Enabled_SetsNetworkModeBridge
-- NetworkPolicy_AirGapped_ForcesDisabledNetwork
-- NetworkPolicy_AirGapped_OverridesEnabledSetting
-- NetworkPolicy_Configure_SetsPortBindings
-- NetworkPolicy_Configure_SetsDnsServers
-- NetworkPolicy_Configure_SetsExtraHosts
-- NetworkPolicy_Configure_SetsNetworkAliases
-- NetworkPolicy_Validate_RejectsPrivilegedPorts
-- NetworkPolicy_Validate_RejectsConflictingPorts
+    [Fact]
+    public void Constructor_WithNullDockerClient_ThrowsArgumentNullException()
+    {
+        // Arrange & Act
+        var act = () => new DockerSandbox(null!, NullLogger<DockerSandbox>.Instance);
 
-#### ImageManagerTests
-- ImageManager_GetImage_ReturnsConfiguredImageForLanguage
-- ImageManager_GetImage_ReturnsFallbackForUnknownLanguage
-- ImageManager_GetImage_SupportsCustomImageOverride
-- ImageManager_Exists_ReturnsTrueForExistingImage
-- ImageManager_Exists_ReturnsFalseForMissingImage
-- ImageManager_Pull_PullsImageFromRegistry
-- ImageManager_Pull_ReportsProgress
-- ImageManager_Pull_RespectsTimeout
-- ImageManager_Pull_ThrowsInOfflineMode
-- ImageManager_Pull_HandlesAuthenticationErrors
-- ImageManager_List_ReturnsAllManagedImages
-- ImageManager_Prune_RemovesUnusedImages
-- ImageManager_Prune_PreservesRecentlyUsedImages
+        // Assert
+        act.Should().Throw<ArgumentNullException>().WithParameterName("dockerClient");
+    }
+
+    [Fact]
+    public async Task IsAvailable_WhenDockerResponds_ReturnsTrue()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _sandbox.IsAvailableAsync(CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        await _mockDockerClient.System.Received(1).PingAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task IsAvailable_WhenDockerUnreachable_ReturnsFalse()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>())
+            .Throws(new DockerApiException(System.Net.HttpStatusCode.ServiceUnavailable, "Docker daemon not responding"));
+
+        // Act
+        var result = await _sandbox.IsAvailableAsync(CancellationToken.None);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenNotAvailable_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>())
+            .Throws(new DockerApiException(System.Net.HttpStatusCode.ServiceUnavailable, "Docker unavailable"));
+
+        var request = new SandboxRequest
+        {
+            Image = "alpine:latest",
+            Command = new[] { "echo", "test" },
+            WorkingDirectory = "/workspace"
+        };
+
+        // Act
+        var act = async () => await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Docker is not available*");
+    }
+
+    [Fact]
+    public async Task RunAsync_CreatesContainerWithCorrectConfiguration()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var createResponse = new CreateContainerResponse { ID = "container-abc123" };
+        _mockDockerClient.Containers.CreateContainerAsync(
+            Arg.Any<CreateContainerParameters>(),
+            Arg.Any<CancellationToken>())
+            .Returns(createResponse);
+
+        _mockDockerClient.Containers.StartContainerAsync(
+            Arg.Any<string>(),
+            Arg.Any<ContainerStartParameters>(),
+            Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        _mockDockerClient.Containers.WaitContainerAsync(
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new ContainerWaitResponse { StatusCode = 0 });
+
+        _mockDockerClient.Containers.GetContainerLogsAsync(
+            Arg.Any<string>(),
+            Arg.Any<ContainerLogsParameters>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new MultiplexedStream(Stream.Null));
+
+        var request = new SandboxRequest
+        {
+            Image = "mcr.microsoft.com/dotnet/sdk:8.0",
+            Command = new[] { "dotnet", "--version" },
+            WorkingDirectory = "/workspace",
+            EnvironmentVariables = new Dictionary<string, string> { ["HOME"] = "/tmp" }
+        };
+
+        // Act
+        var result = await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        await _mockDockerClient.Containers.Received(1).CreateContainerAsync(
+            Arg.Is<CreateContainerParameters>(p =>
+                p.Image == "mcr.microsoft.com/dotnet/sdk:8.0" &&
+                p.WorkingDir == "/workspace" &&
+                p.Cmd.SequenceEqual(new[] { "dotnet", "--version" }) &&
+                p.Env.Contains("HOME=/tmp") &&
+                p.HostConfig.NetworkMode == "none" &&
+                p.HostConfig.AutoRemove == false &&
+                p.Labels.ContainsKey("acode.managed")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAsync_ReturnsStdoutStderrAndExitCode()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var createResponse = new CreateContainerResponse { ID = "container-xyz789" };
+        _mockDockerClient.Containers.CreateContainerAsync(Arg.Any<CreateContainerParameters>(), Arg.Any<CancellationToken>())
+            .Returns(createResponse);
+
+        _mockDockerClient.Containers.StartContainerAsync(Arg.Any<string>(), Arg.Any<ContainerStartParameters>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        _mockDockerClient.Containers.WaitContainerAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ContainerWaitResponse { StatusCode = 42 });
+
+        var stdoutStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("stdout output"));
+        var stderrStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("stderr output"));
+        _mockDockerClient.Containers.GetContainerLogsAsync(Arg.Any<string>(), Arg.Is<ContainerLogsParameters>(p => p.ShowStdout), Arg.Any<CancellationToken>())
+            .Returns(new MultiplexedStream(stdoutStream));
+        _mockDockerClient.Containers.GetContainerLogsAsync(Arg.Any<string>(), Arg.Is<ContainerLogsParameters>(p => p.ShowStderr), Arg.Any<CancellationToken>())
+            .Returns(new MultiplexedStream(stderrStream));
+
+        var request = new SandboxRequest { Image = "alpine", Command = new[] { "test" } };
+
+        // Act
+        var result = await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        result.ExitCode.Should().Be(42);
+        result.Stdout.Should().Contain("stdout output");
+        result.Stderr.Should().Contain("stderr output");
+        result.ContainerId.Should().Be("container-xyz789");
+        result.Duration.Should().BeGreaterThan(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public async Task RunAsync_RemovesContainerAfterExecution()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var containerId = "container-cleanup-test";
+        _mockDockerClient.Containers.CreateContainerAsync(Arg.Any<CreateContainerParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new CreateContainerResponse { ID = containerId });
+        _mockDockerClient.Containers.StartContainerAsync(Arg.Any<string>(), Arg.Any<ContainerStartParameters>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+        _mockDockerClient.Containers.WaitContainerAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ContainerWaitResponse { StatusCode = 0 });
+        _mockDockerClient.Containers.GetContainerLogsAsync(Arg.Any<string>(), Arg.Any<ContainerLogsParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new MultiplexedStream(Stream.Null));
+
+        var request = new SandboxRequest { Image = "alpine", Command = new[] { "echo", "test" } };
+
+        // Act
+        await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync(
+            containerId,
+            Arg.Is<ContainerRemoveParameters>(p => p.Force == true && p.RemoveVolumes == true),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CleanupAsync_RemovesAllManagedContainers()
+    {
+        // Arrange
+        var managedContainers = new List<ContainerListResponse>
+        {
+            new ContainerListResponse { ID = "container-1", Labels = new Dictionary<string, string> { ["acode.managed"] = "true" } },
+            new ContainerListResponse { ID = "container-2", Labels = new Dictionary<string, string> { ["acode.managed"] = "true" } }
+        };
+
+        _mockDockerClient.Containers.ListContainersAsync(
+            Arg.Is<ContainersListParameters>(p => p.All == true),
+            Arg.Any<CancellationToken>())
+            .Returns(managedContainers);
+
+        // Act
+        await _sandbox.CleanupAsync(CancellationToken.None);
+
+        // Assert
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync("container-1", Arg.Any<ContainerRemoveParameters>(), Arg.Any<CancellationToken>());
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync("container-2", Arg.Any<ContainerRemoveParameters>(), Arg.Any<CancellationToken>());
+    }
+}
+```
+
+**File:** `tests/Acode.Infrastructure.Tests/Sandbox/MountManagerTests.cs`
+
+```csharp
+using Acode.Domain.Security;
+using Acode.Infrastructure.Sandbox;
+using FluentAssertions;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Sandbox;
+
+public sealed class MountManagerTests
+{
+    private readonly string _repositoryRoot = "/home/user/repos/myproject";
+    private readonly MountManager _mountManager;
+
+    public MountManagerTests()
+    {
+        _mountManager = new MountManager(_repositoryRoot);
+    }
+
+    [Theory]
+    [InlineData("src/Program.cs")]
+    [InlineData("./docs/README.md")]
+    [InlineData("tests/")]
+    public void ValidatePath_AllowsWorkspaceSubpaths(string relativePath)
+    {
+        // Act
+        var result = _mountManager.ValidatePath(relativePath, isWorkspaceMount: true);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.CanonicalPath.Should().StartWith(_repositoryRoot);
+    }
+
+    [Theory]
+    [InlineData("../../../etc/passwd")]
+    [InlineData("..\\..\\Windows\\System32")]
+    [InlineData("src/../../outside")]
+    public void ValidatePath_RejectsParentTraversal(string traversalPath)
+    {
+        // Act
+        var result = _mountManager.ValidatePath(traversalPath, isWorkspaceMount: true);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Violation.Should().Be(SecurityViolationCode.HostPathEscape);
+        result.ErrorMessage.Should().Contain("outside repository root");
+    }
+
+    [Theory]
+    [InlineData("/etc/passwd")]
+    [InlineData("/var/run/docker.sock")]
+    [InlineData("/root/.ssh/id_rsa")]
+    [InlineData("C:\\Windows\\System32")]
+    public void ValidatePath_RejectsSensitivePaths(string sensitivePath)
+    {
+        // Act
+        var result = _mountManager.ValidatePath(sensitivePath, isWorkspaceMount: false);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Violation.Should().Be(SecurityViolationCode.SensitivePathAccess);
+        result.ErrorMessage.Should().Contain("sensitive");
+    }
+
+    [Fact]
+    public void CreateBind_CreatesReadOnlyBindByDefault()
+    {
+        // Act
+        var bind = _mountManager.CreateBind("src", "/workspace/src");
+
+        // Assert
+        bind.Should().Be("/home/user/repos/myproject/src:/workspace/src:ro");
+    }
+
+    [Fact]
+    public void CreateBind_SupportsReadWriteOption()
+    {
+        // Act
+        var bind = _mountManager.CreateBind("output", "/workspace/output", readOnly: false);
+
+        // Assert
+        bind.Should().Be("/home/user/repos/myproject/output:/workspace/output:rw");
+    }
+
+    [Fact]
+    public void CreateBind_HandlesSpacesInPaths()
+    {
+        // Arrange
+        var mountManager = new MountManager("/home/user/my project");
+
+        // Act
+        var bind = mountManager.CreateBind("src folder", "/workspace/src");
+
+        // Assert
+        bind.Should().Contain("/home/user/my project/src folder");
+    }
+
+    [Fact]
+    public void SensitivePaths_IncludesDockerSocket()
+    {
+        // Arrange
+        var sensitivePaths = MountManager.GetSensitivePaths();
+
+        // Assert
+        sensitivePaths.Should().Contain(p =>
+            p.Contains("/var/run/docker.sock") ||
+            p.Contains("docker_engine"));
+    }
+
+    [Fact]
+    public void SensitivePaths_IncludesCredentialStores()
+    {
+        // Arrange
+        var sensitivePaths = MountManager.GetSensitivePaths();
+
+        // Assert
+        sensitivePaths.Should().Contain(p => p.Contains(".ssh") || p.Contains(".aws") || p.Contains(".kube"));
+    }
+}
+```
+
+**File:** `tests/Acode.Infrastructure.Tests/Sandbox/ResourceLimiterTests.cs`
+
+```csharp
+using Acode.Infrastructure.Sandbox;
+using Docker.DotNet.Models;
+using FluentAssertions;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Sandbox;
+
+public sealed class ResourceLimiterTests
+{
+    [Fact]
+    public void Configure_SetsCpuLimitCorrectly()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var hostConfig = new HostConfig();
+        var limits = new ResourceLimits { CpuCores = 2.0 };
+
+        // Act
+        limiter.Configure(hostConfig, limits);
+
+        // Assert
+        hostConfig.CPUQuota.Should().Be(200_000); // 2.0 * 100_000
+        hostConfig.CPUPeriod.Should().Be(100_000);
+        hostConfig.NanoCPUs.Should().Be(2_000_000_000); // 2.0 * 1e9
+    }
+
+    [Fact]
+    public void Configure_SetsMemoryLimitCorrectly()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var hostConfig = new HostConfig();
+        var limits = new ResourceLimits { MemoryMB = 512 };
+
+        // Act
+        limiter.Configure(hostConfig, limits);
+
+        // Assert
+        hostConfig.Memory.Should().Be(512 * 1024 * 1024); // 512MB in bytes
+        hostConfig.MemorySwap.Should().Be(0); // Swap disabled
+        hostConfig.MemorySwappiness.Should().Be(0);
+        hostConfig.OomKillDisable.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Configure_SetsPidsLimitCorrectly()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var hostConfig = new HostConfig();
+        var limits = new ResourceLimits { MaxPids = 256 };
+
+        // Act
+        limiter.Configure(hostConfig, limits);
+
+        // Assert
+        hostConfig.PidsLimit.Should().Be(256);
+    }
+
+    [Fact]
+    public void Configure_SetsUlimitsForNofileAndNproc()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var hostConfig = new HostConfig();
+        var limits = new ResourceLimits { MaxOpenFiles = 1024, MaxPids = 128 };
+
+        // Act
+        limiter.Configure(hostConfig, limits);
+
+        // Assert
+        hostConfig.Ulimits.Should().ContainSingle(u => u.Name == "nofile" && u.Soft == 1024 && u.Hard == 10000);
+        hostConfig.Ulimits.Should().ContainSingle(u => u.Name == "nproc" && u.Soft == 128 && u.Hard == 128);
+    }
+
+    [Fact]
+    public void MergeOverrides_AppliesPerCommandLimits()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var baseLimits = new ResourceLimits { CpuCores = 1.0, MemoryMB = 512 };
+        var overrides = new ResourceLimits { CpuCores = 4.0 }; // Override only CPU
+
+        // Act
+        var merged = limiter.MergeOverrides(baseLimits, overrides);
+
+        // Assert
+        merged.CpuCores.Should().Be(4.0); // Overridden
+        merged.MemoryMB.Should().Be(512); // Preserved from base
+    }
+
+    [Theory]
+    [InlineData(-1.0)]
+    [InlineData(-512)]
+    public void Validate_RejectsNegativeLimits(double invalidValue)
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var limits = new ResourceLimits { CpuCores = invalidValue };
+
+        // Act
+        var act = () => limiter.Validate(limits);
+
+        // Assert
+        act.Should().Throw<ArgumentException>().WithMessage("*negative*");
+    }
+
+    [Fact]
+    public void Validate_RejectsZeroCpu()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var limits = new ResourceLimits { CpuCores = 0 };
+
+        // Act
+        var act = () => limiter.Validate(limits);
+
+        // Assert
+        act.Should().Throw<ArgumentException>().WithMessage("*CPU*greater than zero*");
+    }
+
+    [Theory]
+    [InlineData(32 * 1024 * 1024)] // 32TB
+    [InlineData(1)] // 1MB (too small)
+    public void Validate_RejectsUnreasonableMemory(long unreasonableMemoryMB)
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var limits = new ResourceLimits { MemoryMB = unreasonableMemoryMB };
+
+        // Act
+        var act = () => limiter.Validate(limits);
+
+        // Assert
+        act.Should().Throw<ArgumentException>().WithMessage("*memory*range*");
+    }
+}
+```
 
 ### Integration Tests
 
-#### DockerSandboxIntegrationTests
-- DockerSandbox_RunsSimpleCommand_ReturnsCorrectOutput
-- DockerSandbox_RunsDotNetCommand_CompilesAndExecutes
-- DockerSandbox_RunsNodeCommand_ExecutesJavaScript
-- DockerSandbox_RunsPythonCommand_ExecutesPythonScript
-- DockerSandbox_MountsWorkspace_SeesMountedFiles
-- DockerSandbox_WritesOutput_OutputVisibleOnHost
-- DockerSandbox_RespectsTimeout_KillsLongRunningProcess
-- DockerSandbox_RespectsMemoryLimit_OOMKillsExcessiveProcess
-- DockerSandbox_NetworkDisabled_CannotReachInternet
-- DockerSandbox_NetworkEnabled_CanReachInternet
-- DockerSandbox_CleanupRemovesContainers_NoOrphansRemain
-- DockerSandbox_MultipleParallel_AllExecuteSuccessfully
-- DockerSandbox_RecoverFromFailure_SubsequentCallsSucceed
-- DockerSandbox_NonZeroExit_ReturnsCorrectExitCode
-- DockerSandbox_LargeOutput_StreamsCorrectly
-- DockerSandbox_EnvironmentVariables_PassedToContainer
+**File:** `tests/Acode.Infrastructure.IntegrationTests/Sandbox/DockerSandboxIntegrationTests.cs`
 
-#### ImageManagementIntegrationTests
-- ImageManagement_PullImage_DownloadsFromDockerHub
-- ImageManagement_ListImages_ReturnsDownloadedImages
-- ImageManagement_PruneImages_RemovesDanglingImages
-- ImageManagement_CustomImage_UsedForExecution
+```csharp
+using Acode.Domain.Execution;
+using Acode.Infrastructure.Sandbox;
+using Docker.DotNet;
+using FluentAssertions;
+using Xunit;
 
-#### SecurityIntegrationTests
-- Security_ContainerRunsAsNonRoot_UidIsNotZero
-- Security_PrivilegedDisabled_CannotAccessDevices
-- Security_CapabilitiesDropped_CannotChangePerms
-- Security_SensitivePaths_NotMountable
-- Security_DockerSocket_NotMountable
-- Security_Seccomp_BlocksDangerousSyscalls
+namespace Acode.Infrastructure.IntegrationTests.Sandbox;
+
+[Collection("Docker")]
+public sealed class DockerSandboxIntegrationTests : IAsyncLifetime
+{
+    private readonly IDockerClient _dockerClient;
+    private readonly DockerSandbox _sandbox;
+
+    public DockerSandboxIntegrationTests()
+    {
+        _dockerClient = new DockerClientConfiguration().CreateClient();
+        _sandbox = new DockerSandbox(_dockerClient, NullLogger<DockerSandbox>.Instance);
+    }
+
+    [Fact]
+    public async Task RunsSimpleCommand_ReturnsCorrectOutput()
+    {
+        // Arrange
+        var request = new SandboxRequest
+        {
+            Image = "alpine:latest",
+            Command = new[] { "echo", "Hello from Docker" },
+            WorkingDirectory = "/workspace"
+        };
+
+        // Act
+        var result = await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Stdout.Trim().Should().Be("Hello from Docker");
+        result.Stderr.Should().BeEmpty();
+        result.Duration.Should().BeLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task NetworkDisabled_CannotReachInternet()
+    {
+        // Arrange
+        var request = new SandboxRequest
+        {
+            Image = "alpine:latest",
+            Command = new[] { "wget", "-T", "2", "https://example.com", "-O", "-" },
+            WorkingDirectory = "/workspace",
+            NetworkEnabled = false
+        };
+
+        // Act
+        var result = await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        result.ExitCode.Should().NotBe(0);
+        result.Stderr.Should().Contain("Network");
+    }
+
+    [Fact]
+    public async Task RespectsMemoryLimit_OOMKillsExcessiveProcess()
+    {
+        // Arrange
+        var request = new SandboxRequest
+        {
+            Image = "alpine:latest",
+            Command = new[] { "sh", "-c", "head -c 1G </dev/zero | tail" },
+            WorkingDirectory = "/workspace",
+            ResourceLimits = new ResourceLimits { MemoryMB = 64 }
+        };
+
+        // Act
+        var result = await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        result.ExitCode.Should().Be(137); // OOM killed
+        result.WasOOMKilled.Should().BeTrue();
+    }
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        await _sandbox.CleanupAsync(CancellationToken.None);
+        _dockerClient.Dispose();
+    }
+}
+```
 
 ### Benchmark Tests
 
