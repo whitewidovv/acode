@@ -663,6 +663,694 @@ Large artifacts take time. Use `--no-artifacts` for metadata-only export.
 
 ---
 
+## Security Considerations
+
+### Threat 1: ZIP Path Traversal During Import
+
+**Risk:** Malicious bundle contains entries with paths like `../../../etc/passwd` or `..\..\..\Windows\System32\config`. Importing could overwrite critical system files or write files outside workspace directory.
+
+**Attack Scenario:**
+1. Attacker crafts malicious bundle: `malicious.acode-bundle`
+2. ZIP contains entry: `runs/../../../../../../tmp/malicious.sh`
+3. User imports: `acode runs import malicious.acode-bundle`
+4. Extraction writes file to `/tmp/malicious.sh` (outside workspace)
+5. If `/tmp/malicious.sh` executed later (cron, boot script), attacker gains code execution
+
+**Mitigation (C# - SafeZipExtractor):**
+
+```csharp
+namespace Acode.Infrastructure.Export;
+
+public sealed class SafeZipExtractor
+{
+    private readonly string _extractionRoot;
+    private static readonly char[] ForbiddenPathChars = Path.GetInvalidPathChars()
+        .Concat(new[] { '\0', '\r', '\n' }).ToArray();
+
+    public SafeZipExtractor(string extractionRoot)
+    {
+        _extractionRoot = Path.GetFullPath(extractionRoot);
+    }
+
+    public async Task<ExtractResult> ExtractAsync(string bundlePath, CancellationToken ct = default)
+    {
+        if (!File.Exists(bundlePath))
+            throw new FileNotFoundException($"Bundle not found: {bundlePath}");
+
+        using var archive = ZipFile.OpenRead(bundlePath);
+        var extractedFiles = new List<string>();
+
+        foreach (var entry in archive.Entries)
+        {
+            // Step 1: Validate entry name
+            var (isValid, error) = ValidateEntryPath(entry.FullName);
+            if (!isValid)
+                throw new SecurityException($"Path traversal detected in entry '{entry.FullName}': {error}");
+
+            // Step 2: Compute absolute target path
+            var targetPath = Path.Combine(_extractionRoot, entry.FullName);
+            var normalizedPath = Path.GetFullPath(targetPath);
+
+            // Step 3: CRITICAL - Verify normalized path is still within extraction root
+            if (!normalizedPath.StartsWith(_extractionRoot, StringComparison.OrdinalIgnoreCase))
+                throw new SecurityException($"Entry '{entry.FullName}' resolves outside extraction directory: {normalizedPath}");
+
+            // Step 4: Create parent directory safely
+            var parentDir = Path.GetDirectoryName(normalizedPath);
+            if (!string.IsNullOrEmpty(parentDir))
+            {
+                Directory.CreateDirectory(parentDir);
+            }
+
+            // Step 5: Extract file
+            if (entry.FullName.EndsWith('/'))
+            {
+                // Directory entry - already created above
+                continue;
+            }
+
+            entry.ExtractToFile(normalizedPath, overwrite: true);
+            extractedFiles.Add(normalizedPath);
+
+            ct.ThrowIfCancellationRequested();
+        }
+
+        return new ExtractResult { FilesExtracted = extractedFiles, Success = true };
+    }
+
+    private (bool IsValid, string Error) ValidateEntryPath(string entryPath)
+    {
+        // Rule 1: Not null or empty
+        if (string.IsNullOrWhiteSpace(entryPath))
+            return (false, "Entry path is empty");
+
+        // Rule 2: No forbidden characters
+        if (entryPath.IndexOfAny(ForbiddenPathChars) >= 0)
+            return (false, "Entry path contains forbidden characters");
+
+        // Rule 3: No absolute paths (Windows drive letters or Unix root)
+        if (Path.IsPathRooted(entryPath))
+            return (false, "Entry path is absolute (rooted)");
+
+        // Rule 4: No path traversal sequences
+        if (entryPath.Contains(".."))
+            return (false, "Entry path contains '..' traversal sequence");
+
+        // Rule 5: No backslashes (normalize to forward slashes)
+        if (entryPath.Contains('\\'))
+            return (false, "Entry path contains backslashes (use forward slashes)");
+
+        // Rule 6: Length bounds
+        if (entryPath.Length > 500)
+            return (false, "Entry path exceeds maximum length (500 chars)");
+
+        return (true, null);
+    }
+}
+
+public record ExtractResult
+{
+    public required List<string> FilesExtracted { get; init; }
+    public required bool Success { get; init; }
+}
+```
+
+**Prevention:**
+- Always use `Path.GetFullPath()` and verify result is within extraction root
+- Reject any paths containing `..` sequences
+- Never trust ZIP entry paths directly - validate every path
+- Use whitelisting (allow only specific patterns) vs blacklisting
+
+---
+
+### Threat 2: ZIP Bomb (Decompression Bomb)
+
+**Risk:** Malicious bundle is small when compressed (e.g., 1MB) but expands to consume all disk space when extracted (e.g., 10TB). This causes denial of service by filling disk.
+
+**Attack Scenario:**
+1. Attacker creates `bomb.zip` with 1MB compressed size, 10TB uncompressed (nested ZIPs or highly compressible data like zeros)
+2. User imports: `acode runs import bomb.acode-bundle`
+3. Extraction begins, disk fills: `/dev/sda1 100% full`
+4. System becomes unusable, databases crash, services fail
+5. Incident response team must restore from backups
+
+**Mitigation (C# - ZipBombDetector):**
+
+```csharp
+namespace Acode.Infrastructure.Export;
+
+public sealed class ZipBombDetector
+{
+    private const long MaxUncompressedSize = 10L * 1024 * 1024 * 1024; // 10GB
+    private const int MaxCompressionRatio = 100; // 100:1 ratio
+    private const int MaxNestedZips = 2; // Prevent recursive zip bombs
+
+    public (bool IsSafe, string Reason) AnalyzeBundle(string bundlePath)
+    {
+        try
+        {
+            using var archive = ZipFile.OpenRead(bundlePath);
+
+            long totalCompressedSize = 0;
+            long totalUncompressedSize = 0;
+            var zipEntryCount = 0;
+
+            foreach (var entry in archive.Entries)
+            {
+                // Accumulate sizes
+                totalCompressedSize += entry.CompressedLength;
+                totalUncompressedSize += entry.Length;
+
+                // Check 1: Total uncompressed size limit
+                if (totalUncompressedSize > MaxUncompressedSize)
+                    return (false, $"Total uncompressed size ({totalUncompressedSize:N0} bytes) exceeds limit ({MaxUncompressedSize:N0} bytes)");
+
+                // Check 2: Per-file compression ratio
+                if (entry.CompressedLength > 0)
+                {
+                    var ratio = (double)entry.Length / entry.CompressedLength;
+                    if (ratio > MaxCompressionRatio)
+                        return (false, $"File '{entry.FullName}' has suspicious compression ratio {ratio:F1}:1 (limit: {MaxCompressionRatio}:1)");
+                }
+
+                // Check 3: Nested ZIP detection
+                if (entry.FullName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+                    entry.FullName.EndsWith(".acode-bundle", StringComparison.OrdinalIgnoreCase))
+                {
+                    zipEntryCount++;
+                    if (zipEntryCount > MaxNestedZips)
+                        return (false, $"Bundle contains {zipEntryCount} nested ZIP files (limit: {MaxNestedZips})");
+                }
+
+                // Check 4: Unusually high entry count (quine zip)
+                if (archive.Entries.Count > 100_000)
+                    return (false, $"Bundle contains {archive.Entries.Count:N0} entries (limit: 100,000)");
+            }
+
+            // Check 5: Overall compression ratio
+            if (totalCompressedSize > 0)
+            {
+                var overallRatio = (double)totalUncompressedSize / totalCompressedSize;
+                if (overallRatio > MaxCompressionRatio)
+                    return (false, $"Overall compression ratio {overallRatio:F1}:1 exceeds limit ({MaxCompressionRatio}:1)");
+            }
+
+            return (true, "Bundle passed safety checks");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Error analyzing bundle: {ex.Message}");
+        }
+    }
+}
+
+// Usage in BundleImporter
+public class BundleImporter
+{
+    private readonly ZipBombDetector _detector = new();
+    private readonly SafeZipExtractor _extractor;
+
+    public async Task<ImportResult> ImportAsync(string bundlePath)
+    {
+        // CRITICAL: Check for zip bomb BEFORE extraction
+        var (isSafe, reason) = _detector.AnalyzeBundle(bundlePath);
+        if (!isSafe)
+            throw new SecurityException($"Bundle rejected: {reason}");
+
+        // Safe to extract
+        return await _extractor.ExtractAsync(bundlePath);
+    }
+}
+```
+
+**Prevention:**
+- Check total uncompressed size before extracting
+- Monitor compression ratios (>100:1 is suspicious)
+- Limit number of entries in archive
+- Detect nested ZIP files (quine zips)
+- Set maximum extraction size limits
+
+---
+
+### Threat 3: Manifest Hash Mismatch (Tampered Artifacts)
+
+**Risk:** Attacker modifies bundle contents after signing but before import. Manifest contains original hashes, but actual files are tampered. User imports malicious artifacts thinking they're verified.
+
+**Attack Scenario:**
+1. Legitimate bundle exported: `production-run.acode-bundle` (manifest includes SHA-256 hashes)
+2. Attacker intercepts bundle in transit (man-in-the-middle, compromised storage)
+3. Attacker modifies `stdout.txt` to inject malicious commands
+4. User imports bundle without verification: `acode runs import production-run.acode-bundle`
+5. Tampered artifact imported, user reviews "production" output that was actually attacker-modified
+
+**Mitigation (C# - BundleIntegrityVerifier):**
+
+```csharp
+namespace Acode.Infrastructure.Export;
+
+public sealed class BundleIntegrityVerifier
+{
+    private readonly IHashCalculator _hashCalculator;
+
+    public BundleIntegrityVerifier(IHashCalculator hashCalculator)
+    {
+        _hashCalculator = hashCalculator;
+    }
+
+    public async Task<VerificationResult> VerifyAsync(string extractedBundleRoot, BundleManifest manifest, CancellationToken ct = default)
+    {
+        var errors = new List<IntegrityError>();
+        var verifiedCount = 0;
+
+        foreach (var (relativePath, expectedHash) in manifest.Files)
+        {
+            var fullPath = Path.Combine(extractedBundleRoot, relativePath);
+
+            // Check 1: File exists
+            if (!File.Exists(fullPath))
+            {
+                errors.Add(new IntegrityError
+                {
+                    FilePath = relativePath,
+                    ErrorType = IntegrityErrorType.FileMissing,
+                    Message = "File listed in manifest but not found in bundle"
+                });
+                continue;
+            }
+
+            // Check 2: File size matches
+            var actualSize = new FileInfo(fullPath).Length;
+            if (actualSize != expectedHash.SizeBytes)
+            {
+                errors.Add(new IntegrityError
+                {
+                    FilePath = relativePath,
+                    ErrorType = IntegrityErrorType.SizeMismatch,
+                    Message = $"Size mismatch: expected {expectedHash.SizeBytes:N0} bytes, actual {actualSize:N0} bytes"
+                });
+                continue; // Don't hash if size wrong - saves time
+            }
+
+            // Check 3: SHA-256 hash matches
+            var actualHash = await _hashCalculator.ComputeSha256Async(fullPath, ct);
+            if (!string.Equals(actualHash, expectedHash.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(new IntegrityError
+                {
+                    FilePath = relativePath,
+                    ErrorType = IntegrityErrorType.HashMismatch,
+                    Message = $"Hash mismatch: expected {expectedHash.Sha256}, actual {actualHash}",
+                    ExpectedHash = expectedHash.Sha256,
+                    ActualHash = actualHash
+                });
+                continue;
+            }
+
+            verifiedCount++;
+            ct.ThrowIfCancellationRequested();
+        }
+
+        return new VerificationResult
+        {
+            Success = errors.Count == 0,
+            VerifiedCount = verifiedCount,
+            Errors = errors,
+            TotalFiles = manifest.Files.Count
+        };
+    }
+}
+
+public enum IntegrityErrorType
+{
+    FileMissing,
+    SizeMismatch,
+    HashMismatch
+}
+
+public record IntegrityError
+{
+    public required string FilePath { get; init; }
+    public required IntegrityErrorType ErrorType { get; init; }
+    public required string Message { get; init; }
+    public string? ExpectedHash { get; init; }
+    public string? ActualHash { get; init; }
+}
+
+public record VerificationResult
+{
+    public required bool Success { get; init; }
+    public required int VerifiedCount { get; init; }
+    public required int TotalFiles { get; init; }
+    public required List<IntegrityError> Errors { get; init; }
+
+    public string GetSummary()
+    {
+        if (Success)
+            return $"All {TotalFiles} files verified successfully";
+
+        return $"Verification failed: {VerifiedCount}/{TotalFiles} files OK, {Errors.Count} errors:\n" +
+               string.Join("\n", Errors.Select(e => $"  - {e.FilePath}: {e.Message}"));
+    }
+}
+
+// HashCalculator implementation
+public interface IHashCalculator
+{
+    Task<string> ComputeSha256Async(string filePath, CancellationToken ct = default);
+}
+
+public class HashCalculator : IHashCalculator
+{
+    public async Task<string> ComputeSha256Async(string filePath, CancellationToken ct = default)
+    {
+        using var stream = File.OpenRead(filePath);
+        using var sha256 = SHA256.Create();
+
+        var hashBytes = await sha256.ComputeHashAsync(stream, ct);
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+}
+```
+
+**Prevention:**
+- ALWAYS verify hashes before importing artifacts
+- Fail import if ANY hash mismatch detected
+- Use cryptographic signatures (detached signature file)
+- Display verification results to user prominently
+
+---
+
+### Threat 4: Redaction Bypass via Metadata Channels
+
+**Risk:** Sensitive data (API keys, passwords) leaked through alternative channels even though redaction is applied to environment variables. Attacker gains access to secrets from exported bundle.
+
+**Attack Scenario:**
+1. Developer exports run with `--redact` flag (secrets in environment masked)
+2. But: command line arguments contain `--api-key sk-abc123` (not redacted)
+3. Or: stdout contains echoed environment: `export API_KEY=sk-abc123` (not redacted)
+4. Or: provenance includes branch name: `feature/add-api-key-sk-abc123-to-config` (secret in branch name)
+5. User shares "redacted" bundle, attacker extracts secrets from these alternative channels
+
+**Mitigation (C# - ComprehensiveRedactor):**
+
+```csharp
+namespace Acode.Infrastructure.Export;
+
+public sealed class ComprehensiveRedactor
+{
+    private static readonly Regex[] SecretPatterns = new[]
+    {
+        new Regex(@"(?i)(api[_-]?key|password|secret|token|credential)[:=]\s*([^\s]{8,})", RegexOptions.Compiled),
+        new Regex(@"sk-[a-zA-Z0-9]{48,}", RegexOptions.Compiled), // OpenAI keys
+        new Regex(@"ghp_[a-zA-Z0-9]{36,}", RegexOptions.Compiled), // GitHub tokens
+        new Regex(@"xox[baprs]-[a-zA-Z0-9-]{10,}", RegexOptions.Compiled), // Slack tokens
+        new Regex(@"AIza[0-9A-Za-z\\-_]{35}", RegexOptions.Compiled), // Google API keys
+        new Regex(@"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", RegexOptions.Compiled), // Private keys
+        new Regex(@"postgres://[^:]+:([^@]+)@", RegexOptions.Compiled), // DB passwords in URLs
+        new Regex(@"https://[^:]+:([^@]+)@", RegexOptions.Compiled) // Auth in URLs
+    };
+
+    public ExportedRun RedactRun(RunDetails run)
+    {
+        return new ExportedRun
+        {
+            Id = run.Id,
+            TaskName = run.TaskName,
+            StartTime = run.StartTime,
+            EndTime = run.EndTime,
+            ExitCode = run.ExitCode,
+            Status = run.Status,
+
+            // Redact command line
+            Command = RedactText(run.Command),
+
+            // Redact environment variables
+            Environment = RedactEnvironment(run.Environment),
+
+            // Redact working directory (may contain secrets in path)
+            WorkingDirectory = RedactPath(run.WorkingDirectory),
+
+            // Operating mode safe to export
+            OperatingMode = run.OperatingMode
+        };
+    }
+
+    public Provenance RedactProvenance(Provenance provenance)
+    {
+        return provenance with
+        {
+            // Redact remote URL (may contain embedded credentials)
+            RemoteUrl = RedactUrl(provenance.RemoteUrl),
+
+            // Redact branch name (may contain secrets)
+            Branch = RedactText(provenance.Branch),
+
+            // Commit SHA safe to export
+            // Worktree ID safe to export
+            // Machine name potentially sensitive - redact
+            MachineName = RedactHostname(provenance.MachineName)
+        };
+    }
+
+    public async Task<string> RedactArtifactAsync(string filePath, CancellationToken ct = default)
+    {
+        var content = await File.ReadAllTextAsync(filePath, ct);
+        var redacted = RedactText(content);
+
+        var redactedPath = filePath + ".redacted";
+        await File.WriteAllTextAsync(redactedPath, redacted, ct);
+        return redactedPath;
+    }
+
+    private string RedactText(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        var redacted = text;
+        foreach (var pattern in SecretPatterns)
+        {
+            redacted = pattern.Replace(redacted, match =>
+            {
+                // For patterns with capture groups (e.g., key=value), keep key, redact value
+                if (match.Groups.Count > 2)
+                {
+                    var prefix = match.Groups[1].Value;
+                    return $"{prefix}=***REDACTED***";
+                }
+
+                // For full matches, redact entirely
+                return "***REDACTED***";
+            });
+        }
+        return redacted;
+    }
+
+    private Dictionary<string, string> RedactEnvironment(IReadOnlyDictionary<string, string> env)
+    {
+        var redacted = new Dictionary<string, string>();
+        foreach (var (key, value) in env)
+        {
+            // Redact by key name
+            if (Regex.IsMatch(key, @"(?i)(key|password|secret|token|credential)"))
+            {
+                redacted[key] = "***REDACTED***";
+                continue;
+            }
+
+            // Redact by value pattern
+            redacted[key] = RedactText(value);
+        }
+        return redacted;
+    }
+
+    private string RedactPath(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return path;
+
+        // Check if path contains secrets (e.g., /home/user/.secrets/api-keys)
+        if (Regex.IsMatch(path, @"(?i)(secret|credential|key)", RegexOptions.IgnoreCase))
+            return "***REDACTED-PATH***";
+
+        return path;
+    }
+
+    private string? RedactUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return url;
+
+        // Redact embedded credentials in URLs
+        if (url.Contains("@"))
+        {
+            var uri = new Uri(url);
+            if (!string.IsNullOrEmpty(uri.UserInfo))
+            {
+                // Replace user:pass@ with ***REDACTED***@
+                return url.Replace(uri.UserInfo + "@", "***REDACTED***@");
+            }
+        }
+
+        return url;
+    }
+
+    private string? RedactHostname(string? hostname)
+    {
+        // Redact hostname for privacy (may reveal internal infrastructure)
+        if (string.IsNullOrEmpty(hostname))
+            return hostname;
+
+        // Replace with generic hostname
+        return $"host-{hostname.GetHashCode():X8}";
+    }
+}
+```
+
+**Prevention:**
+- Redact ALL text fields, not just environment variables
+- Use pattern matching to detect secrets in command lines, stdout, stderr
+- Redact URLs containing embedded credentials
+- Redact branch names and commit messages (may contain secrets)
+- Provide dry-run preview: `acode runs export --redact --dry-run` shows what will be redacted
+
+---
+
+### Threat 5: JSON Deserialization Attack via Malicious Manifest
+
+**Risk:** Malicious manifest.json exploits JSON deserializer vulnerabilities (type confusion, property injection). Attacker achieves remote code execution during import.
+
+**Attack Scenario:**
+1. Attacker crafts malicious bundle with `manifest.json` containing exploit payload
+2. Payload exploits deserialization vulnerability (e.g., type confusion if polymorphic deserialization used)
+3. User imports: `acode runs import malicious.acode-bundle`
+4. Manifest deserialized, exploit triggers arbitrary code execution
+5. Attacker gains control of user's machine
+
+**Mitigation (C# - SafeManifestDeserializer):**
+
+```csharp
+namespace Acode.Infrastructure.Export;
+
+public sealed class SafeManifestDeserializer
+{
+    private static readonly JsonSerializerOptions SafeOptions = new()
+    {
+        // CRITICAL: Disable type discrimination to prevent type confusion attacks
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+
+        // Limit recursion depth to prevent stack overflow
+        MaxDepth = 32,
+
+        // Don't allow trailing commas or comments (strict JSON only)
+        AllowTrailingCommas = false,
+        ReadCommentHandling = JsonCommentHandling.Disallow,
+
+        // Property names must match exactly (case-sensitive)
+        PropertyNameCaseInsensitive = false,
+
+        // Unknown properties cause errors (fail-secure)
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+    };
+
+    public BundleManifest DeserializeManifest(string manifestJson)
+    {
+        BundleManifest? manifest;
+
+        try
+        {
+            manifest = JsonSerializer.Deserialize<BundleManifest>(manifestJson, SafeOptions);
+        }
+        catch (JsonException ex)
+        {
+            throw new SecurityException($"Manifest JSON is invalid or malicious: {ex.Message}", ex);
+        }
+
+        // Post-deserialization validation
+        if (manifest == null)
+            throw new SecurityException("Manifest deserialized to null");
+
+        ValidateManifest(manifest);
+
+        return manifest;
+    }
+
+    private void ValidateManifest(BundleManifest manifest)
+    {
+        // Validation 1: Version is valid semver
+        if (string.IsNullOrWhiteSpace(manifest.Version) || !IsValidSemver(manifest.Version))
+            throw new SecurityException($"Invalid manifest version: '{manifest.Version}'");
+
+        // Validation 2: Created timestamp is reasonable
+        var now = DateTimeOffset.UtcNow;
+        if (manifest.CreatedAt > now.AddHours(24))
+            throw new SecurityException($"Manifest creation time is in the future: {manifest.CreatedAt}");
+
+        if (manifest.CreatedAt < now.AddYears(-10))
+            throw new SecurityException($"Manifest creation time is suspiciously old: {manifest.CreatedAt}");
+
+        // Validation 3: Run count is reasonable
+        if (manifest.RunCount < 0)
+            throw new SecurityException($"Invalid run count: {manifest.RunCount}");
+
+        if (manifest.RunCount > 100_000)
+            throw new SecurityException($"Run count exceeds maximum (100,000): {manifest.RunCount}");
+
+        // Validation 4: File count matches run count expectation
+        if (manifest.Files.Count > manifest.RunCount * 100)
+            throw new SecurityException($"File count ({manifest.Files.Count}) is excessive for {manifest.RunCount} runs");
+
+        // Validation 5: All file hashes are valid SHA-256 (64 hex chars)
+        foreach (var (path, hash) in manifest.Files)
+        {
+            if (string.IsNullOrWhiteSpace(hash.Sha256) || hash.Sha256.Length != 64 || !IsHexString(hash.Sha256))
+                throw new SecurityException($"Invalid SHA-256 hash for file '{path}': '{hash.Sha256}'");
+
+            if (hash.SizeBytes < 0)
+                throw new SecurityException($"Invalid file size for '{path}': {hash.SizeBytes}");
+        }
+
+        // Validation 6: Total artifact bytes is reasonable
+        if (manifest.TotalArtifactBytes < 0)
+            throw new SecurityException($"Invalid total artifact bytes: {manifest.TotalArtifactBytes}");
+
+        if (manifest.TotalArtifactBytes > 100L * 1024 * 1024 * 1024) // 100GB
+            throw new SecurityException($"Total artifact bytes exceeds maximum (100GB): {manifest.TotalArtifactBytes:N0}");
+    }
+
+    private bool IsValidSemver(string version)
+    {
+        // Simple semver validation: X.Y.Z where X, Y, Z are non-negative integers
+        var parts = version.Split('.');
+        if (parts.Length != 3)
+            return false;
+
+        foreach (var part in parts)
+        {
+            if (!int.TryParse(part, out var num) || num < 0)
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool IsHexString(string value)
+    {
+        return value.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+    }
+}
+```
+
+**Prevention:**
+- Use strongly-typed deserialization (no polymorphism)
+- Disable type discrimination features in JSON deserializer
+- Validate ALL fields after deserialization
+- Set recursion depth limits
+- Reject manifests with unknown properties (fail-secure)
+- Validate version strings, timestamps, counts are within reasonable bounds
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
