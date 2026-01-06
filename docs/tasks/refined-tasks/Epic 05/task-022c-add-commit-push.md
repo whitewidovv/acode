@@ -1093,47 +1093,421 @@ public sealed class ForcePushGuard : IForcePushGuard
 
 ## Troubleshooting
 
-### Issue: Push rejected (non-fast-forward)
+### Issue 1: Push Rejected with "Non-Fast-Forward" Error
 
-**Symptoms:** Remote rejected push with "non-fast-forward" error
+**Symptoms:**
+- `PushAsync` throws PushRejectedException: "Updates were rejected because the remote contains work that you do not have"
+- Error message: "! [rejected] main -> main (non-fast-forward)"
+- Push succeeds locally but fails when sending to remote
+- Git status shows "Your branch and 'origin/main' have diverged"
+- Happens after pull request merged by another developer
+- Also occurs when remote history was force-pushed
 
-**Causes:**
-- Remote has commits not in local branch
-- Another user pushed to same branch
-- Branch was force-pushed remotely
-
-**Solutions:**
-1. Pull or fetch and rebase: `git pull --rebase`
-2. If intentional, use force push with care: `git push --force-with-lease`
-3. Check branch protection rules on remote
-
-### Issue: Commit message validation failed
-
-**Symptoms:** Commit rejected due to message format
-
-**Causes:**
-- Missing required prefix (feat:, fix:, etc.)
-- Message too short or missing body
-- Invalid ticket reference format
+**Root Causes:**
+1. **Remote has new commits** - Team member pushed commits after your last pull/fetch
+2. **Diverged history** - Local branch has commits not in remote, remote has commits not in local
+3. **Remote force-pushed** - Someone force-pushed, rewriting remote history
+4. **Protected branch rules** - Remote repository enforces fast-forward-only merges
+5. **Concurrent development** - Multiple developers pushing to same branch simultaneously
+6. **Stale local branch** - Haven't pulled in weeks, remote significantly ahead
 
 **Solutions:**
-1. Review commit message rules in agent-config.yml
-2. Amend commit with correct message: `git commit --amend`
-3. Check project's CONTRIBUTING.md for format
 
-### Issue: Authentication failure on push
+```bash
+# Solution 1: Fetch and check divergence
+git fetch origin
+git log --oneline --graph --decorate --all
+# Shows: Local branch (HEAD) and remote branch (origin/main) diverged
 
-**Symptoms:** "Authentication failed" or "Permission denied"
+git log main..origin/main
+# Shows: Commits in remote not in local
+# Example output:
+#   abc123 feat: implement feature Y (Jordan)
+#   def456 fix: critical bug (Alex)
 
-**Causes:**
-- Expired credentials
-- SSH key not loaded
-- Insufficient permissions on remote
+git log origin/main..main
+# Shows: Commits in local not in remote
+# Example output:
+#   789xyz feat: implement feature X (You)
+
+# Solution 2: Rebase local commits on top of remote (recommended)
+git pull --rebase origin main
+# Shows: Applying your commits on top of remote commits
+# Expected output:
+#   First, rewinding head to replay your work on top of it...
+#   Applying: feat: implement feature X
+
+# Resolve conflicts if any
+git status
+# Shows: Files with conflicts (if any)
+
+# After resolving conflicts (edit files, then):
+git add <resolved-files>
+git rebase --continue
+
+# Push rebased commits
+acode git push
+# Shows: Pushed successfully
+
+# Solution 3: Merge remote commits into local (alternative)
+git pull origin main
+# Creates merge commit combining local and remote history
+
+git log --oneline --graph -5
+# Shows:
+#   *   merge123 Merge remote-tracking branch 'origin/main'
+#   |\
+#   | * abc123 feat: implement feature Y (Jordan)
+#   * | 789xyz feat: implement feature X (You)
+
+acode git push
+# Shows: Pushed successfully
+
+# Solution 4: Force push with lease (DANGEROUS - only if you know what you're doing)
+# Use when you intentionally want to overwrite remote history
+git push --force-with-lease origin main
+# Safer than --force, only succeeds if remote hasn't changed since last fetch
+# Expected output:
+#   + 789xyz...abc123 main -> main (forced update)
+
+# Solution 5: Check branch protection rules
+gh api repos/{owner}/{repo}/branches/main/protection
+# Shows: Whether force-push is disabled, required reviews, etc.
+```
+
+### Issue 2: Commit Fails with "Nothing to Commit, Working Tree Clean"
+
+**Symptoms:**
+- `CommitAsync` throws NothingToCommitException
+- Error: "nothing to commit, working tree clean"
+- Agent reports no staged files
+- Files were modified but commit fails
+- Happens after calling StageAsync but before CommitAsync
+- Git status shows "nothing to commit" despite visible changes
+
+**Root Causes:**
+1. **Files not staged** - Forgot to call `StageAsync` before `CommitAsync`
+2. **Wrong working directory** - Staging/committing in different directory than files modified
+3. **Gitignored files** - Modified files match .gitignore patterns
+4. **Unstaged after staging** - Called `UnstageAsync` or `git reset` after staging
+5. **Empty diff** - Changes were whitespace-only and `core.whitespace` settings ignore them
+6. **Already committed** - Changes were already committed in previous operation
 
 **Solutions:**
-1. Refresh authentication: `git credential reject` then retry
-2. Check SSH agent: `ssh-add -l`
-3. Verify repository access permissions
+
+```bash
+# Solution 1: Check what files were actually modified
+git status --porcelain
+# Shows: Status of all files
+# Expected output examples:
+#   M src/file.cs         (modified, not staged)
+#   ?? src/newfile.cs     (untracked)
+#   A src/staged.cs       (staged for commit)
+#   (nothing)             (working tree clean)
+
+# If shows modified files (M), stage them first
+acode git add src/file.cs
+git status
+# Shows: Changes staged for commit
+
+# Solution 2: Check if files are gitignored
+git check-ignore -v src/file.cs
+# If file is ignored, shows:
+#   .gitignore:15:*.log    src/debug.log
+# If not ignored, shows nothing
+
+# Force add ignored file if needed
+acode git add --force src/debug.log
+
+# Solution 3: Check staging area vs working tree
+git diff --stat
+# Shows: Unstaged changes (working tree vs index)
+
+git diff --cached --stat
+# Shows: Staged changes (index vs HEAD)
+# If empty, nothing staged for commit
+
+# Solution 4: Verify working directory is correct
+pwd
+# Shows: /path/to/repo
+
+git rev-parse --show-toplevel
+# Shows: /path/to/repo (should match pwd)
+
+# If mismatch, cd to correct directory
+cd $(git rev-parse --show-toplevel)
+
+# Solution 5: Check for whitespace-only changes
+git diff --check
+# Shows: Whitespace errors or nothing if only whitespace changed
+
+# Stage and commit with --allow-empty if intentional
+acode git commit "docs: update whitespace" --allow-empty
+
+# Solution 6: Use --allow-empty for empty commits (checkpoint commits)
+acode git commit "chore: checkpoint before refactor" --allow-empty
+```
+
+### Issue 3: Authentication Failure on Push with "Invalid Credentials"
+
+**Symptoms:**
+- `PushAsync` throws AuthenticationException: "Authentication failed"
+- Error: "remote: Invalid username or password"
+- HTTPS push fails with 401 Unauthorized
+- SSH push fails with "Permission denied (publickey)"
+- Credential helper prompts repeatedly
+- Works locally but fails in CI/CD pipeline
+
+**Root Causes:**
+1. **Expired HTTPS token** - GitHub personal access token or GitLab token expired
+2. **Token lacks permissions** - Token doesn't have push/write access to repository
+3. **SSH key not loaded** - SSH agent not running or key not added
+4. **Wrong SSH key** - Multiple SSH keys, using wrong one for this remote
+5. **Credential helper misconfigured** - git-credential-cache timeout too short
+6. **2FA enabled** - Repository requires two-factor authentication, token doesn't support it
+7. **IP whitelist** - Remote server restricts access by IP address (relevant for corporate networks)
+
+**Solutions:**
+
+```bash
+# Solution 1: Check credential helper configuration
+git config --get credential.helper
+# Shows: cache, store, manager-core, or nothing
+
+# Configure credential helper to cache for 1 hour
+git config --global credential.helper 'cache --timeout=3600'
+
+# Or store credentials permanently (less secure)
+git config --global credential.helper store
+
+# Solution 2: Clear cached credentials and re-enter
+git credential reject <<EOF
+protocol=https
+host=github.com
+EOF
+# Shows: (no output, credentials cleared)
+
+# Next push will prompt for credentials
+acode git push
+# Prompts: Username: <your-username>
+#          Password: <your-token> (NOT your GitHub password!)
+
+# Solution 3: Check HTTPS token permissions (GitHub)
+curl -H "Authorization: token YOUR_TOKEN" https://api.github.com/user/repos
+# Shows: List of repositories you have access to
+# If 401, token is invalid
+# If 403, token lacks permissions
+
+# Regenerate token with correct scopes at:
+# GitHub: Settings → Developer settings → Personal access tokens
+# Required scopes: repo (full control of private repositories)
+
+# Solution 4: SSH authentication - check SSH agent
+ssh-add -l
+# Shows: List of loaded SSH keys, or "The agent has no identities" if empty
+
+# Start SSH agent if not running
+eval "$(ssh-agent -s)"
+# Shows: Agent pid 12345
+
+# Add SSH key
+ssh-add ~/.ssh/id_ed25519
+# Shows: Identity added: /home/user/.ssh/id_ed25519
+
+# Test SSH connection
+ssh -T git@github.com
+# Expected output:
+#   Hi username! You've successfully authenticated, but GitHub does not provide shell access.
+
+# Solution 5: SSH key mismatch - specify correct key
+# Check which key remote expects
+ssh -T git@github.com -i ~/.ssh/id_rsa_github
+# Or configure in ~/.ssh/config:
+cat >> ~/.ssh/config <<EOF
+Host github.com
+  IdentityFile ~/.ssh/id_ed25519_github
+  IdentitiesOnly yes
+EOF
+
+# Solution 6: Switch from HTTPS to SSH (or vice versa)
+git remote get-url origin
+# Shows: https://github.com/user/repo.git (HTTPS)
+
+# Change to SSH
+git remote set-url origin git@github.com:user/repo.git
+
+# Or change to HTTPS
+git remote set-url origin https://github.com/user/repo.git
+```
+
+### Issue 4: Large File Push Fails with "RPC Failed" or Timeout
+
+**Symptoms:**
+- `PushAsync` throws timeout exception after 60 seconds
+- Error: "error: RPC failed; HTTP 500 curl 22 The requested URL returned error: 500"
+- Error: "fatal: the remote end hung up unexpectedly"
+- Push hangs at "Writing objects: 100%" then fails
+- Happens with commits containing large files (>50MB)
+- Works for small changes but fails for large refactors
+- Slower network connections affected more
+
+**Root Causes:**
+1. **Large file size** - Single file >50MB exceeds GitHub/GitLab limits without LFS
+2. **HTTP buffer too small** - Git's HTTP post buffer insufficient for large push
+3. **Network timeout** - Slow connection can't complete push within timeout
+4. **Server-side limits** - Remote repository has size limits per push
+5. **Compression overhead** - Many binary files slow down compression
+6. **Weak connection** - Intermittent packet loss causes retry failures
+
+**Solutions:**
+
+```bash
+# Solution 1: Increase Git HTTP buffer size
+git config --global http.postBuffer 524288000
+# Sets buffer to 500MB (default is 1MB)
+
+# Verify configuration
+git config --get http.postBuffer
+# Shows: 524288000
+
+# Solution 2: Increase push timeout in GitService
+# In .agent/config.yml:
+# git:
+#   timeoutSeconds: 300  # 5 minutes instead of default 60s
+
+# Or via environment variable
+export GIT_PUSH_TIMEOUT=300
+acode git push
+
+# Solution 3: Use Git LFS for large files
+# Install Git LFS
+git lfs install
+
+# Track large file types
+git lfs track "*.psd"
+git lfs track "*.zip"
+git lfs track "*.bin"
+
+# Add .gitattributes
+git add .gitattributes
+
+# Migrate existing large files to LFS
+git lfs migrate import --include="*.psd,*.zip" --everything
+
+# Push with LFS
+acode git push
+
+# Solution 4: Split large commits into smaller ones
+# If commit has 100 files totaling 200MB, split into multiple commits
+
+# Commit first batch
+git reset --soft HEAD~1  # Unstage last commit
+git reset HEAD~1         # Unstage files
+
+git add src/batch1/
+git commit -m "feat: part 1 of large refactor"
+acode git push
+
+# Commit second batch
+git add src/batch2/
+git commit -m "feat: part 2 of large refactor"
+acode git push
+
+# Solution 5: Use shallow push (if supported by remote)
+# Push only recent commits, not entire history
+git push --shallow origin main
+
+# Solution 6: Check network connectivity and retry
+ping -c 4 github.com
+# Shows: Packet loss percentage
+# If >5% packet loss, network is unstable
+
+# Use --verbose to see push progress
+GIT_TRACE=1 GIT_CURL_VERBOSE=1 git push origin main
+# Shows: Detailed network activity
+
+# Retry push with exponential backoff (implemented in PushRetryPolicy)
+acode git push  # Automatically retries on transient failures
+```
+
+### Issue 5: Mode Violation Error "Push Blocked by Local-Only Mode"
+
+**Symptoms:**
+- `PushAsync` throws ModeViolationException: "Push blocked by local-only mode"
+- Error: "Network operations are not permitted in LocalOnly mode"
+- Commit succeeds but push fails immediately
+- Happens in restricted environments (CI/CD, airgapped deployments)
+- No network access despite having internet connectivity
+- Mode setting doesn't match intended usage
+
+**Root Causes:**
+1. **Operating mode misconfigured** - `.agent/config.yml` set to LocalOnly when should be Burst
+2. **Security policy** - Organization enforces LocalOnly for compliance (ITAR, EAR)
+3. **Environment detection** - Auto-detection chose wrong mode based on environment variables
+4. **Stale configuration** - Config file not updated after infrastructure changes
+5. **Override not applied** - Command-line --mode flag not working
+6. **Intentional restriction** - System admin locked mode to prevent data exfiltration
+
+**Solutions:**
+
+```bash
+# Solution 1: Check current operating mode
+acode config get mode
+# Shows: LocalOnly, Burst, or Airgapped
+
+# Solution 2: Change mode to Burst (if allowed)
+acode config set mode burst
+# Shows: Operating mode set to Burst
+
+# Verify change
+acode config get mode
+# Shows: Burst
+
+# Solution 3: Check config file directly
+cat .agent/config.yml
+# Shows:
+#   operatingMode: LocalOnly
+#   allowNetworkOperations: false
+
+# Edit config file
+nano .agent/config.yml
+# Change: operatingMode: Burst
+#         allowNetworkOperations: true
+
+# Solution 4: Override mode for single operation (if supported)
+acode --mode=burst git push
+# Temporarily allows push in Burst mode
+
+# Solution 5: Check if mode is locked by policy
+acode config get modeLocked
+# Shows: true (mode cannot be changed) or false
+
+# If locked, contact system administrator
+# Policy file location: /etc/acode/policy.yml
+
+# Solution 6: Use offline workflow in LocalOnly mode
+# Work locally, then export/import changes via USB/sneakernet
+
+# Export commits as patch files
+git format-patch origin/main..HEAD
+# Shows: 0001-feat-implement-feature.patch
+#        0002-fix-bug.patch
+
+# Transfer patches to system with network access
+
+# On networked system, apply patches
+git am *.patch
+acode git push
+
+# Solution 7: Verify network is actually needed
+# Check if remote is local bare repository
+git remote get-url origin
+# If shows: /path/to/local/bare/repo.git
+# Then push doesn't require network, mode enforcement may be bug
+
+# Report issue to support with:
+acode diagnostics --include-mode-info
+```
 
 ---
 
