@@ -247,13 +247,13 @@ Task 009 Parent (Policy orchestration + Configuration)
 ## Progress Tracking
 
 ### Current Status
-- **Phase:** Not started
-- **Next Action:** Create feature branch, begin Phase 1.1
+- **Phase:** Phase 2 (Task 009b) - Routing Heuristics
+- **Next Action:** Phase 2.4 - Implement SingleModelStrategy
 
 ### Metrics
-- **Commits:** 0
-- **Tests Written:** 0
-- **Tests Passing:** 0
+- **Commits:** 8
+- **Tests Written:** 33 (AgentRole: 7, RoleDefinition: 7, IRoleRegistry: 12, RoutingRequest: 8, RoutingDecision: 6)
+- **Tests Passing:** 33/33 ✅
 
 ---
 
