@@ -1,6 +1,103 @@
 
 ---
 
+## Session: 2026-01-06 (Continuation #3) - Task 050c: Phase 2 Partial (Helper Types + Tests)
+
+### Status: ⏸️ Phase 2 Partial - Tests Written (RED), Implementation Next Session
+
+**Branch**: `feature/task-050-workspace-database-foundation`
+**Commits**: 3 commits (Phase 2a complete + Phase 2b tests)
+**Build**: GREEN (helper types compile, tests in RED state as expected)
+**Tests**: 5/5 helper tests passing, 6 discovery tests written (RED - awaiting implementation)
+
+### Completed This Session (Continuation #3)
+
+#### ✅ Phase 2a: Helper Types and Abstractions (COMPLETE)
+
+**Commit 1**: feat(task-050c): add migration discovery helper types
+- `EmbeddedResource` record - simple positional record for embedded resource name + content
+- `MigrationOptions` configuration class - directory setting for file-based migrations
+- `DuplicateMigrationVersionException` - error code ACODE-MIG-009 for duplicate detection
+- Made `MigrationException` non-sealed to allow inheritance
+- 5/5 helper tests passing
+
+**Commit 2**: feat(task-050c): add migration discovery abstractions
+- `IFileSystem` interface - GetFilesAsync, ReadAllTextAsync for file operations
+- `IEmbeddedResourceProvider` interface - GetMigrationResourcesAsync for embedded scanning
+- Build GREEN (0 errors, 0 warnings)
+
+#### ⏸️ Phase 2b: MigrationDiscovery Tests (RED - Awaiting Implementation)
+
+**Commit 3**: test(task-050c): add comprehensive MigrationDiscovery tests
+- 6 comprehensive test scenarios using NSubstitute:
+  1. `DiscoverAsync_FindsEmbeddedMigrations` - verifies embedded resource scanning
+  2. `DiscoverAsync_FindsFileBasedMigrations` - verifies file-based scanning with up/down pairing
+  3. `DiscoverAsync_OrdersByVersionNumber` - verifies sorting by version prefix
+  4. `DiscoverAsync_PairsUpAndDownScripts` - verifies HasDownScript property logic
+  5. `DiscoverAsync_ThrowsOnDuplicateVersion` - verifies duplicate detection throws exception
+  6. `DiscoverAsync_LogsWarningForMissingDownScript` - verifies warning log for migrations without down scripts
+- Tests in RED state (MigrationDiscovery class not implemented yet)
+- Converted from Moq to NSubstitute (project standard)
+
+### Phase 2 Summary
+
+**Files Created** (8 files total for Phase 2a):
+- 3 helper types (EmbeddedResource, MigrationOptions, DuplicateMigrationVersionException)
+- 2 abstractions (IFileSystem, IEmbeddedResourceProvider)
+- 2 test files (MigrationDiscoveryHelperTests, MigrationDiscoveryTests)
+- 1 modification (MigrationException - removed sealed)
+
+**Tests Created**: 11 tests total for Phase 2
+- Phase 2a: 5 tests (helper types - all passing GREEN)
+- Phase 2b: 6 tests (discovery scenarios - all in RED awaiting implementation)
+
+**Build Quality**:
+- 0 errors
+- 0 warnings
+- NSubstitute used for mocking (consistent with project standards)
+
+---
+
+### Remaining Work for Phase 2b
+
+**MigrationDiscovery Implementation** (next session):
+- Implement `MigrationDiscovery` class with constructor (IFileSystem, IEmbeddedResourceProvider, ILogger, IOptions<MigrationOptions>)
+- Implement `DiscoverAsync` method:
+  - Scan embedded resources via provider
+  - Scan file system for `*.sql` files
+  - Extract version from filename (e.g., "001_initial.sql" → "001_initial")
+  - Pair up/down scripts ("XXX_name.sql" + "XXX_name_down.sql")
+  - Calculate checksums for all discovered migrations
+  - Detect and throw on duplicate versions
+  - Order by version number
+  - Log warnings for missing down scripts
+  - Return `IReadOnlyList<MigrationFile>`
+- Make all 6 tests pass (GREEN state)
+- Commit implementation
+
+**Estimated Complexity**: Medium-High (complex pairing logic, checksum calculation, ordering)
+
+---
+
+### Token Usage (This Session - Continuation #3)
+- **Used**: ~118k tokens (59%)
+- **Remaining**: ~82k tokens (41%)
+- **Status**: Good stopping point - tests written (RED), ready for implementation in next session with fresh context
+
+---
+
+### Applied Lessons (This Session)
+
+- ✅ Strict TDD (write comprehensive tests FIRST, then implement)
+- ✅ Autonomous work (completed Phase 2a entirely + all Phase 2b tests without stopping)
+- ✅ Converted from Moq to NSubstitute (project standard adherence)
+- ✅ Commit after every logical unit (3 commits: helpers, abstractions, tests)
+- ✅ Asynchronous updates via PROGRESS_NOTES.md
+- ✅ Clean stopping point with tests in RED (classic TDD - next session will make them GREEN)
+- ✅ Token management - stopped before implementing complex logic to preserve context for next session
+
+---
+
 ## Session: 2026-01-06 (Continuation #2) - Task 050c: Migration Runner (Phase 1 COMPLETE)
 
 ### Status: ✅ Phase 1 Complete - Ready for Phase 2 Infrastructure Work
