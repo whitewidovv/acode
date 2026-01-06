@@ -19,7 +19,9 @@ This document defines the three operating modes for Acode and their security con
 
 Acode supports three operating modes that define what network access and external services the agent can use. These modes exist to give you precise control over data sovereignty and security.
 
-**Key Principle**: **All modes block external LLM API calls** (OpenAI, Anthropic, Cohere, etc.). Acode is designed for local-first AI inference.
+**Key Principle**: **All modes MUST block external LLM API calls** (OpenAI, Anthropic, Cohere, etc.). Acode is designed for local-first AI inference and MUST NOT send user code to external LLM services.
+
+> **RFC 2119 Conformance**: This document uses the keywords "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" as defined in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt) to indicate requirement levels.
 
 ### The Three Modes
 
@@ -46,7 +48,7 @@ Acode supports three operating modes that define what network access and externa
 
 ### Description
 
-LocalOnly mode ensures that **all** data stays on your local machine. No network requests are allowed except to localhost services (like your local model endpoint). This mode is ideal for working with sensitive codebases, proprietary algorithms, or when you simply want complete control over data flow.
+LocalOnly mode ensures that **all** data stays on your local machine. Network requests MUST NOT be made to any non-localhost addresses. Connections to localhost services (like your local model endpoint) MAY be allowed. This mode is ideal for working with sensitive codebases, proprietary algorithms, or when you simply want complete control over data flow.
 
 ### When to Use
 
@@ -143,7 +145,7 @@ Burst mode permits connecting to:
 
 ### Blocked Endpoints
 
-Even in Burst mode, these endpoints are **always blocked**:
+Even in Burst mode, these endpoints MUST be blocked at all times:
 
 - `api.openai.com`
 - `api.anthropic.com`
@@ -299,27 +301,27 @@ Continue? [y/N]: _
    - Violations are logged to audit log
 
 2. **Endpoint Blocklist**
-   - External LLM API endpoints are hard-coded and blocked
-   - Blocklist cannot be disabled or overridden
+   - External LLM API endpoints are hard-coded and MUST be blocked
+   - Blocklist MUST NOT be disabled or overridden by users
    - Applies to all modes equally
 
 3. **Pre-execution Validation**
-   - Every operation is validated against current mode before execution
+   - Every operation MUST be validated against current mode before execution
    - Invalid operations raise `ModeViolationAttempted` event
-   - Operation is aborted with clear error message
+   - Operation MUST be aborted with clear error message
 
 4. **Audit Logging**
-   - All operations logged with mode context
-   - Attempted violations logged separately
-   - Audit log cannot be disabled in production
+   - All operations SHOULD be logged with mode context
+   - Attempted violations MUST be logged separately
+   - Audit log MUST NOT be disabled in production builds
 
 ### Violation Handling
 
 When a mode violation is attempted:
 
-1. **Operation is blocked** immediately
-2. **Event is logged** to audit log with full context
-3. **Error is returned** to user with explanation
+1. **Operation MUST be blocked** immediately
+2. **Event MUST be logged** to audit log with full context
+3. **Error MUST be returned** to user with explanation and remediation guidance
 4. **Suggestion is provided** (e.g., "Use --mode Burst to allow network access")
 
 Example:
@@ -337,6 +339,129 @@ To allow this operation:
 Or update your .agent/config.yml:
   mode: "Burst"
 ```
+
+## Security Considerations
+
+Operating modes form the foundation of Acode's security model. Understanding the security implications of each mode is critical for protecting your code, credentials, and infrastructure.
+
+### Threat Model by Mode
+
+#### LocalOnly Mode Threats
+
+**Threat 1: Local model data exfiltration**
+- **Risk**: Malicious local model could attempt to exfiltrate code via network
+- **Mitigation**: Network sandbox blocks all outbound connections (enforced at runtime)
+
+**Threat 2: Model poisoning**
+- **Risk**: Compromised model weights could generate malicious code
+- **Mitigation**: User reviews all code changes before execution; audit logging enabled by default
+
+**Threat 3: Filesystem boundary violation**
+- **Risk**: Model attempts to access sensitive paths (`.git/`, `.env`, SSH keys)
+- **Mitigation**: Default denylist blocks access to sensitive paths; violations logged and blocked
+
+#### Burst Mode Threats
+
+**Threat 1: Cloud compute compromise**
+- **Risk**: Compromised cloud instance could persist malicious access
+- **Mitigation**: Ephemeral compute instances destroyed after use; no persistent credentials stored on remote instances
+
+**Threat 2: Network eavesdropping during transfer**
+- **Risk**: Code transferred to cloud compute could be intercepted
+- **Mitigation**: All transfers use TLS 1.3+; mutual TLS available for high-security environments
+
+**Threat 3: External API data leakage**
+- **Risk**: External API calls could leak sensitive code or credentials
+- **Mitigation**: Blocked endpoints list prevents access to external LLM APIs (OpenAI, Anthropic, etc.); user can extend blocklist
+
+#### Airgapped Mode Threats
+
+**Threat 1: Physical access to model or data**
+- **Risk**: Attacker with physical access could extract code from model memory
+- **Mitigation**: User responsibility - use full-disk encryption; Acode does not store plaintext code on disk beyond session
+
+**Threat 2: Side-channel attacks**
+- **Risk**: Timing attacks, power analysis could leak sensitive information
+- **Mitigation**: Out of scope for Acode; addressed by OS-level and hardware-level protections
+
+### Security Boundaries
+
+Each mode enforces strict security boundaries:
+
+| Boundary | LocalOnly | Burst | Airgapped |
+|----------|-----------|-------|-----------|
+| Network access | BLOCKED | ALLOWED (user-controlled) | BLOCKED (verified) |
+| External LLM APIs | BLOCKED | BLOCKED | BLOCKED |
+| Filesystem access | RESTRICTED (denylist) | RESTRICTED (denylist) | RESTRICTED (denylist) |
+| Process execution | SANDBOXED | SANDBOXED | SANDBOXED |
+| Cloud compute | BLOCKED | ALLOWED | BLOCKED |
+
+### Security Best Practices
+
+1. **Start with LocalOnly**: Use the most restrictive mode by default. Only escalate to Burst when necessary.
+
+2. **Review denylist configuration**: Audit `.agent/config.yml` to ensure sensitive paths are protected:
+   ```yaml
+   safety:
+     denylist_paths:
+       - ".env"
+       - ".git/"
+       - "~/.ssh/"
+       - "~/.aws/"
+   ```
+
+3. **Enable audit logging**: Ensure all operations are logged for security review:
+   ```yaml
+   audit:
+     enabled: true
+     log_path: ".acode/audit.log"
+   ```
+
+4. **Validate cloud compute configuration**: In Burst mode, verify cloud credentials have minimal permissions:
+   - Use instance profiles (not long-lived credentials)
+   - Limit permissions to compute-only (no S3, DynamoDB, etc.)
+   - Enable CloudTrail/equivalent audit logging
+
+5. **Never commit credentials**: Acode's denylist blocks credential files by default, but always verify:
+   ```bash
+   git status  # Check for .env, credentials.json, etc.
+   ```
+
+6. **Use mode-specific profiles**: Create separate configuration profiles for different security contexts:
+   ```bash
+   acode --profile local-dev    # Uses LocalOnly
+   acode --profile cloud-ci     # Uses Burst with strict controls
+   ```
+
+### Security Guarantees
+
+**What Acode MUST Provide**:
+- ✅ External LLM API calls (OpenAI, Anthropic, etc.) MUST be blocked in all modes
+- ✅ Sensitive paths (`.git/`, `.env`, SSH keys) MUST be blocked by default
+- ✅ All security-relevant operations MUST be audited when audit logging is enabled
+- ✅ Network access MUST be enforceable via operating mode constraints
+
+**What Acode Is NOT Required to Provide**:
+- ❌ Protection against compromised local models (user MUST trust model source)
+- ❌ Protection against physical access attacks (users SHOULD use OS-level encryption)
+- ❌ Protection against malicious code that users explicitly approve for execution
+
+### Compliance Considerations
+
+- **GDPR/Data Privacy**: LocalOnly and Airgapped modes ensure code never leaves your infrastructure
+- **HIPAA/PHI**: Airgapped mode suitable for environments with PHI (consult compliance team)
+- **SOC 2**: Audit logging provides evidence for security controls
+- **ISO 27001**: Operating mode constraints align with access control requirements
+
+### Incident Response
+
+If you suspect a security issue:
+
+1. **Stop Acode immediately**: `Ctrl+C` or `kill` the process
+2. **Review audit logs**: Check `.acode/audit.log` for suspicious activity
+3. **Check git history**: `git log --all --oneline` for unexpected commits
+4. **Verify no credential leaks**: `git log -p | grep -i "password\|secret\|key"`
+5. **Report to maintainers**: File a security issue (see SECURITY.md)
 
 ## FAQ
 
