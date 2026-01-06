@@ -54,6 +54,42 @@ This task covers status, diff, and log operations only. Branch operations are in
 
 ---
 
+## Use Cases
+
+### Use Case 1: DevBot Pre-Commit Status Check
+
+**Persona:** DevBot modifies 8 files while implementing a feature. Before committing, it needs to verify all expected changes are staged and no unintended files were modified.
+
+**Before (manual):** Developer runs `git status`, manually reviews 8 files listed, visually confirms each is expected (2 minutes).
+
+**After (automated):** DevBot calls `GetStatusAsync()`, receives structured `GitStatus` with 8 `StagedFiles`. Programmatically verifies each file path matches expected list (200ms).
+
+**ROI:** Automated verification prevents accidental commits. Saves 2 min/commit × 20 commits/day × 250 days/year = 10,000 minutes/year = 167 hours × $100/hour = **$16,700/year per developer**.
+
+### Use Case 2: Jordan Diff Review Before Deployment
+
+**Persona:** Jordan needs to review all code changes between current release (v1.2.0) and release candidate (v1.3.0-rc1) before production deployment.
+
+**Before (manual):** Jordan runs `git diff v1.2.0 v1.3.0-rc1`, manually scrolls through 5,000-line diff output, visually inspects for suspicious changes (45 minutes per release).
+
+**After (automated):** Agent calls `GetDiffAsync(diffOptions)`, receives diff as string. Automatically scans for security patterns (hardcoded credentials, backdoors), highlights risky changes for human review (5 minutes automated + 10 minutes human review).
+
+**ROI:** Automated diff scanning reduces review time by 67% (45 min → 15 min). 12 releases/year × 30 min saved = 360 min = 6 hours × $120/hour = **$720/year per release engineer**.
+
+### Use Case 3: Alex Automated Release Notes from Git Log
+
+**Persona:** Alex generates release notes every sprint by reviewing commit history and categorizing changes (features, fixes, breaking changes).
+
+**Before (manual):** Alex runs `git log --since="2 weeks ago"`, copies 50 commits to spreadsheet, manually categorizes each commit by reading message and diff (2 hours per sprint).
+
+**After (automated):** Agent calls `GetLogAsync(logOptions)`, receives structured `GitCommit[]`. Automatically categorizes commits using conventional commit format (feat:, fix:, BREAKING:), generates markdown release notes (5 minutes automated).
+
+**ROI:** Automated release notes save 115 minutes/sprint. 26 sprints/year × 115 min = 2,990 min = 50 hours × $120/hour = **$6,000/year per product manager**.
+
+**Combined ROI:** $16,700 (DevBot) + $720 (Jordan) + $6,000 (Alex) = **$23,420/year per engineering team**.
+
+---
+
 ## Glossary / Terms
 
 | Term | Definition |
