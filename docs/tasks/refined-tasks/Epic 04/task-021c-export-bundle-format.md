@@ -262,6 +262,36 @@ This task covers:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **ZIP format universality** - All target platforms support ZIP extraction (Windows, Linux, macOS)
+2. **SHA-256 sufficiency** - SHA-256 provides adequate integrity verification for bundles
+3. **JSON compatibility** - All platforms can parse JSON manifest files
+4. **UTF-8 encoding** - All text artifacts use UTF-8 encoding
+5. **File system compatibility** - Target systems support long file paths (>260 chars on Windows with long path support enabled)
+6. **SQLite portability** - If including database, SQLite files are cross-platform compatible
+7. **Git available** - Provenance extraction assumes git command is available
+8. **Disk space available** - Export destination has sufficient space (2x bundle size for temp operations)
+9. **Memory sufficient** - System has enough RAM to buffer artifacts during compression (recommended 4GB+)
+10. **Clock synchronization** - System clocks are reasonably synchronized for timestamp accuracy
+
+### Operational Assumptions
+
+11. **Bundle sizes reasonable** - Most bundles <100MB, largest <10GB (not designed for multi-TB exports)
+12. **Infrequent exports** - Export operations are occasional (daily/weekly), not continuous streaming
+13. **Single user exports** - Concurrent exports from same workspace are rare
+14. **Import trust** - Users import bundles from trusted sources (no automatic signature verification by default)
+15. **Storage durability** - Bundle storage (S3, filesystem) provides durability guarantees
+16. **Redaction completeness** - Redaction patterns catch most secrets, but manual review recommended for sensitive exports
+17. **Network available for upload** - If using `--upload`, network connectivity is stable
+18. **Workspace writable** - Import destination workspace has write permissions
+19. **No schema changes mid-export** - Database schema doesn't change during export process
+20. **Retention policy respected** - Old bundles are managed by external retention policies, not automatic cleanup
+
+---
+
 ## Functional Requirements
 
 ### FR-001 to FR-020: Bundle Format Structure
