@@ -519,6 +519,588 @@ git push  # Enter credentials once
 
 ---
 
+## Security Considerations
+
+### Threat 1: Credential Exposure in Logs and Error Messages
+
+**Risk:** Git URLs often contain embedded credentials (e.g., `https://user:password@github.com/repo.git`). If these URLs appear in logs, error messages, or exception stack traces, credentials are exposed to anyone with log access.
+
+**Attack Scenario:**
+1. Developer configures remote with embedded credentials: `git remote add origin https://token:ghp_abc123@github.com/repo.git`
+2. Push operation fails due to network error
+3. GitService logs error message including full URL with token
+4. Attacker with log access (e.g., compromised log aggregator, insider threat) extracts token
+5. Attacker uses token to access private repository and steal source code
+
+**Mitigation:**
+
+```csharp
+// CredentialRedactor.cs - Complete implementation
+namespace Acode.Infrastructure.Git;
+
+public sealed class CredentialRedactor : ICredentialRedactor
+{
+    // Regex patterns for detecting credentials in various formats
+    private static readonly Regex UrlWithEmbeddedCredentials = new(
+        @"(https?://)([^:]+):([^@]+)@",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex SshUrlWithPassword = new(
+        @"(ssh://[^:]+):([^@]+)@",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex GitCredentialLine = new(
+        @"(password|token|secret|key|credential|auth|bearer|api_key|apikey)\s*[:=]\s*\S+",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly string[] SensitiveEnvironmentVariables =
+    {
+        "GIT_ASKPASS", "GIT_PASSWORD", "GIT_TOKEN", "GITHUB_TOKEN",
+        "GITLAB_TOKEN", "GIT_CREDENTIALS"
+    };
+
+    public string Redact(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return input;
+
+        // Step 1: Redact URLs with embedded credentials
+        var result = UrlWithEmbeddedCredentials.Replace(input, "$1[REDACTED]@");
+        result = SshUrlWithPassword.Replace(result, "$1[REDACTED]@");
+
+        // Step 2: Redact lines containing credential keywords
+        var lines = result.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (GitCredentialLine.IsMatch(lines[i]))
+            {
+                var match = GitCredentialLine.Match(lines[i]);
+                var keyPart = match.Value[..match.Value.IndexOfAny(new[] { ':', '=' }) + 1];
+                lines[i] = GitCredentialLine.Replace(lines[i], $"{keyPart}[REDACTED]");
+            }
+        }
+
+        // Step 3: Redact sensitive environment variables
+        result = string.Join('\n', lines);
+        foreach (var envVar in SensitiveEnvironmentVariables)
+        {
+            var pattern = $@"{envVar}\s*=\s*\S+";
+            result = Regex.Replace(result, pattern, $"{envVar}=[REDACTED]", RegexOptions.IgnoreCase);
+        }
+
+        return result;
+    }
+
+    public string RedactUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return url;
+
+        return UrlWithEmbeddedCredentials.Replace(url, "$1[REDACTED]@");
+    }
+}
+
+// Usage in GitService.cs
+private GitException MapToException(CommandResult result, string workingDir)
+{
+    var stderr = result.StdErr ?? "";
+    var redactedStderr = _redactor.Redact(stderr);
+    var redactedWorkingDir = workingDir; // Path is safe
+
+    _logger.LogError(
+        "Git command failed: Exit={ExitCode}, StdErr={StdErr}, WorkingDir={WorkingDir}",
+        result.ExitCode,
+        redactedStderr, // Always redacted
+        redactedWorkingDir);
+
+    return result.ExitCode switch
+    {
+        128 when stderr.Contains("not a git repository") =>
+            new NotARepositoryException(workingDir),
+        // ... other exception mappings with redacted stderr
+        _ => new GitException($"Git command failed: {redactedStderr}",
+            result.ExitCode, redactedStderr, workingDir, "GIT_000")
+    };
+}
+```
+
+---
+
+### Threat 2: Command Injection via Unsanitized Paths
+
+**Risk:** If file paths or branch names from user input are passed to git commands without proper escaping, an attacker can inject shell commands that execute with Acode's privileges.
+
+**Attack Scenario:**
+1. Attacker crafts malicious branch name: `feature/test; rm -rf /tmp/important; #`
+2. Agent calls `IGitService.CheckoutAsync(repoPath, maliciousBranchName)`
+3. GitService constructs command: `git checkout feature/test; rm -rf /tmp/important; #`
+4. Command execution layer executes as shell command (if not properly escaped)
+5. Malicious `rm` command executes, deleting critical files
+
+**Mitigation:**
+
+```csharp
+// PathSanitizer.cs - Complete implementation
+namespace Acode.Infrastructure.Git;
+
+public sealed class PathSanitizer : IPathSanitizer
+{
+    private static readonly char[] ShellMetacharacters =
+    {
+        ';', '&', '|', '<', '>', '`', '$', '(', ')', '{', '}', '[', ']',
+        '\\', '"', '\'', '\n', '\r', '\t'
+    };
+
+    private static readonly Regex BranchNamePattern = new(
+        @"^[a-zA-Z0-9/_\-\.]+$",
+        RegexOptions.Compiled);
+
+    private static readonly Regex PathTraversalPattern = new(
+        @"\.\./|\.\.\\",
+        RegexOptions.Compiled);
+
+    public string SanitizeBranchName(string branchName)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+            throw new ArgumentException("Branch name cannot be empty", nameof(branchName));
+
+        // Check for shell metacharacters
+        if (branchName.IndexOfAny(ShellMetacharacters) >= 0)
+            throw new GitException(
+                $"Branch name contains invalid characters: {branchName}",
+                0, null, null, "GIT_INVALID_INPUT");
+
+        // Validate against allowed pattern
+        if (!BranchNamePattern.IsMatch(branchName))
+            throw new GitException(
+                $"Branch name format invalid: {branchName}. Use only alphanumeric, /, -, _, .",
+                0, null, null, "GIT_INVALID_INPUT");
+
+        // Check for path traversal
+        if (PathTraversalPattern.IsMatch(branchName))
+            throw new GitException(
+                $"Branch name contains path traversal: {branchName}",
+                0, null, null, "GIT_INVALID_INPUT");
+
+        return branchName;
+    }
+
+    public string SanitizePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Path cannot be empty", nameof(path));
+
+        // Normalize path separators
+        var normalized = path.Replace('\\', '/');
+
+        // Check for path traversal
+        if (PathTraversalPattern.IsMatch(normalized))
+            throw new GitException(
+                $"Path contains traversal sequences: {path}",
+                0, null, null, "GIT_INVALID_INPUT");
+
+        // Check for absolute paths outside repository
+        if (Path.IsPathRooted(path) && !path.StartsWith("/repo/", StringComparison.Ordinal))
+        {
+            throw new GitException(
+                $"Absolute path not allowed: {path}",
+                0, null, null, "GIT_INVALID_INPUT");
+        }
+
+        // Shell metacharacter check (especially for file operations)
+        if (path.IndexOfAny(ShellMetacharacters) >= 0)
+        {
+            // Log warning but allow (git handles quoting)
+            // Command execution layer will properly escape
+        }
+
+        return normalized;
+    }
+}
+
+// Usage in GitService.cs
+public async Task CheckoutAsync(string workingDir, string branchOrCommit, CancellationToken ct = default)
+{
+    // Sanitize inputs before constructing command
+    var sanitizedBranch = _sanitizer.SanitizeBranchName(branchOrCommit);
+    var sanitizedWorkingDir = _sanitizer.SanitizePath(workingDir);
+
+    await EnsureRepositoryAsync(sanitizedWorkingDir, ct);
+
+    // Command execution layer will properly quote arguments
+    var args = new[] { "checkout", sanitizedBranch };
+    await ExecuteGitAsync(sanitizedWorkingDir, args, ct);
+
+    _logger.LogInformation("Checked out {Branch} in {Dir}", sanitizedBranch, sanitizedWorkingDir);
+}
+```
+
+---
+
+### Threat 3: Repository Escape via Relative Paths
+
+**Risk:** If working directory parameter is not validated, an attacker can use relative paths (e.g., `../../../../etc`) to execute git commands outside the intended repository, potentially accessing sensitive system files.
+
+**Attack Scenario:**
+1. Attacker provides malicious working directory: `../../../../etc`
+2. Agent calls `IGitService.GetStatusAsync(maliciousPath)`
+3. GitService executes `git -C ../../../../etc status`
+4. Git attempts to access /etc/.git/ (doesn't exist, but info leak if it did)
+5. Error messages reveal filesystem structure and permissions
+
+**Mitigation:**
+
+```csharp
+// RepositoryValidator.cs - Complete implementation
+namespace Acode.Infrastructure.Git;
+
+public sealed class RepositoryValidator : IRepositoryValidator
+{
+    private readonly ICommandExecutor _executor;
+    private readonly ILogger<RepositoryValidator> _logger;
+
+    // Cache validated repositories to avoid repeated checks
+    private readonly ConcurrentDictionary<string, (bool IsValid, DateTime ValidatedAt)> _cache = new();
+    private static readonly TimeSpan CacheExpiration = TimeSpan.FromMinutes(5);
+
+    public async Task<string> ValidateAndNormalizeAsync(string workingDir, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workingDir))
+            throw new ArgumentException("Working directory cannot be empty", nameof(workingDir));
+
+        // Step 1: Resolve to absolute path
+        var absolutePath = Path.GetFullPath(workingDir);
+
+        // Step 2: Check cache
+        if (_cache.TryGetValue(absolutePath, out var cached) &&
+            DateTime.UtcNow - cached.ValidatedAt < CacheExpiration &&
+            cached.IsValid)
+        {
+            return absolutePath;
+        }
+
+        // Step 3: Verify directory exists
+        if (!Directory.Exists(absolutePath))
+            throw new NotARepositoryException(absolutePath);
+
+        // Step 4: Verify it's a git repository (use rev-parse --git-dir)
+        try
+        {
+            var command = new CommandSpec
+            {
+                Executable = "git",
+                Arguments = new[] { "-C", absolutePath, "rev-parse", "--git-dir" },
+                Timeout = TimeSpan.FromSeconds(5),
+                RedactSecrets = false
+            };
+
+            var result = await _executor.ExecuteAsync(command, ct);
+
+            if (result.ExitCode != 0)
+            {
+                _logger.LogWarning(
+                    "Not a git repository: {Path}, Exit={Exit}, StdErr={StdErr}",
+                    absolutePath, result.ExitCode, result.StdErr);
+                throw new NotARepositoryException(absolutePath);
+            }
+
+            // Step 5: Verify git-dir is within working directory (prevent escape)
+            var gitDir = result.StdOut.Trim();
+            var gitDirAbsolute = Path.IsPathRooted(gitDir)
+                ? gitDir
+                : Path.GetFullPath(Path.Combine(absolutePath, gitDir));
+
+            if (!gitDirAbsolute.StartsWith(absolutePath, StringComparison.Ordinal) &&
+                !gitDirAbsolute.StartsWith(Path.Combine(absolutePath, ".git"), StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Git directory outside working directory: WorkingDir={WorkingDir}, GitDir={GitDir}",
+                    absolutePath, gitDirAbsolute);
+                throw new GitException(
+                    $"Git directory outside repository bounds: {gitDirAbsolute}",
+                    0, null, absolutePath, "GIT_SECURITY_VIOLATION");
+            }
+
+            // Step 6: Cache successful validation
+            _cache[absolutePath] = (true, DateTime.UtcNow);
+
+            return absolutePath;
+        }
+        catch (CommandExecutionException ex)
+        {
+            _logger.LogError(ex, "Failed to validate repository: {Path}", absolutePath);
+            throw new NotARepositoryException(absolutePath);
+        }
+    }
+
+    public void InvalidateCache(string workingDir)
+    {
+        var absolutePath = Path.GetFullPath(workingDir);
+        _cache.TryRemove(absolutePath, out _);
+    }
+}
+
+// Usage in GitService.cs - Always validate first
+private async Task EnsureRepositoryAsync(string workingDir, CancellationToken ct)
+{
+    var validatedPath = await _validator.ValidateAndNormalizeAsync(workingDir, ct);
+    // All subsequent operations use validatedPath
+}
+```
+
+---
+
+### Threat 4: Sensitive Data Exposure via Unredacted Diff Output
+
+**Risk:** Git diff output may contain sensitive data (API keys, passwords, tokens) that was accidentally committed. If diff output is logged or displayed without redaction, these secrets are exposed.
+
+**Attack Scenario:**
+1. Developer accidentally commits file containing `API_KEY=sk_live_abc123`
+2. Agent calls `IGitService.GetDiffAsync()` to review changes
+3. Diff output includes full API key in plain text
+4. Diff output is logged to artifact collection (Task 021)
+5. Attacker with artifact access extracts API key from logs
+6. Attacker uses key to access production API
+
+**Mitigation:**
+
+```csharp
+// DiffRedactor.cs - Complete implementation
+namespace Acode.Infrastructure.Git;
+
+public sealed class DiffRedactor : IDiffRedactor
+{
+    private static readonly Regex[] SensitivePatterns =
+    {
+        // API keys (various formats)
+        new Regex(@"(?i)api[_-]?key\s*[:=]\s*['\""]*([a-z0-9_\-]{20,})['\""]*", RegexOptions.Compiled),
+        new Regex(@"(?i)(sk|pk)_live_[a-zA-Z0-9]{24,}", RegexOptions.Compiled),
+
+        // Passwords
+        new Regex(@"(?i)password\s*[:=]\s*['\""]*([^\s'""]+)['\""]*", RegexOptions.Compiled),
+
+        // Tokens (GitHub, GitLab, etc.)
+        new Regex(@"(?i)(ghp|gho|ghu|ghs|ghr|glpat)_[a-zA-Z0-9]{36,}", RegexOptions.Compiled),
+
+        // AWS credentials
+        new Regex(@"AKIA[0-9A-Z]{16}", RegexOptions.Compiled),
+        new Regex(@"(?i)aws_secret_access_key\s*[:=]\s*['\""]*([a-zA-Z0-9/+]{40})['\""]*", RegexOptions.Compiled),
+
+        // Private keys (PEM format)
+        new Regex(@"-----BEGIN (RSA |DSA |EC )?PRIVATE KEY-----[^-]+-----END (RSA |DSA |EC )?PRIVATE KEY-----",
+            RegexOptions.Compiled | RegexOptions.Singleline),
+
+        // Connection strings
+        new Regex(@"(?i)(Server|Host|Data Source)\s*=\s*[^;]+;\s*(User Id|UID)\s*=\s*[^;]+;\s*Password\s*=\s*[^;]+",
+            RegexOptions.Compiled),
+
+        // JWT tokens
+        new Regex(@"eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*", RegexOptions.Compiled),
+
+        // Generic secrets (base64-looking strings >20 chars after "secret")
+        new Regex(@"(?i)secret\s*[:=]\s*['\""]*([a-zA-Z0-9+/]{20,}={0,2})['\""]*", RegexOptions.Compiled)
+    };
+
+    private readonly ILogger<DiffRedactor> _logger;
+
+    public string RedactDiff(string diffOutput)
+    {
+        if (string.IsNullOrEmpty(diffOutput))
+            return diffOutput;
+
+        var redactedCount = 0;
+        var result = diffOutput;
+
+        foreach (var pattern in SensitivePatterns)
+        {
+            var matches = pattern.Matches(result);
+            if (matches.Count > 0)
+            {
+                redactedCount += matches.Count;
+                result = pattern.Replace(result, match =>
+                {
+                    // Keep pattern prefix, redact value
+                    var prefix = match.Value[..Math.Min(match.Value.IndexOf('=') + 1, 20)];
+                    return $"{prefix}[REDACTED]";
+                });
+            }
+        }
+
+        if (redactedCount > 0)
+        {
+            _logger.LogWarning(
+                "Redacted {Count} sensitive patterns from diff output",
+                redactedCount);
+        }
+
+        return result;
+    }
+
+    public bool ContainsSensitiveData(string content)
+    {
+        return SensitivePatterns.Any(pattern => pattern.IsMatch(content));
+    }
+}
+
+// Usage in GitService.cs
+public async Task<string> GetDiffAsync(string workingDir, DiffOptions options, CancellationToken ct = default)
+{
+    await EnsureRepositoryAsync(workingDir, ct);
+
+    var args = new List<string> { "diff" };
+    // ... build diff args ...
+
+    var result = await ExecuteGitAsync(workingDir, args, ct);
+
+    // ALWAYS redact diff output before returning
+    var redactedDiff = _diffRedactor.RedactDiff(result.StdOut);
+
+    return redactedDiff;
+}
+```
+
+---
+
+### Threat 5: Mode Bypass via Configuration Tampering
+
+**Risk:** If git configuration file (.agent/config.yml) is writable by untrusted processes, an attacker can modify operating mode settings to bypass network operation restrictions.
+
+**Attack Scenario:**
+1. System is configured in local-only mode (no network operations allowed)
+2. Attacker gains write access to .agent/config.yml (e.g., via misconfigured permissions)
+3. Attacker modifies: `operatingMode: burst` in config file
+4. Agent reloads configuration and switches to burst mode
+5. Attacker calls `IGitService.PushAsync()` to exfiltrate code to external repository
+6. Source code leaked to attacker-controlled remote
+
+**Mitigation:**
+
+```csharp
+// ModeEnforcementService.cs - Complete implementation
+namespace Acode.Infrastructure.Git;
+
+public sealed class ModeEnforcementService : IModeEnforcementService
+{
+    private readonly IModeResolver _modeResolver;
+    private readonly IConfigurationValidator _configValidator;
+    private readonly ILogger<ModeEnforcementService> _logger;
+
+    // Cached mode to detect unauthorized changes
+    private OperatingMode? _lastValidatedMode;
+    private DateTime _lastValidationTime;
+    private static readonly TimeSpan ValidationExpiration = TimeSpan.FromMinutes(1);
+
+    public async Task<OperatingMode> GetAndValidateModeAsync(CancellationToken ct = default)
+    {
+        // Step 1: Get current mode from resolver
+        var currentMode = await _modeResolver.GetCurrentModeAsync(ct);
+
+        // Step 2: Validate configuration file integrity
+        var configPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".agent", "config.yml");
+        if (File.Exists(configPath))
+        {
+            var configHash = await ComputeFileHashAsync(configPath, ct);
+            var (isValid, reason) = await _configValidator.ValidateIntegrityAsync(configPath, configHash, ct);
+
+            if (!isValid)
+            {
+                _logger.LogCritical(
+                    "Configuration file integrity check failed: {Reason}. Falling back to most restrictive mode (LocalOnly).",
+                    reason);
+
+                // Fallback to most restrictive mode
+                return OperatingMode.LocalOnly;
+            }
+        }
+
+        // Step 3: Detect suspicious mode transitions
+        if (_lastValidatedMode.HasValue &&
+            DateTime.UtcNow - _lastValidationTime < ValidationExpiration &&
+            _lastValidatedMode.Value != currentMode)
+        {
+            _logger.LogWarning(
+                "Operating mode changed unexpectedly: {OldMode} -> {NewMode}. Validating transition...",
+                _lastValidatedMode.Value, currentMode);
+
+            // Audit log the transition
+            await LogModeTransitionAsync(_lastValidatedMode.Value, currentMode, ct);
+        }
+
+        // Step 4: Update cache
+        _lastValidatedMode = currentMode;
+        _lastValidationTime = DateTime.UtcNow;
+
+        return currentMode;
+    }
+
+    public async Task ValidateNetworkOperationAsync(string operationName, CancellationToken ct = default)
+    {
+        var mode = await GetAndValidateModeAsync(ct);
+
+        if (mode is OperatingMode.LocalOnly or OperatingMode.Airgapped)
+        {
+            _logger.LogCritical(
+                "Security violation: Network operation '{Operation}' blocked in {Mode} mode",
+                operationName, mode);
+
+            // Audit log security event
+            await LogSecurityViolationAsync(operationName, mode, ct);
+
+            throw new ModeViolationException(mode.ToString(), operationName);
+        }
+
+        _logger.LogInformation(
+            "Network operation '{Operation}' permitted in {Mode} mode",
+            operationName, mode);
+    }
+
+    private async Task<string> ComputeFileHashAsync(string path, CancellationToken ct)
+    {
+        using var sha256 = SHA256.Create();
+        await using var stream = File.OpenRead(path);
+        var hash = await sha256.ComputeHashAsync(stream, ct);
+        return Convert.ToHexString(hash);
+    }
+
+    private async Task LogModeTransitionAsync(OperatingMode oldMode, OperatingMode newMode, CancellationToken ct)
+    {
+        // Log to audit trail (Task 011 workspace DB)
+        _logger.LogInformation(
+            "Mode transition: {OldMode} -> {NewMode}, Timestamp={Timestamp}",
+            oldMode, newMode, DateTime.UtcNow);
+    }
+
+    private async Task LogSecurityViolationAsync(string operation, OperatingMode mode, CancellationToken ct)
+    {
+        // Log to security audit trail
+        _logger.LogCritical(
+            "SECURITY VIOLATION: Operation={Operation}, Mode={Mode}, Timestamp={Timestamp}, User={User}",
+            operation, mode, DateTime.UtcNow, Environment.UserName);
+    }
+}
+
+// Usage in GitService.cs - ALWAYS check mode before network operations
+public async Task PushAsync(string workingDir, PushOptions options, CancellationToken ct = default)
+{
+    // MANDATORY mode enforcement before any network operation
+    await _modeEnforcement.ValidateNetworkOperationAsync("push", ct);
+
+    await EnsureRepositoryAsync(workingDir, ct);
+
+    // ... proceed with push operation ...
+}
+
+public async Task FetchAsync(string workingDir, FetchOptions? options = null, CancellationToken ct = default)
+{
+    // MANDATORY mode enforcement
+    await _modeEnforcement.ValidateNetworkOperationAsync("fetch", ct);
+
+    // ... proceed with fetch operation ...
+}
+```
+
+---
+
 ## Acceptance Criteria / Definition of Done
 
 ### Functionality
