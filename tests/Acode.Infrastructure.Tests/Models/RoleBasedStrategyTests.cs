@@ -269,4 +269,63 @@ public class RoleBasedStrategyTests
         act.Should().Throw<ArgumentNullException>()
             .WithParameterName("request");
     }
+
+    [Fact]
+    public void GetModel_WithUserOverride_ReturnsOverrideModel()
+    {
+        // Arrange
+        var config = new RoutingConfig
+        {
+            Strategy = "role-based",
+            DefaultModel = "llama3.2:7b",
+            RoleModels = new Dictionary<string, string>
+            {
+                ["planner"] = "llama3.2:70b",
+                ["coder"] = "qwen2.5:14b",
+            },
+        };
+        var strategy = new RoleBasedStrategy(_logger, config);
+        var request = new RoutingRequest
+        {
+            Role = AgentRole.Planner,
+            UserOverride = "mistral:7b",
+        };
+
+        // Act
+        var decision = strategy.GetModel(request);
+
+        // Assert
+        decision.ModelId.Should().Be("mistral:7b");
+        decision.IsFallback.Should().BeFalse();
+        decision.Reason.Should().Contain("user override");
+        decision.Reason.Should().Contain("mistral:7b");
+    }
+
+    [Fact]
+    public void GetModel_WithUserOverride_BypassesRoleMapping()
+    {
+        // Arrange
+        var config = new RoutingConfig
+        {
+            Strategy = "role-based",
+            DefaultModel = "llama3.2:7b",
+            RoleModels = new Dictionary<string, string>
+            {
+                ["planner"] = "llama3.2:70b",
+            },
+        };
+        var strategy = new RoleBasedStrategy(_logger, config);
+        var request = new RoutingRequest
+        {
+            Role = AgentRole.Planner,
+            UserOverride = "qwen2.5:32b",
+        };
+
+        // Act
+        var decision = strategy.GetModel(request);
+
+        // Assert - Should use override, not role-based mapping
+        decision.ModelId.Should().Be("qwen2.5:32b");
+        decision.ModelId.Should().NotBe("llama3.2:70b");
+    }
 }
