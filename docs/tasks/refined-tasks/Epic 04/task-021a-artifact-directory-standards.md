@@ -1533,47 +1533,462 @@ acode artifact cat test-legitimate test.txt
 
 ## Troubleshooting
 
-### Issue: Artifacts not being collected
+### Issue 1: Artifacts Not Being Collected Despite Enabled Configuration
 
-**Symptoms:** Run completes but artifacts directory is empty
-
-**Causes:**
-- Artifact collection disabled in config
-- Output files written to unexpected locations
-- File patterns don't match actual outputs
-
-**Solutions:**
-1. Check `runs.artifacts.enabled` in config
-2. Verify output paths in build/test commands
-3. Update artifact patterns to match actual outputs
-
-### Issue: Artifact directory growing too large
-
-**Symptoms:** Disk space warnings, slow file operations
+**Symptoms:**
+- Run completes successfully but `.acode/artifacts/{run-id}/` directory is empty
+- `acode run show <run-id>` reports 0 artifacts collected
+- Expected files (stdout.txt, stderr.txt, build outputs) missing
+- Logs show "Artifact collection skipped" warnings
+- Run metadata shows `artifacts_collected: []`
 
 **Causes:**
-- No retention policy configured
-- Large artifacts (videos, binaries) being collected
-- Many runs accumulating over time
+1. Artifact collection patterns don't match actual output file paths
+2. Output files written to unexpected locations outside workspace
+3. File collection happens before outputs are fully written (timing issue)
+4. Insufficient permissions to read source files for collection
+5. Artifact collector crashed silently during collection phase
+6. `.acodeignore` patterns accidentally excluding artifacts
+7. File size exceeds configured `max-artifact-size-mb` threshold
 
 **Solutions:**
-1. Configure retention policy to delete old artifacts
-2. Exclude large file types from collection
-3. Run `acode artifacts prune` periodically
 
-### Issue: Artifacts not found by ID
+```bash
+# Solution 1: Verify artifact collection is enabled
+acode config get runs.artifacts.enabled
+# Expected: true
 
-**Symptoms:** "Artifact not found" errors when retrieving
+# If false, enable:
+acode config set runs.artifacts.enabled true
+
+# Solution 2: Check artifact patterns match actual outputs
+acode config get runs.artifacts.patterns
+# Expected: ["*.log", "stdout.txt", "stderr.txt", "build/**/*"]
+
+# List actual files created during run:
+find . -type f -newermt "2024-01-15 10:00:00" ! -path "./.acode/*" ! -path "./.git/*"
+# Identify outputs not matching patterns
+
+# Add missing patterns:
+acode config add runs.artifacts.patterns "coverage/**/*.xml"
+acode config add runs.artifacts.patterns "test-results/**/*.trx"
+
+# Solution 3: Increase wait time for file stabilization
+acode config set runs.artifacts.collection-delay-ms 500
+# Waits 500ms after run completes before collecting
+
+# Solution 4: Check file permissions on outputs
+ls -la build/output.dll
+# Should be readable (at least 444)
+
+# Fix permissions:
+chmod 644 build/*.dll
+# Re-run collection:
+acode artifact collect --run-id <run-id> --file build/output.dll
+
+# Solution 5: Review .acodeignore patterns
+cat .acodeignore
+# Look for overly broad excludes like "*.dll" or "build/"
+
+# Temporarily disable .acodeignore to test:
+mv .acodeignore .acodeignore.bak
+acode run execute --task build
+# Check if artifacts now collected
+
+# Solution 6: Check artifact size limits
+acode config get runs.artifacts.max-artifact-size-mb
+# Default: 100
+
+# Increase limit if needed:
+acode config set runs.artifacts.max-artifact-size-mb 500
+
+# Solution 7: Enable debug logging to identify collection issues
+acode config set logging.level debug
+acode run execute --task build
+# Review logs:
+cat .acode/artifacts/<run-id>/acode.log | grep "artifact"
+
+# Solution 8: Manually trigger collection for existing run
+acode artifact collect --run-id <run-id> --pattern "build/**/*" --force
+# Forces re-collection even if run marked complete
+```
+
+---
+
+### Issue 2: Artifact Directory Growing Unbounded, Consuming Disk Space
+
+**Symptoms:**
+- `.acode/artifacts/` directory exceeds 10GB+ size
+- `df -h` shows disk space warnings or full disk
+- File operations slow down (ls, find take seconds)
+- Git operations slow due to large ignored directory
+- Docker build context includes large artifacts accidentally
+- Backup times increase significantly
 
 **Causes:**
-- Artifact was pruned by retention policy
-- ID is from different workspace
-- Database and filesystem out of sync
+1. No retention policy configured (infinite retention by default)
+2. Large binary artifacts (videos, core dumps, disk images) being collected
+3. Many CI/CD runs accumulating over weeks/months
+4. Retention policy not running automatically (cron job disabled)
+5. Failed runs retained longer than successful runs
+6. Export bundles stored inside artifacts directory (double storage)
+7. Compression disabled, storing raw uncompressed artifacts
 
 **Solutions:**
-1. Check artifact retention settings
-2. Verify correct workspace is active
-3. Run `acode artifacts verify` to check consistency
+
+```bash
+# Solution 1: Check current disk usage
+du -sh .acode/artifacts/
+# Example output: 12G    .acode/artifacts/
+
+# Break down by run:
+du -sh .acode/artifacts/*/ | sort -h | tail -20
+# Identifies largest runs
+
+# Solution 2: Configure retention policy
+acode config set runs.artifacts.retention-days-success 30
+acode config set runs.artifacts.retention-days-failure 90
+# Keeps successful runs for 30 days, failures for 90 days
+
+# Verify configuration:
+acode config get runs.artifacts
+# Expected output includes retention settings
+
+# Solution 3: Manually prune old artifacts
+acode artifact prune --dry-run
+# Shows what would be deleted without deleting
+
+# Example output:
+# Would delete 45 runs (78GB):
+#   run-20231201-task-build (2.1GB, 67 days old)
+#   run-20231202-task-test (1.8GB, 66 days old)
+#   ...
+
+# Actually delete:
+acode artifact prune --yes
+# Deleted 45 runs, freed 78GB
+
+# Solution 4: Exclude large file types from collection
+acode config add runs.artifacts.exclude-patterns "*.mp4"
+acode config add runs.artifacts.exclude-patterns "*.mkv"
+acode config add runs.artifacts.exclude-patterns "*.iso"
+acode config add runs.artifacts.exclude-patterns "*.tar"
+acode config add runs.artifacts.exclude-patterns "*.zip"
+acode config add runs.artifacts.exclude-patterns "core.*"
+
+# Solution 5: Delete specific large runs manually
+# Find largest runs:
+du -sh .acode/artifacts/*/ | sort -h | tail -5
+
+# Delete specific run:
+acode run delete run-20231115-load-test --include-artifacts
+# Confirmation: "Delete run and 4.2GB artifacts? (yes/no)"
+
+# Solution 6: Enable compression for artifacts
+acode config set runs.artifacts.compression true
+acode config set runs.artifacts.compression-level 6
+# Typically achieves 60-80% reduction for text artifacts
+
+# Solution 7: Set up automatic pruning (Linux/macOS cron)
+crontab -e
+# Add line:
+# 0 2 * * * cd /path/to/workspace && acode artifact prune --yes >> .acode/prune.log 2>&1
+# Runs daily at 2 AM
+
+# Windows Task Scheduler:
+schtasks /create /tn "Acode Artifact Prune" /tr "C:\path\to\acode.exe artifact prune --yes" /sc daily /st 02:00
+
+# Solution 8: Move export bundles outside artifacts directory
+mkdir -p .acode/exports
+acode config set runs.export.output-directory ".acode/exports"
+# Prevents export bundles from being double-counted in artifact storage
+```
+
+---
+
+### Issue 3: Artifacts Not Found When Querying by Run ID
+
+**Symptoms:**
+- `acode artifact list --run <run-id>` returns "Run not found"
+- `acode run show <run-id>` displays run but shows 0 artifacts
+- Directory `.acode/artifacts/<run-id>/` exists on filesystem
+- Error: "Artifact metadata not found in database"
+- Database queries show run but `artifacts_count` is NULL
+
+**Causes:**
+1. Artifact collection completed but database update failed (transaction rollback)
+2. Database corruption after power loss during write
+3. Database and filesystem restored from different backup points
+4. Run ID format changed between Acode versions (migration incomplete)
+5. Manual filesystem manipulation (moved/renamed directories)
+6. Symbolic links broken after moving workspace
+7. Case sensitivity mismatch (Windows vs Linux filesystem)
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify run exists in database
+acode db query "SELECT id, status, artifacts_count FROM runs WHERE id='<run-id>'"
+# If no results, run not in database
+
+# Check if directory exists:
+ls -la .acode/artifacts/<run-id>/
+# If exists, database desync detected
+
+# Solution 2: Rebuild artifact index from filesystem
+acode artifact reindex --run <run-id>
+# Scans filesystem and updates database
+
+# Example output:
+# Reindexing run-20240115-task-build...
+# Found 12 artifacts on filesystem
+# Updated database: 12 artifacts registered
+
+# Reindex all runs:
+acode artifact reindex --all
+# Warning: May take several minutes for large workspaces
+
+# Solution 3: Verify filesystem and database consistency
+acode artifact verify --check-orphans
+# Reports runs in DB without filesystem artifacts
+# Reports filesystem artifacts without DB records
+
+# Example output:
+# Orphaned DB records: 3 runs (no filesystem artifacts)
+# Orphaned filesystem: 5 runs (not in database)
+
+# Solution 4: Check for case sensitivity issues (Windows → Linux migration)
+# On Linux:
+ls .acode/artifacts/ | grep -i "<run-id>"
+# May find RUN-ID vs run-id mismatch
+
+# Fix case mismatch:
+acode artifact fix-case-sensitivity --dry-run
+# Shows what would be renamed
+
+acode artifact fix-case-sensitivity --apply
+# Renames directories to match database
+
+# Solution 5: Restore database from backup
+# List available backups:
+ls -lt .acode/backups/*.db
+
+# Restore specific backup:
+cp .acode/backups/workspace-20240115.db .acode/workspace.db
+# Warning: May lose recent runs
+
+# Solution 6: Check for broken symbolic links
+find .acode/artifacts/ -type l -exec test ! -e {} \; -print
+# Lists broken symlinks
+
+# Remove broken symlinks:
+find .acode/artifacts/ -type l -exec test ! -e {} \; -delete
+
+# Solution 7: Verify workspace is correct
+acode workspace list
+# Ensure current workspace matches expected
+
+# Switch workspace if needed:
+acode workspace switch <workspace-name>
+
+# Solution 8: Export and re-import run to fix metadata
+acode run export --run <run-id> --output /tmp/run-backup.zip
+acode run delete <run-id> --include-artifacts --force
+acode run import /tmp/run-backup.zip
+# Recreates run with fresh metadata
+```
+
+---
+
+### Issue 4: Permission Denied Errors When Creating Artifact Directories
+
+**Symptoms:**
+- `acode run execute` fails with "Permission denied: .acode/artifacts/"
+- Error: "Failed to create directory: Operation not permitted"
+- Artifacts collected but not written to disk
+- Run status shows "Failed" with exit code 1
+- Logs show: "Unable to set file permissions 755 on .acode/artifacts/<run-id>/"
+
+**Causes:**
+1. Parent `.acode/` directory owned by different user (sudo run previously)
+2. Insufficient filesystem permissions on workspace directory
+3. SELinux or AppArmor policies blocking directory creation
+4. Read-only filesystem mount (Docker volume, network share)
+5. Disk quota exceeded for user
+6. Antivirus software blocking directory creation
+7. File system ACLs restricting write access
+
+**Solutions:**
+
+```bash
+# Solution 1: Check ownership of .acode directory
+ls -ld .acode .acode/artifacts
+# Example output:
+# drwxr-xr-x 5 root root 4096 Jan 15 10:00 .acode
+# Should be owned by current user
+
+# Fix ownership:
+sudo chown -R $USER:$USER .acode/
+# Verify:
+ls -ld .acode
+# drwxr-xr-x 5 user user 4096 Jan 15 10:00 .acode
+
+# Solution 2: Check and fix directory permissions
+stat -c "%a %n" .acode .acode/artifacts
+# Expected: 755 for directories
+
+# Fix permissions:
+chmod 755 .acode
+chmod 755 .acode/artifacts
+# Allow write access:
+chmod u+w .acode/artifacts
+
+# Solution 3: Check SELinux status (RHEL/CentOS/Fedora)
+getenforce
+# If "Enforcing", check denials:
+sudo ausearch -m avc -ts recent | grep acode
+
+# Temporarily disable SELinux to test:
+sudo setenforce 0
+acode run execute --task test
+# If works, create SELinux policy:
+sudo semanage fcontext -a -t user_home_t ".acode/artifacts(/.*)?"
+sudo restorecon -R .acode/artifacts
+
+# Solution 4: Check disk quota
+quota -vs
+# Example output showing quota exceeded:
+# Filesystem  blocks  quota  limit  grace  files  quota  limit  grace
+# /dev/sda1   10240M  10000M 10500M  6days   1234   5000   5500   none
+
+# Clean up space or request quota increase from admin
+
+# Solution 5: Verify filesystem is writable
+mount | grep $(df . | tail -1 | awk '{print $1}')
+# Look for "ro" (read-only) flag
+
+# Example: /dev/sda1 on / type ext4 (ro,relatime)
+# If read-only, remount:
+sudo mount -o remount,rw /
+
+# Solution 6: Check antivirus exclusions (Windows)
+# Add .acode directory to Windows Defender exclusions:
+# Settings > Update & Security > Windows Security > Virus & threat protection
+# > Manage settings > Add or remove exclusions
+# Add: C:\Users\<username>\projects\workspace\.acode
+
+# PowerShell command:
+Add-MpPreference -ExclusionPath "C:\Users\<username>\projects\workspace\.acode"
+
+# Solution 7: Test with explicit permissions override
+acode config set runs.artifacts.directory-permissions "0755"
+acode config set runs.artifacts.file-permissions "0644"
+# Forces specific permissions regardless of umask
+
+# Solution 8: Run Acode with elevated privileges (NOT RECOMMENDED)
+# Only if all else fails and workspace is single-user:
+sudo acode run execute --task build
+# Better: Fix underlying permission issue instead
+```
+
+---
+
+### Issue 5: Cross-Platform Path Incompatibility (Windows ↔ Linux/macOS)
+
+**Symptoms:**
+- Artifact paths work on Windows but fail on Linux (or vice versa)
+- Error: "Invalid path separator: backslash not allowed"
+- Exported bundle from Windows doesn't extract correctly on Linux
+- Run metadata shows paths like `C:\Users\...` on Linux system
+- Symlinks in artifacts don't work after moving between platforms
+- File not found errors despite file existing at expected location
+
+**Causes:**
+1. Windows backslashes (`\`) hardcoded instead of using path separators
+2. Absolute paths embedded in metadata (non-portable)
+3. Drive letters (`C:`) present in artifact paths
+4. Case-sensitive filesystem on Linux vs case-insensitive on Windows
+5. Windows MAX_PATH limit (260 chars) exceeded with long artifact paths
+6. Line endings (CRLF vs LF) causing checksum mismatches
+7. Reserved filenames on Windows (CON, PRN, AUX) not handled
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify path separators in artifact metadata
+acode run show <run-id> --format json | grep -E '\\\\|\\\\'
+# Should show no backslashes in paths
+
+# Check run metadata file:
+cat .acode/artifacts/<run-id>/run.json | jq .artifacts[].path
+# All paths should use forward slashes
+
+# Solution 2: Re-normalize paths using Acode utility
+acode artifact normalize-paths --run <run-id>
+# Converts all paths to forward slashes, removes drive letters
+
+# Example output:
+# Normalizing paths for run-20240115-task-build...
+# Updated: C:\temp\output.dll → temp/output.dll
+# Updated: src\Main.cs → src/Main.cs
+# 15 paths normalized
+
+# Solution 3: Enable portable path mode globally
+acode config set runs.artifacts.portable-paths true
+# Future runs will use portable paths automatically
+
+# Solution 4: Handle case sensitivity issues
+# On Linux, check for duplicates differing only in case:
+find .acode/artifacts/<run-id>/ -type f | awk -F/ '{print tolower($NF)}' | sort | uniq -d
+# Shows filenames with case conflicts
+
+# Rename duplicates:
+acode artifact deduplicate-case --run <run-id>
+# Appends _1, _2 to conflicting names
+
+# Solution 5: Work around Windows MAX_PATH limit
+# Check path lengths:
+find .acode/artifacts/<run-id>/ -type f -exec sh -c 'echo "$(echo "{}" | wc -c) {}"' \; | sort -n | tail -10
+# Shows longest paths
+
+# Enable long path support (Windows 10+):
+# Run as Administrator:
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+
+# Or configure Acode to use short paths:
+acode config set runs.artifacts.use-short-run-ids true
+# Uses 8-char run IDs instead of 26-char ULIDs
+
+# Solution 6: Standardize line endings before collection
+# Configure git to normalize line endings:
+echo "* text=auto" > .gitattributes
+echo "*.txt text eol=lf" >> .gitattributes
+
+# Convert existing artifacts:
+find .acode/artifacts/<run-id>/ -name "*.txt" -exec dos2unix {} \;
+# Converts CRLF → LF
+
+# Recompute checksums after conversion:
+acode artifact recompute-checksums --run <run-id>
+
+# Solution 7: Export with cross-platform compatibility flag
+acode run export --run <run-id> --portable --output bundle.zip
+# Normalizes paths, line endings, symlinks for cross-platform use
+
+# Extract on target platform:
+acode run import bundle.zip --normalize-paths
+# Adjusts paths to target OS conventions
+
+# Solution 8: Avoid Windows reserved filenames
+# Detect reserved names:
+find .acode/artifacts/ -iname "CON" -o -iname "PRN" -o -iname "AUX" -o -iname "NUL" -o -iname "COM[1-9]" -o -iname "LPT[1-9]"
+
+# Acode automatically renames these:
+acode config set runs.artifacts.rename-reserved-names true
+# CON → CON_, PRN → PRN_, etc.
+```
+
+---
 
 ---
 
