@@ -57,6 +57,121 @@ This task defines the core Git service interface and shared infrastructure. Spec
 
 ---
 
+## Use Cases
+
+### Use Case 1: DevBot Automated Feature Development with Git Operations
+
+**Persona:** DevBot is an autonomous coding agent working on a new feature branch for adding user authentication to a web application.
+
+**Before:**
+- Human developer must manually create feature branch: `git checkout -b feature/auth` (30 seconds)
+- Human developer must manually stage changes after each file: `git add file.cs` (15 seconds per file × 8 files = 2 minutes)
+- Human developer must manually commit: `git commit -m "..."` and craft message (3 minutes)
+- Human developer must manually push: `git push --set-upstream origin feature/auth` (30 seconds)
+- Human developer must manually check status: `git status` between each step (10 seconds × 4 = 40 seconds)
+- **Total time:** 6 minutes 40 seconds per feature workflow
+- **Annual cost for developer doing 5 feature branches/week:** 5 × 52 × 6.67 min = 1,734 minutes = 28.9 hours/year × $100/hour = **$2,890/year**
+
+**After:**
+- DevBot calls `IGitService.CreateBranchAsync("feature/auth")` automatically (200ms)
+- DevBot calls `IGitService.StageAllAsync()` for all changes automatically (500ms)
+- DevBot calls `IGitService.CommitAsync("feat: add authentication")` automatically (1s)
+- DevBot calls `IGitService.PushAsync()` with auto-upstream setup (3s with network)
+- DevBot calls `IGitService.GetStatusAsync()` automatically between steps (200ms)
+- **Total time:** 5 seconds per feature workflow (automated, no human intervention)
+- **Time savings:** 6 min 35 sec per workflow = 99.1% reduction
+- **Annual savings:** $2,890 × 0.991 = **$2,864/year per developer**
+- **10-developer team:** $28,640/year
+- **ROI:** Immediate (no upfront cost, pure automation benefit)
+
+**Metrics:**
+- Feature branch creation: 30s → 200ms (99.3% faster)
+- Staging changes: 2 min → 500ms (99.6% faster)
+- Commit creation: 3 min → 1s (99.4% faster)
+- Push with upstream: 30s → 3s (90% faster)
+- Developer interruptions: 5 per workflow → 0 (100% reduction)
+
+### Use Case 2: Jordan Investigating Production Incident with Git History
+
+**Persona:** Jordan is a DevOps engineer investigating a production incident that occurred after a recent deployment. They need to find which commits introduced the breaking change.
+
+**Before:**
+- Jordan manually runs: `git log --oneline --since="2 days ago"` (5 seconds)
+- Jordan copies 50 commit SHAs to a text file manually (2 minutes)
+- Jordan manually runs: `git show <sha>` for each commit to inspect changes (30 seconds × 10 commits = 5 minutes)
+- Jordan manually runs: `git diff <sha1> <sha2>` to compare versions (1 minute × 5 comparisons = 5 minutes)
+- Jordan manually runs: `git log --grep="bug"` to search for related fixes (30 seconds)
+- Jordan manually correlates timestamps with deployment logs (10 minutes)
+- **Total investigation time:** 23 minutes per incident
+- **Frequency:** 12 incidents/year requiring git investigation
+- **Annual time:** 23 min × 12 = 276 minutes = 4.6 hours/year
+- **Annual cost:** 4.6 hours × $120/hour (DevOps rate) = **$552/year**
+
+**After:**
+- Acode agent calls `IGitService.GetLogAsync(new LogOptions { Since = "2 days ago", Limit = 50 })` (800ms)
+- Agent automatically parses 50 commits into structured `GitCommit` objects (50ms)
+- Agent calls `IGitService.GetDiffAsync()` for suspicious commits automatically (1.5s × 10 = 15s)
+- Agent automatically correlates commit timestamps with deployment logs (2s)
+- Agent searches commit messages with `LogOptions { Grep = "bug" }` automatically (500ms)
+- Agent presents findings in structured report (instant)
+- **Total investigation time:** 18.5 seconds (automated analysis)
+- **Time savings:** 22 min 41.5 sec per incident = 98.7% reduction
+- **Annual savings:** $552 × 0.987 = **$545/year per engineer**
+- **5-engineer DevOps team:** $2,725/year
+- **ROI:** Immediate (structured Git API enables automated root cause analysis)
+
+**Metrics:**
+- Log retrieval: Manual copy-paste → structured API (0 human time)
+- Commit inspection: 5 min manual → 15s automated (98% faster)
+- Diff comparison: 5 min manual → 15s automated (95% faster)
+- Correlation: 10 min manual → 2s automated (99.7% faster)
+- Mean Time To Identify (MTTI): 23 min → 19 sec (98.7% reduction)
+
+### Use Case 3: Alex Compliance Audit of Code Changes
+
+**Persona:** Alex is a security auditor reviewing all commits made to production branches over the past quarter to ensure compliance with security policies (no hardcoded secrets, proper review process, commit message standards).
+
+**Before:**
+- Alex manually runs: `git log --all --since="3 months ago" --format="%H %an %ae %s"` (10 seconds)
+- Alex manually copies output to spreadsheet (15 minutes for 200 commits)
+- Alex manually runs: `git show <sha>` for each commit to inspect content (2 minutes × 200 commits = 6.67 hours)
+- Alex manually searches for patterns like "password", "api_key", "secret" in diffs (30 minutes across all commits)
+- Alex manually verifies commit message format compliance (1 minute × 200 = 3.33 hours)
+- Alex manually generates compliance report (1 hour)
+- **Total audit time:** 11.5 hours per quarter
+- **Annual time:** 11.5 hours × 4 quarters = 46 hours/year
+- **Annual cost:** 46 hours × $150/hour (auditor rate) = **$6,900/year**
+
+**After:**
+- Acode compliance agent calls `IGitService.GetLogAsync(new LogOptions { Since = "3 months ago" })` (1.5s for 200 commits)
+- Agent receives structured `GitCommit[]` with all metadata parsed (instant)
+- Agent automatically inspects commit diffs using `IGitService.GetDiffAsync()` for all 200 commits (100ms × 200 = 20s)
+- Agent automatically scans diffs for secret patterns using regex (5s total across all commits)
+- Agent automatically validates commit message format against policy (instant with structured data)
+- Agent automatically generates compliance report with violations flagged (2s)
+- **Total audit time:** 28.5 seconds (automated analysis)
+- **Time savings:** 11.5 hours - 28.5s = 11.49 hours per quarter (99.9% reduction)
+- **Annual savings:** $6,900 × 0.999 = **$6,893/year per auditor**
+- **3-auditor team:** $20,679/year
+- **ROI:** Immediate (structured Git API enables automated compliance checks)
+
+**Metrics:**
+- Log collection: 10s + 15 min manual → 1.5s automated (99% faster)
+- Commit content inspection: 6.67 hours → 20s (99.9% faster)
+- Secret pattern scanning: 30 min → 5s (99.7% faster)
+- Message format validation: 3.33 hours → instant (100% faster)
+- Report generation: 1 hour → 2s (99.9% faster)
+- Compliance cycle time: 11.5 hours → 28.5s (99.9% reduction)
+
+**Combined Suite 022 ROI:**
+- DevBot automation: $28,640/year (10 developers)
+- Jordan incident investigation: $2,725/year (5 engineers)
+- Alex compliance audit: $20,679/year (3 auditors)
+- **Total annual value:** $52,044/year for typical 10-person engineering team
+- **Payback period:** Immediate (zero infrastructure cost, pure productivity gain)
+
+---
+
 ## Glossary / Terms
 
 | Term | Definition |
