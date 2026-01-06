@@ -676,6 +676,38 @@ This ensures artifacts are not committed to version control.
 
 ---
 
+## Assumptions
+
+This task makes the following assumptions about the system, environment, dependencies, and operational context:
+
+### Technical Assumptions
+
+1. **Filesystem Hierarchy Supported** — Target filesystems (ext4, NTFS, APFS, Btrfs) support sufficient directory depth (`.acode/artifacts/{run-id}/` = 3 levels) without performance degradation
+2. **Cross-Platform Path Handling** — .NET Path.Combine() correctly handles forward slashes on Windows, Linux, and macOS for consistent path resolution
+3. **Unique Run IDs** — Run ID generation (ULID or UUID v4) provides collision-free identifiers with probability <1 in 10^18 for realistic workload (100k runs/workspace)
+4. **Atomic Directory Creation** — Filesystem guarantees atomic directory creation preventing race conditions when multiple processes create `.acode/artifacts/` simultaneously
+5. **Write Permissions Available** — Agent process has write permissions to workspace root directory enabling `.acode/` creation; users run agent with sufficient privileges (not sandboxed)
+6. **Disk Space Monitoring** — Operating system or monitoring tools alert administrators before disk exhaustion; agent does not implement disk space checking beyond retention policy
+7. **File Locking Semantics** — Filesystem supports advisory file locking for preventing concurrent writes to same artifact file; handles distributed filesystems (NFS, SMB) correctly
+8. **Symlink Support** — Filesystem supports symbolic links if needed for artifact references; resolution follows symlinks correctly without infinite loops
+9. **Gitignore Parsing** — Git version control respects `.gitignore` patterns including wildcards (`*.txt`) and negations (`!important.txt`); agent writes valid `.gitignore` syntax
+10. **JSON Serialization** — .NET System.Text.Json correctly serializes run metadata including Unicode characters, timestamps (ISO 8601), and nested objects up to 64 levels depth
+
+### Operational Assumptions
+
+11. **Single Workspace Instance** — Only one agent instance per workspace runs commands concurrently; multiple instances accessing same workspace handled via database locking (Task 050b dependency)
+12. **Workspace Root Stability** — Workspace root directory path remains constant during agent lifetime; moving workspaces requires re-initialization
+13. **Retention Policy Configuration** — Default retention (30 days successful, 90 days failed) is acceptable for most users; custom policies configured in `agent-config.yml` before large-scale use
+14. **Artifact Size Limits** — Default 10MB per artifact and 100MB per run are sufficient for typical builds/tests; larger artifacts (videos, binaries) manually excluded or limits increased
+15. **No External Artifact Management** — Users do not manually edit/delete artifacts in `.acode/artifacts/` directory; all artifact operations go through agent CLI to maintain database consistency
+16. **Run ID Display** — Users can copy/paste run IDs from CLI output (monospace-friendly ULIDs/UUIDs); screen readers correctly announce identifiers for accessibility
+17. **Standard Output Streams** — Executed commands write output to stdout/stderr, not directly to files bypassing stream capture; frameworks like MSBuild, npm, pytest follow this convention
+18. **Artifact Immutability** — Once written, artifacts are never modified by external processes; any tampering detected via checksums (if implemented, see Task 021 parent)
+19. **Workspace Portability** — Workspaces can be archived/restored including `.acode/` directory; restoring workspace with artifacts maintains consistency between database (Task 050) and filesystem
+20. **Pruning Job Reliability** — Background retention job runs reliably via OS scheduler (cron, Task Scheduler, systemd timer); failed pruning attempts retried next cycle without manual intervention
+
+---
+
 ## Best Practices
 
 ### Directory Structure
