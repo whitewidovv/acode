@@ -75,6 +75,140 @@ All commands MUST respect Task 001 operating modes:
 
 ---
 
+## Use Cases
+
+### Use Case 1: Developer Debugging Failed CI Run (Jordan, Backend Engineer)
+
+**Persona:** Jordan is a backend engineer who received a notification that the nightly CI build failed. The CI system only shows "Build failed with exit code 1" without details.
+
+**Before (Manual Log Hunting - 25 minutes):**
+1. SSH into CI server (2 min - VPN connection, password lookup)
+2. Navigate to CI workspace directory (3 min - remember path, check multiple locations)
+3. List recent build directories: `ls -lt /var/ci/builds/` (1 min)
+4. Open build log: `less /var/ci/builds/2024-01-15-03-00/build.log` (2 min)
+5. Scroll through 50,000 lines to find error (10 min - manual search, missed context)
+6. Check stderr separately: `less /var/ci/builds/2024-01-15-03-00/stderr.log` (2 min)
+7. Compare with previous successful build manually (5 min - open two terminals, visual diff)
+8. **Total time:** 25 minutes, high friction, context switching
+
+**After (Acode CLI - 2 minutes):**
+1. List recent runs: `acode runs list --status failed --limit 5` (10 sec)
+2. View failed run details: `acode runs show run-20240115-ci-build` (5 sec - shows exit code, duration, task)
+3. Read error logs: `acode runs logs run-20240115-ci-build --tail 100` (5 sec - sees error immediately)
+4. Compare with last success: `acode runs diff run-20240114-ci-build run-20240115-ci-build --output-only` (10 sec - highlights what changed)
+5. Identify root cause: New dependency version broke API contract (visible in diff)
+6. **Total time:** 2 minutes, low friction, no SSH required
+
+**Metrics:**
+- Time saved: 23 minutes per failed build investigation
+- Developer productivity: +92% improvement
+- Context switches eliminated: SSH, VPN, file system navigation
+- Annual ROI (assuming 3 failed builds per week): 23 min × 3 builds × 52 weeks = 3,588 minutes/year = **59.8 hours saved per developer**
+- Cost savings at $100/hour: **$5,980/year per developer**
+
+---
+
+### Use Case 2: Security Team Auditing Command Execution History (Riley, Security Auditor)
+
+**Persona:** Riley is a security auditor who must verify that all production deployments followed approved processes during Q4 2023 compliance review. Audit requires proof that no unauthorized commands were executed.
+
+**Before (Manual Audit - 8 hours for quarterly review):**
+1. Request access to production CI logs from DevOps team (30 min - ticket submission, approval wait)
+2. Download log archives for Oct-Dec 2023 (15 min - 2.3GB download over VPN)
+3. Extract compressed logs: `tar xzf logs-q4.tar.gz` (10 min)
+4. Manually grep through thousands of files (120 min - slow, error-prone):
+   ```bash
+   find logs/ -name "*.log" -exec grep -l "deploy" {} \;
+   ```
+5. Parse each log file to extract: timestamp, command, user, exit code (180 min - manual Excel entry)
+6. Cross-reference with approved deployment list (60 min - manual comparison)
+7. Identify anomalies and investigate each (90 min - open individual logs)
+8. Generate compliance report in required format (30 min - manual formatting)
+9. **Total time:** 8 hours per quarterly audit
+
+**After (Acode CLI with JSON output - 45 minutes):**
+1. Query all deployment runs in Q4: `acode runs list --from 2023-10-01 --to 2023-12-31 --task deploy --format json > q4-deploys.json` (5 sec)
+2. Extract required fields using jq (15 min - scripted):
+   ```bash
+   jq '[.[] | {id, timestamp, task, user, exit_code, duration_sec}]' q4-deploys.json > audit-summary.json
+   ```
+3. Filter for anomalies (failures, unusual durations): `jq '.[] | select(.exit_code != 0 or .duration_sec > 600)' audit-summary.json` (2 min)
+4. Investigate each anomaly: `acode runs show <run-id> --format json` (10 min - 5 anomalies × 2 min each)
+5. Generate compliance report: `python generate-audit-report.py audit-summary.json` (3 min - automated template)
+6. Review and annotate findings (15 min)
+7. **Total time:** 45 minutes per quarterly audit
+
+**Metrics:**
+- Time saved: 7.25 hours per quarterly audit
+- Audit efficiency: +90.6% improvement
+- Data accuracy: 100% (no manual transcription errors)
+- Automation potential: JSON output enables scripted analysis
+- Annual ROI (4 quarterly audits): 7.25 hours × 4 = **29 hours saved per year**
+- Cost savings at $150/hour (auditor rate): **$4,350/year**
+
+---
+
+### Use Case 3: DevOps Identifying Regression Between Releases (Sam, DevOps Lead)
+
+**Persona:** Sam is a DevOps lead responsible for ensuring stable releases. After deploying v2.5.0, customer support reports that the dashboard loads slower than v2.4.0. Sam needs to identify what changed.
+
+**Before (Manual Comparison - 2 hours):**
+1. Locate v2.4.0 build artifacts on build server (10 min - search Jira for build number, SSH to server)
+2. Locate v2.5.0 build artifacts (5 min - recent build)
+3. Download both artifact sets to local machine (10 min - 500MB each over slow network)
+4. Compare build logs manually (40 min - open side-by-side, scan for differences):
+   - Check dependency versions
+   - Check build times
+   - Look for warnings
+5. Compare asset sizes: `du -sh v2.4.0/dist/ v2.5.0/dist/` (2 min)
+6. Notice bundle size increased 30%, but unclear why (30 min - manual inspection of files)
+7. Identify culprit: New analytics library added (8MB uncompressed)
+8. **Total time:** 2 hours, incomplete analysis
+
+**After (Acode CLI - 5 minutes):**
+1. Find relevant build runs: `acode runs list --task build --branch main --limit 10` (5 sec)
+2. Identify v2.4.0 and v2.5.0 runs by timestamp (10 sec - visible in list output)
+3. Compare runs: `acode runs diff run-20231201-v240 run-20240115-v250 --show-artifacts` (15 sec)
+4. Diff output highlights:
+   ```diff
+   Artifact size changes:
+   + dist/main.js: 2.1MB → 2.8MB (+700KB, +33%)
+   + node_modules/analytics-pro/: 0 → 8.2MB (NEW)
+
+   Dependency changes:
+   + analytics-pro@3.2.1 (new)
+
+   Build time:
+   2.4.0: 45 seconds
+   2.5.0: 78 seconds (+33 seconds, +73%)
+   ```
+5. View full metadata for context: `acode runs show run-20240115-v250 --show-env` (5 sec - sees package.json changes)
+6. Root cause identified: analytics-pro library added in commit abc123 (visible in run metadata)
+7. **Total time:** 5 minutes, complete analysis
+
+**Metrics:**
+- Time saved: 1 hour 55 minutes per regression investigation
+- Mean time to identify (MTTI): Reduced from 2 hours to 5 minutes (-96.8%)
+- Comparison accuracy: Automated diff eliminates human error
+- Actionable insights: Immediate visibility into size, time, dependency changes
+- Annual ROI (assuming 2 regressions per month): 115 min × 2 × 12 = **2,760 minutes/year = 46 hours saved**
+- Cost savings at $120/hour (DevOps rate): **$5,520/year**
+
+---
+
+### Combined ROI Summary for Use Cases
+
+| Use Case | Time Saved | Annual Hours Saved | Annual Cost Savings |
+|----------|------------|-------------------|---------------------|
+| Developer debugging failed CI runs | 23 min/incident | 59.8 hours | $5,980 |
+| Security auditing command history | 7.25 hours/audit | 29 hours | $4,350 |
+| DevOps regression identification | 115 min/regression | 46 hours | $5,520 |
+| **TOTAL** | | **134.8 hours/year** | **$15,850/year** |
+
+**Payback Period:** Assuming 40 hours development effort at $100/hour = $4,000 investment, payback in **3.0 months**.
+
+---
+
 ## Glossary / Terms
 
 | Term | Definition |
