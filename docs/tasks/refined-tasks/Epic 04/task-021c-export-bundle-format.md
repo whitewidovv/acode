@@ -76,6 +76,159 @@ This task covers:
 
 ---
 
+## Use Cases
+
+### Use Case 1: DevOps Sharing Production Failure Bundle with Remote Team (Alex, Site Reliability Engineer)
+
+**Persona:** Alex is an SRE responding to a production outage at 2 AM. The application crashed with cryptic errors. Alex's offshore team in India needs to debug but can't access production systems due to compliance restrictions.
+
+**Before (Manual Log Export - 45 minutes):**
+1. SSH into production server (5 min - VPN, multi-factor auth, jump host)
+2. Locate relevant log files manually: `find /var/log/app/ -name "*2024-01-15*"` (10 min - scattered across multiple directories)
+3. Tar logs: `tar czf debug-logs.tar.gz /var/log/app/*.log` (5 min)
+4. Download from production to laptop: `scp debug-logs.tar.gz local:/tmp/` (10 min - slow network, 500MB file)
+5. Upload to file sharing service (Dropbox, Google Drive) manually (10 min - waiting for upload)
+6. Share link with offshore team via Slack (2 min)
+7. **Problem:** Environment variables missing, command details lost, git commit SHA not captured
+8. Team has to ask "what command did you run?" "what was the config?" - back and forth delays (30+ min)
+9. **Total time:** 45 minutes + 30 minutes clarification = **75 minutes to share incomplete data**
+
+**After (Acode Export Bundle - 2 minutes):**
+1. Identify failed run: `acode runs list --status failed --limit 5` (5 sec)
+2. Export run to bundle: `acode runs export --run run-prod-failure-20240115 --output incident-12345.zip` (20 sec - creates self-contained bundle)
+3. Upload bundle: `acode runs export --run run-prod-failure-20240115 --upload s3://incident-bucket/incident-12345.zip` (30 sec - streaming upload)
+4. Share S3 link with team (5 sec)
+5. Offshore team imports: `acode runs import incident-12345.zip` (15 sec)
+6. Bundle includes: stdout/stderr, environment (redacted), command, git commit SHA, config files, provenance
+7. Team has complete context: `acode runs show run-prod-failure-20240115` shows all details
+8. **Total time:** 2 minutes for complete, self-contained data package
+
+**Metrics:**
+- Time saved: 73 minutes per incident (97% improvement)
+- Completeness: 100% context (vs 40% with manual logs)
+- Compliance: Automatic redaction of secrets before export
+- Collaboration: Offshore team productive immediately (vs 30+ min delays)
+- Annual ROI (assuming 2 production incidents per month): 73 min × 2 × 12 = **1,752 minutes/year = 29.2 hours saved**
+- Cost savings at $150/hour (SRE rate): **$4,380/year**
+
+---
+
+### Use Case 2: Compliance Team Archiving Q4 Deployment Records (Morgan, Compliance Auditor)
+
+**Persona:** Morgan is a compliance auditor who must archive all Q4 production deployments for SOC 2 audit. Records must be stored for 7 years with proof of integrity. Manual archival is error-prone and incomplete.
+
+**Before (Manual Archive Creation - 12 hours for quarterly archive):**
+1. Query database for all Q4 deployments: `SELECT * FROM deployments WHERE date >= '2023-10-01' AND date <= '2023-12-31'` (10 min)
+2. Export to CSV manually (5 min)
+3. For each deployment (48 deployments in Q4):
+   a. SSH to deployment server (2 min each)
+   b. Locate deployment logs: `cd /var/log/deployments/deploy-xyz/` (1 min)
+   c. Copy logs to archive directory (1 min)
+   d. Record git commit SHA manually from Jenkins (2 min)
+   e. Document environment variables in Excel (3 min)
+   f. Save screenshots of deployment UI (2 min)
+   g. **Subtotal per deployment:** 11 minutes
+4. 48 deployments × 11 min = **528 minutes = 8.8 hours**
+5. Create final archive: `tar czf q4-2023-deployments.tar.gz archive/` (10 min)
+6. Upload to compliance S3 bucket manually (15 min)
+7. Generate SHA-256 hash manually: `sha256sum q4-2023-deployments.tar.gz > checksum.txt` (2 min)
+8. Document in compliance spreadsheet (30 min - manual data entry)
+9. **Total time:** 12 hours, **high risk of missing data or errors**
+
+**After (Acode Export Bundle - 30 minutes for quarterly archive):**
+1. Export all Q4 deployments in single command:
+   ```bash
+   acode runs export --task deploy \
+                      --from 2023-10-01 \
+                      --to 2023-12-31 \
+                      --format compliance \
+                      --output q4-2023-deployments.zip \
+                      --sign
+   ```
+   (5 minutes - selects 48 runs, includes all artifacts, generates manifest)
+2. Manifest automatically includes:
+   - SHA-256 hashes for all artifacts
+   - Git commit SHAs (from provenance)
+   - Redacted environment variables
+   - Execution timestamps, exit codes, durations
+   - Signature for integrity verification
+3. Upload to compliance S3: `aws s3 cp q4-2023-deployments.zip s3://compliance/archives/` (10 min)
+4. Verify bundle: `acode runs verify q4-2023-deployments.zip` (5 sec - checks all hashes)
+5. Import to compliance archive workspace for spot-checking: `acode runs import q4-2023-deployments.zip --workspace compliance-archive` (10 min)
+6. Generate audit report from bundle metadata: `acode runs report q4-2023-deployments.zip --format xlsx` (2 min - auto-generates Excel)
+7. Review and submit (3 min)
+8. **Total time:** 30 minutes, **100% data completeness, cryptographic integrity proof**
+
+**Metrics:**
+- Time saved: 11.5 hours per quarterly archive (96% improvement)
+- Accuracy: 100% complete (vs 85% with manual process - often missing env vars or commit SHAs)
+- Auditability: Cryptographic signatures prove integrity (vs trust-based manual process)
+- Compliance risk: Eliminated (all required fields automatically captured)
+- Annual ROI (4 quarterly archives): 11.5 hours × 4 = **46 hours saved per year**
+- Cost savings at $120/hour (auditor rate): **$5,520/year**
+
+---
+
+### Use Case 3: Developer Reproducing Customer-Reported Bug Across Environments (Casey, Support Engineer)
+
+**Persona:** Casey is a support engineer who received a customer bug report. The customer says "feature X doesn't work" but Casey can't reproduce it locally. Customer is using a different OS, different config, and won't share their exact environment due to confidentiality.
+
+**Before (Manual Environment Recreation - 4 hours + often fails):**
+1. Ask customer for environment details via email (30 min - back and forth)
+2. Customer provides partial info: OS, app version (missing: env vars, config files, dependency versions)
+3. Install matching OS version in VM (45 min - download, setup)
+4. Install app version (10 min)
+5. Try to reproduce bug with guessed configuration (30 min - doesn't reproduce)
+6. Ask customer for more details (30 min email round-trip)
+7. Customer shares config file via email (security team flags sensitive data exposure)
+8. Sanitize config manually (15 min)
+9. Retry reproduction (20 min - still doesn't reproduce because missing env vars)
+10. Third round of email asking for env vars (30 min)
+11. Customer refuses due to security policy (contains API keys)
+12. **Result: Cannot reproduce bug, issue stuck for days**
+13. **Total time:** 4 hours, **success rate: 30%**
+
+**After (Acode Export Bundle with Redaction - 15 minutes, 95% success rate):**
+1. Ask customer to export run: `acode runs export --run run-feature-x-failure --output customer-bug.zip` (30 sec - customer runs command)
+2. Bundle auto-redacts secrets (API keys, passwords) but preserves structure
+3. Customer emails bundle (5 min - small ZIP file, no manual sanitization needed)
+4. Casey imports: `acode runs import customer-bug.zip` (10 sec)
+5. Casey reviews run: `acode runs show run-feature-x-failure` (10 sec)
+6. Bundle includes:
+   - Exact command executed
+   - Redacted environment variables (shows keys but masks values: `API_KEY=***REDACTED***`)
+   - Config files (customer can review redaction before sharing)
+   - stdout/stderr showing actual error
+   - Git commit SHA (customer's app version)
+   - OS information from metadata
+7. Casey sees error: `stderr.txt` shows "Connection refused on port 5432" - database not running
+8. Root cause identified: Customer's PostgreSQL wasn't started
+9. Casey replies with fix: "Start PostgreSQL service before running app"
+10. **Total time:** 15 minutes, **bug reproduced and fixed**
+
+**Metrics:**
+- Time saved: 3 hours 45 minutes per bug investigation (94% improvement)
+- Success rate: 95% (vs 30% with manual environment recreation)
+- Security: Automatic redaction prevents leaking customer secrets
+- Customer satisfaction: Fast resolution (15 min vs days)
+- Annual ROI (assuming 3 customer bugs per week): 3.75 hours × 3 × 52 = **585 hours saved per year**
+- Cost savings at $100/hour (support engineer rate): **$58,500/year**
+
+---
+
+### Combined ROI Summary for Use Cases
+
+| Use Case | Time Saved | Annual Hours Saved | Annual Cost Savings |
+|----------|------------|-------------------|---------------------|
+| DevOps sharing production failure bundle | 73 min/incident | 29.2 hours | $4,380 |
+| Compliance archiving Q4 deployment records | 11.5 hours/quarter | 46 hours | $5,520 |
+| Developer reproducing customer bug | 3.75 hours/bug | 585 hours | $58,500 |
+| **TOTAL** | | **660.2 hours/year** | **$68,400/year** |
+
+**Payback Period:** Assuming 60 hours development effort at $100/hour = $6,000 investment, payback in **0.9 months** (32 days).
+
+---
+
 ## Glossary / Terms
 
 | Term | Definition |
