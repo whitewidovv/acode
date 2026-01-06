@@ -1195,6 +1195,605 @@ public sealed class PolicyViolationException : Exception
 
 ---
 
+### Threat 3: Fork Bomb Resource Exhaustion
+
+**Risk Description:** Without PIDs limit, malicious or buggy code can create unlimited processes (fork bomb), exhausting system PIDs and causing host-wide denial of service. All containers and host processes become unable to spawn new processes.
+
+**Attack Scenario:**
+1. Container has no PIDs limit configured
+2. Malicious npm package postinstall script executes fork bomb:
+   ```bash
+   :(){ :|:& };:
+   # Or in Node.js:
+   const { spawn } = require('child_process');
+   while(true) { spawn('node', ['-e', 'while(true){}']); }
+   ```
+3. Process count explodes: 1 → 2 → 4 → 8 → 16 → 32 → ... → 100,000+
+4. Host PID table exhausted (typical limit: 32,768 or 4,194,304)
+5. Docker daemon can't spawn new containers
+6. SSH sessions can't fork shells
+7. System recovery requires hard reboot
+
+**Mitigation (C# Implementation):**
+
+```csharp
+// ResourceLimitsPolicyEnforcer.cs
+namespace Acode.Infrastructure.Sandbox.Security;
+
+public sealed class ResourceLimitsPolicyEnforcer
+{
+    private readonly ILogger<ResourceLimitsPolicyEnforcer> _logger;
+    private readonly IAuditLogger _auditLogger;
+
+    // Sane defaults based on typical workloads
+    private const long DefaultMemoryLimitBytes = 4L * 1024 * 1024 * 1024; // 4GB
+    private const long DefaultMemorySwapLimitBytes = 4L * 1024 * 1024 * 1024; // 4GB (no swap abuse)
+    private const long DefaultPidsLimit = 512; // Enough for builds, low enough to prevent bombs
+    private const long DefaultCpuQuota = 200000; // 200% of 1 core (2 cores)
+    private const long DefaultCpuPeriod = 100000; // Standard 100ms period
+    private const int DefaultUlimitNofile = 65536; // Open file descriptors
+    private const int DefaultUlimitNproc = 4096; // Max processes (additional safeguard)
+
+    public ResourceLimitsPolicyEnforcer(
+        ILogger<ResourceLimitsPolicyEnforcer> logger,
+        IAuditLogger auditLogger)
+    {
+        _logger = logger;
+        _auditLogger = auditLogger;
+    }
+
+    public void ApplyResourceLimitsPolicy(
+        CreateContainerParameters containerParams,
+        SecurityPolicyConfig policyConfig)
+    {
+        if (containerParams.HostConfig == null)
+        {
+            containerParams.HostConfig = new HostConfig();
+        }
+
+        // Memory limits
+        var memoryLimit = policyConfig.ResourceLimits?.MemoryLimitBytes ?? DefaultMemoryLimitBytes;
+        containerParams.HostConfig.Memory = memoryLimit;
+        containerParams.HostConfig.MemorySwap = policyConfig.ResourceLimits?.MemorySwapLimitBytes
+            ?? DefaultMemorySwapLimitBytes;
+        containerParams.HostConfig.OomKillDisable = false; // MUST enable OOM killer
+
+        _logger.LogInformation(
+            "Applied memory limits: Memory={Memory}MB, Swap={Swap}MB, OOM killer enabled",
+            memoryLimit / (1024 * 1024),
+            containerParams.HostConfig.MemorySwap / (1024 * 1024));
+
+        // CPU limits (throttling, not hard kill)
+        var cpuQuota = policyConfig.ResourceLimits?.CpuQuota ?? DefaultCpuQuota;
+        containerParams.HostConfig.CpuQuota = cpuQuota;
+        containerParams.HostConfig.CpuPeriod = DefaultCpuPeriod;
+
+        var cpuCores = (double)cpuQuota / DefaultCpuPeriod;
+        _logger.LogInformation(
+            "Applied CPU limits: Quota={Quota}, Period={Period} ({Cores} cores)",
+            cpuQuota, DefaultCpuPeriod, cpuCores);
+
+        // PIDs limit (CRITICAL for fork bomb prevention)
+        var pidsLimit = policyConfig.ResourceLimits?.PidsLimit ?? DefaultPidsLimit;
+        containerParams.HostConfig.PidsLimit = pidsLimit;
+
+        _logger.LogInformation(
+            "Applied PIDs limit: {PidsLimit} (prevents fork bombs)",
+            pidsLimit);
+
+        // Ulimits (additional safeguards)
+        containerParams.HostConfig.Ulimits = new List<Ulimit>
+        {
+            new Ulimit
+            {
+                Name = "nofile",
+                Soft = DefaultUlimitNofile,
+                Hard = DefaultUlimitNofile
+            },
+            new Ulimit
+            {
+                Name = "nproc",
+                Soft = DefaultUlimitNproc,
+                Hard = DefaultUlimitNproc
+            }
+        };
+
+        _logger.LogInformation(
+            "Applied ulimits: nofile={Nofile}, nproc={Nproc}",
+            DefaultUlimitNofile, DefaultUlimitNproc);
+
+        // Audit log resource limits
+        _auditLogger.LogAsync(new AuditEvent
+        {
+            EventType = "resource_limits_applied",
+            Timestamp = DateTimeOffset.UtcNow,
+            Details = new Dictionary<string, object>
+            {
+                ["memory_limit_bytes"] = memoryLimit,
+                ["memory_swap_limit_bytes"] = containerParams.HostConfig.MemorySwap,
+                ["cpu_quota"] = cpuQuota,
+                ["cpu_period"] = DefaultCpuPeriod,
+                ["cpu_cores_equivalent"] = cpuCores,
+                ["pids_limit"] = pidsLimit,
+                ["ulimit_nofile"] = DefaultUlimitNofile,
+                ["ulimit_nproc"] = DefaultUlimitNproc,
+                ["oom_kill_enabled"] = !containerParams.HostConfig.OomKillDisable
+            }
+        }).Wait();
+    }
+}
+
+public sealed record ResourceLimitsConfig
+{
+    public long? MemoryLimitBytes { get; init; }
+    public long? MemorySwapLimitBytes { get; init; }
+    public long? CpuQuota { get; init; }
+    public long? PidsLimit { get; init; }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test fork bomb prevention
+acode task run test
+
+# Inside container, attempt fork bomb
+docker exec <container-id> bash -c ':(){ :|:& };:'
+
+# Expected: Container hits PIDs limit at 512 processes
+# Container may be killed, but host remains stable
+
+# Verify PIDs limit applied
+docker inspect <container-id> --format '{{.HostConfig.PidsLimit}}'
+# Expected: 512
+
+# Check host is still responsive
+docker ps
+# Expected: Command succeeds, other containers unaffected
+```
+
+---
+
+#### Security Threat 4: Volume Mount Escape / Host Filesystem Access
+
+**Risk:** Container mounts sensitive host paths (e.g., `/`, `/etc`, `/var/run/docker.sock`) gaining full host access.
+
+**Attack Scenario:**
+1. User (or malicious dependency) requests container with `-v /:/host` mount
+2. Container gains read/write access to entire host filesystem
+3. Attacker modifies `/host/etc/passwd`, `/host/root/.ssh/authorized_keys`
+4. Attacker reads secrets from `/host/var/secrets`, `/host/home/*/.env`
+5. Attacker mounts Docker socket (`/var/run/docker.sock`) and spawns privileged container
+6. Complete host compromise achieved
+
+**Mitigation:**
+
+Implement a volume mount policy enforcer that validates all volume mounts against a denylist of sensitive host paths. Reject containers attempting to mount protected paths.
+
+```csharp
+// VolumeMountPolicyEnforcer.cs
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+public sealed class VolumeMountPolicyEnforcer
+{
+    private readonly ILogger<VolumeMountPolicyEnforcer> _logger;
+    private readonly IAuditLogger _auditLogger;
+
+    // Sensitive host paths that must NEVER be mounted
+    private static readonly HashSet<string> DeniedHostPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/",                        // Root filesystem
+        "/root",                    // Root home directory
+        "/etc",                     // System configuration
+        "/var",                     // System state
+        "/boot",                    // Boot files
+        "/sys",                     // Kernel interface
+        "/proc",                    // Process information
+        "/dev",                     // Device files
+        "/run",                     // Runtime state
+        "/var/run/docker.sock",     // Docker socket (critical!)
+        "/usr",                     // System binaries
+        "/bin",                     // Essential binaries
+        "/sbin",                    // System binaries
+        "/lib",                     // System libraries
+        "/lib64",                   // System libraries
+        "/home",                    // All user home directories
+        "/opt",                     // Optional software
+        "/mnt",                     // Mount points
+        "/media",                   // Removable media
+    };
+
+    // Paths that are allowed to be mounted (workspace-only)
+    private static readonly string[] AllowedPathPrefixes = new[]
+    {
+        "/tmp/acode-workspace-",    // Acode workspaces only
+    };
+
+    public VolumeMountPolicyEnforcer(
+        ILogger<VolumeMountPolicyEnforcer> logger,
+        IAuditLogger auditLogger)
+    {
+        _logger = logger;
+        _auditLogger = auditLogger;
+    }
+
+    public void ValidateAndApplyVolumeMountPolicy(
+        CreateContainerParameters containerParams,
+        SecurityPolicyConfig policyConfig)
+    {
+        if (containerParams.HostConfig?.Binds == null || !containerParams.HostConfig.Binds.Any())
+        {
+            _logger.LogInformation("No volume mounts requested, policy check passed");
+            return;
+        }
+
+        var requestedMounts = containerParams.HostConfig.Binds;
+        var violations = new List<string>();
+
+        foreach (var mount in requestedMounts)
+        {
+            // Parse mount string: "host-path:container-path:options"
+            var parts = mount.Split(':', 3);
+            if (parts.Length < 2)
+            {
+                violations.Add($"Invalid mount format: {mount}");
+                continue;
+            }
+
+            var hostPath = Path.GetFullPath(parts[0]); // Normalize path
+            var containerPath = parts[1];
+            var options = parts.Length > 2 ? parts[2] : string.Empty;
+
+            // Check if host path is in denylist
+            if (IsDeniedPath(hostPath))
+            {
+                violations.Add($"Denied host path: {hostPath} -> {containerPath}");
+                continue;
+            }
+
+            // Check if host path matches allowed prefixes
+            if (!IsAllowedPath(hostPath))
+            {
+                violations.Add($"Host path not in allowed workspace: {hostPath}");
+                continue;
+            }
+
+            // Ensure mount is read-only if it's not the primary workspace
+            if (!options.Contains("ro") && !hostPath.StartsWith("/tmp/acode-workspace-"))
+            {
+                violations.Add($"Mount must be read-only: {hostPath}");
+                continue;
+            }
+
+            _logger.LogInformation(
+                "Volume mount allowed: {HostPath} -> {ContainerPath} ({Options})",
+                hostPath, containerPath, options);
+        }
+
+        // If any violations, reject container creation
+        if (violations.Any())
+        {
+            var errorMessage = $"Volume mount policy violations:\n  - {string.Join("\n  - ", violations)}";
+            _logger.LogError(errorMessage);
+
+            _auditLogger.LogAsync(new AuditEvent
+            {
+                EventType = "volume_mount_policy_violation",
+                Timestamp = DateTimeOffset.UtcNow,
+                Severity = AuditSeverity.Critical,
+                Details = new Dictionary<string, object>
+                {
+                    ["requested_mounts"] = requestedMounts,
+                    ["violations"] = violations,
+                    ["action"] = "container_creation_denied"
+                }
+            }).Wait();
+
+            throw new SecurityPolicyViolationException(errorMessage);
+        }
+
+        _auditLogger.LogAsync(new AuditEvent
+        {
+            EventType = "volume_mount_policy_passed",
+            Timestamp = DateTimeOffset.UtcNow,
+            Details = new Dictionary<string, object>
+            {
+                ["allowed_mounts"] = requestedMounts,
+                ["count"] = requestedMounts.Count
+            }
+        }).Wait();
+    }
+
+    private static bool IsDeniedPath(string hostPath)
+    {
+        // Exact match
+        if (DeniedHostPaths.Contains(hostPath))
+        {
+            return true;
+        }
+
+        // Parent path match (e.g., /etc/passwd is denied because /etc is denied)
+        return DeniedHostPaths.Any(denied =>
+            hostPath.StartsWith(denied + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsAllowedPath(string hostPath)
+    {
+        return AllowedPathPrefixes.Any(prefix =>
+            hostPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+public sealed class SecurityPolicyViolationException : Exception
+{
+    public SecurityPolicyViolationException(string message) : base(message) { }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test volume mount denylist
+acode task run test --debug
+
+# Attempt to mount sensitive paths (should fail)
+docker run -v /:/host alpine ls /host
+# Expected: Error - "Volume mount policy violations: Denied host path: / -> /host"
+
+docker run -v /var/run/docker.sock:/var/run/docker.sock alpine ls
+# Expected: Error - "Denied host path: /var/run/docker.sock"
+
+docker run -v /etc:/etc:ro alpine ls /etc
+# Expected: Error - "Denied host path: /etc"
+
+# Valid workspace mount (should succeed)
+docker run -v /tmp/acode-workspace-abc123:/workspace:rw alpine ls /workspace
+# Expected: Success - mount allowed
+
+# Check audit logs for violations
+acode audit query --event-type volume_mount_policy_violation --last 5m
+# Expected: Shows all denied mount attempts with full details
+```
+
+---
+
+#### Security Threat 5: Seccomp Profile Bypass / Dangerous Syscalls
+
+**Risk:** Container runs without Seccomp profile, allowing dangerous syscalls (e.g., `reboot`, `mount`, `keyctl`) that can compromise host.
+
+**Attack Scenario:**
+1. Container starts with `--security-opt seccomp=unconfined` or no Seccomp profile
+2. Malicious code executes dangerous syscalls:
+   - `mount()` - Mount host filesystems inside container
+   - `reboot()` - Reboot host system
+   - `keyctl()` - Access kernel keyring, steal credentials
+   - `bpf()` - Load kernel BPF programs, escalate privileges
+   - `perf_event_open()` - Access kernel performance data, side-channel attacks
+3. Attacker gains kernel-level capabilities
+4. Container breakout achieved via kernel exploitation
+
+**Mitigation:**
+
+Implement a Seccomp profile enforcer that applies a restrictive default Seccomp profile blocking dangerous syscalls. Use Docker's default Seccomp profile or a custom profile.
+
+```csharp
+// SeccompPolicyEnforcer.cs
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+public sealed class SeccompPolicyEnforcer
+{
+    private readonly ILogger<SeccompPolicyEnforcer> _logger;
+    private readonly IAuditLogger _auditLogger;
+    private readonly string _seccompProfilePath;
+
+    // Dangerous syscalls that MUST be blocked
+    private static readonly string[] BlockedSyscalls = new[]
+    {
+        "reboot",               // Reboot host system
+        "swapon", "swapoff",    // Manage swap
+        "mount", "umount",      // Mount filesystems
+        "pivot_root",           // Change root filesystem
+        "chroot",               // Change root directory (can escape)
+        "keyctl",               // Access kernel keyring
+        "add_key",              // Add keys to keyring
+        "request_key",          // Request keys from keyring
+        "bpf",                  // Load BPF programs
+        "perf_event_open",      // Performance monitoring (side channels)
+        "fanotify_init",        // Filesystem monitoring
+        "lookup_dcookie",       // Directory cache lookup
+        "kcmp",                 // Compare kernel objects
+        "finit_module",         // Load kernel modules
+        "init_module",          // Load kernel modules
+        "delete_module",        // Delete kernel modules
+        "kexec_load",           // Load kernel for kexec
+        "kexec_file_load",      // Load kernel for kexec (file-based)
+    };
+
+    public SeccompPolicyEnforcer(
+        ILogger<SeccompPolicyEnforcer> logger,
+        IAuditLogger auditLogger,
+        string seccompProfilePath = "/etc/acode/seccomp-default.json")
+    {
+        _logger = logger;
+        _auditLogger = auditLogger;
+        _seccompProfilePath = seccompProfilePath;
+    }
+
+    public void ApplySeccompPolicy(
+        CreateContainerParameters containerParams,
+        SecurityPolicyConfig policyConfig)
+    {
+        if (containerParams.HostConfig == null)
+        {
+            containerParams.HostConfig = new HostConfig();
+        }
+
+        if (containerParams.HostConfig.SecurityOpt == null)
+        {
+            containerParams.HostConfig.SecurityOpt = new List<string>();
+        }
+
+        // Check if user tried to disable Seccomp (FORBIDDEN)
+        var unconfined = containerParams.HostConfig.SecurityOpt
+            .Any(opt => opt.Contains("seccomp=unconfined"));
+
+        if (unconfined)
+        {
+            var errorMessage = "Seccomp cannot be disabled (seccomp=unconfined is forbidden)";
+            _logger.LogError(errorMessage);
+
+            _auditLogger.LogAsync(new AuditEvent
+            {
+                EventType = "seccomp_disable_attempt",
+                Timestamp = DateTimeOffset.UtcNow,
+                Severity = AuditSeverity.Critical,
+                Details = new Dictionary<string, object>
+                {
+                    ["attempted_security_opt"] = containerParams.HostConfig.SecurityOpt,
+                    ["action"] = "container_creation_denied"
+                }
+            }).Wait();
+
+            throw new SecurityPolicyViolationException(errorMessage);
+        }
+
+        // Use custom Seccomp profile if provided, otherwise use Docker default
+        string seccompProfile;
+        if (policyConfig.SeccompProfilePath != null && File.Exists(policyConfig.SeccompProfilePath))
+        {
+            seccompProfile = $"seccomp={policyConfig.SeccompProfilePath}";
+            _logger.LogInformation(
+                "Applying custom Seccomp profile: {ProfilePath}",
+                policyConfig.SeccompProfilePath);
+        }
+        else if (File.Exists(_seccompProfilePath))
+        {
+            seccompProfile = $"seccomp={_seccompProfilePath}";
+            _logger.LogInformation(
+                "Applying default Acode Seccomp profile: {ProfilePath}",
+                _seccompProfilePath);
+        }
+        else
+        {
+            // Fall back to Docker's default Seccomp profile (better than nothing)
+            _logger.LogWarning(
+                "No custom Seccomp profile found, using Docker default. " +
+                "For maximum security, provide a custom profile at {ProfilePath}",
+                _seccompProfilePath);
+            return; // Docker applies default Seccomp automatically
+        }
+
+        // Apply Seccomp profile
+        containerParams.HostConfig.SecurityOpt.Add(seccompProfile);
+
+        _logger.LogInformation("Seccomp policy applied: {Profile}", seccompProfile);
+
+        _auditLogger.LogAsync(new AuditEvent
+        {
+            EventType = "seccomp_policy_applied",
+            Timestamp = DateTimeOffset.UtcNow,
+            Details = new Dictionary<string, object>
+            {
+                ["seccomp_profile"] = seccompProfile,
+                ["blocked_syscalls_count"] = BlockedSyscalls.Length,
+                ["security_opt"] = containerParams.HostConfig.SecurityOpt
+            }
+        }).Wait();
+    }
+
+    /// <summary>
+    /// Generates a default Seccomp profile JSON that blocks dangerous syscalls.
+    /// Should be called during Acode initialization to create /etc/acode/seccomp-default.json
+    /// </summary>
+    public static string GenerateDefaultSeccompProfile()
+    {
+        var profile = new
+        {
+            defaultAction = "SCMP_ACT_ERRNO", // Deny by default
+            architectures = new[] { "SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32" },
+            syscalls = new[]
+            {
+                new
+                {
+                    names = BlockedSyscalls,
+                    action = "SCMP_ACT_ERRNO", // Block these syscalls
+                    comment = "Dangerous syscalls that must be blocked"
+                },
+                new
+                {
+                    names = new[] { "*" }, // Allow all other syscalls
+                    action = "SCMP_ACT_ALLOW"
+                }
+            }
+        };
+
+        return JsonSerializer.Serialize(profile, new JsonSerializerOptions
+        {
+            WriteIndented = true
+        });
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test Seccomp profile enforcement
+acode task run test --debug
+
+# Verify Seccomp profile is applied
+docker inspect <container-id> --format '{{.HostConfig.SecurityOpt}}'
+# Expected: [seccomp=/etc/acode/seccomp-default.json]
+
+# Attempt to disable Seccomp (should fail)
+acode task run test --docker-opt="--security-opt seccomp=unconfined"
+# Expected: Error - "Seccomp cannot be disabled (seccomp=unconfined is forbidden)"
+
+# Test that dangerous syscalls are blocked inside container
+docker exec <container-id> bash -c 'python3 -c "import os; os.system(\"reboot\")"'
+# Expected: Operation not permitted (errno)
+
+docker exec <container-id> bash -c 'mount -t tmpfs tmpfs /mnt'
+# Expected: Operation not permitted (errno)
+
+# Verify Seccomp profile content
+cat /etc/acode/seccomp-default.json
+# Expected: JSON with blocked syscalls (reboot, mount, keyctl, bpf, etc.)
+
+# Check audit logs
+acode audit query --event-type seccomp_policy_applied --last 5m
+# Expected: Shows Seccomp profile applied with blocked syscalls count
+```
+
+**Generate Seccomp Profile (Initialization):**
+
+```bash
+# Generate default Seccomp profile during Acode setup
+acode init --generate-seccomp-profile
+
+# This creates /etc/acode/seccomp-default.json with:
+# - Block reboot, mount, keyctl, bpf, perf_event_open
+# - Allow all other syscalls
+# - Architecture: x86_64, x86, x32
+```
+
+---
+
 ## Best Practices
 
 ### Policy Definition
@@ -1217,6 +1816,325 @@ public sealed class PolicyViolationException : Exception
 10. **Suggest remediation** - How to adjust policy if needed
 11. **Preview mode** - Show what would be blocked without blocking
 12. **Override with confirmation** - Allow bypass with explicit acknowledgment
+
+---
+
+## Troubleshooting
+
+This section provides solutions to common issues encountered when enforcing security policies inside Docker sandbox containers.
+
+---
+
+### Issue 1: Container Creation Fails with "Operation not permitted"
+
+**Symptoms:**
+- Container creation fails immediately
+- Error message: `docker: Error response from daemon: OCI runtime create failed: container_linux.go:380: starting container process caused: process_linux.go:545: container init caused: process_linux.go:508: setting cgroup config for procHooks process caused: Unit libpod-<id>.scope not found: Operation not permitted`
+- Container never starts, exits with code 126 or 127
+
+**Causes:**
+1. Host system missing required kernel capabilities for cgroups v2
+2. User namespace remapping not configured correctly
+3. AppArmor or SELinux blocking container initialization
+4. Docker daemon running in rootless mode without proper subordinate UID/GID ranges
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify kernel supports cgroups v2
+cat /sys/fs/cgroup/cgroup.controllers
+# Expected: cpu io memory pids
+
+# If empty, enable cgroups v2 in GRUB
+sudo nano /etc/default/grub
+# Add: GRUB_CMDLINE_LINUX="systemd.unified_cgroup_hierarchy=1"
+sudo update-grub
+sudo reboot
+
+# Solution 2: Configure subordinate UID/GID for user namespaces
+sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 $(whoami)
+# Restart Docker daemon
+sudo systemctl restart docker
+
+# Solution 3: Check AppArmor/SELinux status
+sudo aa-status | grep docker
+# If docker-default profile is not loaded:
+sudo apparmor_parser -r /etc/apparmor.d/docker
+sudo systemctl restart docker
+
+# Solution 4: Verify Docker daemon can create cgroups
+docker run --rm alpine cat /proc/self/cgroup
+# Expected: 0::/docker/<container-id>
+```
+
+---
+
+### Issue 2: Network Policy Blocks Legitimate Traffic
+
+**Symptoms:**
+- Container cannot reach local package registries (npm, NuGet, PyPI)
+- DNS resolution fails inside container
+- Error: `getaddrinfo: Temporary failure in name resolution`
+- Network mode is set to `none` but user expects internet access
+
+**Causes:**
+1. Operating mode is `LocalOnly` or `Airgapped`, which disables network
+2. DNS servers not configured in `/etc/resolv.conf` inside container
+3. Firewall rules on host blocking Docker bridge network
+4. Network policy enforcer rejecting allowed domains
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify operating mode allows network
+acode config get operating-mode
+# Expected: burst or docker (NOT local-only or airgapped)
+
+# If incorrect, update operating mode:
+acode config set operating-mode burst
+
+# Solution 2: Configure DNS servers for container
+docker run --rm --dns=8.8.8.8 --dns=8.8.4.4 alpine nslookup google.com
+# Expected: DNS resolution succeeds
+
+# Add to Acode config (acode.yml):
+docker:
+  dns:
+    - 8.8.8.8
+    - 8.8.4.4
+
+# Solution 3: Check host firewall rules
+sudo iptables -L DOCKER-USER -n -v
+# Look for DROP rules blocking Docker bridge (172.17.0.0/16)
+
+# Allow Docker bridge network:
+sudo iptables -I DOCKER-USER -i docker0 -j ACCEPT
+sudo iptables -I DOCKER-USER -o docker0 -j ACCEPT
+
+# Solution 4: Add allowed domains to network policy whitelist
+acode config set network-policy.allowed-domains "registry.npmjs.org,pypi.org,api.nuget.org"
+```
+
+---
+
+### Issue 3: Container Hits Memory/CPU Limits During Build
+
+**Symptoms:**
+- Build process terminates with exit code 137 (OOM killed)
+- Build freezes at compilation/linking step (CPU throttling)
+- Error: `Command killed with signal 9`
+- Docker logs show: `OOMKilled: true`
+
+**Causes:**
+1. Memory limit (4GB default) too low for large builds (e.g., C++ compilation)
+2. CPU quota (2 cores default) insufficient for parallel builds
+3. PIDs limit (512 default) too low for build systems spawning many processes
+4. Build not optimized (not using cached layers, incremental builds)
+
+**Solutions:**
+
+```bash
+# Solution 1: Check current resource limits
+docker inspect <container-id> --format '{{.HostConfig.Memory}}'
+docker inspect <container-id> --format '{{.HostConfig.CpuQuota}}'
+docker inspect <container-id> --format '{{.HostConfig.PidsLimit}}'
+
+# Solution 2: Increase memory limit for large builds
+acode config set resource-limits.memory-limit-bytes $((8 * 1024 * 1024 * 1024))  # 8GB
+
+# Solution 3: Increase CPU quota for parallel builds
+acode config set resource-limits.cpu-quota 400000  # 4 cores
+
+# Solution 4: Increase PIDs limit if build spawns many processes
+acode config set resource-limits.pids-limit 2048
+
+# Solution 5: Optimize build with multi-stage Dockerfile
+# Use build cache, layer splitting, .dockerignore
+docker build --target builder --tag myapp:build .
+docker build --target runtime --tag myapp:latest .
+
+# Solution 6: Monitor resource usage during build
+docker stats <container-id>
+# Watch for memory% and CPU% approaching limits
+```
+
+---
+
+### Issue 4: Volume Mount Fails with "Permission denied"
+
+**Symptoms:**
+- Container starts but cannot read/write mounted volumes
+- Error: `ls: /workspace: Permission denied`
+- Files in mounted volume show `root:root` ownership inside container
+- Container running as non-root user (UID 65532) cannot access files
+
+**Causes:**
+1. Host files owned by root, container user (UID 65532) has no permissions
+2. Volume mounted read-only (`:ro` flag) but container expects read-write
+3. SELinux labels on host files preventing container access
+4. Volume mount path denied by VolumeMountPolicyEnforcer (not in allowed workspace)
+
+**Solutions:**
+
+```bash
+# Solution 1: Fix file ownership on host before mounting
+# Option A: Change host files to match container UID (65532)
+sudo chown -R 65532:65532 /tmp/acode-workspace-abc123
+
+# Option B: Run container with host user's UID (less secure)
+docker run --user $(id -u):$(id -g) -v /workspace ...
+
+# Solution 2: Verify mount is read-write, not read-only
+docker inspect <container-id> --format '{{json .HostConfig.Binds}}'
+# Expected: "/tmp/acode-workspace-abc123:/workspace:rw" (NOT :ro)
+
+# Solution 3: Fix SELinux labels (if using RHEL/CentOS/Fedora)
+ls -Z /tmp/acode-workspace-abc123
+# If label is incorrect, relabel for Docker:
+sudo chcon -Rt svirt_sandbox_file_t /tmp/acode-workspace-abc123
+
+# Or mount with :Z flag to auto-relabel:
+docker run -v /tmp/acode-workspace-abc123:/workspace:Z ...
+
+# Solution 4: Ensure workspace path matches allowed prefixes
+# Check policy configuration:
+acode config get volume-mount-policy.allowed-path-prefixes
+# Expected: ["/tmp/acode-workspace-"]
+
+# If workspace is elsewhere, update policy:
+acode config set volume-mount-policy.allowed-path-prefixes "/my/custom/workspace-"
+```
+
+---
+
+### Issue 5: Seccomp Policy Blocks Required Syscalls for Build Tools
+
+**Symptoms:**
+- Build tools fail with cryptic errors: `Operation not permitted`
+- Specific operations fail: `strace`, `gdb`, `perf`, kernel module builds
+- Error: `prctl(PR_SET_NO_NEW_PRIVS) failed: Operation not permitted`
+- Container runs but advanced debugging/profiling tools don't work
+
+**Causes:**
+1. Default Seccomp profile blocks syscalls required by debugging tools
+2. Build process requires `ptrace()` for debugging (blocked by Seccomp)
+3. Performance profiling requires `perf_event_open()` (blocked for security)
+4. Container trying to load kernel modules (blocked, `finit_module`)
+
+**Solutions:**
+
+```bash
+# Solution 1: Identify which syscall is being blocked
+# Run with strace to see denied syscalls (requires privileged container)
+docker run --rm --privileged alpine strace -f <your-command> 2>&1 | grep EPERM
+
+# Solution 2: Create custom Seccomp profile allowing required syscalls
+# Copy default profile and add exceptions:
+cp /etc/acode/seccomp-default.json /etc/acode/seccomp-debug.json
+
+# Edit seccomp-debug.json to allow ptrace for debugging:
+{
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "syscalls": [
+    {
+      "names": ["ptrace"],
+      "action": "SCMP_ACT_ALLOW",
+      "comment": "Allow ptrace for debugging"
+    }
+  ]
+}
+
+# Use custom profile:
+acode config set security-policy.seccomp-profile-path /etc/acode/seccomp-debug.json
+
+# Solution 3: For development/debugging ONLY, disable Seccomp (NOT RECOMMENDED)
+# This should NEVER be done in production or CI/CD environments
+# acode config set security-policy.disable-seccomp true  # DANGEROUS!
+
+# Solution 4: Use alternative tools that don't require blocked syscalls
+# Instead of gdb (requires ptrace), use logging/printf debugging
+# Instead of perf (requires perf_event_open), use application-level metrics
+# Instead of strace (requires ptrace), use Docker logs and audit logs
+
+# Solution 5: Run debugging tools on host, not in container
+# Debug the application binary directly on host:
+gdb ./myapp
+strace -f ./myapp
+
+# Or use Docker exec with relaxed Seccomp:
+docker exec --privileged <container-id> gdb /app/myapp
+```
+
+---
+
+### Issue 6: Audit Logs Not Generated for Policy Violations
+
+**Symptoms:**
+- Policy violations occur but no audit events logged
+- `acode audit query` returns empty results
+- Audit log file `/var/log/acode/audit.log` does not exist or is empty
+- Cannot investigate security incidents due to missing audit trail
+
+**Causes:**
+1. Audit logger not initialized or configured correctly
+2. Log file path not writable by Acode process
+3. Audit logging disabled in configuration
+4. Audit events buffered in memory but not flushed to disk
+5. Log rotation deleted audit logs before they were archived
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify audit logging is enabled
+acode config get audit.enabled
+# Expected: true
+
+# If disabled, enable it:
+acode config set audit.enabled true
+
+# Solution 2: Check audit log file permissions
+ls -la /var/log/acode/
+# Expected: audit.log should exist and be writable by Acode user
+
+# If missing, create directory and set permissions:
+sudo mkdir -p /var/log/acode
+sudo chown $(whoami):$(whoami) /var/log/acode
+sudo chmod 755 /var/log/acode
+
+# Solution 3: Verify audit logger is initialized in code
+# Check Infrastructure layer startup logs:
+acode --verbose
+# Expected: "Audit logger initialized: /var/log/acode/audit.log"
+
+# Solution 4: Force flush audit events to disk
+# Restart Acode service to flush buffered events:
+sudo systemctl restart acode
+
+# Or trigger explicit flush via API:
+acode audit flush
+
+# Solution 5: Configure audit log retention and rotation
+# Edit /etc/logrotate.d/acode:
+/var/log/acode/audit.log {
+    daily
+    rotate 90
+    compress
+    delaycompress
+    notifempty
+    create 0644 acode acode
+    postrotate
+        systemctl reload acode
+    endscript
+}
+
+# Solution 6: Test audit logging manually
+acode task run test --debug
+# Trigger a policy violation (e.g., mount denied path):
+# docker run -v /:/host alpine ls
+# Check audit logs:
+acode audit query --event-type volume_mount_policy_violation --last 5m
+# Expected: Event logged with details
+```
 
 ---
 
