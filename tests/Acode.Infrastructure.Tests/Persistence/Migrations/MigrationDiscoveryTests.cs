@@ -1,4 +1,6 @@
 // tests/Acode.Infrastructure.Tests/Persistence/Migrations/MigrationDiscoveryTests.cs
+#pragma warning disable CA2007 // ConfigureAwait not required in test code
+
 namespace Acode.Infrastructure.Tests.Persistence.Migrations;
 
 using Acode.Application.Database;
@@ -52,8 +54,8 @@ public sealed class MigrationDiscoveryTests
 
         // Assert
         result.Should().HaveCount(2);
-        result[0].Version.Should().Be("001_initial_schema");
-        result[1].Version.Should().Be("002_add_column");
+        result[0].Version.Should().Be("001");
+        result[1].Version.Should().Be("002");
         result.All(m => m.Source == MigrationSource.Embedded).Should().BeTrue();
     }
 
@@ -77,7 +79,7 @@ public sealed class MigrationDiscoveryTests
 
         // Assert
         result.Should().HaveCount(1);
-        result[0].Version.Should().Be("003_add_feature");
+        result[0].Version.Should().Be("003");
         result[0].Source.Should().Be(MigrationSource.File);
         result[0].HasDownScript.Should().BeTrue();
     }
@@ -101,9 +103,9 @@ public sealed class MigrationDiscoveryTests
 
         // Assert
         result.Should().HaveCount(3);
-        result[0].Version.Should().Be("001_first");
-        result[1].Version.Should().Be("002_second");
-        result[2].Version.Should().Be("010_tenth");
+        result[0].Version.Should().Be("001");
+        result[1].Version.Should().Be("002");
+        result[2].Version.Should().Be("010");
     }
 
     [Fact]
@@ -117,7 +119,7 @@ public sealed class MigrationDiscoveryTests
             {
                 "/app/.agent/migrations/001_create_table.sql",
                 "/app/.agent/migrations/001_create_table_down.sql",
-                "/app/.agent/migrations/002_no_down.sql"
+                "/app/.agent/migrations/002_add_column.sql"
             });
         _fileSystemMock.ReadAllTextAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns("SQL content");
@@ -158,7 +160,7 @@ public sealed class MigrationDiscoveryTests
     {
         // Arrange
         _embeddedMock.GetMigrationResourcesAsync(Arg.Any<CancellationToken>())
-            .Returns(new[] { new EmbeddedResource("001_no_down.sql", "SQL") });
+            .Returns(new[] { new EmbeddedResource("001_initial_schema.sql", "SQL") });
         _fileSystemMock.GetFilesAsync(_migrationsDir, "*.sql", Arg.Any<CancellationToken>())
             .Returns(Array.Empty<string>());
 
@@ -169,7 +171,7 @@ public sealed class MigrationDiscoveryTests
         _loggerMock.Received(1).Log(
             LogLevel.Warning,
             Arg.Any<EventId>(),
-            Arg.Is<object>(v => v.ToString()!.Contains("001_no_down")),
+            Arg.Is<object>(v => v.ToString()!.Contains("001")),
             null,
             Arg.Any<Func<object, Exception?, string>>());
     }
