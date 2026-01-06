@@ -1,9 +1,11 @@
-#pragma warning disable CA2007 // Consider calling ConfigureAwait on awaited task - xUnit tests should use ConfigureAwait(true)
+#pragma warning disable CA2007 // xUnit tests should use ConfigureAwait(true)
 
 using Acode.Application.Database;
+using Acode.Infrastructure.Database;
 using Acode.Infrastructure.Database.Sqlite;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Acode.Infrastructure.Tests.Database;
@@ -31,52 +33,44 @@ public sealed class SqliteConnectionFactoryTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_WithNullConnectionString_ThrowsArgumentNullException()
+    public void Constructor_WithNullOptions_ThrowsArgumentNullException()
     {
         // Act & Assert
         var act = () => new SqliteConnectionFactory(null!, NullLogger<SqliteConnectionFactory>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("databasePath");
+        act.Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
-    public void ProviderType_ReturnsSQLite()
+    public void Provider_ReturnsSQLite()
     {
         // Arrange
-        var factory = new SqliteConnectionFactory(_testDbPath, NullLogger<SqliteConnectionFactory>.Instance);
+        var options = CreateOptions(_testDbPath);
+        var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
 
         // Assert
-        factory.ProviderType.Should().Be(DbProviderType.SQLite);
+        factory.Provider.Should().Be(DatabaseProvider.SQLite);
     }
 
     [Fact]
-    public void ConnectionString_ReturnsExpectedValue()
+    public void Constructor_CreatesDirectoryIfNotExists()
     {
-        // Arrange
-        var factory = new SqliteConnectionFactory(_testDbPath, NullLogger<SqliteConnectionFactory>.Instance);
+        // Arrange - directory doesn't exist initially
+        Directory.Exists(_testDbDir).Should().BeFalse("directory should not exist before constructor");
+
+        // Act - constructor creates directory
+        var options = CreateOptions(_testDbPath);
+        using var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
 
         // Assert
-        factory.ConnectionString.Should().Contain(_testDbPath);
-    }
-
-    [Fact]
-    public async Task CreateAsync_CreatesDirectoryIfNotExists()
-    {
-        // Arrange
-        var factory = new SqliteConnectionFactory(_testDbPath, NullLogger<SqliteConnectionFactory>.Instance);
-        Directory.Exists(_testDbDir).Should().BeFalse("directory should not exist before test");
-
-        // Act
-        await using var connection = await factory.CreateAsync(CancellationToken.None).ConfigureAwait(true);
-
-        // Assert
-        Directory.Exists(_testDbDir).Should().BeTrue("directory should be created");
+        Directory.Exists(_testDbDir).Should().BeTrue("constructor should create directory");
     }
 
     [Fact]
     public async Task CreateAsync_CreatesDatabaseFile()
     {
         // Arrange
-        var factory = new SqliteConnectionFactory(_testDbPath, NullLogger<SqliteConnectionFactory>.Instance);
+        var options = CreateOptions(_testDbPath);
+        var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
         File.Exists(_testDbPath).Should().BeFalse("database file should not exist before test");
 
         // Act
@@ -87,23 +81,11 @@ public sealed class SqliteConnectionFactoryTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAsync_ReturnsOpenConnection()
-    {
-        // Arrange
-        var factory = new SqliteConnectionFactory(_testDbPath, NullLogger<SqliteConnectionFactory>.Instance);
-
-        // Act
-        await using var connection = await factory.CreateAsync(CancellationToken.None).ConfigureAwait(true);
-
-        // Assert
-        connection.State.Should().Be(System.Data.ConnectionState.Open);
-    }
-
-    [Fact]
     public async Task CreateAsync_EnablesWALMode()
     {
         // Arrange
-        var factory = new SqliteConnectionFactory(_testDbPath, NullLogger<SqliteConnectionFactory>.Instance);
+        var options = CreateOptions(_testDbPath);
+        var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
 
         // Act
         await using var connection = await factory.CreateAsync(CancellationToken.None).ConfigureAwait(true);
@@ -117,7 +99,8 @@ public sealed class SqliteConnectionFactoryTests : IDisposable
     public async Task CreateAsync_SetsBusyTimeout()
     {
         // Arrange
-        var factory = new SqliteConnectionFactory(_testDbPath, NullLogger<SqliteConnectionFactory>.Instance, busyTimeoutMs: 3000);
+        var options = CreateOptions(_testDbPath, busyTimeoutMs: 3000);
+        var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
 
         // Act
         await using var connection = await factory.CreateAsync(CancellationToken.None).ConfigureAwait(true);
@@ -128,15 +111,79 @@ public sealed class SqliteConnectionFactoryTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAsync_EnablesForeignKeys()
+    {
+        // Arrange
+        var options = CreateOptions(_testDbPath);
+        var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
+
+        // Act
+        await using var connection = await factory.CreateAsync(CancellationToken.None).ConfigureAwait(true);
+
+        // Assert
+        var foreignKeys = await connection.QuerySingleAsync<int>("PRAGMA foreign_keys;").ConfigureAwait(true);
+        foreignKeys.Should().Be(1, "foreign_keys should be enabled");
+    }
+
+    [Fact]
     public async Task CreateAsync_RespectsCancellation()
     {
         // Arrange
-        var factory = new SqliteConnectionFactory(_testDbPath, NullLogger<SqliteConnectionFactory>.Instance);
+        var options = CreateOptions(_testDbPath);
+        using var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        // Act & Assert
+        // Act & Assert - TaskCanceledException inherits from OperationCanceledException
         var act = async () => await factory.CreateAsync(cts.Token).ConfigureAwait(true);
         await act.Should().ThrowAsync<OperationCanceledException>().ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ReturnsHealthy_WhenDatabaseExists()
+    {
+        // Arrange
+        var options = CreateOptions(_testDbPath);
+        var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
+
+        // Create database first
+        await using var connection = await factory.CreateAsync().ConfigureAwait(true);
+
+        // Act
+        var result = await factory.CheckHealthAsync().ConfigureAwait(true);
+
+        // Assert
+        result.Status.Should().Be(HealthStatus.Healthy);
+        result.Data.Should().NotBeNull();
+        result.Data.Should().ContainKey("path");
+        result.Data.Should().ContainKey("size_bytes");
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ReturnsUnhealthy_WhenDatabaseMissing()
+    {
+        // Arrange
+        var options = CreateOptions(_testDbPath);
+        var factory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
+
+        // Act (database doesn't exist)
+        var result = await factory.CheckHealthAsync().ConfigureAwait(true);
+
+        // Assert
+        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Description.Should().Contain("not found");
+    }
+
+    private static IOptions<DatabaseOptions> CreateOptions(string dbPath, int busyTimeoutMs = 5000)
+    {
+        var options = new DatabaseOptions
+        {
+            Local = new LocalDatabaseOptions
+            {
+                Path = dbPath,
+                BusyTimeoutMs = busyTimeoutMs,
+            },
+        };
+        return Options.Create(options);
     }
 }

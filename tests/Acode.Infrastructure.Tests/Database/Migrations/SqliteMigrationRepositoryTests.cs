@@ -1,10 +1,12 @@
 #pragma warning disable CA2007 // xUnit tests should use ConfigureAwait(true)
 
 using Acode.Application.Database;
+using Acode.Infrastructure.Database;
 using Acode.Infrastructure.Database.Migrations;
 using Acode.Infrastructure.Database.Sqlite;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Acode.Infrastructure.Tests.Database.Migrations;
@@ -22,7 +24,12 @@ public sealed class SqliteMigrationRepositoryTests : IDisposable
     {
         _testDbDir = Path.Combine(Path.GetTempPath(), $"acode-migrations-test-{Guid.NewGuid():N}");
         _testDbPath = Path.Combine(_testDbDir, "migrations.db");
-        _connectionFactory = new SqliteConnectionFactory(_testDbPath, NullLogger<SqliteConnectionFactory>.Instance);
+
+        var options = Options.Create(new DatabaseOptions
+        {
+            Local = new LocalDatabaseOptions { Path = _testDbPath },
+        });
+        _connectionFactory = new SqliteConnectionFactory(options, NullLogger<SqliteConnectionFactory>.Instance);
     }
 
     public void Dispose()
