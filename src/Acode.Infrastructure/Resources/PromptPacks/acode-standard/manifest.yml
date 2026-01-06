@@ -1,0 +1,20 @@
+format_version: '1.0'
+id: acode-standard
+version: 1.0.0
+name: Acode Standard Pack
+description: General-purpose coding assistance with strict minimal diff philosophy. Works across Python, JavaScript, Go, Rust, C#, TypeScript, and other languages.
+author: Acode Team
+content_hash: placeholder_will_compute
+created_at: 2026-01-05T22:00:00Z
+components:
+  - path: system.md
+    type: system
+  - path: roles/planner.md
+    type: role
+    role: planner
+  - path: roles/coder.md
+    type: role
+    role: coder
+  - path: roles/reviewer.md
+    type: role
+    role: reviewer
