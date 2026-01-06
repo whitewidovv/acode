@@ -2,7 +2,6 @@ namespace Acode.Domain.Tests.Security;
 
 using Acode.Domain.Security;
 using FluentAssertions;
-using Xunit;
 
 public class SecuritySeverityTests
 {

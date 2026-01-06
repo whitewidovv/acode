@@ -1,4 +1,4 @@
-using Acode.Application.PromptPacks;
+using Acode.Domain.PromptPacks;
 using FluentAssertions;
 
 namespace Acode.Application.Tests.PromptPacks;
