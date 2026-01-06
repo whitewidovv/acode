@@ -1257,6 +1257,852 @@ sandbox:
 
 ---
 
+## Security Considerations
+
+This section provides detailed threat analysis and complete mitigation code for the five primary security risks in Docker sandbox implementation.
+
+### Threat 1: Container Escape via Privileged Mode or Excessive Capabilities
+
+**Risk Description:**
+Running containers in privileged mode or with unnecessary Linux capabilities grants processes inside the container broad access to host resources. Privileged containers can load kernel modules, access all devices, and bypass most isolation mechanisms. Even non-privileged containers with capabilities like `CAP_SYS_ADMIN` can potentially escape to the host.
+
+**Attack Scenario:**
+An attacker who achieves code execution inside a privileged container can:
+1. Mount the host's root filesystem: `mount /dev/sda1 /mnt/host`
+2. Chroot into host filesystem: `chroot /mnt/host`
+3. Execute arbitrary code on host with root privileges
+4. Install backdoors, exfiltrate data, pivot to other systems
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+/// <summary>
+/// Enforces capability dropping and prevents privileged mode.
+/// CRITICAL: This validator MUST be called before every container creation.
+/// </summary>
+public sealed class CapabilityEnforcer
+{
+    private readonly ILogger<CapabilityEnforcer> _logger;
+    private readonly SandboxSecurityConfig _config;
+
+    // Capabilities that should NEVER be granted
+    private static readonly HashSet<string> BlacklistedCapabilities = new()
+    {
+        "CAP_SYS_ADMIN",      // Can mount filesystems, load modules
+        "CAP_SYS_MODULE",     // Can load kernel modules
+        "CAP_SYS_RAWIO",      // Can access /dev/mem, /dev/kmem
+        "CAP_SYS_PTRACE",     // Can attach to arbitrary processes
+        "CAP_SYS_BOOT",       // Can reboot the system
+        "CAP_MAC_ADMIN",      // Can change SELinux/AppArmor policies
+        "CAP_MAC_OVERRIDE",   // Can bypass SELinux/AppArmor
+        "CAP_DAC_OVERRIDE",   // Can bypass file permission checks
+        "CAP_DAC_READ_SEARCH" // Can bypass file read permission checks
+    };
+
+    public CapabilityEnforcer(
+        ILogger<CapabilityEnforcer> logger,
+        SandboxSecurityConfig config)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+    }
+
+    /// <summary>
+    /// Validates that HostConfig does not grant excessive privileges.
+    /// Throws SecurityPolicyViolationException if validation fails.
+    /// </summary>
+    public void ValidateAndEnforceCapabilities(HostConfig hostConfig, string containerId)
+    {
+        ArgumentNullException.ThrowIfNull(hostConfig);
+
+        // CRITICAL CHECK 1: Privileged mode MUST be false
+        if (hostConfig.Privileged)
+        {
+            var error = $"Container {containerId}: Privileged mode is FORBIDDEN. " +
+                       "This would grant full host access. Set Privileged = false.";
+            _logger.LogError(error);
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.PrivilegedModeEnabled, error);
+        }
+
+        // CRITICAL CHECK 2: Drop ALL capabilities by default
+        if (hostConfig.CapDrop == null || !hostConfig.CapDrop.Contains("ALL"))
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: CapDrop does not include ALL. Enforcing.", containerId);
+            hostConfig.CapDrop = new List<string> { "ALL" };
+        }
+
+        // CRITICAL CHECK 3: Validate any added capabilities
+        if (hostConfig.CapAdd != null && hostConfig.CapAdd.Any())
+        {
+            var forbidden = hostConfig.CapAdd.Intersect(BlacklistedCapabilities).ToList();
+            if (forbidden.Any())
+            {
+                var error = $"Container {containerId}: Blacklisted capabilities detected: " +
+                           $"{string.Join(", ", forbidden)}. These MUST NOT be granted.";
+                _logger.LogError(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.BlacklistedCapability, error);
+            }
+
+            // Log approved capabilities (should be minimal or none)
+            _logger.LogInformation(
+                "Container {ContainerId}: Approved capabilities added: {Caps}",
+                containerId, string.Join(", ", hostConfig.CapAdd));
+        }
+
+        // CRITICAL CHECK 4: NoNewPrivileges must be set
+        if (hostConfig.SecurityOpt == null ||
+            !hostConfig.SecurityOpt.Any(opt => opt == "no-new-privileges"))
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: no-new-privileges not set. Enforcing.", containerId);
+            hostConfig.SecurityOpt ??= new List<string>();
+            hostConfig.SecurityOpt.Add("no-new-privileges");
+        }
+
+        _logger.LogInformation(
+            "Container {ContainerId}: Capability enforcement passed. " +
+            "Privileged=false, CapDrop=ALL, NoNewPrivileges=true", containerId);
+    }
+}
+
+/// <summary>
+/// Exception thrown when security policy is violated.
+/// </summary>
+public sealed class SecurityPolicyViolationException : Exception
+{
+    public SecurityViolationCode Code { get; }
+
+    public SecurityPolicyViolationException(SecurityViolationCode code, string message)
+        : base(message)
+    {
+        Code = code;
+    }
+}
+
+public enum SecurityViolationCode
+{
+    PrivilegedModeEnabled,
+    BlacklistedCapability,
+    HostPathEscape,
+    DockerSocketMounted,
+    UnverifiedImage
+}
+```
+
+---
+
+### Threat 2: Host Path Traversal via Malicious Mount Paths
+
+**Risk Description:**
+If mount source paths are not validated, an attacker could specify paths like `/`, `/etc`, `/var/run/docker.sock`, or use path traversal sequences (`../`) to escape the intended mount restriction. This could expose sensitive host files (SSH keys, credentials, Docker socket) or allow modification of system configuration.
+
+**Attack Scenario:**
+Malicious repository contract (`.agent/config.yml`) specifies:
+```yaml
+sandbox:
+  mounts:
+    additional:
+      - source: ../../../../etc
+        target: /container-etc
+        readonly: false
+```
+Without validation, this mounts `/etc` as writable, allowing attacker to:
+1. Modify `/etc/passwd`, `/etc/shadow` (add root user)
+2. Modify `/etc/crontab` (install backdoor)
+3. Read `/etc/machine-id`, `/etc/ssh/ssh_host_*` keys
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+/// <summary>
+/// Validates mount paths to prevent path traversal and access to sensitive host directories.
+/// </summary>
+public sealed class MountPathValidator
+{
+    private readonly ILogger<MountPathValidator> _logger;
+    private readonly string _repositoryRoot;
+
+    // Sensitive paths that MUST NEVER be mounted (even read-only)
+    private static readonly HashSet<string> ForbiddenPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/",                    // Root filesystem
+        "/etc",                 // System configuration
+        "/var",                 // System state
+        "/usr",                 // System binaries
+        "/bin",                 // Critical binaries
+        "/sbin",                // System binaries
+        "/boot",                // Boot files
+        "/dev",                 // Device files
+        "/proc",                // Process information
+        "/sys",                 // Kernel/system information
+        "/run",                 // Runtime data
+        "/var/run",             // Runtime sockets
+        "/var/run/docker.sock", // Docker socket (CRITICAL)
+        "/root",                // Root user home
+        "/home",                // All user homes (too broad)
+        "C:\\",                 // Windows root
+        "C:\\Windows",          // Windows system
+        "C:\\Program Files"     // Windows programs
+    };
+
+    public MountPathValidator(ILogger<MountPathValidator> logger, string repositoryRoot)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _repositoryRoot = Path.GetFullPath(repositoryRoot ?? throw new ArgumentNullException(nameof(repositoryRoot)));
+    }
+
+    /// <summary>
+    /// Validates and canonicalizes a mount source path.
+    /// Returns the canonical path if valid, throws if invalid.
+    /// </summary>
+    public string ValidateAndCanonicalizePath(string sourcePath, bool isWorkspaceMount)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.HostPathEscape,
+                "Mount source path cannot be null or empty");
+        }
+
+        // Step 1: Resolve to absolute path
+        string absolutePath;
+        try
+        {
+            absolutePath = Path.IsPathRooted(sourcePath)
+                ? Path.GetFullPath(sourcePath)
+                : Path.GetFullPath(Path.Combine(_repositoryRoot, sourcePath));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resolve path: {Path}", sourcePath);
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.HostPathEscape,
+                $"Invalid path: {sourcePath}");
+        }
+
+        // Step 2: Check against forbidden paths
+        var canonicalPath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? absolutePath.Replace('/', '\\')
+            : absolutePath.Replace('\\', '/');
+
+        foreach (var forbidden in ForbiddenPaths)
+        {
+            var forbiddenCanonical = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? forbidden.Replace('/', '\\')
+                : forbidden;
+
+            if (canonicalPath.Equals(forbiddenCanonical, StringComparison.OrdinalIgnoreCase) ||
+                canonicalPath.StartsWith(forbiddenCanonical + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                var error = $"FORBIDDEN: Cannot mount sensitive path '{sourcePath}' " +
+                           $"(resolved to '{absolutePath}'). Path is in restricted list.";
+                _logger.LogError(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.HostPathEscape, error);
+            }
+        }
+
+        // Step 3: Workspace mounts MUST be within repository root
+        if (isWorkspaceMount)
+        {
+            if (!absolutePath.StartsWith(_repositoryRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                var error = $"FORBIDDEN: Workspace mount '{sourcePath}' (resolved to '{absolutePath}') " +
+                           $"is outside repository root '{_repositoryRoot}'";
+                _logger.LogError(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.HostPathEscape, error);
+            }
+        }
+
+        // Step 4: Check for excessive parent directory traversals (potential obfuscation)
+        var segments = sourcePath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+        var parentTraversals = segments.Count(s => s == "..");
+        if (parentTraversals > 5)
+        {
+            _logger.LogWarning(
+                "Path '{Path}' has {Count} parent traversals (suspicious)", sourcePath, parentTraversals);
+        }
+
+        // Step 5: Verify path exists (prevents typos leading to security issues)
+        if (!Directory.Exists(absolutePath) && !File.Exists(absolutePath))
+        {
+            _logger.LogWarning("Path does not exist: {Path}", absolutePath);
+            // Don't fail here - Docker will handle non-existent paths
+            // But log for visibility
+        }
+
+        _logger.LogDebug(
+            "Mount path validated: '{Source}' -> '{Canonical}'", sourcePath, canonicalPath);
+
+        return canonicalPath;
+    }
+
+    /// <summary>
+    /// Checks if a path points to the Docker socket (CRITICAL security check).
+    /// </summary>
+    public bool IsDockerSocket(string path)
+    {
+        var canonical = Path.GetFullPath(path);
+        var dockerSockets = new[]
+        {
+            "/var/run/docker.sock",
+            "/run/docker.sock",
+            "\\\\.\\pipe\\docker_engine",
+            "npipe:////./pipe/docker_engine"
+        };
+
+        return dockerSockets.Any(socket =>
+            canonical.Equals(socket, StringComparison.OrdinalIgnoreCase));
+    }
+}
+```
+
+---
+
+### Threat 3: Resource Exhaustion via Missing or Insufficient Limits
+
+**Risk Description:**
+Without proper resource limits, a container can consume unlimited CPU, memory, and PIDs, causing host system degradation or complete denial of service. A fork bomb can create thousands of processes. A memory leak can trigger host OOM killer, potentially killing critical system services.
+
+**Attack Scenario:**
+Malicious code executes inside container:
+```bash
+# Fork bomb
+:(){ :|:& };:
+
+# Memory bomb
+while true; do
+  malloc_bomb=$(cat /dev/zero | head -c 100M | base64)
+done
+```
+Without limits, this exhausts host resources in seconds, affecting all other containers and host processes.
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+/// <summary>
+/// Enforces resource limits to prevent denial-of-service attacks.
+/// </summary>
+public sealed class ResourceLimitEnforcer
+{
+    private readonly ILogger<ResourceLimitEnforcer> _logger;
+    private readonly SandboxConfiguration _config;
+
+    // Absolute maximums (cannot be exceeded even by config)
+    private const long MaxMemoryBytes = 8L * 1024 * 1024 * 1024; // 8GB
+    private const long MaxCpuQuota = 400_000; // 4 cores
+    private const long MaxPids = 2048;
+    private const int MaxUlimitNoFile = 10000;
+
+    public ResourceLimitEnforcer(
+        ILogger<ResourceLimitEnforcer> logger,
+        SandboxConfiguration config)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+    }
+
+    /// <summary>
+    /// Applies and validates resource limits on HostConfig.
+    /// Clamps values to safe maximums if configured limits exceed safety thresholds.
+    /// </summary>
+    public void EnforceResourceLimits(HostConfig hostConfig, string containerId)
+    {
+        ArgumentNullException.ThrowIfNull(hostConfig);
+
+        // Memory limit (CRITICAL: prevents OOM bomb)
+        var requestedMemory = ParseMemoryString(_config.Defaults.Memory);
+        var enforcedMemory = Math.Min(requestedMemory, MaxMemoryBytes);
+
+        if (enforcedMemory < requestedMemory)
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: Requested memory {Requested}MB exceeds maximum {Max}MB. Clamping.",
+                containerId, requestedMemory / (1024 * 1024), MaxMemoryBytes / (1024 * 1024));
+        }
+
+        hostConfig.Memory = enforcedMemory;
+        hostConfig.MemorySwap = 0; // Disable swap (prevents swap thrashing)
+        hostConfig.MemorySwappiness = 0;
+        hostConfig.OomKillDisable = false; // CRITICAL: Allow OOM kill
+
+        _logger.LogInformation(
+            "Container {ContainerId}: Memory limit set to {Memory}MB",
+            containerId, enforcedMemory / (1024 * 1024));
+
+        // CPU limit (CRITICAL: prevents CPU exhaustion)
+        var requestedCpu = _config.Defaults.CpuLimit;
+        var enforcedCpu = Math.Min(requestedCpu, MaxCpuQuota / 100_000.0);
+
+        if (enforcedCpu < requestedCpu)
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: Requested CPU {Requested} cores exceeds maximum {Max}. Clamping.",
+                containerId, requestedCpu, enforcedCpu);
+        }
+
+        hostConfig.CPUQuota = (long)(enforcedCpu * 100_000);
+        hostConfig.CPUPeriod = 100_000; // Standard 100ms period
+        hostConfig.CPUShares = 1024; // Default weight
+
+        _logger.LogInformation(
+            "Container {ContainerId}: CPU limit set to {Cpu} cores",
+            containerId, enforcedCpu);
+
+        // PID limit (CRITICAL: prevents fork bomb)
+        var requestedPids = _config.Defaults.PidsLimit;
+        var enforcedPids = Math.Min(requestedPids, MaxPids);
+
+        if (enforcedPids < requestedPids)
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: Requested PID limit {Requested} exceeds maximum {Max}. Clamping.",
+                containerId, requestedPids, MaxPids);
+        }
+
+        hostConfig.PidsLimit = enforcedPids;
+
+        _logger.LogInformation(
+            "Container {ContainerId}: PID limit set to {Pids}",
+            containerId, enforcedPids);
+
+        // Ulimits (file descriptors, processes)
+        hostConfig.Ulimits = new List<Ulimit>
+        {
+            new Ulimit
+            {
+                Name = "nofile", // Max open files
+                Soft = 1024,
+                Hard = Math.Min(_config.Defaults.PidsLimit * 2, MaxUlimitNoFile)
+            },
+            new Ulimit
+            {
+                Name = "nproc", // Max processes (redundant with PidsLimit but good defense-in-depth)
+                Soft = enforcedPids,
+                Hard = enforcedPids
+            }
+        };
+
+        _logger.LogInformation(
+            "Container {ContainerId}: Resource limits enforced successfully", containerId);
+    }
+
+    private static long ParseMemoryString(string memory)
+    {
+        if (string.IsNullOrWhiteSpace(memory))
+            return 512L * 1024 * 1024; // Default 512MB
+
+        var trimmed = memory.Trim().ToUpperInvariant();
+        var value = double.Parse(new string(trimmed.TakeWhile(char.IsDigit).ToArray()));
+
+        if (trimmed.EndsWith("GB") || trimmed.EndsWith("G"))
+            return (long)(value * 1024 * 1024 * 1024);
+        if (trimmed.EndsWith("MB") || trimmed.EndsWith("M"))
+            return (long)(value * 1024 * 1024);
+        if (trimmed.EndsWith("KB") || trimmed.EndsWith("K"))
+            return (long)(value * 1024);
+
+        // Assume bytes if no unit
+        return (long)value;
+    }
+}
+```
+
+---
+
+### Threat 4: Docker Socket Exposure Leading to Full Host Compromise
+
+**Risk Description:**
+Mounting the Docker socket (`/var/run/docker.sock`) into a container is equivalent to granting root access to the host. Any process inside the container can create privileged containers, mount arbitrary host paths, execute commands on the host, and completely bypass all isolation.
+
+**Attack Scenario:**
+If Docker socket is mounted:
+```yaml
+mounts:
+  - source: /var/run/docker.sock
+    target: /var/run/docker.sock
+```
+Attacker inside container runs:
+```bash
+# Install Docker CLI inside container
+apk add docker-cli
+
+# Create privileged container with host root mounted
+docker run -v /:/host --privileged alpine chroot /host
+
+# Now has full root access to host
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+/// <summary>
+/// Prevents Docker socket exposure which would grant full host access.
+/// </summary>
+public sealed class DockerSocketGuard
+{
+    private readonly ILogger<DockerSocketGuard> _logger;
+    private readonly MountPathValidator _pathValidator;
+
+    // All variations of Docker socket path across platforms
+    private static readonly HashSet<string> DockerSocketPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/var/run/docker.sock",
+        "/run/docker.sock",
+        "//./pipe/docker_engine",          // Windows named pipe
+        "\\\\.\\pipe\\docker_engine",      // Windows named pipe (escaped)
+        "npipe:////./pipe/docker_engine",  // Docker.DotNet Windows format
+        "unix:///var/run/docker.sock",     // Docker.DotNet Unix format
+        "tcp://localhost:2375",            // Unencrypted TCP (also dangerous)
+        "tcp://127.0.0.1:2375"
+    };
+
+    public DockerSocketGuard(
+        ILogger<DockerSocketGuard> logger,
+        MountPathValidator pathValidator)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _pathValidator = pathValidator ?? throw new ArgumentNullException(nameof(pathValidator));
+    }
+
+    /// <summary>
+    /// Scans all mounts for Docker socket and throws if found.
+    /// CRITICAL: This check MUST pass before container creation.
+    /// </summary>
+    public void ValidateNoDockerSocketMounted(IList<string> binds, string containerId)
+    {
+        if (binds == null || !binds.Any())
+            return;
+
+        foreach (var bind in binds)
+        {
+            // Parse bind format: "source:target:mode" or "source:target"
+            var parts = bind.Split(':');
+            if (parts.Length < 2)
+            {
+                _logger.LogWarning(
+                    "Container {ContainerId}: Invalid bind format: {Bind}", containerId, bind);
+                continue;
+            }
+
+            var sourcePath = parts[0];
+
+            // Check if source is Docker socket
+            if (IsDockerSocketPath(sourcePath))
+            {
+                var error = $"CRITICAL SECURITY VIOLATION: Container {containerId} " +
+                           $"attempts to mount Docker socket '{sourcePath}'. " +
+                           "This would grant full host access and is STRICTLY FORBIDDEN.";
+                _logger.LogCritical(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.DockerSocketMounted, error);
+            }
+
+            // Also check canonical path (resolves symlinks)
+            try
+            {
+                var canonical = _pathValidator.ValidateAndCanonicalizePath(sourcePath, false);
+                if (IsDockerSocketPath(canonical))
+                {
+                    var error = $"CRITICAL SECURITY VIOLATION: Container {containerId} " +
+                               $"attempts to mount path '{sourcePath}' which resolves to Docker socket '{canonical}'. " +
+                               "Symlink or relative path to Docker socket is STRICTLY FORBIDDEN.";
+                    _logger.LogCritical(error);
+                    throw new SecurityPolicyViolationException(
+                        SecurityViolationCode.DockerSocketMounted, error);
+                }
+            }
+            catch (SecurityPolicyViolationException)
+            {
+                // Re-throw security violations
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Path validation failed for other reason - log but don't fail
+                // (Docker will reject invalid paths later)
+                _logger.LogWarning(ex,
+                    "Container {ContainerId}: Could not validate mount path: {Path}",
+                    containerId, sourcePath);
+            }
+        }
+
+        _logger.LogDebug(
+            "Container {ContainerId}: Docker socket mount check passed ({Count} mounts scanned)",
+            containerId, binds.Count);
+    }
+
+    private static bool IsDockerSocketPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        // Normalize path for comparison
+        var normalized = path.Replace('\\', '/').TrimEnd('/');
+
+        return DockerSocketPaths.Any(socketPath =>
+        {
+            var normalizedSocket = socketPath.Replace('\\', '/').TrimEnd('/');
+            return normalized.Equals(normalizedSocket, StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith(normalizedSocket, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+}
+```
+
+---
+
+### Threat 5: Malicious Container Images (Supply Chain Attack)
+
+**Risk Description:**
+Container images pulled from registries can contain malware, backdoors, or vulnerable software. A compromised or malicious image could exfiltrate data, mine cryptocurrency, or establish persistence on the host. Even official-looking images can be typosquatted (e.g., `dotnet/sdk` vs `d0tnet/sdk`).
+
+**Attack Scenario:**
+User configures custom image:
+```yaml
+sandbox:
+  images:
+    dotnet: malicious-user/fake-dotnet-sdk:latest
+```
+Image contains:
+1. Backdoored compiler that injects malware into built binaries
+2. Cryptocurrency miner consuming CPU in background
+3. Data exfiltration tool sending code to attacker's server
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+using System.Security.Cryptography;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+/// <summary>
+/// Validates and verifies container images before use.
+/// </summary>
+public sealed class ImageVerifier
+{
+    private readonly IDockerClient _dockerClient;
+    private readonly ILogger<ImageVerifier> _logger;
+    private readonly SandboxConfiguration _config;
+
+    // Trusted registries (configurable, defaults to official sources)
+    private static readonly HashSet<string> TrustedRegistries = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "mcr.microsoft.com",      // Microsoft Container Registry
+        "docker.io",              // Docker Hub (official)
+        "registry.hub.docker.com", // Docker Hub (full URL)
+        "ghcr.io",                // GitHub Container Registry (if org-owned)
+        "gcr.io"                  // Google Container Registry (if project-owned)
+    };
+
+    // Official image patterns (configurable)
+    private static readonly Dictionary<string, string[]> OfficialImagePrefixes = new()
+    {
+        ["dotnet"] = new[] { "mcr.microsoft.com/dotnet/sdk", "mcr.microsoft.com/dotnet/runtime" },
+        ["node"] = new[] { "docker.io/library/node", "node" }, // "node" = docker.io/library/node
+        ["python"] = new[] { "docker.io/library/python", "python" },
+        ["ubuntu"] = new[] { "docker.io/library/ubuntu", "ubuntu" }
+    };
+
+    public ImageVerifier(
+        IDockerClient dockerClient,
+        ILogger<ImageVerifier> logger,
+        SandboxConfiguration config)
+    {
+        _dockerClient = dockerClient ?? throw new ArgumentNullException(nameof(dockerClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+    }
+
+    /// <summary>
+    /// Verifies image before use. Checks:
+    /// 1. Image comes from trusted registry
+    /// 2. Image tag is not 'latest' (pinned version required in production)
+    /// 3. Image exists locally or can be pulled
+    /// 4. Image digest matches expected (if pinned)
+    /// </summary>
+    public async Task<ImageInspectResponse> VerifyImageAsync(
+        string imageName,
+        bool allowPull,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(imageName))
+        {
+            throw new ArgumentException("Image name cannot be null or empty", nameof(imageName));
+        }
+
+        // Parse image name into components
+        var (registry, repository, tag, digest) = ParseImageName(imageName);
+
+        // Check 1: Verify registry is trusted (unless explicitly allowed)
+        if (!string.IsNullOrEmpty(registry) && !TrustedRegistries.Contains(registry))
+        {
+            if (!_config.Security.AllowUntrustedRegistries)
+            {
+                var error = $"Image '{imageName}' is from untrusted registry '{registry}'. " +
+                           $"Trusted registries: {string.Join(", ", TrustedRegistries)}. " +
+                           "Set sandbox.security.allow_untrusted_registries = true to override (NOT RECOMMENDED).";
+                _logger.LogError(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.UnverifiedImage, error);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "SECURITY WARNING: Using image from untrusted registry: {Registry}", registry);
+            }
+        }
+
+        // Check 2: Warn if using :latest tag (non-reproducible)
+        if (tag == "latest")
+        {
+            _logger.LogWarning(
+                "Image '{Image}' uses ':latest' tag which is non-reproducible. " +
+                "Consider pinning to specific version (e.g., 'node:20.10.0') or digest.", imageName);
+        }
+
+        // Check 3: Verify image exists locally
+        ImageInspectResponse? imageInfo = null;
+        try
+        {
+            imageInfo = await _dockerClient.Images.InspectImageAsync(imageName, ct);
+            _logger.LogInformation(
+                "Image '{Image}' found locally. Digest: {Digest}",
+                imageName, imageInfo.RepoDigests?.FirstOrDefault() ?? "unknown");
+        }
+        catch (DockerImageNotFoundException)
+        {
+            _logger.LogInformation("Image '{Image}' not found locally", imageName);
+
+            if (!allowPull)
+            {
+                var error = $"Image '{imageName}' not found locally and pulling is disabled. " +
+                           "Pre-pull image with 'docker pull {imageName}' or enable auto-pull.";
+                _logger.LogError(error);
+                throw new InvalidOperationException(error);
+            }
+
+            // Pull image
+            _logger.LogInformation("Pulling image '{Image}'...", imageName);
+            await PullImageWithProgressAsync(imageName, ct);
+
+            // Inspect after pull
+            imageInfo = await _dockerClient.Images.InspectImageAsync(imageName, ct);
+        }
+
+        // Check 4: If digest was specified, verify it matches
+        if (!string.IsNullOrEmpty(digest))
+        {
+            var actualDigest = imageInfo.RepoDigests?.FirstOrDefault()?.Split('@').LastOrDefault();
+            if (actualDigest != null && !actualDigest.Equals(digest, StringComparison.OrdinalIgnoreCase))
+            {
+                var error = $"Image '{imageName}' digest mismatch. " +
+                           $"Expected: {digest}, Actual: {actualDigest}. " +
+                           "This could indicate image tampering or registry compromise.";
+                _logger.LogError(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.UnverifiedImage, error);
+            }
+        }
+
+        _logger.LogInformation(
+            "Image verification passed: {Image} (Size: {Size}MB, Created: {Created})",
+            imageName,
+            imageInfo.Size / (1024.0 * 1024.0),
+            imageInfo.Created);
+
+        return imageInfo;
+    }
+
+    private static (string Registry, string Repository, string Tag, string Digest) ParseImageName(string imageName)
+    {
+        // Format: [registry/]repository[:tag][@digest]
+        // Examples:
+        //   node:20                        -> ("", "node", "20", "")
+        //   mcr.microsoft.com/dotnet/sdk:8 -> ("mcr.microsoft.com", "dotnet/sdk", "8", "")
+        //   ubuntu@sha256:abc123...        -> ("", "ubuntu", "", "sha256:abc123...")
+
+        string registry = "";
+        string repository = imageName;
+        string tag = "latest";
+        string digest = "";
+
+        // Extract digest if present
+        var digestSplit = repository.Split('@');
+        if (digestSplit.Length == 2)
+        {
+            repository = digestSplit[0];
+            digest = digestSplit[1];
+        }
+
+        // Extract tag if present
+        var tagSplit = repository.Split(':');
+        if (tagSplit.Length == 2)
+        {
+            repository = tagSplit[0];
+            tag = tagSplit[1];
+        }
+
+        // Extract registry if present (contains '/')
+        var registrySplit = repository.Split('/');
+        if (registrySplit.Length > 1 && registrySplit[0].Contains('.'))
+        {
+            registry = registrySplit[0];
+            repository = string.Join("/", registrySplit.Skip(1));
+        }
+
+        return (registry, repository, tag, digest);
+    }
+
+    private async Task PullImageWithProgressAsync(string imageName, CancellationToken ct)
+    {
+        var progress = new Progress<JSONMessage>(msg =>
+        {
+            if (!string.IsNullOrEmpty(msg.Status))
+            {
+                _logger.LogDebug("Pull progress: {Status} {Progress}", msg.Status, msg.ProgressMessage);
+            }
+        });
+
+        await _dockerClient.Images.CreateImageAsync(
+            new ImagesCreateParameters { FromImage = imageName },
+            null, // No auth for public images
+            progress,
+            ct);
+    }
+}
+```
+
+---
+
 ## Best Practices
 
 ### Container Management
