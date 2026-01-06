@@ -13,8 +13,8 @@ public sealed record RoutingConfig
     /// Gets the routing strategy to use.
     /// </summary>
     /// <remarks>
-    /// Valid values: "single", "role-based", "adaptive"
-    /// Default: "single"
+    /// Valid values: "single", "role-based", "adaptive".
+    /// Default: "single".
     /// </remarks>
     public string Strategy { get; init; } = "single";
 
@@ -23,7 +23,7 @@ public sealed record RoutingConfig
     /// </summary>
     /// <remarks>
     /// Required for all strategies.
-    /// Example: "llama3.2:7b"
+    /// Example: "llama3.2:7b".
     /// </remarks>
     public string DefaultModel { get; init; } = "llama3.2:7b";
 
@@ -32,8 +32,8 @@ public sealed record RoutingConfig
     /// </summary>
     /// <remarks>
     /// Only used when Strategy = "role-based".
-    /// Keys: "planner", "coder", "reviewer"
-    /// Values: Model IDs (e.g., "llama3.2:70b")
+    /// Keys: "planner", "coder", "reviewer".
+    /// Values: Model IDs (e.g., "llama3.2:70b").
     /// </remarks>
     public IReadOnlyDictionary<string, string>? RoleModels { get; init; }
 
@@ -42,7 +42,7 @@ public sealed record RoutingConfig
     /// </summary>
     /// <remarks>
     /// Ordered list of model IDs to try sequentially.
-    /// Example: ["llama3.2:70b", "llama3.2:7b", "mistral:7b"]
+    /// Example: ["llama3.2:70b", "llama3.2:7b", "mistral:7b"].
     /// </remarks>
     public IReadOnlyList<string>? FallbackChain { get; init; }
 }
