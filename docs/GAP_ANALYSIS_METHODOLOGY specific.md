@@ -11,7 +11,7 @@ This document provides a systematic process to identify incomplete task implemen
 4. ✅ Tests exist and actually test the implementation
 5. ✅ Tests are passing (proving implementation works)
 
-**Application**: Change `000` throughout this document to target any task suite (e.g., 001, 002, 050, 051).
+**Application**: Change `002` throughout this document to target any task suite (e.g., 001, 002, 050, 051).
 
 ---
 
@@ -45,9 +45,9 @@ find docs/tasks/refined-tasks -name "task-050*.md" -type f | sort
 
 **Expected Output**:
 ```
-docs/tasks/refined-tasks/Epic NN/task-001-parent-task-name.md
-docs/tasks/refined-tasks/Epic NN/task-001a-subtask-name.md
-docs/tasks/refined-tasks/Epic NN/task-001b-subtask-name.md
+docs/tasks/refined-tasks/Epic NN/task-002-parent-task-name.md
+docs/tasks/refined-tasks/Epic NN/task-002a-subtask-name.md
+docs/tasks/refined-tasks/Epic NN/task-002b-subtask-name.md
 ...
 ```
 
@@ -62,16 +62,16 @@ docs/tasks/refined-tasks/Epic NN/task-001b-subtask-name.md
 **Commands**:
 ```bash
 # Get total line count for each spec file
-wc -l docs/tasks/refined-tasks/Epic\ NN/task-001*.md
+wc -l docs/tasks/refined-tasks/Epic\ NN/task-002*.md
 
 # Find Implementation Prompt section line number (contains complete production code)
-grep -n "## Implementation Prompt" docs/tasks/refined-tasks/Epic\ NN/task-001a*.md
+grep -n "## Implementation Prompt" docs/tasks/refined-tasks/Epic\ NN/task-002a*.md
 
 # Find Testing Requirements section line number (contains complete test code)
-grep -n "## Testing Requirements" docs/tasks/refined-tasks/Epic\ NN/task-001a*.md
+grep -n "## Testing Requirements" docs/tasks/refined-tasks/Epic\ NN/task-002a*.md
 
 # Find Acceptance Criteria section (for feature checklist)
-grep -n "## Acceptance Criteria" docs/tasks/refined-tasks/Epic\ NN/task-001a*.md
+grep -n "## Acceptance Criteria" docs/tasks/refined-tasks/Epic\ NN/task-002a*.md
 ```
 
 **Example Output** (task-050a):
@@ -113,15 +113,15 @@ Implementation Prompt: line 3195
 **Tool Calls**:
 ```python
 # Read Acceptance Criteria (get complete deliverables list)
-Read(file_path="docs/tasks/refined-tasks/Epic NN/task-001a-*.md",
+Read(file_path="docs/tasks/refined-tasks/Epic NN/task-002a-*.md",
      offset=600, limit=300)
 
 # Read Testing Requirements (get complete test code)
-Read(file_path="docs/tasks/refined-tasks/Epic NN/task-001a-*.md",
+Read(file_path="docs/tasks/refined-tasks/Epic NN/task-002a-*.md",
      offset=2118, limit=1077)
 
 # Read Implementation Prompt (get complete production code)
-Read(file_path="docs/tasks/refined-tasks/Epic NN/task-001a-*.md",
+Read(file_path="docs/tasks/refined-tasks/Epic NN/task-002a-*.md",
      offset=3195, limit=819)
 ```
 
@@ -300,12 +300,12 @@ dotnet test --filter "FullyQualifiedName~ValidationResultTests" --verbosity norm
 
 **Objective**: Document missing/incomplete components with evidence.
 
-**File Location**: `docs/implementation-plans/task-001a-gap-analysis.md`
+**File Location**: `docs/implementation-plans/task-002a-gap-analysis.md`
 
 **Document Structure**:
 
 ```markdown
-# Task 001a Gap Analysis
+# Task 002a Gap Analysis
 
 ## Specification Requirements Summary
 
@@ -597,8 +597,8 @@ For each test file:
 **Step 1: Update Todo List**
 ```json
 [
-  {"content": "Task 001a Phase N: [Component] (INCOMPLETE → COMPLETE)", "status": "in_progress", "activeForm": "Completing [Component]"},
-  {"content": "Task 001a Phase N+1: [Next]", "status": "pending", "activeForm": "Next phase"}
+  {"content": "Task 002a Phase N: [Component] (INCOMPLETE → COMPLETE)", "status": "in_progress", "activeForm": "Completing [Component]"},
+  {"content": "Task 002a Phase N+1: [Next]", "status": "pending", "activeForm": "Next phase"}
 ]
 ```
 
@@ -689,9 +689,9 @@ grep "public.*MethodNameFromSpec" src/.../Component.cs
 **Step 6: Commit**
 ```bash
 git add -A
-git commit -m "feat(task-001a): complete [Component] implementation
+git commit -m "feat(task-002a): complete [Component] implementation
 
-Phase N of task-001a:
+Phase N of task-002a:
 - [Component].cs - completed X missing methods, removed NotImplementedException
 - [Component]Tests.cs - implemented Y missing tests
 - All X tests now passing (was Y/X, now X/X)
@@ -705,20 +705,20 @@ Verified:
 
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 
-git push origin feature/task-001-[branch-name]
+git push origin feature/task-002-[branch-name]
 ```
 
 **Step 7: Update Gap Analysis Document**
 ```bash
 # Mark phase complete with evidence
-Edit(file_path="docs/implementation-plans/task-001a-gap-analysis.md",
+Edit(file_path="docs/implementation-plans/task-002a-gap-analysis.md",
      old_string="- [ ] Phase N complete",
      new_string="- [x] Phase N complete - Verified: X/X tests passing, 0 NotImplementedException")
 ```
 
 **Step 8: Mark Phase Complete in Todo**
 ```json
-{"content": "✅ Task 001a Phase N: [Component] COMPLETE", "status": "completed", "activeForm": "Verified complete with tests"}
+{"content": "✅ Task 002a Phase N: [Component] COMPLETE", "status": "completed", "activeForm": "Verified complete with tests"}
 ```
 
 **Step 9: Repeat for Next Phase**
@@ -820,7 +820,7 @@ grep -c "Should()\|Assert\|Verify" tests/Acode.Domain.Tests/Database/ValidationR
 **9. Acceptance Criteria Cross-Check**
 ```bash
 # Open spec file, go to Acceptance Criteria section
-Read(file_path="docs/tasks/refined-tasks/Epic NN/task-001a-*.md",
+Read(file_path="docs/tasks/refined-tasks/Epic NN/task-002a-*.md",
      offset=600, limit=300)
 
 # Manually check each item:
@@ -834,7 +834,7 @@ Read(file_path="docs/tasks/refined-tasks/Epic NN/task-001a-*.md",
 **10. Gap Analysis Completeness Check**
 ```bash
 # Review gap analysis document
-Read(file_path="docs/implementation-plans/task-001a-gap-analysis.md")
+Read(file_path="docs/implementation-plans/task-002a-gap-analysis.md")
 
 # Verify all phases marked complete:
 # - [x] Phase 1 complete
@@ -866,16 +866,16 @@ Read(file_path="docs/implementation-plans/task-001a-gap-analysis.md")
 
 ## Reusable Template for Any Task Suite
 
-### Quick Start: Gap Analysis for Task 001
+### Quick Start: Gap Analysis for Task 002
 
 **Step 1**: Find task files
 ```bash
-find docs/tasks/refined-tasks -name "task-001*.md" -type f | sort
+find docs/tasks/refined-tasks -name "task-002*.md" -type f | sort
 ```
 
 **Step 2**: Get section locations
 ```bash
-SPEC_FILE="docs/tasks/refined-tasks/Epic NN/task-001a-*.md"
+SPEC_FILE="docs/tasks/refined-tasks/Epic NN/task-002a-*.md"
 wc -l "$SPEC_FILE"
 grep -n "## Acceptance Criteria" "$SPEC_FILE"
 grep -n "## Testing Requirements" "$SPEC_FILE"
@@ -1010,7 +1010,7 @@ find src tests -name "*.cs" | grep -i "{task_keyword}"
 find docs/tasks/refined-tasks -name "task-*a-*.md" | sed 's/a-.*//' | sort -u
 
 # Example output:
-# task-001  (Operating Modes & Safety Posture)
+# task-002  (Operating Modes & Safety Posture)
 # task-002  (Repository Contract)
 # task-003  (Threat Model)
 # task-050  (Database Foundation)
@@ -1050,13 +1050,13 @@ Based on task-050a experience (70% gap):
 
 ## Handoff Instructions for Another Agent Session
 
-Copy this template and replace `000`:
+Copy this template and replace `002`:
 
 ```markdown
-# Task 001 Gap Analysis and Completion - Execution Instructions
+# Task 002 Gap Analysis and Completion - Execution Instructions
 
 ## Your Mission
-Verify and complete task-001 by implementing ALL components from the specification and PROVING they work with passing tests.
+Verify and complete task-002 by implementing ALL components from the specification and PROVING they work with passing tests.
 
 ## Critical Requirements
 
@@ -1075,7 +1075,7 @@ You must verify:
 
 ```bash
 # Find spec file
-SPEC_FILE=$(find docs/tasks/refined-tasks -name "task-001a-*.md")
+SPEC_FILE=$(find docs/tasks/refined-tasks -name "task-002a-*.md")
 
 # Get section line numbers
 grep -n "## Acceptance Criteria" "$SPEC_FILE"
@@ -1149,7 +1149,7 @@ dotnet test --filter "FullyQualifiedName~FileTests" --verbosity normal
 
 ### Step 3: Create Gap Analysis Document
 
-Create: `docs/implementation-plans/task-001a-gap-analysis.md`
+Create: `docs/implementation-plans/task-002a-gap-analysis.md`
 
 **Use template from this document** (Phase 5 section).
 
@@ -1217,7 +1217,7 @@ dotnet test --filter "FileTests"
 5. **COMMIT**:
 ```bash
 git add -A
-git commit -m "feat(task-001a): complete [Component]
+git commit -m "feat(task-002a): complete [Component]
 
 Phase N:
 - [Component].cs - implemented X methods, removed NotImplementedException
@@ -1315,7 +1315,7 @@ Verify. Verify. Verify.
 6. **Executing systematically** (TDD with verification at each step)
 7. **Final verification** (comprehensive checklist before marking complete)
 
-**Reusability**: Replace `000` to target any task suite.
+**Reusability**: Replace `002` to target any task suite.
 
 **Proven Success**: Applied to task-050a, discovered 87% incomplete despite files existing (NotImplementedException found in multiple files), implemented missing work, achieved 100% verified completion.
 
