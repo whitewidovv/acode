@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using Acode.Application.Inference;
 using FluentAssertions;
 using NSubstitute;
-using Xunit;
 
 /// <summary>
 /// Tests for IProviderRegistry interface contract following TDD (RED phase).

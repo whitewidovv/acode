@@ -4,7 +4,6 @@ using System;
 using Acode.Application.Inference;
 using Acode.Domain.Models.Inference;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for DeltaAccumulator class following TDD (RED phase).
