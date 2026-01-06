@@ -1576,6 +1576,252 @@ acode runs repair-bundle bundle.acode-bundle --output bundle-repaired.acode-bund
 
 ---
 
+### Issue 3: Export Fails with "Permission Denied" Errors on Windows
+
+**Symptoms:**
+- Export command fails with `System.UnauthorizedAccessException`
+- Error message: "Access to the path 'C:\Users\...\acode-export-12345.acode-bundle' is denied"
+- Bundle file partially created but incomplete (0 bytes or corrupted)
+- Same command works for other users on same machine
+- Exporting to different drive letters produces same error
+- Windows Event Log shows "Access Control List (ACL)" warnings
+
+**Root Causes:**
+1. **Antivirus real-time scanning** - AV software locks newly created ZIP files during scan, blocking write operations
+2. **OneDrive/Dropbox sync conflicts** - Cloud storage clients lock files in synced directories during upload
+3. **Inherited permissions insufficient** - Parent directory has restrictive ACLs that don't grant write access to current user
+4. **File system junction/reparse point** - Export directory is a symlink/junction with different permissions than target
+5. **Previous export process still holding handle** - Crashed/hung export process from earlier run still has file handle open
+6. **User profile corruption** - Windows user profile has corrupted NTFS permissions preventing file creation
+7. **Mandatory Integrity Control (MIC)** - Process running at low integrity level trying to write to medium/high integrity directory
+
+**Solutions:**
+
+```bash
+# Solution 1: Check real-time AV exclusion list
+# Open Windows Security > Virus & threat protection > Manage settings > Exclusions
+# Add: C:\Users\YourName\source\local coding agent\.acode\
+# Retry export
+acode runs export --last 5
+# Expected: Export completes without errors
+
+# Solution 2: Export to non-synced directory
+acode runs export --last 5 --output C:\temp\acode-export.acode-bundle
+# Avoid: C:\Users\YourName\OneDrive\, C:\Users\YourName\Dropbox\
+# Expected: Bundle created successfully in C:\temp\
+
+# Solution 3: Check directory permissions with icacls
+icacls "C:\Users\YourName\source\local coding agent\.acode"
+# Expected output: YourName:(OI)(CI)(F) - Full control inherited
+# If missing, run:
+icacls "C:\Users\YourName\source\local coding agent\.acode" /grant YourName:(OI)(CI)F /T
+# Retry export
+
+# Solution 4: Check for junctions/reparse points
+fsutil reparsepoint query "C:\Users\YourName\source\local coding agent\.acode"
+# If reparse point exists, check target permissions:
+# Navigate to actual target directory and verify write access
+
+# Solution 5: Find and kill hung export processes
+tasklist /FI "IMAGENAME eq acode.exe" /V
+# If hung process found (status "Not Responding"):
+taskkill /IM acode.exe /F
+# Wait 10 seconds for handles to release, retry export
+
+# Solution 6: Reset NTFS permissions to defaults
+takeown /F "C:\Users\YourName\source\local coding agent\.acode" /R /D Y
+icacls "C:\Users\YourName\source\local coding agent\.acode" /reset /T /C
+# Retry export - permissions reset to defaults
+
+# Solution 7: Check process integrity level
+whoami /groups | findstr "Mandatory Label"
+# If "Low Mandatory Level" shown, export to low-integrity path:
+acode runs export --last 5 --output %LOCALAPPDATA%\Temp\bundle.acode-bundle
+# Or run acode from elevated prompt (admin)
+
+# Solution 8: Use Process Monitor to diagnose exact cause
+# Download Sysinternals Process Monitor
+# Filter: Process Name contains "acode", Result is "ACCESS DENIED"
+# Run export, check which file/operation is denied
+# Apply targeted fix based on specific operation failing
+```
+
+---
+
+### Issue 4: Import Creates Duplicate Runs When Re-Importing Same Bundle
+
+**Symptoms:**
+- Running `acode runs import bundle.acode-bundle` twice creates duplicate run records
+- `acode runs list` shows same run ID appearing multiple times with different timestamps
+- Artifact files duplicated in `.acode/artifacts/{run-id}/` (suffixed with `-1`, `-2`, etc.)
+- Database query shows multiple rows with same `run_id` but different `imported_at` timestamps
+- Conflict resolution prompt (`--on-conflict`) not appearing despite duplicates
+- Re-importing overwrites artifacts but still adds new database rows
+
+**Root Causes:**
+1. **Import ID not tracked** - System doesn't record bundle provenance, can't detect re-import of same source bundle
+2. **Run ID collision detection disabled** - `--on-conflict skip` not working correctly, always inserting new rows
+3. **Bundle manifest missing fingerprint** - No unique bundle ID (hash of manifest + metadata) to detect re-import
+4. **Time-based deduplication logic flawed** - Deduplication compares timestamps which differ between exports
+5. **Foreign key constraints not enforced** - Database allows multiple rows with same `run_id` due to missing unique constraint
+6. **Merge strategy bug** - `--on-conflict merge` incorrectly merges identical data, creating duplicates instead of no-op
+7. **Transaction isolation issue** - Concurrent imports of same bundle bypassing deduplication checks due to READ COMMITTED isolation
+
+**Solutions:**
+
+```bash
+# Solution 1: Use --on-conflict skip for idempotent imports
+acode runs import bundle.acode-bundle --on-conflict skip
+# Expected: "5 runs skipped (already exist), 0 imported"
+# Check: acode runs list | grep run-123 | wc -l  # Should output "1"
+
+# Solution 2: Clean up existing duplicates before re-import
+# Find duplicate run IDs
+acode runs list --format json | jq -r '.[].id' | sort | uniq -d
+# For each duplicate ID, keep newest, delete older:
+acode runs delete run-123-duplicate-older-timestamp
+# Then import with skip:
+acode runs import bundle.acode-bundle --on-conflict skip
+
+# Solution 3: Use dry-run to preview import behavior
+acode runs import bundle.acode-bundle --dry-run
+# Expected output shows:
+#   "Run run-123: SKIP (already exists)"
+#   "Run run-456: IMPORT (new)"
+# Confirms skip logic working before actual import
+
+# Solution 4: Verify bundle fingerprint stored in database
+acode runs list --format json | jq '.[].bundle_fingerprint'
+# If null for all runs, bundle fingerprinting not implemented
+# Workaround: Track imported bundles manually:
+echo "bundle.acode-bundle" >> .acode/imported-bundles.txt
+# Check before import:
+grep -q "bundle.acode-bundle" .acode/imported-bundles.txt && echo "Already imported"
+
+# Solution 5: Check database schema for unique constraint
+sqlite3 .acode/acode.db "PRAGMA table_info(runs);"
+# Look for UNIQUE constraint on run_id column
+# If missing, run migration:
+sqlite3 .acode/acode.db "CREATE UNIQUE INDEX idx_runs_run_id ON runs(run_id);"
+# This prevents duplicate insertions at database level
+
+# Solution 6: Use replace strategy for true idempotent behavior
+acode runs import bundle.acode-bundle --on-conflict replace
+# Expected: "5 runs replaced (updated existing), 0 duplicates"
+# Verify: Check imported_at timestamp updated, no duplicate rows
+
+# Solution 7: Set transaction isolation to SERIALIZABLE for concurrent safety
+# Edit .acode/config.yml:
+# database:
+#   isolation_level: SERIALIZABLE
+# Prevents race conditions during concurrent imports
+
+# Solution 8: Use import log to track bundle history
+acode runs import bundle.acode-bundle --log-import
+# Creates .acode/import-log.jsonl with entry:
+# {"timestamp":"2025-01-06T12:00:00Z","bundle":"bundle.acode-bundle","fingerprint":"sha256:abc123...","runs_imported":5}
+# Check log before re-import:
+grep "bundle.acode-bundle" .acode/import-log.jsonl
+# If found, skip re-import
+```
+
+---
+
+### Issue 5: Bundle Export Missing Artifacts Despite Files Existing in Artifacts Directory
+
+**Symptoms:**
+- `acode runs export --last 5` completes successfully but bundle missing artifact files
+- `unzip -l bundle.acode-bundle` shows `runs/` and `manifest.json` but empty `artifacts/` directory
+- `acode runs show run-123 --artifacts` shows artifacts associated with run
+- Files exist in `.acode/artifacts/{run-id}/` with correct permissions
+- Manifest JSON lists expected artifacts in `files` array but they're not in ZIP
+- Export summary shows "Artifacts: 42 files, 156MB" but bundle size only 2MB
+- No error messages during export process
+
+**Root Causes:**
+1. **Symlink artifacts not followed** - Artifact files are symlinks and `--dereference` not enabled during ZIP creation
+2. **Artifact paths exceed ZIP path length limit** - Paths longer than 255 characters silently skipped by ZIP library
+3. **Case-sensitivity mismatch** - Database stores `Artifact.txt` but filesystem has `artifact.txt`, lookup fails on case-sensitive FS
+4. **Artifact files deleted/moved after run** - Files were present during run but removed before export
+5. **Artifact directory junction/mount point** - `.acode/artifacts/` is mounted volume that's unmounted at export time
+6. **Hidden/system file attributes** - Artifacts marked hidden on Windows, ZIP library skips by default
+7. **Race condition between export and cleanup** - Background cleanup job deleting old artifacts during export
+8. **Filter pattern excluding artifacts** - Export command has `--exclude-pattern` that inadvertently matches artifact extensions
+
+**Solutions:**
+
+```bash
+# Solution 1: Check for symlinks and enable dereferencing
+ls -la .acode/artifacts/{run-id}/
+# If artifacts show as symlinks (e.g., "artifact.txt -> /mnt/storage/artifact.txt"):
+acode runs export --last 5 --follow-symlinks
+# Expected: Symlink targets included in bundle, bundle size increases
+
+# Solution 2: Verify artifact paths length
+find .acode/artifacts/ -type f -print0 | xargs -0 -I {} sh -c 'echo ${#1} $1' _ {} | sort -rn | head -5
+# If paths exceed 255 characters:
+# Option A: Use ZIP64 format (default in modern tools)
+# Option B: Export with path flattening:
+acode runs export --last 5 --flatten-artifacts
+# Stores as artifacts/{sha256-hash}.{ext} instead of preserving directory structure
+
+# Solution 3: Check case-sensitivity issues
+# On Linux/macOS:
+find .acode/artifacts/{run-id}/ -type f
+# Compare with database:
+acode runs show {run-id} --artifacts --format json | jq -r '.artifacts[].path'
+# If mismatch, fix with:
+acode runs repair {run-id} --fix-artifact-case
+# Re-export after repair
+
+# Solution 4: Verify artifact files still exist before export
+acode runs validate {run-id} --check-artifacts
+# Expected output: "✓ All 42 artifacts present and readable"
+# If missing files reported:
+# Option A: Export with --skip-missing-artifacts (exports what exists)
+# Option B: Re-run the task to regenerate missing artifacts
+
+# Solution 5: Check if artifacts directory is mount point
+df -h .acode/artifacts/
+# If different filesystem/mount than parent:
+# Ensure mounted before export:
+mountpoint -q .acode/artifacts/ || mount /dev/sdb1 .acode/artifacts/
+acode runs export --last 5
+
+# Solution 6: Include hidden/system files in export
+# On Windows, check attributes:
+attrib .acode\artifacts\{run-id}\*
+# If "H" (hidden) or "S" (system) shown:
+acode runs export --last 5 --include-hidden
+# Or clear attributes:
+attrib -H -S .acode\artifacts\{run-id}\* /S
+
+# Solution 7: Pause cleanup during export
+# If background cleanup job running:
+acode maintenance pause-cleanup
+acode runs export --last 5
+acode maintenance resume-cleanup
+# Or use export lock:
+acode runs export --last 5 --lock-artifacts
+# Expected: Cleanup blocked until export completes
+
+# Solution 8: Review and clear exclude patterns
+acode config show | grep export_exclude_pattern
+# If pattern like "*.tmp,*.log" inadvertently matches artifacts:
+acode runs export --last 5 --exclude-pattern ""
+# Or override with explicit include:
+acode runs export --last 5 --include-pattern "*.json,*.xml,*.log"
+
+# Solution 9: Use verbose mode to diagnose
+acode runs export --last 5 --verbose
+# Expected output shows each artifact being added:
+#   "Adding artifact: .acode/artifacts/run-123/output.json (4.2MB)"
+#   "Adding artifact: .acode/artifacts/run-123/logs/trace.log (892KB)"
+# If artifacts not listed, check which solution above applies
+```
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
