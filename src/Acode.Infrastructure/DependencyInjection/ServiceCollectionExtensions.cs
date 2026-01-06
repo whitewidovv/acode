@@ -1,7 +1,10 @@
 using Acode.Application.Configuration;
 using Acode.Application.Inference;
+using Acode.Application.Tools;
+using Acode.Application.Tools.Retry;
 using Acode.Infrastructure.Configuration;
 using Acode.Infrastructure.Ollama;
+using Acode.Infrastructure.Tools;
 using Acode.Infrastructure.Vllm;
 using Acode.Infrastructure.Vllm.Client;
 using Microsoft.Extensions.DependencyInjection;
@@ -94,6 +97,52 @@ public static class ServiceCollectionExtensions
 
         // Register VllmProvider as IModelProvider
         services.AddSingleton<IModelProvider, VllmProvider>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the Tool Schema Registry with the DI container.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <remarks>
+    /// FR-007: Tool Schema Registry requirements.
+    /// Registers ToolSchemaRegistry as singleton implementing IToolSchemaRegistry.
+    /// </remarks>
+    public static IServiceCollection AddToolSchemaRegistry(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddSingleton<IToolSchemaRegistry, ToolSchemaRegistry>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers tool validation retry components with the DI container.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Optional retry configuration. Uses defaults if null.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <remarks>
+    /// FR-007b: Validation error retry contract.
+    /// Registers ValidationErrorFormatter and RetryTracker as singletons.
+    /// </remarks>
+    public static IServiceCollection AddToolValidationRetry(
+        this IServiceCollection services,
+        RetryConfiguration? configuration = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var config = configuration ?? RetryConfiguration.Default;
+
+        // Register configuration
+        services.AddSingleton(config);
+
+        // Register formatter and tracker
+        services.AddSingleton<IValidationErrorFormatter, ValidationErrorFormatter>();
+        services.AddSingleton<IRetryTracker, RetryTracker>();
 
         return services;
     }

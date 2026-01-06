@@ -34,6 +34,57 @@ Testing resume requires simulating many failure modes. Crashes at various points
 
 ---
 
+## Use Cases
+
+### Use Case 1: Sarah - Laptop Lid Close During Long-Running Session
+
+**Persona:** Sarah is a senior software engineer working from a coffee shop. She's running a complex refactoring session that involves analyzing 47 files, planning 12 tasks, and executing 38 code modification steps. The agent has completed 8 tasks and is midway through task 9 when Sarah needs to pack up and leave. She closes her laptop lid without waiting for the session to complete.
+
+**Before (No Resume):** When Sarah reaches her next location and opens her laptop, the agent process was killed by the lid-close suspend. All in-memory state is lost. The 8 completed tasks (which took 90 minutes of agent work) are gone. Sarah must start a completely new session, re-analyze all 47 files, regenerate the 12-task plan, and re-execute the first 8 tasks. This redundant work takes another 90 minutes. Additionally, Sarah wastes 15 minutes manually identifying which files were already modified to avoid duplicate changes. The total productivity loss is 105 minutes or $210 (105 minutes × $120/hour). Sarah experiences this scenario twice per week (coffee shop work, commute interruptions), costing $21,840/year (52 weeks × 2 × $210).
+
+**After (Resume with Checkpoints):** When Sarah closes her laptop, the agent catches the SIGTERM signal and gracefully transitions the session to PAUSED state. The checkpoint includes full session state: 8 completed tasks, current position (task 9, step 3), conversation context, and all file modifications made so far. When Sarah reopens her laptop 45 minutes later, she runs `acode resume`. The agent loads the checkpoint from SQLite in 320ms, validates the environment (47 files still accessible, model still available), and displays: "Resuming session abc123. Skipping 8 completed tasks (90 min). Continuing from Task 9, Step 3." The agent continues exactly where it left off. Zero redundant work. The 105 minutes of wasted time is eliminated, saving $210 per incident. At twice per week, this saves $21,840/year per developer. For a 20-developer team, annual savings is $436,800/year.
+
+**Metrics:**
+- Time saved per resume: 105 minutes
+- Value per resume: $210
+- Frequency: 2 times/week per developer
+- Annual value per developer: $21,840
+- Team annual value (20 devs): $436,800
+
+### Use Case 2: Jordan - Crash Recovery After Kernel Panic During Critical Deployment
+
+**Persona:** Jordan is a DevOps engineer running a critical production deployment using the AI agent. The deployment involves 6 sequential tasks: analyze current state, generate migration scripts, run integration tests, update configuration, apply database migrations, deploy new code. Jordan has completed tasks 1-4 (which took 35 minutes) and is midway through task 5 (applying database migrations) when the system experiences a kernel panic and hard reboots.
+
+**Before (No Resume):** After reboot, Jordan restarts the agent. Without resume capability, the agent has no memory of the previous session. Jordan must manually determine which tasks were completed. Jordan checks the database and sees that 2 of 5 migrations were applied. Jordan doesn't know if the 3rd migration was partially applied (corrupted state) or not started. Jordan spends 25 minutes manually investigating, rolls back the 2 completed migrations (because state is unclear), and starts the entire deployment from scratch. The re-run takes another 35 minutes. Additionally, the deployment window is missed, delaying the release by 12 hours and causing customer-facing downtime. Total cost: 60 minutes of Jordan's time ($180) + 12 hours of deployment delay (estimated $5,000 in lost revenue and customer trust). Total incident cost: $5,180. This type of crash happens once per quarter per DevOps engineer.
+
+**After (Resume with Idempotent Replay):** After reboot, Jordan runs `acode resume`. The agent loads the session checkpoint, which shows: tasks 1-4 complete, task 5 in progress at step "Apply migration 3 of 5". The agent's idempotency system checks the database and sees migrations 1-2 were successfully applied. Migration 3 was NOT applied (the crash occurred before the transaction committed). The agent resumes by retrying migration 3 (idempotent, safe to replay). The migration succeeds. The agent continues with migrations 4-5, then proceeds to task 6 (deploy code). The entire resume process takes 12 minutes (validation 2 min + remaining work 10 min). Zero manual investigation. Zero rollback. Zero re-execution of completed work. The deployment completes within the original window. Time saved: 60 minutes ($180) + deployment window preserved ($5,000) = $5,180 per incident. At 1 incident per quarter per DevOps engineer, savings is $20,720/year per engineer. For a team with 4 DevOps engineers, annual savings is $82,880/year.
+
+**Metrics:**
+- Time saved per crash: 60 minutes
+- Deployment delay prevented: 12 hours ($5,000 value)
+- Total value per incident: $5,180
+- Frequency: 1 time/quarter per DevOps engineer
+- Annual value per engineer: $20,720
+- Team annual value (4 DevOps engineers): $82,880
+
+### Use Case 3: Alex - Multi-Stage Resume After Power Outage
+
+**Persona:** Alex is a full-stack developer working on a complex feature that requires multiple agent sessions. Alex starts a refactoring session at 2 PM that involves 15 tasks. By 4 PM, Alex has completed 7 tasks when the office experiences a power outage. Alex's desktop computer shuts down immediately (no UPS). Power is restored 30 minutes later. Alex resumes the session and continues work. At 5:30 PM, Alex intentionally pauses the session (Ctrl+C) to attend a meeting. At 6 PM, Alex resumes again to finish the remaining work.
+
+**Before (No Resume):** Each interruption forces Alex to start over. After the power outage, Alex re-runs the refactoring from scratch, losing 2 hours of work. After the meeting, Alex manually reviews the code to determine what was done, taking 20 minutes. Total wasted time: 2 hours 20 minutes = $280 (2.33 hours × $120/hour). Power outages happen twice per year per developer. Intentional pauses for meetings happen 3 times per week. Annual cost: (2 power outages × $280) + (52 weeks × 3 pauses × $40) = $560 + $6,240 = $6,800/year per developer.
+
+**After (Resume with Multiple Checkpoints):** After the power outage, Alex runs `acode resume`. The agent loads the last checkpoint before power loss (task 7 complete, task 8 in progress). Environment validation detects that no files changed during the outage. The agent resumes task 8 by rolling back the in-progress step and retrying it (safe, idempotent). Resume takes 8 seconds. After the meeting, Alex runs `acode resume` again. The agent loads the second checkpoint (task 12 complete). Resume takes 5 seconds. Alex continues and completes the work by 6:45 PM instead of 8 PM (1 hour 15 minutes saved). Time saved per power outage: 2 hours ($240). Time saved per meeting pause: 20 minutes ($40). Annual savings: (2 × $240) + (52 × 3 × $40) = $480 + $6,240 = $6,720/year per developer. For 20 developers, annual savings is $134,400/year.
+
+**Metrics:**
+- Time saved per power outage: 2 hours ($240)
+- Time saved per meeting pause: 20 minutes ($40)
+- Power outage frequency: 2/year
+- Meeting pause frequency: 3/week
+- Annual value per developer: $6,720
+- Team annual value (20 devs): $134,400
+
+---
+
 ## Glossary / Terms
 
 | Term | Definition |
@@ -105,6 +156,326 @@ The following items are explicitly excluded from Task 011.c:
 - ASM-017: Event history is append-only during resume
 - ASM-018: Configuration changes between runs are detected and handled
 - ASM-019: Resume preserves original task description
+
+---
+
+## Security Considerations
+
+Resume introduces security-sensitive scenarios where session state from the past is replayed in the present. Attackers could exploit resume to bypass approvals, escalate privileges, or inject malicious state.
+
+### Threat 1: Session Hijacking via Lock File Manipulation
+
+**Attack:** An attacker with filesystem access modifies the session lock file to claim ownership of another user's paused session. When the attacker runs `acode resume`, they gain control of the victim's session and can execute arbitrary code in the victim's workspace.
+
+**Mitigation:**
+
+```csharp
+namespace AgenticCoder.Application.Sessions.Security;
+
+public sealed class SessionLockValidator
+{
+    private readonly IProcessChecker _processChecker;
+    private readonly IFileSystemPermissions _permissions;
+
+    public async Task<LockValidationResult> ValidateAsync(
+        SessionLock sessionLock,
+        CancellationToken ct)
+    {
+        // Check file permissions (must be 600, owner-only)
+        var permissions = await _permissions.GetAsync(sessionLock.FilePath, ct);
+        if (permissions.Mode != UnixFileMode.OwnerRead | UnixFileMode.OwnerWrite)
+        {
+            return LockValidationResult.Failed(
+                "LOCK-001",
+                "Session lock file has incorrect permissions. Expected 600, got {0}",
+                permissions.Mode);
+        }
+
+        // Verify owner matches current user
+        if (permissions.OwnerId != Environment.GetEnvironmentVariable("USER_ID"))
+        {
+            return LockValidationResult.Failed(
+                "LOCK-002",
+                "Session lock file owned by different user");
+        }
+
+        // Check if locking process is still alive
+        if (!await _processChecker.IsRunningAsync(sessionLock.ProcessId, ct))
+        {
+            // Stale lock - safe to acquire
+            return LockValidationResult.Stale(sessionLock.ProcessId);
+        }
+
+        // Verify process is actually acode
+        var processInfo = await _processChecker.GetInfoAsync(sessionLock.ProcessId, ct);
+        if (!processInfo.ExecutablePath.Contains("acode"))
+        {
+            return LockValidationResult.Failed(
+                "LOCK-003",
+                "Lock held by non-acode process: {0}",
+                processInfo.ExecutablePath);
+        }
+
+        return LockValidationResult.Success();
+    }
+}
+```
+
+### Threat 2: Approval Bypass via Checkpoint Manipulation
+
+**Attack:** An attacker pauses a session at an approval gate, modifies the checkpoint file to mark the approval as "granted", then resumes. The agent proceeds without human approval.
+
+**Mitigation:**
+
+```csharp
+namespace AgenticCoder.Application.Sessions.Security;
+
+public sealed class CheckpointIntegrityValidator
+{
+    private readonly IHmacService _hmac;
+    private const string HmacSecretEnv = "ACODE_CHECKPOINT_SECRET";
+
+    public async Task<Checkpoint> CreateAsync(
+        Session session,
+        CancellationToken ct)
+    {
+        var checkpoint = new Checkpoint(
+            Id: GenerateId(),
+            SessionId: session.Id,
+            CurrentTaskId: session.CurrentTaskId,
+            CurrentStepId: session.CurrentStepId,
+            State: session.State,
+            ConversationState: SerializeConversation(session),
+            CreatedAt: DateTimeOffset.UtcNow);
+
+        // Generate HMAC signature
+        var payload = JsonSerializer.Serialize(checkpoint);
+        var secret = Environment.GetEnvironmentVariable(HmacSecretEnv)
+            ?? throw new InvalidOperationException($"Missing {HmacSecretEnv}");
+        var signature = _hmac.ComputeHash(payload, secret);
+
+        checkpoint = checkpoint with { Signature = signature };
+        return checkpoint;
+    }
+
+    public async Task<CheckpointValidationResult> ValidateAsync(
+        Checkpoint checkpoint,
+        CancellationToken ct)
+    {
+        var secret = Environment.GetEnvironmentVariable(HmacSecretEnv)
+            ?? throw new InvalidOperationException($"Missing {HmacSecretEnv}");
+
+        // Recompute HMAC without signature field
+        var payloadWithoutSignature = JsonSerializer.Serialize(
+            checkpoint with { Signature = null });
+        var expectedSignature = _hmac.ComputeHash(payloadWithoutSignature, secret);
+
+        if (checkpoint.Signature != expectedSignature)
+        {
+            return CheckpointValidationResult.Failed(
+                "CKPT-001",
+                "Checkpoint signature invalid - possible tampering detected");
+        }
+
+        return CheckpointValidationResult.Success();
+    }
+}
+```
+
+### Threat 3: Malicious Workspace File Injection
+
+**Attack:** An attacker modifies files in the workspace while a session is paused. When the user resumes, the agent reads the malicious files and executes attacker-controlled code or commits malicious changes.
+
+**Mitigation:**
+
+```csharp
+namespace AgenticCoder.Application.Sessions.Security;
+
+public sealed class WorkspaceIntegrityChecker
+{
+    public async Task<IntegrityReport> CheckAsync(
+        Session session,
+        Checkpoint checkpoint,
+        CancellationToken ct)
+    {
+        var changedFiles = new List<ChangedFile>();
+        var suspiciousFiles = new List<SuspiciousFile>();
+
+        // Get files that existed at checkpoint time
+        var checkpointFiles = checkpoint.FileSnapshot;
+
+        foreach (var file in checkpointFiles)
+        {
+            var currentHash = await ComputeFileHashAsync(file.Path, ct);
+
+            // File changed since checkpoint
+            if (currentHash != file.Hash)
+            {
+                changedFiles.Add(new ChangedFile(
+                    file.Path,
+                    file.Hash,
+                    currentHash,
+                    await File.GetLastWriteTimeUtcAsync(file.Path, ct)));
+
+                // Check for suspicious patterns
+                var content = await File.ReadAllTextAsync(file.Path, ct);
+                if (ContainsSuspiciousPatterns(content))
+                {
+                    suspiciousFiles.Add(new SuspiciousFile(
+                        file.Path,
+                        GetSuspiciousPatterns(content)));
+                }
+            }
+        }
+
+        return new IntegrityReport(
+            TotalFiles: checkpointFiles.Count,
+            ChangedFiles: changedFiles,
+            SuspiciousFiles: suspiciousFiles,
+            Recommendation: DetermineRecommendation(changedFiles, suspiciousFiles));
+    }
+
+    private static bool ContainsSuspiciousPatterns(string content)
+    {
+        var patterns = new[]
+        {
+            "eval(",
+            "exec(",
+            "subprocess.call(",
+            "os.system(",
+            "rm -rf",
+            "curl http://",
+            "wget http://"
+        };
+
+        return patterns.Any(p => content.Contains(p, StringComparison.OrdinalIgnoreCase));
+    }
+}
+```
+
+### Threat 4: Secrets Exposure in Checkpoint State
+
+**Attack:** Sensitive data (API keys, passwords, tokens) entered during a session is stored in the checkpoint. An attacker with filesystem access reads the checkpoint file and extracts secrets.
+
+**Mitigation:**
+
+```csharp
+namespace AgenticCoder.Application.Sessions.Security;
+
+public sealed class SecretRedactionService
+{
+    private static readonly Regex[] SecretPatterns = new[]
+    {
+        new Regex(@"[A-Za-z0-9]{20,}", RegexOptions.Compiled), // Generic long strings
+        new Regex(@"(?i)(api[_-]?key|password|token|secret)\s*[:=]\s*['""]([^'""]+)['""]", RegexOptions.Compiled),
+        new Regex(@"(?i)Bearer\s+[A-Za-z0-9\-._~+/]+", RegexOptions.Compiled),
+        new Regex(@"(?i)(aws|github|stripe)_[A-Za-z0-9]{20,}", RegexOptions.Compiled)
+    };
+
+    public JsonDocument RedactSecrets(JsonDocument conversationState)
+    {
+        var json = conversationState.RootElement.GetRawText();
+
+        foreach (var pattern in SecretPatterns)
+        {
+            json = pattern.Replace(json, match =>
+            {
+                var value = match.Groups[2].Success
+                    ? match.Groups[2].Value
+                    : match.Value;
+
+                // Redact, keeping last 4 chars for debugging
+                var redacted = value.Length > 4
+                    ? $"***{value.Substring(value.Length - 4)}"
+                    : "***";
+
+                return match.Value.Replace(value, redacted);
+            });
+        }
+
+        return JsonDocument.Parse(json);
+    }
+}
+```
+
+### Threat 5: Time-of-Check-Time-of-Use (TOCTOU) Attacks
+
+**Attack:** Environment validation checks files at resume time, but an attacker modifies files between validation and actual use, bypassing security checks.
+
+**Mitigation:**
+
+```csharp
+namespace AgenticCoder.Application.Sessions.Security;
+
+public sealed class AtomicFileValidator
+{
+    public async Task<FileValidationResult> ValidateAndLockAsync(
+        string filePath,
+        string expectedHash,
+        CancellationToken ct)
+    {
+        // Open file with exclusive read lock
+        using var stream = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None); // Exclusive lock prevents modifications
+
+        // Compute hash while file is locked
+        var actualHash = await ComputeHashAsync(stream, ct);
+
+        if (actualHash != expectedHash)
+        {
+            return FileValidationResult.Failed(
+                "FILE-001",
+                "File {0} was modified. Expected hash {1}, got {2}",
+                filePath,
+                expectedHash,
+                actualHash);
+        }
+
+        // Keep stream open and return it for immediate use
+        // Caller must use the stream and dispose when done
+        return FileValidationResult.Success(stream);
+    }
+}
+```
+
+---
+
+## Best Practices
+
+### Resume Design
+
+1. **Always checkpoint after completing a step** - Never checkpoint mid-step to avoid partial state
+2. **Make all operations idempotent** - Design steps so replaying them produces the same result
+3. **Store minimal state in checkpoints** - Large checkpoints slow resume and risk corruption
+4. **Use deterministic IDs** - UUIDv7 or timestamp-based IDs ensure replay consistency
+5. **Validate environment before resume** - Catch workspace changes that could cause issues
+
+### State Management
+
+6. **Separate completed from in-progress work** - Clear distinction enables skip vs retry logic
+7. **Use append-only event history** - Never modify past events during resume
+8. **Persist checkpoints atomically** - Use database transactions to prevent partial writes
+9. **Include timestamps in all state** - Required for deterministic replay ordering
+10. **Version checkpoint format** - Schema changes must be backward-compatible
+
+### Error Handling
+
+11. **Resume failure must not corrupt state** - If resume fails, leave session in paused state
+12. **Log all resume attempts** - Include session ID, checkpoint ID, skip count for debugging
+13. **Provide actionable error messages** - Tell users exactly what went wrong and how to fix it
+14. **Distinguish transient from permanent failures** - Network issues retry, schema mismatches abort
+15. **Offer manual intervention for stuck sessions** - `acode session unlock` for stale locks
+
+### Testing
+
+16. **Test resume at every step boundary** - Ensure every checkpoint is resumable
+17. **Test crash scenarios with property-based testing** - Randomly kill process at any point
+18. **Test with modified workspaces** - Changed files, deleted files, new files
+19. **Test idempotency by double-resume** - Resume, pause immediately, resume again
+20. **Measure resume latency** - Must be <500ms for good UX
 
 ---
 
@@ -248,7 +619,322 @@ The following items are explicitly excluded from Task 011.c:
 
 ---
 
-## User Manual Documentation
+## Troubleshooting
+
+### Problem 1: \"Cannot Resume - Session Lock Held by Another Process\"
+
+**Symptoms:**
+- User runs `acode resume <session-id>` and receives error: \"Session is locked by another process (PID 47382)\"
+- Error message includes lock acquisition time and expiration time
+- User believes no other process is running but lock persists
+
+**Possible Causes:**
+1. Another terminal or IDE has the agent running for this session
+2. Previous process crashed without releasing lock (stale lock)
+3. Lock file permissions prevent lock acquisition
+4. Session was forcibly terminated leaving orphaned lock
+
+**Diagnosis:**
+
+```bash
+# Check if lock-holding process still exists
+ps aux | grep 47382
+
+# Verify lock file exists
+ls -la .acode/locks/session-<session-id>.lock
+
+# Check lock file contents
+cat .acode/locks/session-<session-id>.lock
+
+# Check lock expiration
+acode session show <session-id> --verbose | grep -i lock
+```
+
+**Solutions:**
+
+1. **Wait for Existing Process to Complete:**
+   - If the process is legitimately running, wait or monitor with `acode session status --watch`
+   
+2. **Force Release Stale Lock:**
+   ```bash
+   # Verify process is dead
+   ps aux | grep 47382 || echo \"Process not found\"
+   \n   # Force release lock
+   acode session unlock <session-id> --force
+   [WARN] Forcing release of stale lock held by PID 47382
+   [INFO] Lock released successfully
+   \n   # Retry resume
+   acode resume <session-id>
+   ```
+
+3. **Manual Lock File Removal (Last Resort):**
+   ```bash
+   # Only if acode session unlock fails
+   rm .acode/locks/session-<session-id>.lock
+   \n   # Retry resume
+   acode resume <session-id>
+   ```
+
+**Prevention:**
+- Configure lock timeout to prevent indefinite locks: `session.lock_timeout: 300s` in `.acode/config.yml`
+- Enable automatic stale lock cleanup: `session.stale_lock_cleanup: true`
+- Use graceful shutdown (Ctrl+C) instead of killing process (kill -9)
+
+---
+
+### Problem 2: \"Environment Validation Failed - Files Modified Externally\"
+
+**Symptoms:**
+- Resume command fails with error: \"Environment validation failed: 3 files modified since session started\"
+- Error lists modified files with timestamps
+- User manually edited files while session was paused
+
+**Possible Causes:**
+1. User manually modified files while session paused
+2. Another process (IDE, git pull, etc.) modified files
+3. Filesystem timestamp drift (NFS, Docker volumes)
+4. Automatic code formatters ran on files
+
+**Diagnosis:**
+
+```bash
+# Check which files changed
+acode session show <session-id> --verbose | grep -A 10 \"Modified Files\"
+
+# Compare file checksums
+acode session validate-env <session-id> --detailed
+
+# Review file modification timestamps
+stat <modified-file-path>
+
+# Check git history for external changes
+git log --since=\"<session-start-time>\" --oneline -- <modified-file-path>
+```
+
+**Solutions:**
+
+1. **Accept Changes and Resume (Safe):**
+   ```bash
+   # Review changes first
+   git diff <modified-file-path>
+   \n   # If changes are compatible, accept and resume
+   acode resume <session-id> --accept-changes
+   [WARN] Accepting 3 externally modified files
+   [INFO] Resuming session with current file state
+   ```
+
+2. **Discard External Changes:**
+   ```bash
+   # Restore files to session start state
+   acode session restore-env <session-id>
+   [INFO] Restoring 3 files to checkpoint state
+   [INFO] Creating backup: .acode/backups/session-<id>-env-backup
+   \n   # Resume
+   acode resume <session-id>
+   ```
+
+3. **Force Resume (Skip Validation):**
+   ```bash
+   # DANGEROUS: Only use if you understand the risks
+   acode resume <session-id> --force --skip-validation
+   [WARN] Skipping environment validation - resume may produce unexpected results
+   ```
+
+4. **Cancel Session and Start Fresh:**
+   ```bash
+   # If environment diverged too much
+   acode session cancel <session-id>
+   acode run \"<new-task-description>\"
+   ```
+
+**Prevention:**
+- Avoid modifying files manually while session is paused
+- Use `acode session lock-workspace` to prevent external modifications
+- Configure validation strictness: `resume.environment_validation: strict` (default) or `lenient`
+- Exclude volatile files from validation: `resume.ignore_patterns: [\"*.log\", \"*.tmp\"]`
+
+---
+
+### Problem 3: \"Checkpoint Corrupted - Cannot Load Session State\"
+
+**Symptoms:**
+- Resume fails with error: \"Checkpoint data corrupted - integrity check failed\"
+- SQLite database query succeeds but checkpoint deserialization fails
+- Session appears in database but cannot be resumed
+
+**Possible Causes:**
+1. Database corruption from disk failure or power loss
+2. Incompatible checkpoint format from version upgrade
+3. Manual database modification or repair attempt
+4. Partial write during crash (checkpoint not fully flushed)
+
+**Diagnosis:**
+
+```bash
+# Check database integrity
+sqlite3 .acode/workspace.db \"PRAGMA integrity_check;\"
+
+# Query checkpoint directly
+sqlite3 .acode/workspace.db \"SELECT id, state, checkpoint_version FROM sessions WHERE id = '<session-id>';\"
+
+# Attempt checkpoint deserialization
+acode session inspect <session-id> --validate-checkpoint
+
+# Check for database backups
+ls -lt .acode/backups/ | head -10
+```
+
+**Solutions:**
+
+1. **Restore from Previous Checkpoint:**
+   ```bash
+   # List available checkpoints for session
+   acode session checkpoints <session-id>
+   \n   # Rollback to earlier checkpoint
+   acode session rollback <session-id> --to-checkpoint <checkpoint-id>
+   [INFO] Rolling back to checkpoint from 2026-01-05T14:23:45Z
+   [INFO] Discarding 2 tasks completed after checkpoint
+   \n   # Resume from earlier point
+   acode resume <session-id>
+   ```
+
+2. **Restore Database from Backup:**
+   ```bash
+   # Stop all acode processes
+   pkill acode
+   \n   # Restore database from backup
+   cp .acode/backups/workspace.db.2026-01-05T14-30-00Z .acode/workspace.db
+   \n   # Verify restoration
+   acode session show <session-id>
+   \n   # Resume
+   acode resume <session-id>
+   ```
+
+3. **Rebuild Checkpoint from Event Log:**
+   ```bash
+   # If event log intact, rebuild checkpoint
+   acode session rebuild-checkpoint <session-id>
+   [INFO] Replaying 247 events to rebuild checkpoint
+   [INFO] Checkpoint rebuilt successfully
+   \n   # Retry resume
+   acode resume <session-id>
+   ```
+
+4. **Partial Resume from Incomplete Checkpoint:**
+   ```bash
+   # Resume as much as possible from corrupt checkpoint
+   acode resume <session-id> --partial --accept-data-loss
+   [WARN] Checkpoint partially corrupt - resuming from last valid state
+   [WARN] 2 tasks may need manual review
+   ```
+
+**Prevention:**
+- Enable automatic database backups: `database.backup_interval: 1h`
+- Use WAL mode for crash resistance: `PRAGMA journal_mode=WAL;`
+- Regular integrity checks: `acode db check --schedule daily`
+- Checkpoint versioning: Store multiple checkpoints per session for fallback
+
+---
+
+### Problem 4: \"Idempotency Violation - Duplicate Operations Detected\"
+
+**Symptoms:**
+- Resume completes successfully but produces unexpected results
+- Operations appear to execute twice (e.g., file modified twice, API called twice)
+- Audit logs show duplicate tool calls with different timestamps
+- User reports \"the agent redid work it already completed\"
+
+**Possible Causes:**
+1. Checkpoint replay logic not properly skipping completed steps
+2. Idempotency keys not being checked before operation execution
+3. External state changed between checkpoint and resume (e.g., file deleted)
+4. Clock skew or timestamp collision causing incorrect ordering
+
+**Diagnosis:**
+
+```bash
+# Check for duplicate operations in audit log
+acode session history <session-id> --format json | jq '.events[] | select(.event_type == \"tool_call\") | {tool: .tool_name, args: .args, timestamp: .timestamp}' | sort
+
+# Compare timestamps of duplicate operations
+acode session show <session-id> --verbose | grep -A 5 \"Duplicate Operations\"
+
+# Verify idempotency key generation
+acode session validate-idempotency <session-id>
+
+# Check for clock skew
+timedatectl status  # Linux
+systemsetup -getusingnetworktime  # macOS
+```
+
+**Solutions:**
+
+1. **Review and Rollback Duplicate Changes:**
+   ```bash
+   # View changes made during resume
+   git diff <checkpoint-timestamp>
+   \n   # Rollback duplicate changes
+   git checkout <checkpoint-commit> -- <file-path>
+   \n   # Manually fix any side effects (API calls, database writes)
+   ```
+
+2. **Replay from Earlier Checkpoint:**
+   ```bash
+   # Cancel current session state
+   acode session cancel <session-id>
+   \n   # Resume from checkpoint before duplication
+   acode session rollback <session-id> --to-checkpoint <earlier-checkpoint-id>
+   acode resume <session-id>
+   ```
+
+3. **Fix Idempotency Key Generation:**
+   ```csharp
+   // Ensure idempotency keys include enough uniqueness
+   var key = $\"{toolName}:{JsonSerializer.Serialize(args)}:{stepId}:{attempt}\";\n   var hash = SHA256.HashData(Encoding.UTF8.GetBytes(key));\n   var idempotencyKey = Convert.ToBase64String(hash);\n   ```
+
+4. **Manual Deduplication:**
+   ```bash
+   # Identify duplicate operations
+   acode session deduplicate <session-id> --dry-run
+   [INFO] Found 3 duplicate operations\n   [INFO] Step 12: read_file(\"src/auth.ts\") executed twice\n   [INFO] Step 15: write_file(\"src/auth.ts\") executed twice\n   [INFO] Step 18: git_commit(\"Add auth\") executed twice\n   \n   # Remove duplicates from history
+   acode session deduplicate <session-id> --apply
+   [INFO] Marked 3 operations as duplicates (skipped on future replays)
+   ```
+
+**Prevention:**
+- Implement strong idempotency key generation including step context
+- Always check idempotency keys before executing operations
+- Log all operations with idempotency keys for audit trail
+- Test resume with simulated crashes at various points
+- Use property-based testing to verify idempotency invariants
+
+---
+
+### Problem 5: \"Resume Performance Degraded - Takes Minutes Instead of Seconds\"
+
+**Symptoms:**
+- Resume command takes 5-10 minutes to start (expected: < 10 seconds)
+- Long delay during \"Loading checkpoint\" or \"Validating environment\" phases
+- Resume eventually succeeds but user experience is poor
+- Database queries appear slow
+
+**Possible Causes:**
+1. Large session with thousands of events causing slow replay
+2. Environment validation checking thousands of files
+3. Database fragmentation or missing indexes
+4. Network latency checking PostgreSQL sync state
+5. Large artifact files being loaded into memory
+
+**Diagnosis:**
+
+```bash
+# Measure resume phases
+acode resume <session-id> --verbose --profile
+[INFO] Loading checkpoint: 145ms\n[INFO] Validating environment: 287,432ms  # <-- SLOW\n[INFO] Replaying events: 892ms\n[INFO] Total: 288,469ms (4m 48s)\n\n# Check event count\nsqlite3 .acode/workspace.db \"SELECT COUNT(*) FROM session_events WHERE session_id = '<session-id>';\"\n\n# Check environment validation file count\nacode session show <session-id> --verbose | grep \"Files to Validate\"\n\n# Measure database query performance\nsqlite3 .acode/workspace.db \".timer ON\" \"SELECT * FROM sessions WHERE id = '<session-id>';\"\n\n# Check database size\nls -lh .acode/workspace.db\n```
+
+**Solutions:**
+
+1. **Skip Environment Validation (Faster Resume):**\n   ```bash\n   # Trade speed for safety\n   acode resume <session-id> --skip-validation\n   [WARN] Skipping environment validation for faster resume\n   [INFO] Resume completed in 2.3 seconds\n   ```\n\n2. **Optimize Database:**\n   ```bash\n   # Vacuum database to reduce fragmentation\n   sqlite3 .acode/workspace.db \"VACUUM;\"\n   \n   # Analyze to update query optimizer statistics\n   sqlite3 .acode/workspace.db \"ANALYZE;\"\n   \n   # Add missing indexes\n   sqlite3 .acode/workspace.db \"CREATE INDEX IF NOT EXISTS idx_events_session_timestamp ON session_events(session_id, timestamp);\"\n   ```\n\n3. **Limit Environment Validation Scope:**\n   ```yaml\n   # .acode/config.yml\n   resume:\n     environment_validation:\n       enabled: true\n       max_files_to_check: 100  # Default: unlimited\n       file_patterns: [\"src/**/*.cs\", \"tests/**/*.cs\"]  # Only check relevant files\n   ```\n\n4. **Archive Large Sessions:**\n   ```bash\n   # Export session for archival\n   acode session export <session-id> --output session-backup.jsonl\n   \n   # Delete from active database\n   acode session delete <session-id> --confirm\n   \n   # Start fresh session\n   acode run \"<task-description>\"\n   ```\n\n5. **Implement Lazy Loading:**\n   - Configure checkpoint to not load all artifacts into memory\n   - Load artifacts on-demand when actually needed by agent\n   \n**Prevention:**\n- Configure checkpoint size limits: `checkpoint.max_event_count: 1000`\n- Periodically archive completed sessions: `session.auto_archive: true`\n- Use incremental checkpoints instead of full session replay\n- Optimize database schema with proper indexes\n- Monitor resume performance with metrics: `resume_duration_seconds` histogram\n\n---\n\n## User Manual Documentation
 
 ### Overview
 

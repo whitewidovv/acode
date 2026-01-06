@@ -36,6 +36,356 @@ Testing verifies both tiers independently and together. Unit tests mock database
 
 ---
 
+## Use Cases
+
+### Use Case 1: Offline Development on Flight with Background Sync on Landing
+
+**Persona:** Alex (Senior Developer, DevOps Engineer)
+
+**Context:** Alex is flying from San Francisco to New York for a conference (6-hour flight). During the flight, Alex works on implementing a new CI/CD pipeline using Acode to generate GitHub Actions workflows. Alex's laptop has no internet connection, but Acode should work normally. Upon landing and connecting to airport WiFi, all work should automatically sync to the company's PostgreSQL database for backup and team visibility.
+
+**Problem:** Without two-tier persistence, Alex faces a dilemma:
+- **Cloud-only approach:** Cannot work offline—agent requires internet for every operation, making 6 hours of flight time wasted
+- **Local-only approach:** No backup or team visibility—if laptop is lost/stolen, 6 hours of work is gone forever
+- **Manual sync:** Alex must remember to sync upon landing—error-prone and often forgotten
+
+**Solution (With Task 011.b):** Acode uses SQLite as the local workspace cache, enabling full offline functionality. Upon connecting to WiFi, the outbox pattern automatically syncs all work to PostgreSQL:
+
+1. **Pre-Flight (14:30 PST):** Alex checks Acode status before boarding
+   ```bash
+   $ acode db status
+   SQLite: Connected (.agent/workspace.db, 48 MB, healthy)
+   PostgreSQL: Connected (company.example.com:5432, sync up-to-date)
+   Outbox: Empty (0 pending records)
+   ```
+
+2. **In-Flight (15:00-21:00 PST):** Alex runs 8 agent sessions to generate workflows, all operations write to SQLite with no network dependency:
+   - Session 1: Analyze existing .github/workflows/ (3 files)
+   - Session 2: Generate build workflow (creates build.yml)
+   - Session 3: Generate test workflow (creates test.yml)
+   - Session 4: Generate deploy workflow (creates deploy.yml)
+   - Sessions 5-8: Refinements and documentation updates
+   
+   Each session state transition writes to SQLite (< 50ms) and creates outbox record:
+   ```sql
+   INSERT INTO outbox (idempotency_key, entity_type, entity_id, payload, created_at)
+   VALUES (
+     'session:abc123:2026-01-05T18:23:45Z',
+     'Session',
+     'abc123',
+     '{"id":"abc123","state":"Completed","task_description":"Generate build workflow"}',
+     '2026-01-05T18:23:45Z'
+   );
+   ```
+   
+   Sync attempts fail due to no network (expected), records remain in outbox:
+   ```bash
+   $ acode db status
+   SQLite: Connected (healthy)
+   PostgreSQL: Offline (cannot connect)
+   Outbox: 47 pending records (oldest: 3h 23m)
+   ```
+
+3. **Post-Landing (21:15 EST / 18:15 PST):** Alex connects to airport WiFi, sync process automatically resumes:
+   - Background sync worker detects network connectivity
+   - Processes outbox records oldest-first with exponential backoff
+   - Uses idempotency keys to prevent duplicates from retry logic
+   - Syncs all 47 records (8 sessions × ~6 records/session) in 12 seconds
+   
+   ```bash
+   $ acode db status
+   SQLite: Connected (healthy)
+   PostgreSQL: Connected (company.example.com:5432, syncing...)
+   Outbox: 0 pending records (synced 47 records in last 12s)
+   
+   $ acode db sync-log --tail 5
+   [2026-01-05T21:15:23 EST] Sync started (47 pending records)
+   [2026-01-05T21:15:27 EST] Synced session abc123 (attempt 1/10, 0ms)
+   [2026-01-05T21:15:27 EST] Synced session def456 (attempt 1/10, 0ms)
+   ...
+   [2026-01-05T21:15:35 EST] Sync complete (47/47 succeeded, 0 failed)
+   ```
+
+4. **Team Visibility:** Alex's manager Jordan checks team dashboard and sees Alex's 8 completed sessions, all workflows, and progress during the flight:
+   ```sql
+   -- Query from PostgreSQL (team dashboard)
+   SELECT s.id, s.task_description, s.state, s.created_at, s.updated_at
+   FROM sessions s
+   WHERE s.user_id = 'alex@company.com'
+     AND s.created_at >= '2026-01-05T15:00:00Z'
+   ORDER BY s.created_at;
+   
+   -- Result: 8 sessions, all synced within 12 seconds of WiFi connection
+   ```
+
+**Business Impact:**
+- **Productivity Preservation:** 6 hours of flight time fully productive (8 sessions completed) vs. 0 sessions with cloud-only approach = **6 hours saved** = **$1,500 per flight** ($250/hour developer rate)
+- **Annual Savings:** 4 flights/year/developer × 15 developers × $1,500/flight = **$90,000/year** in preserved productivity
+- **Data Protection:** PostgreSQL backup ensures 0% risk of data loss from laptop theft/damage during travel
+- **Team Transparency:** Managers have real-time visibility into work completed during offline periods (within minutes of reconnection)
+- **Developer Experience:** Seamless offline-to-online transition with zero manual intervention—Alex doesn't even notice the sync happening
+
+**Success Metrics:**
+- Offline session completion rate: 100% (SQLite never blocks operations)
+- Sync success rate: 99.8% of outbox records sync successfully within 60 seconds of connectivity
+- Sync latency: < 500ms per record (average 250ms for session state updates)
+- Data loss: 0% from network issues (outbox ensures eventual delivery)
+- Developer satisfaction: 95% report "seamless offline experience" in quarterly survey
+
+---
+
+### Use Case 2: Database Migration from SQLite-Only to PostgreSQL with Zero Downtime
+
+**Persona:** Morgan (DevOps Manager), Taylor (Database Administrator)
+
+**Context:** Company starts with 5 developers using Acode with SQLite-only configuration (no central database). After 6 months, company grows to 20 developers and needs centralized visibility, backup, and compliance audit trails. Morgan needs to migrate to PostgreSQL without disrupting ongoing work or losing any data.
+
+**Problem:** Traditional database migrations require:
+- **Downtime:** Stop all agents, export data, import to new database, reconfigure, restart—causing 2-4 hours of blocked development
+- **Data Loss Risk:** Manual export/import may miss in-progress sessions or corrupt data
+- **Testing Difficulty:** Cannot validate migration without affecting production
+- **Rollback Complexity:** If migration fails, restoring to original state is manual and error-prone
+
+**Solution (With Task 011.b):** Two-tier architecture enables zero-downtime migration by adding PostgreSQL as optional tier without disrupting SQLite:
+
+1. **Phase 1: PostgreSQL Provisioning (Day 1):** Taylor provisions PostgreSQL database:
+   ```bash
+   # Create PostgreSQL database
+   createdb -h postgres.company.com -U admin acode_production
+   
+   # Run initial schema migration
+   psql -h postgres.company.com -U admin acode_production < migrations/schema_v1.sql
+   
+   # Verify schema
+   psql -h postgres.company.com -U admin acode_production -c "\dt"
+   # Output: sessions, session_events, tasks, steps, tool_calls, artifacts, outbox
+   ```
+
+2. **Phase 2: Configuration Update (Day 1, during lunch break):** Morgan updates `.agent/config.yml` for all developers via Git commit:
+   ```yaml
+   persistence:
+     postgres:
+       enabled: true
+       connection_string_env: ACODE_POSTGRES_URL
+       sync_interval: 30s
+       batch_size: 100
+   ```
+   
+   Developers run `acode config reload` (< 5 seconds, no restart required):
+   ```bash
+   $ export ACODE_POSTGRES_URL="postgresql://acode:***@postgres.company.com:5432/acode_production"
+   $ acode config reload
+   [INFO] Configuration reloaded
+   [INFO] PostgreSQL sync enabled (connection verified)
+   [INFO] Outbox processing started (checking every 30s)
+   ```
+
+3. **Phase 3: Historical Data Sync (Day 1-2, background):** Each developer's Acode instance syncs historical data from SQLite to PostgreSQL:
+   ```bash
+   # Automatic historical sync on first PostgreSQL connection
+   $ acode db sync --historical
+   [INFO] Scanning SQLite for historical sessions...
+   [INFO] Found 127 sessions (34 completed, 2 failed, 91 cancelled, 0 active)
+   [INFO] Creating outbox records for 127 sessions...
+   [INFO] Outbox: 127 pending records
+   [INFO] Sync started (estimated 3-5 minutes)
+   ...
+   [INFO] Sync complete (127/127 succeeded, 0 failed, duration: 4m 12s)
+   ```
+   
+   Morgan monitors sync progress across team:
+   ```bash
+   # Query PostgreSQL for sync status
+   SELECT 
+     user_id,
+     COUNT(*) as total_sessions,
+     MIN(created_at) as oldest_session,
+     MAX(created_at) as newest_session
+   FROM sessions
+   GROUP BY user_id
+   ORDER BY total_sessions DESC;
+   
+   # After 24 hours: 20 developers, 2,543 historical sessions synced
+   ```
+
+4. **Phase 4: Ongoing Sync (Day 2+):** All new sessions automatically sync to PostgreSQL within 30 seconds:
+   - Developer creates new session → writes to SQLite (< 50ms)
+   - Background worker reads outbox every 30s → syncs to PostgreSQL (< 500ms per record)
+   - PostgreSQL has complete view of all team activity with 30-second lag
+
+5. **Phase 5: Validation (Day 3):** Taylor validates data integrity:
+   ```bash
+   # Count sessions in SQLite (local)
+   sqlite3 .agent/workspace.db "SELECT COUNT(*) FROM sessions;"
+   # Output: 143
+   
+   # Count sessions in PostgreSQL (remote)
+   psql -h postgres.company.com -c "SELECT COUNT(*) FROM sessions WHERE user_id = 'taylor@company.com';"
+   # Output: 143 (matches!)
+   
+   # Verify no data loss
+   acode db validate --compare-checksums
+   [INFO] Comparing 143 sessions between SQLite and PostgreSQL
+   [INFO] Checksum match: 143/143 (100%)
+   [INFO] Data integrity: VERIFIED
+   ```
+
+6. **Rollback Capability (if needed):** If PostgreSQL has issues, simply disable sync in config—SQLite continues working:
+   ```yaml
+   persistence:
+     postgres:
+       enabled: false  # Disable sync, continue with SQLite-only
+   ```
+   No data loss, no downtime, instant rollback.
+
+**Business Impact:**
+- **Zero Downtime:** Migration completed with 0 minutes of blocked development time (vs. 2-4 hours traditional approach) = **$10,000 saved** (20 developers × 3 hours × $167/hour)
+- **Risk Mitigation:** Gradual rollout with instant rollback capability eliminates "big bang" migration risk
+- **Compliance:** PostgreSQL provides centralized audit trail for SOC 2 compliance (requirement for enterprise customers)
+- **Backup Strategy:** Automated PostgreSQL backups protect against laptop failures (3 laptop failures in 6 months × avg 40 hours lost work = **$20,000 risk elimination**)
+- **Team Visibility:** Managers gain real-time dashboard of all developer activity across 20-person team (estimated 5 hours/week management time savings = **$10,800/year**)
+
+**Success Metrics:**
+- Migration downtime: 0 seconds (vs. 2-4 hours traditional approach)
+- Data loss during migration: 0 sessions lost
+- Sync accuracy: 100% checksum validation match between SQLite and PostgreSQL
+- Rollback time: < 30 seconds (config change only)
+- Developer satisfaction: 100% reported "didn't notice migration happening"
+
+---
+
+### Use Case 3: Disaster Recovery from Corrupted SQLite Database Using PostgreSQL Replica
+
+**Persona:** Jordan (Senior Developer), Morgan (DevOps Manager)
+
+**Context:** Jordan's laptop experiences a filesystem corruption event (power failure during disk write). The SQLite database (`.agent/workspace.db`) becomes corrupted and unrecoverable. Jordan has 3 active sessions in progress (total 18 hours of work over past 2 days) that would be lost without PostgreSQL backup.
+
+**Problem:** Without PostgreSQL tier:
+- **Total Data Loss:** 3 sessions × 18 hours = complete work loss
+- **Recovery Time:** Must recreate all work from memory—estimated 20+ hours to reconstruct
+- **Merge Conflicts:** Other developers' work has progressed—Jordan's recreation may conflict
+- **Business Impact:** Project deadline at risk, customer deliverable delayed
+
+**Solution (With Task 011.b):** PostgreSQL serves as source-of-truth backup, enabling complete recovery:
+
+1. **Corruption Detection (9:15 AM):** Jordan attempts to run Acode, detects corruption:
+   ```bash
+   $ acode session list
+   [ERROR] SQLite database corrupted: .agent/workspace.db
+   [ERROR] Database integrity check failed (error code 11: SQLITE_CORRUPT)
+   [ERROR] Attempted recovery failed (journal file missing)
+   
+   $ sqlite3 .agent/workspace.db "PRAGMA integrity_check;"
+   *** in database main ***
+   On tree page 47 cell 12: Rowid 1523 out of order
+   Error: database disk image is malformed
+   ```
+
+2. **Recovery Initiation (9:18 AM):** Jordan triggers recovery from PostgreSQL:
+   ```bash
+   # Backup corrupted database (for forensics)
+   mv .agent/workspace.db .agent/workspace.db.corrupted.2026-01-05
+   
+   # Trigger recovery from PostgreSQL
+   $ acode db recover --from postgres
+   [INFO] PostgreSQL connection: OK (postgres.company.com:5432)
+   [INFO] Querying sessions for user: jordan@company.com
+   [INFO] Found 127 historical sessions
+   [INFO] Found 3 active sessions (created in last 48 hours)
+   [INFO] Creating new SQLite database: .agent/workspace.db
+   [INFO] Restoring schema (version 12)
+   [INFO] Restoring 127 sessions...
+   [INFO] Restoring 2,847 events...
+   [INFO] Restoring 384 tasks...
+   [INFO] Restoring 1,923 steps...
+   [INFO] Restoring 5,672 tool calls...
+   [INFO] Restoring 1,234 artifacts...
+   [INFO] Recovery complete (duration: 18 seconds)
+   [INFO] Verifying data integrity...
+   [INFO] Checksum validation: 127/127 sessions OK
+   [INFO] SQLite database restored successfully
+   ```
+
+3. **Verification (9:19 AM):** Jordan verifies all data recovered:
+   ```bash
+   # List sessions
+   $ acode session list --active
+   ID       State       Description                              Created
+   ──────────────────────────────────────────────────────────────────────────────
+   abc123   Executing   Implement OAuth2 authorization flow      2026-01-04 14:23
+   def456   Planning    Add token refresh endpoint               2026-01-05 08:45
+   ghi789   Paused      Write OAuth2 integration tests           2026-01-05 09:02
+   
+   # Verify session details
+   $ acode session show abc123 --verbose
+   Session: abc123
+   State: Executing
+   Description: Implement OAuth2 authorization flow
+   Created: 2026-01-04T14:23:17Z
+   Updated: 2026-01-05T09:12:34Z (12 minutes ago, before corruption)
+   Tasks: 4 (2 completed, 1 in-progress, 1 pending)
+   Steps: 18 (14 completed, 4 pending)
+   Tool Calls: 47
+   Artifacts: 12 files modified
+   
+   # All data present - can resume immediately!
+   ```
+
+4. **Resume Work (9:20 AM):** Jordan resumes exactly where left off:
+   ```bash
+   $ acode session resume abc123
+   [INFO] Resuming session abc123 from EXECUTING state
+   [INFO] Validating environment (Git branch, dependencies)
+   [INFO] Environment: OK
+   [INFO] Checkpoint found: Step 14 of Task 2 completed
+   [INFO] Resuming from Step 15: "Add token validation middleware"
+   [Agent continues working normally, no data loss]
+   ```
+
+5. **Root Cause Analysis (Later):** Morgan investigates corruption:
+   ```bash
+   # Review audit logs from PostgreSQL
+   SELECT 
+     session_id,
+     from_state,
+     to_state,
+     timestamp,
+     reason
+   FROM session_events
+   WHERE session_id IN ('abc123', 'def456', 'ghi789')
+     AND timestamp >= '2026-01-05T09:10:00Z'
+   ORDER BY timestamp;
+   
+   # Last sync before corruption: 09:12:34Z (3 minutes before detection)
+   # Data loss window: 3 minutes (vs. 18 hours without PostgreSQL)
+   ```
+
+**Business Impact:**
+- **Data Recovery:** 18 hours of work recovered in 18 seconds (1 second per hour of work!) = **$4,500 saved** (18 hours × $250/hour)
+- **Productivity Loss:** 3 minutes of work lost (last sync to corruption) vs. 18 hours total loss = **99.7% data protection**
+- **Recovery Time:** 5 minutes total (detection + recovery + verification) vs. 20+ hours recreation = **$4,875 saved** (19.9 hours × $245/hour)
+- **Business Continuity:** Project deadline met on schedule (vs. 2-day delay without recovery)
+- **Risk Mitigation:** Filesystem corruption (1-2 events/year/developer) no longer causes catastrophic data loss
+- **Insurance Value:** PostgreSQL backup acts as "insurance policy" for $0/month incremental cost (already provisioned)
+
+**Success Metrics:**
+- Recovery time: 18 seconds to restore 127 sessions (vs. 20+ hours manual recreation)
+- Data loss window: 3 minutes (vs. complete loss without backup)
+- Checksum validation: 100% integrity verified
+- Resume success: All 3 sessions resumed correctly with no manual intervention
+- Developer confidence: "I don't worry about losing work anymore" (post-incident survey)
+
+---
+
+**Total Business Value Summary:**
+- **Offline Productivity:** $90,000/year from flight/travel work preservation
+- **Zero-Downtime Migration:** $10,000 one-time + $10,800/year ongoing management efficiency
+- **Disaster Recovery:** $9,375 per corruption event (estimated 2-3 events/year/20 developers) = $56,250/year expected value
+- **Total Annual ROI:** **$157,050/year** for a 20-developer team
+- **Intangible Benefits:** Developer peace of mind, compliance readiness, team visibility, centralized audit trail
+
+---
+
 ## Glossary / Terms
 
 | Term | Definition |
@@ -256,6 +606,880 @@ The following items are explicitly excluded from Task 011.b:
 - NFR-018: Sync status MUST be exposed
 - NFR-019: Outbox depth MUST be tracked
 - NFR-020: Connection health MUST be monitored
+
+---
+
+## Security Considerations
+
+### Threat 1: Connection String Exposure via Configuration Files or Logs
+
+**Attack Scenario:**
+A developer accidentally commits `.agent/config.yml` containing PostgreSQL connection string with embedded password to Git repository. The repository is public or accessible to unauthorized users. Attacker clones repository, extracts connection string, and gains full access to PostgreSQL database containing all team session data.
+
+**Impact Assessment:**
+- **Confidentiality:** **CRITICAL** - Full database access exposes all session data, tool calls, artifacts
+- **Integrity:** **HIGH** - Attacker can modify or delete session records
+- **Availability:** **MEDIUM** - Attacker could drop tables or delete database
+
+**Mitigation Strategy:**
+
+1. **Environment Variable Mandate:** Never store passwords in config files, require environment variables
+
+```csharp
+namespace AgenticCoder.Infrastructure.Persistence;
+
+public sealed class PostgresConnectionStringBuilder
+{
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<PostgresConnectionStringBuilder> _logger;
+    
+    public string Build()
+    {
+        // Read from environment variable (preferred)
+        var connectionString = Environment.GetEnvironmentVariable("ACODE_POSTGRES_URL");
+        if (!string.IsNullOrEmpty(connectionString))
+        {
+            ValidateConnectionString(connectionString);
+            return connectionString;
+        }
+        
+        // Fallback: Build from individual config values
+        var host = _configuration["Persistence:Postgres:Host"];
+        var port = _configuration["Persistence:Postgres:Port"] ?? "5432";
+        var database = _configuration["Persistence:Postgres:Database"];
+        var username = _configuration["Persistence:Postgres:Username"];
+        
+        // Password MUST come from environment variable
+        var passwordEnvVar = _configuration["Persistence:Postgres:PasswordEnv"];
+        if (string.IsNullOrEmpty(passwordEnvVar))
+        {
+            throw new InvalidOperationException(
+                "PostgreSQL password must be provided via environment variable. "
+                + "Set 'Persistence:Postgres:PasswordEnv' to environment variable name (e.g., 'ACODE_POSTGRES_PASSWORD').");
+        }
+        
+        var password = Environment.GetEnvironmentVariable(passwordEnvVar);
+        if (string.IsNullOrEmpty(password))
+        {
+            throw new InvalidOperationException(
+                $"Environment variable '{passwordEnvVar}' not set or empty. "
+                + "PostgreSQL password is required.");
+        }
+        
+        // Build connection string
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = host,
+            Port = int.Parse(port),
+            Database = database,
+            Username = username,
+            Password = password,
+            SslMode = SslMode.Require, // Enforce SSL
+            Timeout = 30,
+            CommandTimeout = 60,
+            Pooling = true,
+            MaxPoolSize = 10
+        };
+        
+        return builder.ConnectionString;
+    }
+    
+    private void ValidateConnectionString(string connectionString)
+    {
+        // Ensure no plain-text passwords in logs
+        if (connectionString.Contains("password=", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "Connection string contains embedded password. "
+                + "Consider using environment variable ACODE_POSTGRES_URL with password.");
+        }
+    }
+}
+```
+
+2. **Log Redaction:** Strip passwords from all logged connection strings
+
+```csharp
+public sealed class ConnectionStringRedactor
+{
+    private static readonly Regex PasswordPattern = new(
+        @"password\s*=\s*([^;]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    
+    public static string Redact(string connectionString)
+    {
+        if (string.IsNullOrEmpty(connectionString))
+            return connectionString;
+        
+        // Replace password value with ***
+        return PasswordPattern.Replace(connectionString, "password=***");
+    }
+}
+
+public sealed class PostgresRunStateStore : IRunStateStore
+{
+    private readonly ILogger<PostgresRunStateStore> _logger;
+    
+    public PostgresRunStateStore(string connectionString, ILogger<PostgresRunStateStore> logger)
+    {
+        _logger = logger;
+        
+        // Log redacted connection string
+        var redacted = ConnectionStringRedactor.Redact(connectionString);
+        _logger.LogInformation(
+            "Initializing PostgreSQL store: {ConnectionString}",
+            redacted);
+    }
+}
+```
+
+3. **Configuration File Template:** Provide template with environment variable placeholders
+
+```yaml
+# .agent/config.yml.template (checked into Git)
+persistence:
+  postgres:
+    enabled: true
+    connection_string_env: ACODE_POSTGRES_URL  # Set environment variable with actual connection string
+    # OR use individual settings:
+    # host: postgres.company.com
+    # port: 5432
+    # database: acode
+    # username: acode
+    # password_env: ACODE_POSTGRES_PASSWORD  # Environment variable containing password
+```
+
+4. **Git Pre-Commit Hook:** Prevent committing secrets
+
+```bash
+#!/bin/bash
+# .git/hooks/pre-commit
+
+# Check for potential secrets in .agent/config.yml
+if git diff --cached --name-only | grep -q '.agent/config.yml'; then
+    if git diff --cached .agent/config.yml | grep -iE '(password|secret|key)\s*=\s*[^\$]'; then
+        echo "ERROR: .agent/config.yml contains potential secret (password/key not using environment variable)"
+        echo "Use 'password_env: ENV_VAR_NAME' instead of 'password: actual-password'"
+        exit 1
+    fi
+fi
+```
+
+**Defense in Depth:**
+- **Configuration:** Environment variables only, never plain-text passwords in files
+- **Logging:** Automatic redaction of passwords in all log output
+- **Version Control:** Pre-commit hooks prevent accidental commits
+- **Documentation:** Clear guidance on secret management in user manual
+- **Validation:** Startup fails if password not provided via environment variable
+
+---
+
+### Threat 2: SQL Injection via Malicious Session Metadata
+
+**Attack Scenario:**
+A compromised dependency or malicious plugin injects SQL code into session metadata fields (e.g., `task_description`, `reason`). When this data is queried or displayed, the SQL injection executes arbitrary commands on PostgreSQL, potentially dropping tables or exfiltrating data.
+
+**Impact Assessment:**
+- **Confidentiality:** **HIGH** - Attacker can read all database contents
+- **Integrity:** **CRITICAL** - Attacker can modify or delete records
+- **Availability:** **HIGH** - Attacker can DROP tables or database
+
+**Mitigation Strategy:**
+
+1. **Parameterized Queries:** Use Entity Framework Core's parameterized queries, never string concatenation
+
+```csharp
+public sealed class PostgresRunStateStore : IRunStateStore
+{
+    private readonly AcodeDbContext _context;
+    
+    public async Task SaveAsync(Session session, CancellationToken ct)
+    {
+        // Entity Framework Core automatically parameterizes queries
+        var entity = new SessionEntity
+        {
+            Id = session.Id.Value,
+            TaskDescription = session.TaskDescription, // Automatically parameterized
+            State = session.State.ToString(),
+            CreatedAt = session.CreatedAt,
+            UpdatedAt = session.UpdatedAt
+        };
+        
+        _context.Sessions.Add(entity);
+        await _context.SaveChangesAsync(ct);
+        
+        // WRONG (vulnerable to SQL injection):
+        // var sql = $"INSERT INTO sessions (id, task_description) VALUES ('{session.Id}', '{session.TaskDescription}')";
+        // _context.Database.ExecuteSqlRaw(sql); // NEVER DO THIS
+    }
+    
+    public async Task<IReadOnlyList<Session>> SearchAsync(string query, CancellationToken ct)
+    {
+        // Correct: Use parameterized LIKE query
+        var entities = await _context.Sessions
+            .Where(s => EF.Functions.Like(s.TaskDescription, $"%{query}%")) // Parameterized
+            .ToListAsync(ct);
+        
+        // WRONG (vulnerable to SQL injection):
+        // var sql = $"SELECT * FROM sessions WHERE task_description LIKE '%{query}%'";
+        // var entities = await _context.Sessions.FromSqlRaw(sql).ToListAsync(ct); // NEVER DO THIS
+        
+        return entities.Select(MapToDomain).ToList();
+    }
+}
+```
+
+2. **Input Validation:** Validate and sanitize all user-provided strings
+
+```csharp
+public sealed class SessionInputValidator
+{
+    private static readonly Regex SafeDescriptionPattern = new(
+        @"^[a-zA-Z0-9\s\-_.,;:!?()\[\]{}@#$%&*+=<>/\\|~`'\"]+$",
+        RegexOptions.Compiled);
+    
+    public static string ValidateTaskDescription(string description)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+            throw new ArgumentException("Task description cannot be empty");
+        
+        if (description.Length > 1000)
+            throw new ArgumentException("Task description too long (max 1000 characters)");
+        
+        // Check for SQL injection patterns
+        var suspiciousPatterns = new[]
+        {
+            ";", "--", "/*", "*/", "xp_", "sp_", "exec", "execute",
+            "drop", "delete", "insert", "update", "create", "alter"
+        };
+        
+        var lower = description.ToLowerInvariant();
+        foreach (var pattern in suspiciousPatterns)
+        {
+            if (lower.Contains(pattern))
+            {
+                throw new ArgumentException(
+                    $"Task description contains disallowed pattern: '{pattern}'. "
+                    + "This may be a SQL injection attempt.");
+            }
+        }
+        
+        return description;
+    }
+}
+
+public sealed class Session
+{
+    public Session(SessionId id, string taskDescription)
+    {
+        Id = id;
+        TaskDescription = SessionInputValidator.ValidateTaskDescription(taskDescription);
+        // ...
+    }
+}
+```
+
+3. **Database User Permissions:** Run with minimal permissions (no DROP, no admin)
+
+```sql
+-- Create restricted database user for Acode
+CREATE USER acode_app WITH PASSWORD 'strong-password-here';
+
+-- Grant only necessary permissions (no DDL)
+GRANT CONNECT ON DATABASE acode TO acode_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO acode_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO acode_app;
+
+-- Revoke dangerous permissions
+REVOKE CREATE ON SCHEMA public FROM acode_app;
+REVOKE DROP ON ALL TABLES IN SCHEMA public FROM acode_app;
+
+-- Verify permissions
+\du acode_app
+```
+
+4. **Query Monitoring:** Log and alert on suspicious query patterns
+
+```csharp
+public sealed class QueryMonitoringInterceptor : DbCommandInterceptor
+{
+    private readonly ILogger<QueryMonitoringInterceptor> _logger;
+    
+    public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<DbDataReader> result,
+        CancellationToken ct)
+    {
+        // Log all queries with duration
+        var commandText = command.CommandText;
+        
+        // Alert on suspicious patterns
+        if (commandText.Contains("DROP", StringComparison.OrdinalIgnoreCase) ||
+            commandText.Contains("DELETE FROM", StringComparison.OrdinalIgnoreCase) ||
+            commandText.Contains("TRUNCATE", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "Suspicious SQL command detected: {CommandText}",
+                commandText);
+        }
+        
+        return base.ReaderExecutingAsync(command, eventData, result, ct);
+    }
+}
+```
+
+**Defense in Depth:**
+- **ORM Layer:** Entity Framework Core parameterizes all queries automatically
+- **Input Validation:** Reject suspicious patterns before reaching database
+- **Database Permissions:** Minimal privileges (no DROP, no admin commands)
+- **Monitoring:** Alert on dangerous SQL patterns in production
+- **Testing:** SQL injection test suite validates all input paths
+
+---
+
+### Threat 3: Outbox Flooding Denial of Service
+
+**Attack Scenario:**
+A malicious script or runaway process creates thousands of sessions rapidly, each generating multiple outbox records. The outbox table grows to millions of records, exhausting disk space and degrading sync performance. Legitimate sessions cannot sync because background worker is overwhelmed processing backlog.
+
+**Impact Assessment:**
+- **Confidentiality:** Low
+- **Integrity:** Low
+- **Availability:** **CRITICAL** - Sync system becomes unusable, disk full
+
+**Mitigation Strategy:**
+
+1. **Outbox Size Limits:** Enforce maximum pending records per user
+
+```csharp
+public sealed class OutboxService : IOutboxService
+{
+    private readonly AcodeDbContext _context;
+    private readonly ILogger<OutboxService> _logger;
+    
+    private const int MaxPendingPerUser = 1000;
+    
+    public async Task EnqueueAsync(OutboxRecord record, CancellationToken ct)
+    {
+        // Check current outbox depth for this user
+        var pendingCount = await _context.OutboxRecords
+            .CountAsync(r => r.UserId == record.UserId && r.ProcessedAt == null, ct);
+        
+        if (pendingCount >= MaxPendingPerUser)
+        {
+            _logger.LogError(
+                "Outbox limit exceeded for user {UserId}: {PendingCount} pending records",
+                record.UserId, pendingCount);
+            
+            throw new OutboxLimitExceededException(
+                $"Too many pending outbox records ({pendingCount}). "
+                + $"Maximum: {MaxPendingPerUser}. Wait for sync to complete before creating more sessions.");
+        }
+        
+        // Add to outbox
+        _context.OutboxRecords.Add(record);
+        await _context.SaveChangesAsync(ct);
+    }
+}
+```
+
+2. **Automatic Cleanup:** Purge old processed records to prevent unbounded growth
+
+```csharp
+public sealed class OutboxCleanupService : BackgroundService
+{
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ILogger<OutboxCleanupService> _logger;
+    
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            await Task.Delay(TimeSpan.FromHours(1), ct);
+            await CleanupProcessedRecordsAsync(ct);
+        }
+    }
+    
+    private async Task CleanupProcessedRecordsAsync(CancellationToken ct)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<AcodeDbContext>();
+        
+        // Delete records processed more than 7 days ago
+        var threshold = DateTimeOffset.UtcNow.AddDays(-7);
+        
+        var deleted = await context.OutboxRecords
+            .Where(r => r.ProcessedAt != null && r.ProcessedAt < threshold)
+            .ExecuteDeleteAsync(ct);
+        
+        if (deleted > 0)
+        {
+            _logger.LogInformation(
+                "Cleaned up {DeletedCount} processed outbox records older than {Threshold}",
+                deleted, threshold);
+        }
+    }
+}
+```
+
+3. **Rate Limiting:** Throttle session creation per user
+
+```csharp
+public sealed class SessionRateLimiter
+{
+    private readonly IDistributedCache _cache;
+    private const int MaxSessionsPerHour = 50;
+    
+    public async Task<bool> TryAcquireAsync(string userId, CancellationToken ct)
+    {
+        var key = $"session-rate-limit:{userId}:{DateTimeOffset.UtcNow:yyyy-MM-dd-HH}";
+        
+        var currentCountStr = await _cache.GetStringAsync(key, ct);
+        var currentCount = int.TryParse(currentCountStr, out var count) ? count : 0;
+        
+        if (currentCount >= MaxSessionsPerHour)
+        {
+            return false; // Rate limit exceeded
+        }
+        
+        // Increment counter
+        await _cache.SetStringAsync(
+            key,
+            (currentCount + 1).ToString(),
+            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1) },
+            ct);
+        
+        return true;
+    }
+}
+```
+
+4. **Monitoring and Alerting:** Alert on abnormal outbox growth
+
+```csharp
+public sealed class OutboxHealthCheck : IHealthCheck
+{
+    private readonly AcodeDbContext _context;
+    private const int WarningThreshold = 5000;
+    private const int CriticalThreshold = 10000;
+    
+    public async Task<HealthCheckResult> CheckHealthAsync(
+        HealthCheckContext context,
+        CancellationToken ct)
+    {
+        var pendingCount = await _context.OutboxRecords
+            .CountAsync(r => r.ProcessedAt == null, ct);
+        
+        if (pendingCount >= CriticalThreshold)
+        {
+            return HealthCheckResult.Unhealthy(
+                $"Outbox critically full: {pendingCount} pending records (threshold: {CriticalThreshold})");
+        }
+        
+        if (pendingCount >= WarningThreshold)
+        {
+            return HealthCheckResult.Degraded(
+                $"Outbox filling up: {pendingCount} pending records (warning threshold: {WarningThreshold})");
+        }
+        
+        return HealthCheckResult.Healthy($"Outbox healthy: {pendingCount} pending records");
+    }
+}
+```
+
+**Defense in Depth:**
+- **Per-User Limits:** Maximum 1000 pending outbox records per user
+- **Automatic Cleanup:** Purge processed records older than 7 days
+- **Rate Limiting:** Maximum 50 sessions per user per hour
+- **Health Checks:** Alert at 5000 pending (warning) and 10000 (critical)
+- **Disk Quotas:** OS-level disk quotas prevent unbounded database growth
+
+---
+
+## Best Practices
+
+### Database Configuration
+
+**BP-001: Always Enable SQLite WAL Mode**
+- **Reason:** Write-Ahead Logging provides better concurrency and crash recovery
+- **Example:** `PRAGMA journal_mode=WAL;` on database initialization
+- **Anti-pattern:** Using default DELETE journaling mode (poor concurrent read performance)
+
+**BP-002: Use STRICT Tables in SQLite**
+- **Reason:** Enforces column type checking, prevents data type confusion
+- **Example:** `CREATE TABLE sessions (...) STRICT;`
+- **Anti-pattern:** Relying on SQLite's dynamic typing (allows integer in text column)
+
+**BP-003: Set Appropriate Connection Pool Size**
+- **Reason:** Balances resource usage with concurrency needs
+- **Example:** `MaxPoolSize=10` for PostgreSQL (sufficient for single-user CLI)
+- **Anti-pattern:** Using default pool size (100+) for single-threaded application
+
+### Sync Strategy
+
+**BP-004: Sync Asynchronously, Never Block User**
+- **Reason:** Network latency should not impact local operation speed
+- **Example:** Write to SQLite immediately, queue for PostgreSQL sync in background
+- **Anti-pattern:** Waiting for PostgreSQL write to complete before returning to user
+
+**BP-005: Use Idempotency Keys for Safe Replay**
+- **Reason:** Enables retry logic without risk of duplicate data
+- **Example:** Key format `{entity_type}:{entity_id}:{timestamp_utc}`
+- **Anti-pattern:** Replaying sync without idempotency checking (creates duplicates)
+
+**BP-006: Implement Exponential Backoff for Transient Failures**
+- **Reason:** Avoids overwhelming failing service with rapid retries
+- **Example:** 1s, 2s, 4s, 8s, 16s, ... up to 1 hour between retries
+- **Anti-pattern:** Fixed 1-second retry interval (amplifies load during outage)
+
+### Schema Management
+
+**BP-007: Version All Schema Migrations**
+- **Reason:** Enables tracking applied migrations and detecting drift
+- **Example:** `migrations/v001_initial_schema.sql`, `v002_add_artifacts_table.sql`
+- **Anti-pattern:** Manually applying schema changes without version tracking
+
+**BP-008: Make Migrations Idempotent**
+- **Reason:** Allows safe re-run if migration fails partway through
+- **Example:** `CREATE TABLE IF NOT EXISTS sessions (...);`
+- **Anti-pattern:** `CREATE TABLE sessions (...);` fails on re-run
+
+**BP-009: Test Migrations on Copy of Production Data**
+- **Reason:** Catches data-dependent migration failures before production
+- **Example:** Export production DB, run migration on copy, verify data integrity
+- **Anti-pattern:** Testing migration on empty database only
+
+### Error Handling
+
+**BP-010: Distinguish Transient from Permanent Errors**
+- **Reason:** Transient errors should retry, permanent errors should alert
+- **Example:** Network timeout = transient (retry), authentication failure = permanent (alert)
+- **Anti-pattern:** Retrying authentication failures indefinitely (never succeeds)
+
+**BP-011: Log All Database Errors with Context**
+- **Reason:** Enables debugging without reproducing error
+- **Example:** Log query, parameters, exception, duration, connection state
+- **Anti-pattern:** Logging only exception message ("Connection refused")
+
+**BP-012: Gracefully Degrade When PostgreSQL Unavailable**
+- **Reason:** Application should work offline, sync when reconnected
+- **Example:** SQLite continues working, outbox queues for later sync
+- **Anti-pattern:** Failing startup if PostgreSQL unreachable
+
+### Testing
+
+**BP-013: Test Both Tiers Independently**
+- **Reason:** Isolates failures to specific tier
+- **Example:** Unit tests with in-memory SQLite, integration tests with real PostgreSQL
+- **Anti-pattern:** Testing only two-tier integration (can't isolate which tier failed)
+
+**BP-014: Test Sync with Simulated Network Failures**
+- **Reason:** Validates retry logic and outbox processing
+- **Example:** Inject network errors, verify outbox records retry with backoff
+- **Anti-pattern:** Testing only happy path (sync succeeds first try)
+
+**BP-015: Verify Idempotency with Duplicate Replay**
+- **Reason:** Ensures retry logic doesn't create duplicate records
+- **Example:** Sync same record twice, verify only one instance in PostgreSQL
+- **Anti-pattern:** Assuming idempotency works without testing replay
+
+---
+
+## Troubleshooting
+
+### Problem 1: "Cannot Connect to PostgreSQL" Error During Startup
+
+**Symptoms:**
+- Application fails to start with error "Cannot connect to PostgreSQL"
+- Error message includes connection details (host, port, database)
+- SQLite continues working but no sync occurs
+
+**Possible Causes:**
+1. PostgreSQL server not running or unreachable
+2. Network firewall blocking connection
+3. Incorrect connection string (wrong host/port/database/credentials)
+4. SSL required but not configured in connection string
+5. Database user lacks connection permission
+
+**Diagnosis:**
+
+```bash
+# Test network connectivity to PostgreSQL server
+telnet postgres.company.com 5432
+# Or use nc (netcat)
+nc -zv postgres.company.com 5432
+
+# Test PostgreSQL connection with psql
+export PGPASSWORD='your-password'
+psql -h postgres.company.com -U acode -d acode -c "SELECT version();"
+
+# Check Acode configuration
+acode config show --format json | jq '.persistence.postgres'
+
+# Check environment variables
+echo $ACODE_POSTGRES_URL
+echo $ACODE_POSTGRES_PASSWORD
+
+# Review connection logs
+acode db status --verbose
+```
+
+**Solutions:**
+
+1. **Verify PostgreSQL Server Status:**
+   ```bash
+   # Check if PostgreSQL is running (on server)
+   sudo systemctl status postgresql
+   
+   # Check PostgreSQL logs for errors
+   sudo journalctl -u postgresql -n 50
+   
+   # Verify PostgreSQL listening on correct interface
+   sudo netstat -tulpn | grep 5432
+   # Should show: tcp 0 0 0.0.0.0:5432 LISTEN
+   ```
+
+2. **Fix Connection String:**
+   ```bash
+   # Correct format:
+   export ACODE_POSTGRES_URL="postgresql://username:password@host:port/database?sslmode=require"
+   
+   # Example with SSL:
+   export ACODE_POSTGRES_URL="postgresql://acode:mypass123@postgres.company.com:5432/acode?sslmode=require"
+   
+   # Test connection
+   acode db status
+   ```
+
+3. **Configure Firewall:**
+   ```bash
+   # Allow PostgreSQL through firewall (on server)
+   sudo ufw allow 5432/tcp
+   
+   # Or for specific IP only:
+   sudo ufw allow from 192.168.1.100 to any port 5432
+   ```
+
+4. **Grant Database Permissions:**
+   ```sql
+   -- Run on PostgreSQL server as admin
+   GRANT CONNECT ON DATABASE acode TO acode_user;
+   GRANT USAGE ON SCHEMA public TO acode_user;
+   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO acode_user;
+   ```
+
+5. **Disable PostgreSQL Temporarily (Work Offline):**
+   ```yaml
+   # .agent/config.yml - disable PostgreSQL sync
+   persistence:
+     postgres:
+       enabled: false  # Continue with SQLite only
+   ```
+
+**Prevention:**
+- Test connection string during configuration setup
+- Use health checks to monitor PostgreSQL connectivity
+- Document PostgreSQL prerequisites in deployment guide
+- Provide clear error messages with troubleshooting steps
+
+---
+
+### Problem 2: Outbox Records Not Syncing (Stuck in Pending State)
+
+**Symptoms:**
+- `acode db status` shows large number of pending outbox records (100+)
+- Records remain pending for hours or days
+- Sync worker logs show no activity or repeated errors
+- SQLite database growing but PostgreSQL not receiving updates
+
+**Possible Causes:**
+1. Sync worker not running (service crashed or disabled)
+2. Network connectivity lost after initial connection
+3. PostgreSQL connection pool exhausted
+4. Idempotency key conflicts causing silent failures
+5. Transient errors exhausted retry attempts
+
+**Diagnosis:**
+
+```bash
+# Check outbox status
+acode db status --verbose
+# Output shows: "Outbox: 472 pending records (oldest: 2d 14h)"
+
+# Query outbox directly
+sqlite3 .agent/workspace.db "SELECT COUNT(*) as pending, MIN(created_at) as oldest FROM outbox WHERE processed_at IS NULL;"
+
+# Check sync worker status
+acode db sync-status
+# Output: "Sync worker: STOPPED (last heartbeat: 2h 34m ago)"
+
+# Review sync error logs
+sqlite3 .agent/workspace.db "SELECT entity_type, entity_id, attempts, last_error FROM outbox WHERE processed_at IS NULL ORDER BY attempts DESC LIMIT 10;"
+
+# Test PostgreSQL connectivity
+acode db test-connection --postgres
+```
+
+**Solutions:**
+
+1. **Restart Sync Worker:**
+   ```bash
+   # Force restart sync worker
+   acode db sync-restart
+   [INFO] Stopping sync worker...
+   [INFO] Starting sync worker...
+   [INFO] Sync worker started (processing oldest-first)
+   [INFO] Outbox: 472 pending records
+   
+   # Monitor sync progress
+   acode db sync-status --watch
+   ```
+
+2. **Manual Sync Trigger:**
+   ```bash
+   # Manually trigger sync (foreground)
+   acode db sync --manual --batch-size 100
+   [INFO] Syncing 100 oldest outbox records...
+   [INFO] Synced 100/100 (duration: 8.2s)
+   [INFO] Remaining: 372 pending records
+   
+   # Continue until outbox empty
+   ```
+
+3. **Clear Failed Records:**
+   ```bash
+   # Query records that exhausted retries
+   sqlite3 .agent/workspace.db "SELECT * FROM outbox WHERE attempts >= 10 AND processed_at IS NULL;"
+   
+   # Mark as failed (manual intervention required)
+   acode db outbox-mark-failed --attempts-gte 10
+   [WARN] Marking 12 outbox records as failed (exhausted retries)
+   [WARN] These records will not sync automatically. Manual review required.
+   ```
+
+4. **Reset Idempotency Conflicts:**
+   ```bash
+   # If idempotency key conflicts suspected
+   acode db outbox-reset-keys
+   [INFO] Regenerating idempotency keys for pending records
+   [INFO] Updated 472 records with new timestamps
+   ```
+
+5. **Increase Retry Limits:**
+   ```yaml
+   # .agent/config.yml - increase max retry attempts
+   persistence:
+     sync:
+       max_retry_attempts: 20  # Default: 10
+       max_backoff: 2h         # Default: 1h
+   ```
+
+**Prevention:**
+- Monitor outbox depth with alerts (threshold: 500 pending)
+- Enable sync worker heartbeat monitoring
+- Log all sync failures with context
+- Implement automatic sync worker restart on crash
+
+---
+
+### Problem 3: "Database Locked" Error During Write Operation
+
+**Symptoms:**
+- Application throws "database is locked" exception
+- Error occurs during session creation or state transition
+- SQLite database appears healthy but writes fail intermittently
+- Error more frequent under high load (multiple concurrent sessions)
+
+**Possible Causes:**
+1. Long-running read transaction blocking writes
+2. Multiple processes accessing same SQLite database
+3. SQLite busy timeout too short
+4. WAL mode not enabled (using DELETE journal mode)
+5. Database file on network drive (not supported)
+
+**Diagnosis:**
+
+```bash
+# Check SQLite journal mode
+sqlite3 .agent/workspace.db "PRAGMA journal_mode;"
+# Should output: wal (not delete or truncate)
+
+# Check for concurrent processes
+fuser .agent/workspace.db    # Linux
+lsof .agent/workspace.db     # macOS
+
+# Check busy timeout setting
+sqlite3 .agent/workspace.db "PRAGMA busy_timeout;"
+# Should be >= 5000 (5 seconds)
+
+# Verify database location (not network drive)
+df -h .agent/workspace.db
+mount | grep $(df .agent/workspace.db | tail -1 | awk '{print $1}')
+```
+
+**Solutions:**
+
+1. **Enable WAL Mode:**
+   ```bash
+   # Enable Write-Ahead Logging for better concurrency
+   sqlite3 .agent/workspace.db "PRAGMA journal_mode=WAL;"
+   sqlite3 .agent/workspace.db "PRAGMA synchronous=NORMAL;"
+   
+   # Verify WAL files created
+   ls -lh .agent/workspace.db*
+   # Should see: workspace.db, workspace.db-shm, workspace.db-wal
+   ```
+
+2. **Increase Busy Timeout:**
+   ```csharp
+   // In SQLite connection configuration
+   var connectionString = new SqliteConnectionStringBuilder
+   {
+       DataSource = ".agent/workspace.db",
+       Mode = SqliteOpenMode.ReadWriteCreate,
+       BusyTimeout = 30000 // 30 seconds (default: 5 seconds)
+   }.ToString();
+   ```
+
+3. **Close Long-Running Transactions:**
+   ```bash
+   # Identify long-running transactions
+   sqlite3 .agent/workspace.db "SELECT * FROM pragma_wal_checkpoint(PASSIVE);"
+   
+   # Force checkpoint to free up WAL
+   sqlite3 .agent/workspace.db "PRAGMA wal_checkpoint(TRUNCATE);"
+   ```
+
+4. **Move Database to Local Drive:**
+   ```bash
+   # If database on network drive, move to local
+   mv /mnt/network/.agent/workspace.db ~/.agent/workspace.db
+   
+   # Update configuration
+   acode config set persistence.sqlite.path "~/.agent/workspace.db"
+   ```
+
+5. **Use Connection Pooling Correctly:**
+   ```csharp
+   // Ensure connections are properly disposed
+   public async Task<Session> GetSessionAsync(SessionId id, CancellationToken ct)
+   {
+       using var connection = new SqliteConnection(_connectionString);
+       await connection.OpenAsync(ct);
+       
+       // Use connection...
+       
+       // Connection automatically closed and returned to pool
+   }
+   ```
+
+**Prevention:**
+- Always enable WAL mode for SQLite databases
+- Set busy timeout to 30+ seconds
+- Use `using` statements for connection disposal
+- Avoid network drives for SQLite files
+- Monitor lock contention with metrics
 
 ---
 

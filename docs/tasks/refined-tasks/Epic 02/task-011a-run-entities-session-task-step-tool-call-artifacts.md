@@ -36,6 +36,133 @@ Testing is comprehensive. Unit tests verify entity behavior in isolation. Each e
 
 ---
 
+## Use Cases
+
+### Use Case 1: Progress Tracking During Long-Running Session
+
+**Actor:** Development Manager monitoring team's agent usage  
+**Context:** Need to understand how far along a 2-hour refactoring session has progressed  
+**Problem:** Without hierarchical entities, can only see "in progress" with no granular visibility
+
+**Workflow Without Entity Hierarchy:**
+1. Manager runs: `acode status`
+2. Sees: "Session abc-123: Executing"
+3. No indication of: How many tasks? How many complete? Where is it stuck?
+4. Manager has no visibility into actual progress
+5. Cannot estimate time remaining or identify bottlenecks
+6. **Result: Blind operation, cannot plan around agent workload**
+
+**Workflow With Entity Hierarchy:**
+1. Manager runs: `acode status --detailed`
+2. Sees hierarchical progress:
+   ```
+   Session abc-123: Executing
+   ├─ Task 1: "Analyze codebase" [COMPLETED] (12 steps, 45 tool calls)
+   ├─ Task 2: "Extract interfaces" [IN_PROGRESS] (8/15 steps complete)
+   │  ├─ Step 1: "Read UserService.cs" [COMPLETED]
+   │  ├─ Step 2: "Identify public methods" [COMPLETED]
+   │  ...
+   │  ├─ Step 8: "Generate IUserService interface" [COMPLETED]
+   │  └─ Step 9: "Write interface file" [IN_PROGRESS] (2/3 tool calls)
+   └─ Task 3: "Update references" [NOT_STARTED]
+   ```
+3. Manager immediately sees: 53% complete (1 of 3 tasks done, 8 of 15 steps in current task)
+4. Can identify bottleneck: Step 9 taking longer than expected
+5. Can estimate: ~45 minutes remaining based on current pace
+6. **Result: Full visibility, can plan team activities around completion**
+
+**Business Impact:**
+- **Time savings:** Eliminates status check meetings (15 min/day × 220 days = 55 hours/year)
+- **Planning accuracy:** Prevents context switching by knowing when agent finishes
+- **Value:** 55 hours × $100/hour = **$5,500/year per manager**
+
+---
+
+### Use Case 2: Targeted Rollback After Partial Failure
+
+**Actor:** Senior Developer whose agent session failed mid-execution  
+**Context:** Agent completed 2 of 3 tasks before encountering error  
+**Problem:** Without entity hierarchy, must redo all work or manually determine what succeeded
+
+**Workflow Without Entity Hierarchy:**
+1. Developer runs: `acode run "Refactor authentication module"`
+2. Agent works for 45 minutes
+3. Agent fails with error: "Cannot write to protected file"
+4. Developer runs: `acode status`
+5. Sees: "Session failed" with no detail on what completed
+6. Developer manually inspects working directory to determine changes
+7. Spends 20 minutes reconstructing what succeeded vs. what failed
+8. Decides safest approach: Revert all changes, fix issue, re-run entire session
+9. **Result: 45 minutes of work discarded, must restart from beginning**
+
+**Workflow With Entity Hierarchy:**
+1. Developer runs: `acode run "Refactor authentication module"`
+2. Agent completes:
+   - Task 1: "Extract auth logic to service" - **COMPLETED** (all 8 steps succeeded)
+   - Task 2: "Add unit tests" - **COMPLETED** (all 6 steps succeeded)
+   - Task 3: "Update documentation" - **FAILED** (failed at step 2: write to read-only docs folder)
+3. Developer runs: `acode session show abc-123`
+4. Sees clear breakdown:
+   ```
+   Session abc-123: FAILED
+   ├─ Task 1 [COMPLETED]: 8/8 steps, 24 tool calls successful
+   ├─ Task 2 [COMPLETED]: 6/6 steps, 18 tool calls successful
+   └─ Task 3 [FAILED]: 1/4 steps complete
+      ├─ Step 1: "Generate API docs" [COMPLETED]
+      └─ Step 2: "Write to docs/" [FAILED] - Permission denied
+   ```
+5. Developer sees: Tasks 1 and 2 are solid, only Task 3 needs attention
+6. Developer fixes permission issue: `chmod +w docs/`
+7. Developer runs: `acode resume abc-123 --from-task 3`
+8. Agent resumes, completes Task 3 in 5 minutes
+9. **Result: Preserved 40 minutes of work, only re-ran failed portion**
+
+**Business Impact:**
+- **Time savings:** Prevents redundant work (average 30 min/failure × 12 failures/year = 6 hours/year)
+- **Confidence:** Developers trust agent to resume cleanly, use it more frequently
+- **Value:** 6 hours × $100/hour × 20 developers = **$12,000/year**
+
+---
+
+### Use Case 3: Audit Trail for Compliance
+
+**Actor:** Security Auditor reviewing agent actions for compliance report  
+**Context:** Need to verify agent didn't access restricted files or modify protected code  
+**Problem:** Without detailed entity records, cannot prove what agent did/didn't do
+
+**Workflow Without Entity Hierarchy:**
+1. Auditor receives compliance request: "Prove agent didn't access customer PII during refactoring"
+2. Checks high-level session logs: "Session completed successfully"
+3. No granular record of which files were read, which were written
+4. Cannot definitively prove PII files untouched
+5. Must manually review all file changes in git history (200+ files)
+6. Spends 8 hours reconstructing agent activity from git diffs and timestamps
+7. **Result: High audit cost, cannot definitively prove negative (didn't access X)**
+
+**Workflow With Entity Hierarchy:**
+1. Auditor receives same compliance request
+2. Runs: `acode session show abc-123 --tool-calls --filter "file:customers"`
+3. Query returns: No tool calls involving "customers" directory or PII files
+4. Verifies complete list of files accessed:
+   ```
+   Tool Calls in Session abc-123:
+   - read_file("src/auth/LoginService.cs") [Step 1, Task 1]
+   - read_file("src/auth/PasswordValidator.cs") [Step 2, Task 1]
+   - write_file("src/auth/ILoginService.cs", content) [Step 5, Task 1]
+   - run_command("dotnet test") [Step 8, Task 2]
+   (42 tool calls total, 0 involving PII directories)
+   ```
+5. Exports tool call list to CSV for compliance report
+6. Generates cryptographic hash of event log for tamper-evidence
+7. **Result: 15 minutes to generate proof, cryptographically verifiable non-access**
+
+**Business Impact:**
+- **Audit cost reduction:** 8 hours → 15 minutes (47.5x faster)
+- **Compliance confidence:** Cryptographic proof vs. manual reconstruction
+- **Value:** 7.75 hours savings × $150/hour (auditor rate) × 4 audits/year = **$4,650/year**
+
+---
+
 ## Glossary / Terms
 
 | Term | Definition |
@@ -62,16 +189,21 @@ Testing is comprehensive. Unit tests verify entity behavior in isolation. Each e
 
 The following items are explicitly excluded from Task 011.a:
 
-- **State machine logic** - Task 011 main
-- **Persistence implementation** - Task 011.b
-- **Resume behavior** - Task 011.c
-- **Database schema** - Task 011.b
-- **Sync logic** - Task 049/050
-- **Entity versioning/migration** - Post-MVP
-- **Entity archival** - Post-MVP
-- **Entity deletion** - Soft delete only
-- **Custom entity types** - Fixed set
-- **Entity relationships beyond hierarchy** - Tree only
+- **State machine transition logic** - Covered in Task 011 main, which defines valid state transitions and orchestration
+- **Persistence implementation** - Covered in Task 011.b for SQLite and PostgreSQL database implementations
+- **Resume behavior and restart logic** - Covered in Task 011.c for resuming sessions from checkpoints
+- **Database schema DDL** - Covered in Task 011.b for table definitions, indexes, and constraints
+- **Sync logic between SQLite and PostgreSQL** - Covered in Task 049f for bidirectional synchronization
+- **Entity versioning and schema migration** - Post-MVP feature for handling entity schema changes over time
+- **Entity archival and retention policies** - Post-MVP feature for archiving old sessions and artifacts
+- **Physical entity deletion** - Post-MVP feature, only soft delete is supported in MVP
+- **Custom user-defined entity types** - MVP supports fixed set of entity types only
+- **Entity relationships beyond tree hierarchy** - MVP supports Session → Task → Step → ToolCall → Artifact only
+- **Distributed entity coordination** - Post-MVP feature for coordinating entities across multiple agent instances
+- **Entity caching layer** - Post-MVP performance optimization for frequently accessed entities
+- **Entity compression** - Post-MVP feature for compressing large artifacts to reduce storage usage
+- **Entity encryption at rest** - Post-MVP security feature for encrypting sensitive artifact content
+- **Entity replication** - Post-MVP feature for replicating entities to multiple storage backends
 
 ---
 
@@ -224,6 +356,64 @@ The following items are explicitly excluded from Task 011.a:
 - FR-079: ToolCalls belong to exactly one Step
 - FR-080: Artifacts belong to exactly one ToolCall
 
+### Invariants
+
+- FR-081: Session MUST have at least one Task before transitioning to Executing state
+- FR-082: Task Steps MUST have sequential Order values starting from 0
+- FR-083: ToolCall CompletedAt MUST be >= CreatedAt
+- FR-084: Session UpdatedAt MUST be >= CreatedAt
+- FR-085: Task UpdatedAt MUST be updated when any Step state changes
+- FR-086: Step UpdatedAt MUST be updated when any ToolCall state changes
+- FR-087: Session CANNOT transition to Completed if any Task is InProgress
+- FR-088: Task CANNOT transition to Completed if any Step is Pending or InProgress
+- FR-089: Step CANNOT transition to Completed if any ToolCall is Pending or Executing
+
+### Serialization
+
+- FR-090: Session MUST serialize to JSON format
+- FR-091: All entity properties MUST be included in JSON serialization
+- FR-092: Navigation properties MUST be serializable
+- FR-093: Deserialization MUST reconstruct complete entity graph
+- FR-094: Round-trip serialization MUST preserve all data
+- FR-095: JSON property names MUST use camelCase convention
+- FR-096: Enum values MUST serialize as strings not integers
+
+### Collections
+
+- FR-097: Entity collections MUST be exposed as IReadOnlyList
+- FR-098: Internal collections MUST be mutable for aggregate root operations
+- FR-099: Collection modifications MUST go through aggregate root methods
+- FR-100: Collections MUST maintain insertion order
+- FR-101: Collections MUST NOT allow null elements
+- FR-102: Collections MUST support enumeration
+
+### Events
+
+- FR-103: SessionEvent MUST record FromState and ToState
+- FR-104: SessionEvent MUST record Reason for transition
+- FR-105: SessionEvent MUST record Timestamp of transition
+- FR-106: SessionEvents MUST be append-only
+- FR-107: SessionEvents MUST be ordered chronologically
+- FR-108: SessionEvents MUST NOT be modifiable after creation
+
+### Equality
+
+- FR-109: Entities MUST implement IEquatable based on ID
+- FR-110: Entities with same ID MUST be considered equal
+- FR-111: Entities with different IDs MUST NOT be equal
+- FR-112: GetHashCode MUST use ID hash code
+- FR-113: Value objects MUST implement structural equality
+- FR-114: EntityId equality MUST be based on Guid value
+
+### Construction
+
+- FR-115: Entity constructors MUST validate all required parameters
+- FR-116: Entity constructors MUST throw ArgumentNullException for null required parameters
+- FR-117: Entity constructors MUST throw ArgumentException for invalid required parameters
+- FR-118: Entity constructors MUST initialize collections to empty
+- FR-119: Entity constructors MUST set CreatedAt to current UTC time
+- FR-120: Entity constructors MUST set UpdatedAt equal to CreatedAt initially
+
 ---
 
 ## Non-Functional Requirements
@@ -231,33 +421,1233 @@ The following items are explicitly excluded from Task 011.a:
 ### Performance
 
 - NFR-001: Entity creation MUST complete < 1ms
-- NFR-002: State derivation MUST complete < 10ms
+- NFR-002: State derivation MUST complete < 10ms for Sessions with up to 100 Tasks
 - NFR-003: Serialization MUST complete < 5ms per entity
-- NFR-004: Memory per Session MUST be < 1MB typical
+- NFR-004: Memory per Session MUST be < 1MB typical, < 10MB maximum
+- NFR-005: Collection enumeration MUST have O(1) startup cost
+- NFR-006: ID generation MUST complete < 0.1ms
+- NFR-007: Hash computation MUST complete < 1ms per KB of artifact content
 
 ### Reliability
 
-- NFR-005: Invalid input MUST throw immediately
-- NFR-006: Entity state MUST be consistent
-- NFR-007: Collections MUST be thread-safe for reads
+- NFR-008: Invalid input MUST throw immediately with descriptive errors
+- NFR-009: Entity state MUST be consistent at all times
+- NFR-010: Collections MUST be thread-safe for concurrent reads
+- NFR-011: State transitions MUST be atomic
+- NFR-012: Validation errors MUST include parameter name and invalid value
+- NFR-013: Entities MUST NOT allow partial construction
+- NFR-014: Navigation properties MUST always return non-null collections
 
 ### Security
 
-- NFR-008: Artifacts MUST NOT store secrets directly
-- NFR-009: Metadata MUST be validated
-- NFR-010: ContentHash MUST prevent tampering
+- NFR-015: Artifacts MUST NOT store secrets directly in plain text
+- NFR-016: Metadata MUST be validated against schema before acceptance
+- NFR-017: ContentHash MUST prevent tampering detection
+- NFR-018: Entity IDs MUST NOT be predictable or sequential
+- NFR-019: Error messages MUST NOT leak sensitive information
+- NFR-020: Artifact content MUST be treated as potentially malicious
 
 ### Maintainability
 
-- NFR-011: Entities MUST have no infrastructure dependencies
-- NFR-012: Entities MUST be unit testable in isolation
-- NFR-013: Entity behavior MUST be deterministic
+- NFR-021: Entities MUST have no infrastructure dependencies
+- NFR-022: Entities MUST be unit testable in isolation without mocks
+- NFR-023: Entity behavior MUST be deterministic for same inputs
+- NFR-024: Code coverage for entities MUST exceed 95%
+- NFR-025: Public API MUST have XML documentation
+- NFR-026: Entity classes MUST follow SOLID principles
+- NFR-027: Complex logic MUST have explanatory comments
 
 ### Compatibility
 
-- NFR-014: JSON serialization MUST be stable
-- NFR-015: Database mapping MUST preserve all fields
-- NFR-016: ID format MUST be consistent across stores
+- NFR-028: JSON serialization format MUST be stable across versions
+- NFR-029: Database mapping MUST preserve all fields without loss
+- NFR-030: ID format MUST be consistent across SQLite and PostgreSQL
+- NFR-031: Adding new optional properties MUST NOT break existing code
+- NFR-032: Enum values MUST be additive only, never removed
+- NFR-033: Serialized entities MUST deserialize in newer versions
+
+### Observability
+
+- NFR-034: Entity state changes MUST be traceable through events
+- NFR-035: All entity operations MUST complete within measurable time bounds
+- NFR-036: Entity lifecycle MUST be observable through timestamps
+- NFR-037: Collection sizes MUST be queryable for monitoring
+
+---
+
+## Security Considerations
+
+### Threat 1: Entity State Tampering via Direct Database Access
+
+**Attack Scenario:**  
+Malicious insider or compromised backup script modifies session state directly in SQLite/Postgres database:
+
+1. Attacker identifies running session with valuable work (e.g., refactoring authentication module)
+2. Attacker opens database with `sqlite3` CLI or pgAdmin
+3. Attacker runs: `UPDATE sessions SET state = 'COMPLETED' WHERE id = 'abc-123'`
+4. Attacker modifies step completion: `UPDATE steps SET completed_at = NOW() WHERE step_number > actual_progress`
+5. Agent resumes, believes work is complete when it's not
+6. Incomplete refactoring deployed to production, security vulnerability introduced
+
+**Impact Assessment:**
+- **Data Integrity:** CRITICAL - Session state no longer reflects reality
+- **Business Impact:** Code deployed with incomplete changes, potential production outages
+- **Audit Trail:** Compromised - Cannot trust event log if state was manipulated
+- **Blast Radius:** Single session, but could cascade if changes committed to version control
+
+**Complete Mitigation (C#):**
+
+```csharp
+// Domain/Audit/EntityChecksum.cs
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
+namespace Acode.Domain.Audit;
+
+/// <summary>
+/// Provides tamper-detection for entities via cryptographic checksums
+/// </summary>
+public static class EntityChecksum
+{
+    /// <summary>
+    /// Compute SHA-256 checksum of entity's semantic state
+    /// Includes all state-relevant fields, excludes audit fields like UpdatedAt
+    /// </summary>
+    public static string ComputeChecksum<T>(T entity) where T : class
+    {
+        // Serialize to stable JSON (sorted keys, no whitespace)
+        var json = JsonSerializer.Serialize(entity, new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        });
+        
+        // Compute SHA-256 hash
+        using var sha256 = SHA256.Create();
+        var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(json));
+        return Convert.ToBase64String(hashBytes);
+    }
+    
+    /// <summary>
+    /// Verify entity checksum matches stored value
+    /// </summary>
+    public static bool VerifyChecksum<T>(T entity, string expectedChecksum) where T : class
+    {
+        var actualChecksum = ComputeChecksum(entity);
+        return actualChecksum == expectedChecksum;
+    }
+}
+
+// Domain/Run/Session.cs - Add checksum field
+public partial class Session
+{
+    /// <summary>
+    /// SHA-256 checksum of session state for tamper detection
+    /// Recomputed on every state change
+    /// </summary>
+    public string StateChecksum { get; private set; } = string.Empty;
+    
+    /// <summary>
+    /// Update session state and recompute checksum atomically
+    /// </summary>
+    public void UpdateState(SessionState newState)
+    {
+        State = newState;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        
+        // Recompute checksum after state change
+        StateChecksum = EntityChecksum.ComputeChecksum(new
+        {
+            Id,
+            State,
+            Tasks = Tasks.Select(t => new { t.Id, t.State, t.Order }).ToList()
+        });
+    }
+}
+
+// Infrastructure/Persistence/SessionRepository.cs
+public class SessionRepository : ISessionRepository
+{
+    public async Task<Session> GetByIdAsync(Guid sessionId)
+    {
+        var session = await _dbContext.Sessions
+            .Include(s => s.Tasks)
+            .FirstOrDefaultAsync(s => s.Id == sessionId);
+            
+        if (session == null)
+            throw new SessionNotFoundException(sessionId);
+        
+        // Verify checksum on load - detect tampering
+        var expectedChecksum = session.StateChecksum;
+        var actualChecksum = EntityChecksum.ComputeChecksum(new
+        {
+            session.Id,
+            session.State,
+            Tasks = session.Tasks.Select(t => new { t.Id, t.State, t.Order }).ToList()
+        });
+        
+        if (actualChecksum != expectedChecksum)
+        {
+            _logger.LogError(
+                "Session {SessionId} failed checksum validation. Expected: {Expected}, Actual: {Actual}. Possible tampering detected.",
+                sessionId, expectedChecksum, actualChecksum);
+                
+            throw new EntityTamperedException(
+                $"Session {sessionId} checksum mismatch. Database may have been modified directly.");
+        }
+        
+        return session;
+    }
+    
+    public async Task SaveAsync(Session session)
+    {
+        // Update checksum before save
+        session.UpdateState(session.State);
+        
+        _dbContext.Sessions.Update(session);
+        await _dbContext.SaveChangesAsync();
+        
+        _logger.LogInformation(
+            "Session {SessionId} saved with checksum {Checksum}",
+            session.Id, session.StateChecksum);
+    }
+}
+
+// Application/Exceptions/EntityTamperedException.cs
+public class EntityTamperedException : Exception
+{
+    public EntityTamperedException(string message) : base(message) { }
+}
+```
+
+**Verification:**
+```bash
+# Test 1: Normal operation - checksum validates
+dotnet test --filter "FullyQualifiedName~SessionChecksumTests.SaveAndLoad_ValidChecksum"
+
+# Test 2: Tampering detection - checksum fails
+dotnet test --filter "FullyQualifiedName~SessionChecksumTests.DirectDatabaseModification_DetectsTampering"
+
+# Test 3: Performance - checksum computation < 1ms
+dotnet test --filter "FullyQualifiedName~SessionChecksumTests.ChecksumComputation_MeetsPerformanceRequirement"
+```
+
+**Defense-in-Depth Layers:**
+1. **Application-Level:** Checksum validation on every entity load
+2. **Database-Level:** Row-level security policies restricting direct UPDATE
+3. **Audit-Level:** Database trigger logs all direct modifications for forensics
+4. **Infrastructure-Level:** Database credentials restricted to application service account only
+
+---
+
+### Threat 2: UUID Collision Leading to Entity Confusion
+
+**Attack Scenario:**  
+Attacker exploits weak UUID generation to create collision, causing entity confusion:
+
+1. Attacker discovers Acode uses UUID v4 (random) instead of v7 (time-ordered)
+2. Attacker generates 1 billion UUIDs using weak PRNG, finds collision with existing session
+3. Attacker creates new session with colliding UUID
+4. Database accepts second session (no unique constraint enforced)
+5. Resume logic loads wrong session, executes attacker's malicious tasks
+6. Attacker achieves arbitrary code execution via crafted tool calls
+
+**Impact Assessment:**
+- **Confidentiality:** HIGH - Attacker could read sensitive files via read_file tool calls
+- **Integrity:** CRITICAL - Attacker could modify any file via write_file tool calls
+- **Availability:** MEDIUM - Attacker could crash agent via malformed commands
+- **Privilege Escalation:** Attacker's tasks execute with developer's permissions
+
+**Complete Mitigation (C#):**
+
+```csharp
+// Domain/Common/SecureIdGenerator.cs
+using System.Security.Cryptography;
+
+namespace Acode.Domain.Common;
+
+/// <summary>
+/// Generates cryptographically secure UUID v7 identifiers
+/// UUID v7: Time-ordered + cryptographically random
+/// Format: [48-bit timestamp][4-bit version][12-bit sequence][2-bit variant][62-bit random]
+/// </summary>
+public static class SecureIdGenerator
+{
+    private static readonly RandomNumberGenerator _rng = RandomNumberGenerator.Create();
+    private static long _lastTimestamp = 0;
+    private static int _sequence = 0;
+    private static readonly object _lock = new object();
+    
+    /// <summary>
+    /// Generate UUID v7 with guaranteed uniqueness via timestamp + sequence + random
+    /// </summary>
+    public static Guid NewId()
+    {
+        lock (_lock)
+        {
+            // Get Unix timestamp in milliseconds (48 bits)
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            
+            // Handle clock regression or same-millisecond generation
+            if (now == _lastTimestamp)
+            {
+                _sequence++;
+                if (_sequence > 4095) // 12-bit max
+                {
+                    // Sequence overflow - wait 1ms
+                    Thread.Sleep(1);
+                    now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    _sequence = 0;
+                }
+            }
+            else if (now > _lastTimestamp)
+            {
+                _sequence = 0;
+            }
+            else
+            {
+                // Clock went backwards - use last timestamp + increment sequence
+                now = _lastTimestamp;
+                _sequence++;
+            }
+            
+            _lastTimestamp = now;
+            
+            // Generate 62 bits of cryptographic randomness
+            var randomBytes = new byte[8];
+            _rng.GetBytes(randomBytes);
+            
+            // Construct UUID v7 bytes
+            var bytes = new byte[16];
+            
+            // Bytes 0-5: 48-bit timestamp
+            bytes[0] = (byte)((now >> 40) & 0xFF);
+            bytes[1] = (byte)((now >> 32) & 0xFF);
+            bytes[2] = (byte)((now >> 24) & 0xFF);
+            bytes[3] = (byte)((now >> 16) & 0xFF);
+            bytes[4] = (byte)((now >> 8) & 0xFF);
+            bytes[5] = (byte)(now & 0xFF);
+            
+            // Bytes 6-7: 4-bit version (0111 = v7) + 12-bit sequence
+            bytes[6] = (byte)(0x70 | ((_sequence >> 8) & 0x0F));
+            bytes[7] = (byte)(_sequence & 0xFF);
+            
+            // Bytes 8-15: 2-bit variant (10) + 62-bit random
+            bytes[8] = (byte)(0x80 | (randomBytes[0] & 0x3F));
+            Array.Copy(randomBytes, 1, bytes, 9, 7);
+            
+            return new Guid(bytes);
+        }
+    }
+    
+    /// <summary>
+    /// Verify ID is valid UUID v7 format
+    /// </summary>
+    public static bool IsValidUuidV7(Guid id)
+    {
+        var bytes = id.ToByteArray();
+        
+        // Check version bits (should be 0111 = v7)
+        var version = (bytes[6] >> 4) & 0x0F;
+        if (version != 0x07)
+            return false;
+        
+        // Check variant bits (should be 10)
+        var variant = (bytes[8] >> 6) & 0x03;
+        if (variant != 0x02)
+            return false;
+        
+        return true;
+    }
+    
+    /// <summary>
+    /// Extract timestamp from UUID v7 for ordering/debugging
+    /// </summary>
+    public static DateTimeOffset GetTimestamp(Guid uuidV7)
+    {
+        if (!IsValidUuidV7(uuidV7))
+            throw new ArgumentException("Not a valid UUID v7", nameof(uuidV7));
+        
+        var bytes = uuidV7.ToByteArray();
+        
+        // Extract 48-bit timestamp
+        long timestamp = 0;
+        for (int i = 0; i < 6; i++)
+        {
+            timestamp = (timestamp << 8) | bytes[i];
+        }
+        
+        return DateTimeOffset.FromUnixTimeMilliseconds(timestamp);
+    }
+}
+
+// Domain/Run/Session.cs - Use secure ID generation
+public partial class Session
+{
+    private Session() { } // For EF Core
+    
+    public static Session Create(string prompt, string workingDirectory)
+    {
+        return new Session
+        {
+            Id = SecureIdGenerator.NewId(), // Use cryptographically secure UUID v7
+            Prompt = prompt,
+            WorkingDirectory = workingDirectory,
+            State = SessionState.Planning,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            Tasks = new List<Task>()
+        };
+    }
+}
+
+// Infrastructure/Persistence/Configurations/SessionConfiguration.cs
+public class SessionConfiguration : IEntityTypeConfiguration<Session>
+{
+    public void Configure(EntityTypeBuilder<Session> builder)
+    {
+        builder.HasKey(s => s.Id);
+        
+        // Enforce unique constraint at database level
+        builder.HasIndex(s => s.Id).IsUnique();
+        
+        // Validate UUID v7 format on insert
+        builder.HasCheckConstraint(
+            "CK_Session_ValidUuidV7",
+            "LENGTH(CAST(Id AS TEXT)) = 36"); // Basic format check
+        
+        // Prevent duplicate IDs via unique index
+        builder.ToTable("sessions");
+    }
+}
+```
+
+**Verification:**
+```bash
+# Test 1: UUID v7 format validation
+dotnet test --filter "FullyQualifiedName~SecureIdGeneratorTests.NewId_GeneratesValidUuidV7"
+
+# Test 2: No collisions in 1M generations
+dotnet test --filter "FullyQualifiedName~SecureIdGeneratorTests.NewId_NoCollisionsInMillionGenerations"
+
+# Test 3: Database unique constraint enforcement
+dotnet test --filter "FullyQualifiedName~SessionRepositoryTests.SaveDuplicateId_ThrowsException"
+
+# Test 4: Timestamp extraction accuracy
+dotnet test --filter "FullyQualifiedName~SecureIdGeneratorTests.GetTimestamp_ReturnsAccurateTime"
+```
+
+**Collision Probability Analysis:**
+- UUID v7 with 62-bit random component: 2^62 = 4.6 × 10^18 possible values
+- Birthday paradox: 50% collision probability at 2^31 = 2.1 billion UUIDs
+- Acode context: 1,000 sessions/day = 365,000/year = 3.65M over 10 years
+- **Collision risk: Negligible (< 0.0001% over 10 years)**
+
+---
+
+### Threat 3: Artifact Injection via Malicious Tool Output
+
+**Attack Scenario:**  
+Attacker compromises external tool (e.g., language server) to inject malicious artifacts:
+
+1. Developer uses Acode to refactor code, which invokes external LSP server
+2. Attacker has compromised LSP server binary or MitM'd network connection
+3. LSP server returns crafted response with embedded payload:
+   ```json
+   {
+     "diagnostics": [
+       {
+         "message": "Syntax error",
+         "code": "\"; DROP TABLE sessions; --"
+       }
+     ]
+   }
+   ```
+4. Acode stores artifact without validation, including SQL injection payload
+5. Later audit query displays artifacts: `SELECT * FROM artifacts WHERE tool_name = 'lsp'`
+6. SQL injection executes, drops sessions table
+7. All session history lost, cannot resume any work
+
+**Impact Assessment:**
+- **Data Integrity:** CRITICAL - Arbitrary SQL injection via artifact storage
+- **Availability:** HIGH - Could drop tables, corrupt database
+- **Audit Trail:** HIGH - Could delete event logs covering tracks
+- **Lateral Movement:** Artifact could contain malicious code executed by other tools
+
+**Complete Mitigation (C#):**
+
+```csharp
+// Domain/Run/Artifact.cs
+using System.Text.RegularExpressions;
+
+namespace Acode.Domain.Run;
+
+public partial class Artifact
+{
+    private const int MaxContentSize = 10 * 1024 * 1024; // 10 MB
+    private const int MaxFilePathLength = 1024;
+    
+    private static readonly Regex _sqlInjectionPattern = new Regex(
+        @"('(''|[^'])*')|(;)|(\b(ALTER|CREATE|DELETE|DROP|EXEC(UTE)?|INSERT( +INTO)?|MERGE|SELECT|UPDATE|UNION( +ALL)?)\b)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    
+    private static readonly Regex _scriptInjectionPattern = new Regex(
+        @"<script[^>]*>.*?</script>|javascript:|onerror\s*=|onload\s*=",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    
+    private static readonly string[] _allowedMimeTypes = new[]
+    {
+        "text/plain",
+        "application/json",
+        "text/markdown",
+        "text/x-csharp",
+        "text/x-python",
+        "text/x-java",
+        "application/xml"
+    };
+    
+    private Artifact() { } // For EF Core
+    
+    /// <summary>
+    /// Create artifact with comprehensive input validation
+    /// Prevents injection attacks via untrusted tool output
+    /// </summary>
+    public static Artifact Create(
+        Guid toolCallId,
+        ArtifactType type,
+        string mimeType,
+        string content,
+        string? filePath = null)
+    {
+        // Validation 1: Content size limit
+        if (content.Length > MaxContentSize)
+        {
+            throw new ArgumentException(
+                $"Artifact content exceeds maximum size of {MaxContentSize} bytes. " +
+                $"Large outputs should be written to files, not stored as artifacts.",
+                nameof(content));
+        }
+        
+        // Validation 2: MIME type whitelist
+        if (!_allowedMimeTypes.Contains(mimeType, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"MIME type '{mimeType}' not allowed. Permitted types: {string.Join(", ", _allowedMimeTypes)}",
+                nameof(mimeType));
+        }
+        
+        // Validation 3: SQL injection detection
+        if (_sqlInjectionPattern.IsMatch(content))
+        {
+            throw new ArtifactValidationException(
+                "Artifact content contains potential SQL injection patterns. Content rejected for security.");
+        }
+        
+        // Validation 4: Script injection detection
+        if (_scriptInjectionPattern.IsMatch(content))
+        {
+            throw new ArtifactValidationException(
+                "Artifact content contains potential script injection patterns. Content rejected for security.");
+        }
+        
+        // Validation 5: File path traversal prevention
+        if (filePath != null)
+        {
+            if (filePath.Length > MaxFilePathLength)
+            {
+                throw new ArgumentException(
+                    $"File path exceeds maximum length of {MaxFilePathLength}",
+                    nameof(filePath));
+            }
+            
+            if (filePath.Contains("..") || filePath.Contains("~"))
+            {
+                throw new ArtifactValidationException(
+                    "File path contains directory traversal patterns (.., ~). Only absolute paths allowed.");
+            }
+            
+            if (!Path.IsPathFullyQualified(filePath))
+            {
+                throw new ArtifactValidationException(
+                    "File path must be absolute, not relative.");
+            }
+        }
+        
+        // Validation 6: Unicode normalization (prevent homograph attacks)
+        var normalizedContent = content.Normalize(NormalizationForm.FormC);
+        
+        return new Artifact
+        {
+            Id = SecureIdGenerator.NewId(),
+            ToolCallId = toolCallId,
+            Type = type,
+            MimeType = mimeType.ToLowerInvariant(),
+            Content = normalizedContent,
+            FilePath = filePath,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+    }
+}
+
+// Application/Exceptions/ArtifactValidationException.cs
+public class ArtifactValidationException : Exception
+{
+    public ArtifactValidationException(string message) : base(message) { }
+}
+
+// Infrastructure/Persistence/Configurations/ArtifactConfiguration.cs
+public class ArtifactConfiguration : IEntityTypeConfiguration<Artifact>
+{
+    public void Configure(EntityTypeBuilder<Artifact> builder)
+    {
+        builder.HasKey(a => a.Id);
+        
+        // Store content as parameterized BLOB, never as concatenated SQL
+        builder.Property(a => a.Content)
+            .HasColumnType("TEXT")
+            .IsRequired();
+        
+        // Prevent injection via column name - use explicit mapping
+        builder.ToTable("artifacts");
+        
+        builder.HasIndex(a => a.ToolCallId);
+    }
+}
+
+// Infrastructure/Persistence/ArtifactRepository.cs
+public class ArtifactRepository : IArtifactRepository
+{
+    public async Task SaveAsync(Artifact artifact)
+    {
+        // Use parameterized queries - EF Core handles this automatically
+        _dbContext.Artifacts.Add(artifact);
+        await _dbContext.SaveChangesAsync();
+        
+        _logger.LogInformation(
+            "Artifact {ArtifactId} saved for ToolCall {ToolCallId}. " +
+            "Content length: {Length}, MIME type: {MimeType}",
+            artifact.Id, artifact.ToolCallId, artifact.Content.Length, artifact.MimeType);
+    }
+    
+    public async Task<Artifact> GetByIdAsync(Guid artifactId)
+    {
+        // Read with parameterized query
+        var artifact = await _dbContext.Artifacts
+            .FirstOrDefaultAsync(a => a.Id == artifactId);
+        
+        if (artifact == null)
+            throw new ArtifactNotFoundException(artifactId);
+        
+        // Sanitize content before returning (defense-in-depth)
+        // Even though input validation prevented injection, re-sanitize on read
+        artifact.SanitizeContentForDisplay();
+        
+        return artifact;
+    }
+}
+```
+
+**Verification:**
+```bash
+# Test 1: SQL injection patterns detected
+dotnet test --filter "FullyQualifiedName~ArtifactTests.Create_SqlInjectionContent_ThrowsException"
+
+# Test 2: Script injection patterns detected
+dotnet test --filter "FullyQualifiedName~ArtifactTests.Create_ScriptInjectionContent_ThrowsException"
+
+# Test 3: Path traversal prevented
+dotnet test --filter "FullyQualifiedName~ArtifactTests.Create_PathTraversalAttack_ThrowsException"
+
+# Test 4: Large content rejected
+dotnet test --filter "FullyQualifiedName~ArtifactTests.Create_OversizedContent_ThrowsException"
+
+# Test 5: Parameterized queries prevent injection
+dotnet test --filter "FullyQualifiedName~ArtifactRepositoryTests.SaveMaliciousContent_DoesNotExecuteSql"
+```
+
+**Defense Strategy:**
+1. **Input Validation:** Whitelist MIME types, detect injection patterns, size limits
+2. **Parameterized Queries:** EF Core uses parameterized SQL, prevents concatenation injection
+3. **Content Sanitization:** Unicode normalization, remove control characters
+4. **Path Validation:** No traversal, only absolute paths, length limits
+5. **Output Encoding:** Sanitize again on display (HTML entity encoding for web UI)
+
+---
+
+## Best Practices
+
+### Entity Construction
+
+**BP-001: Use Factory Methods, Not Public Constructors**
+- **Reason:** Encapsulates validation, ensures invariants from creation
+- **Example:** `Session.Create()` validates prompt is non-empty, sets initial state
+- **Anti-pattern:** `new Session { Prompt = "" }` bypasses validation
+
+**BP-002: Generate IDs at Creation, Not in Repository**
+- **Reason:** Entity owns its identity, testable without database
+- **Example:** `Session.Create()` calls `SecureIdGenerator.NewId()`
+- **Anti-pattern:** `INSERT INTO sessions VALUES (UUID(), ...)` - ID not known until save
+
+**BP-003: Make State Transitions Explicit Methods**
+- **Reason:** Business logic in domain, not scattered in application layer
+- **Example:** `session.Start()`, `session.Complete()`, `session.Fail()`
+- **Anti-pattern:** `session.State = SessionState.Executing` - no validation
+
+### Validation
+
+**BP-004: Validate at Boundaries, Not Internally**
+- **Reason:** Performance - validate once on input, trust internally
+- **Example:** `Artifact.Create()` validates, internal methods assume valid
+- **Anti-pattern:** Every property setter validates - slow, redundant
+
+**BP-005: Fail Fast with Specific Exceptions**
+- **Reason:** Clear error messages, easier debugging
+- **Example:** `throw new ArtifactValidationException("SQL injection detected")`
+- **Anti-pattern:** `return null` or generic `InvalidOperationException`
+
+**BP-006: Use Value Objects for Complex Validation**
+- **Reason:** Encapsulates rules, reusable across entities
+- **Example:** `FilePath` value object validates traversal, length, format
+- **Anti-pattern:** Duplicating path validation in Session, Task, Artifact
+
+### Serialization
+
+**BP-007: Version Your JSON Schema**
+- **Reason:** Forward compatibility when adding fields
+- **Example:** `{ "schemaVersion": "1.0", "sessionId": "..." }`
+- **Anti-pattern:** Assume current structure forever - breaks on schema change
+
+**BP-008: Use Stable Property Names (camelCase)**
+- **Reason:** Consistent with JSON conventions, avoid surprises
+- **Example:** `{ "createdAt": "2024-01-15T..." }`
+- **Anti-pattern:** Mixed casing `{ "CreatedAt": ..., "session_id": ... }`
+
+**BP-009: Exclude Audit Fields from Semantic Serialization**
+- **Reason:** UpdatedAt changes don't affect business state
+- **Example:** Checksum includes `Id, State, Tasks` but not `UpdatedAt`
+- **Anti-pattern:** Checksum includes `UpdatedAt` - changes on every save
+
+### Performance
+
+**BP-010: Lazy-Load Collections, Eager-Load Aggregates**
+- **Reason:** Balance performance vs. N+1 queries
+- **Example:** `_dbContext.Sessions.Include(s => s.Tasks)` - aggregate loads together
+- **Anti-pattern:** Load session, then loop loading tasks individually
+
+**BP-011: Use Indexes on Foreign Keys**
+- **Reason:** Fast lookups like "find all tasks for session"
+- **Example:** `CREATE INDEX idx_tasks_session_id ON tasks(session_id)`
+- **Anti-pattern:** Full table scan for every query
+
+**BP-012: Batch Operations for Bulk Inserts**
+- **Reason:** 100x faster than individual inserts
+- **Example:** `_dbContext.AddRange(artifacts); await SaveChangesAsync()`
+- **Anti-pattern:** `foreach (var a in artifacts) { Add(a); SaveChanges(); }`
+
+### Testing
+
+**BP-013: Test Entity Creation Validation**
+- **Reason:** Invariants are contract, must be enforced
+- **Example:** Test `Session.Create("")` throws `ArgumentException`
+- **Anti-pattern:** Only test happy path
+
+**BP-014: Test State Transition Rules**
+- **Reason:** State machines are complex, easy to break
+- **Example:** Test cannot transition `Completed -> Executing`
+- **Anti-pattern:** Only test forward progression
+
+**BP-015: Use In-Memory Database for Entity Tests**
+- **Reason:** Fast, isolated, no setup required
+- **Example:** `new DbContextOptionsBuilder().UseInMemoryDatabase()`
+- **Anti-pattern:** Tests depend on shared SQLite file - flaky
+
+### Security
+
+**BP-016: Never Trust External Input, Even from Tools**
+- **Reason:** Compromised tools can inject malicious data
+- **Example:** Validate artifact content for injection patterns
+- **Anti-pattern:** Store tool output directly without validation
+
+**BP-017: Use Checksums for Critical State**
+- **Reason:** Detects tampering, enables audit trail
+- **Example:** Session checksum includes `State, Tasks, CreatedAt`
+- **Anti-pattern:** No integrity verification - accept any database state
+
+**BP-018: Sanitize Content for Display**
+- **Reason:** Defense-in-depth against stored XSS
+- **Example:** HTML-encode artifact content before rendering in UI
+- **Anti-pattern:** Display raw content - vulnerable if validation bypassed
+
+---
+
+## Troubleshooting
+
+### Problem 1: "Invalid entity state" Exception During Resume
+
+**Symptoms:**
+- Resume command fails with: `EntityStateException: Session abc-123 in invalid state 'Planning'`
+- Session shows `State = Planning` but has completed tasks
+- Cannot resume or cancel session
+
+**Possible Causes:**
+1. **State transition failed mid-update:** Application crashed after updating tasks but before updating session state
+2. **Direct database modification:** Someone manually changed session state in database
+3. **Checksum validation failed:** State tampering detected
+
+**Diagnosis:**
+```bash
+# Check session state consistency
+dotnet run -- session show abc-123 --raw
+
+# Expected output for valid state:
+# Session: Planning -> Tasks: 0
+# Session: Executing -> Tasks: 1+ with at least 1 in progress
+# Session: Completed -> Tasks: All completed
+# Session: Failed -> Tasks: At least 1 failed
+
+# If mismatch detected, check database directly
+sqlite3 ~/.acode/sessions.db
+SELECT id, state, (SELECT COUNT(*) FROM tasks WHERE session_id = sessions.id) as task_count 
+FROM sessions WHERE id = 'abc-123';
+
+# Check for checksum mismatch
+SELECT id, state, state_checksum FROM sessions WHERE id = 'abc-123';
+```
+
+**Solutions:**
+
+**Solution 1: Repair state from task status**
+```bash
+# If tasks completed but session shows Planning/Executing:
+dotnet run -- session repair abc-123 --recompute-state
+
+# This command:
+# 1. Queries all tasks for session
+# 2. If all tasks completed -> set session to Completed
+# 3. If any task failed -> set session to Failed
+# 4. If tasks in progress -> set session to Executing
+# 5. Recomputes checksum
+```
+
+**Solution 2: Force state transition (if repair fails)**
+```bash
+# Manually transition to correct state
+dotnet run -- session set-state abc-123 --state Completed --force
+
+# WARNING: --force bypasses validation, use only when repair fails
+# Logs warning: "Forced state transition for session abc-123"
+```
+
+**Solution 3: Rollback to last checkpoint**
+```bash
+# If corruption detected, restore from event log
+dotnet run -- session rollback abc-123 --to-checkpoint 5
+
+# Replays events 1-5, discards events 6+
+# Rebuilds session state from known-good checkpoint
+```
+
+**Prevention:**
+- Enable atomic state updates: Wrap session + task updates in transaction
+- Run nightly consistency check: `dotnet run -- admin verify-sessions`
+- Enable database backups: SQLite `PRAGMA journal_mode = WAL`
+
+---
+
+### Problem 2: UUID Generation Fails with "Sequence Overflow"
+
+**Symptoms:**
+- Entity creation fails with: `InvalidOperationException: UUID sequence overflow, clock may be stuck`
+- Happens during rapid session creation (>4,096/millisecond)
+- Error message: "Waited 1ms but sequence still maxed out"
+
+**Possible Causes:**
+1. **Clock not advancing:** System clock frozen or virtualization issue
+2. **Extreme load:** Creating entities faster than clock resolution
+3. **Infinite loop:** Bug causing runaway entity creation
+
+**Diagnosis:**
+```bash
+# Check if system clock advancing
+powershell -Command "for ($i=0; $i -lt 10; $i++) { Get-Date -Format 'HH:mm:ss.fff'; Start-Sleep -Milliseconds 100 }"
+
+# Expected: Timestamps advance by ~100ms each iteration
+# Problem: Timestamps frozen or advancing by large jumps (>1 second)
+
+# Check entity creation rate
+dotnet run -- stats show --metric entity-creation-rate
+
+# Expected: < 1000/second for normal operation
+# Problem: > 10,000/second indicates runaway loop
+
+# Check for clock virtualization issues (if running in VM)
+systeminfo | findstr /C:"System Model"
+# If VM: Check hypervisor clock sync settings
+```
+
+**Solutions:**
+
+**Solution 1: Fix system clock**
+```powershell
+# Resync system clock with NTP
+w32tm /resync /force
+
+# Verify clock advancing
+powershell -Command "1..5 | ForEach-Object { [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); Start-Sleep -Milliseconds 50 }"
+
+# Should see values incrementing by ~50ms
+```
+
+**Solution 2: Reduce entity creation rate**
+```csharp
+// If legitimate high load, batch entity creation:
+// Instead of:
+foreach (var task in tasks) { 
+    var step = Step.Create(task.Id, "Do work");
+    await repository.SaveAsync(step);
+}
+
+// Do this:
+var steps = tasks.Select(t => Step.Create(t.Id, "Do work")).ToList();
+await repository.SaveRangeAsync(steps);
+
+// Reduces creation rate from 1000/sec to batches of 100 every 100ms
+```
+
+**Solution 3: Use alternative ID strategy for high-volume entities**
+```csharp
+// For high-volume entities like log entries, use auto-increment:
+public class LogEntry
+{
+    public long Id { get; private set; } // Database auto-increment
+    public Guid SessionId { get; private set; } // UUID v7 for session reference
+    public string Message { get; private set; }
+}
+
+// Use UUID v7 for business entities (Session, Task), auto-increment for logs
+```
+
+**Prevention:**
+- Enable clock monitoring: Alert if clock stops advancing for >5 seconds
+- Rate-limit entity creation: Max 1000/second, queue excess
+- Test clock sync in VM environments before deployment
+
+---
+
+### Problem 3: Artifact Content Validation Blocks Legitimate Output
+
+**Symptoms:**
+- Artifact creation fails with: `ArtifactValidationException: Content contains potential SQL injection patterns`
+- Tool output is legitimate SQL query, not injection attempt
+- Example: Code generator produces `SELECT * FROM users` as part of generated code
+
+**Possible Causes:**
+1. **Overly aggressive validation:** Pattern matching can't distinguish code from injection
+2. **Wrong MIME type:** Content should be `text/x-sql` but set as `text/plain`
+3. **Escaped vs. raw content:** Special characters not properly encoded
+
+**Diagnosis:**
+```bash
+# Check artifact content and MIME type
+dotnet run -- tool-call show <tool-call-id> --artifacts
+
+# Example output showing problem:
+# Artifact: Type=Output, MIME=text/plain, Content=SELECT * FROM users
+#                                         ^^^^^^^^^ Flagged as SQL injection
+
+# Check tool configuration
+dotnet run -- tool show <tool-name> --output-config
+
+# Expected: SQL code generator should set MIME type to text/x-sql
+# Problem: Tool sets generic text/plain
+```
+
+**Solutions:**
+
+**Solution 1: Use correct MIME type for code content**
+```csharp
+// In tool implementation:
+public class SqlCodeGeneratorTool : ITool
+{
+    public async Task<ToolResult> ExecuteAsync(ToolInput input)
+    {
+        var sql = GenerateSqlQuery(input.Parameters);
+        
+        // CORRECT: Specify SQL MIME type - bypasses text/plain validation
+        var artifact = Artifact.Create(
+            toolCallId: input.ToolCallId,
+            type: ArtifactType.Code,
+            mimeType: "text/x-sql", // <-- Specific MIME type for SQL
+            content: sql
+        );
+        
+        return ToolResult.Success(artifact);
+    }
+}
+
+// Update validation to allow SQL MIME type:
+private static readonly string[] _allowedMimeTypes = new[]
+{
+    "text/plain",
+    "text/x-sql",      // <-- Add SQL
+    "text/x-csharp",
+    "application/json"
+};
+```
+
+**Solution 2: Base64-encode problematic content**
+```csharp
+// For content that triggers false positives, encode as base64:
+var problematicContent = "'; DROP TABLE users; --";
+var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(problematicContent));
+
+var artifact = Artifact.Create(
+    toolCallId: input.ToolCallId,
+    type: ArtifactType.EncodedContent,
+    mimeType: "application/base64",
+    content: encoded
+);
+
+// Decode on read:
+var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(artifact.Content));
+```
+
+**Solution 3: Whitelist specific patterns for code generation**
+```csharp
+// Add context-aware validation:
+public static Artifact CreateCodeArtifact(
+    Guid toolCallId,
+    string language, // e.g., "sql", "csharp"
+    string content)
+{
+    // Skip injection validation for code artifacts with proper MIME type
+    var mimeType = language.ToLowerInvariant() switch
+    {
+        "sql" => "text/x-sql",
+        "csharp" => "text/x-csharp",
+        "python" => "text/x-python",
+        _ => "text/plain"
+    };
+    
+    // Code artifacts validated differently than user input
+    return new Artifact
+    {
+        Id = SecureIdGenerator.NewId(),
+        ToolCallId = toolCallId,
+        Type = ArtifactType.Code,
+        MimeType = mimeType,
+        Content = content, // No injection validation for code artifacts
+        CreatedAt = DateTimeOffset.UtcNow
+    };
+}
+```
+
+**Prevention:**
+- Document MIME types for each tool in tool catalog
+- Add validation tests for each MIME type
+- Use `ArtifactType.Code` for generated code, `ArtifactType.Output` for tool results
+
+---
+
+### Problem 4: Session Checksum Fails After Database Migration
+
+**Symptoms:**
+- Resume fails with: `EntityTamperedException: Session checksum mismatch`
+- Happens after upgrading from SQLite to Postgres
+- All sessions show checksum errors, not just one
+
+**Possible Causes:**
+1. **Serialization format changed:** Different JSON ordering between databases
+2. **Timestamp precision loss:** SQLite stores milliseconds, Postgres stores microseconds
+3. **Null handling difference:** SQLite treats empty string as NULL differently than Postgres
+
+**Diagnosis:**
+```bash
+# Check serialization format
+dotnet run -- session show abc-123 --debug-checksum
+
+# Output shows checksum computation:
+# Expected checksum: "8x3kF2..."
+# Actual checksum:   "9zLmA1..."
+# 
+# Serialized state (expected):
+# {"id":"abc-123","state":"Executing","tasks":[{"id":"task-1","state":"Completed","order":1}]}
+#
+# Serialized state (actual):
+# {"id":"abc-123","tasks":[{"order":1,"id":"task-1","state":"Completed"}],"state":"Executing"}
+#                          ^^^^^^^^^ Property order different
+
+# Compare database schemas
+sqlite3 old_db.sqlite ".schema sessions" > sqlite_schema.txt
+psql -d new_db -c "\d+ sessions" > postgres_schema.txt
+diff sqlite_schema.txt postgres_schema.txt
+```
+
+**Solutions:**
+
+**Solution 1: Recompute all checksums after migration**
+```bash
+# After migration, recalculate checksums for all sessions:
+dotnet run -- admin recompute-checksums --all
+
+# This:
+# 1. Loads each session
+# 2. Skips checksum validation (--skip-validation flag)
+# 3. Recomputes checksum from current state
+# 4. Saves updated checksum
+#
+# Progress: Recomputed 1000 sessions in 15 seconds
+```
+
+**Solution 2: Use canonical JSON serialization**
+```csharp
+// Update checksum computation to use deterministic serialization:
+public static string ComputeChecksum<T>(T entity) where T : class
+{
+    var json = JsonSerializer.Serialize(entity, new JsonSerializerOptions
+    {
+        WriteIndented = false,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        
+        // NEW: Sort properties alphabetically for deterministic output
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        
+        // NEW: Custom converter that sorts object properties
+        Converters = { new OrderedPropertiesConverter() }
+    });
+    
+    using var sha256 = SHA256.Create();
+    return Convert.ToBase64String(sha256.ComputeHash(Encoding.UTF8.GetBytes(json)));
+}
+
+public class OrderedPropertiesConverter : JsonConverter<object>
+{
+    // Ensures properties always serialized in same order regardless of database
+}
+```
+
+**Solution 3: Disable checksum validation temporarily**
+```bash
+# If migration urgent and recomputation slow:
+export ACODE_SKIP_CHECKSUM_VALIDATION=true
+dotnet run -- session resume abc-123
+
+# WARNING: Reduces security, use only during migration
+# Re-enable immediately after: unset ACODE_SKIP_CHECKSUM_VALIDATION
+```
+
+**Prevention:**
+- Test migration with checksum validation in staging environment
+- Include checksum recomputation in migration script
+- Document serialization format as part of schema version
+
+---
+
+### Problem 5: Entity Relationship Navigation Fails with Lazy Loading
+
+**Symptoms:**
+- `NullReferenceException` when accessing `task.Steps` collection
+- Works in unit tests, fails in production
+- Error: "Collection was accessed before being loaded"
+
+**Possible Causes:**
+1. **Lazy loading not enabled:** EF Core requires explicit configuration
+2. **DbContext disposed:** Accessing navigation after context closed
+3. **Detached entity:** Entity loaded from one context, accessed from another
+
+**Diagnosis:**
+```bash
+# Enable EF Core query logging
+export ACODE_LOG_LEVEL=Debug
+dotnet run -- session show abc-123
+
+# Check logs for:
+# [DEBUG] Executing DbCommand: SELECT * FROM tasks WHERE session_id = 'abc-123'
+#         ^^^^^^^^^^ If this appears, eager loading working
+# 
+# [WARN] Navigation property 'Tasks' accessed but not loaded
+#        ^^^^^^^^^^ If this appears, lazy loading not configured
+
+# Check DbContext lifetime
+dotnet run -- debug session-load-lifecycle abc-123
+
+# Output shows:
+# 1. DbContext created: 14:32:15.123
+# 2. Session loaded: 14:32:15.145
+# 3. DbContext disposed: 14:32:15.167
+# 4. task.Steps accessed: 14:32:15.201 <-- AFTER disposal
+```
+
+**Solutions:**
+
+**Solution 1: Use eager loading with Include()**
+```csharp
+// CORRECT: Load entire aggregate at once
+public async Task<Session> GetByIdAsync(Guid sessionId)
+{
+    return await _dbContext.Sessions
+        .Include(s => s.Tasks)              // Load tasks
+            .ThenInclude(t => t.Steps)      // Load steps
+                .ThenInclude(s => s.ToolCalls) // Load tool calls
+                    .ThenInclude(tc => tc.Artifacts) // Load artifacts
+        .FirstOrDefaultAsync(s => s.Id == sessionId);
+    
+    // Now entire aggregate loaded, safe to access any navigation property
+}
+
+// INCORRECT: Lazy loading not configured
+public async Task<Session> GetByIdAsync(Guid sessionId)
+{
+    return await _dbContext.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId);
+    // task.Steps will be NULL - not loaded
+}
+```
+
+**Solution 2: Enable lazy loading proxies**
+```csharp
+// In Startup.cs or Program.cs:
+services.AddDbContext<AcodeDbContext>(options =>
+{
+    options.UseSqlite(connectionString)
+           .UseLazyLoadingProxies(); // <-- Enable lazy loading
+});
+
+// Mark navigation properties as virtual:
+public class Task
+{
+    public virtual ICollection<Step> Steps { get; set; } // Must be virtual
+}
+
+// Now Steps automatically loaded when accessed
+```
+
+**Solution 3: Project to DTO with explicit loading**
+```csharp
+// For read-only scenarios, project to DTO:
+public async Task<SessionDto> GetSessionSummaryAsync(Guid sessionId)
+{
+    return await _dbContext.Sessions
+        .Where(s => s.Id == sessionId)
+        .Select(s => new SessionDto
+        {
+            Id = s.Id,
+            State = s.State,
+            TaskCount = s.Tasks.Count,
+            CompletedTasks = s.Tasks.Count(t => t.State == TaskState.Completed)
+        })
+        .FirstOrDefaultAsync();
+    
+    // No navigation property access, query optimized, no lazy loading needed
+}
+```
+
+**Prevention:**
+- Use explicit Include() for all aggregate root queries
+- Enable lazy loading only if needed (adds overhead)
+- Test with disposed DbContext: `using (var context = ...) { var session = Load(); } session.Tasks.Count();`
 
 ---
 
@@ -547,13 +1937,937 @@ Metadata is optional JSON with known shapes:
 }
 ```
 
-### Best Practices
+### Best Practices Summary
 
 1. **Access through Session**: Always go through the aggregate root
 2. **Check derived state**: Task/Session states reflect children
 3. **Preserve artifacts**: They're immutable for audit
 4. **Use metadata sparingly**: Only for truly optional data
 5. **Validate early**: Constructor validation prevents bad data
+
+---
+
+## Security Considerations
+
+### Threat 1: Malicious Artifact Content Injection
+
+**Risk**: An attacker could attempt to inject malicious content into artifacts (e.g., scripts in file content, command injection in command parameters) that could be executed later when artifacts are processed or displayed.
+
+**Mitigation Strategy**: Treat all artifact content as untrusted data. Validate content types, sanitize when displaying, and never execute artifact content directly without explicit user approval.
+
+**Complete C# Implementation**:
+
+```csharp
+namespace AgenticCoder.Domain.Artifacts;
+
+public sealed class ArtifactContentValidator
+{
+    private static readonly HashSet<string> AllowedContentTypes = new()
+    {
+        "text/plain",
+        "text/markdown",
+        "application/json",
+        "text/x-csharp",
+        "text/x-python",
+        "text/x-typescript",
+        "application/octet-stream"
+    };
+
+    private static readonly int MaxArtifactSizeMB = 10;
+    private static readonly int MaxArtifactSizeBytes = MaxArtifactSizeMB * 1024 * 1024;
+
+    public static ValidationResult Validate(byte[] content, string contentType, string name)
+    {
+        // Size validation
+        if (content.Length > MaxArtifactSizeBytes)
+        {
+            return ValidationResult.Failure(
+                $"Artifact size {content.Length} bytes exceeds maximum {MaxArtifactSizeBytes} bytes");
+        }
+
+        // Content type validation
+        if (!AllowedContentTypes.Contains(contentType))
+        {
+            return ValidationResult.Failure(
+                $"Content type '{contentType}' is not in allowed list");
+        }
+
+        // Filename validation - prevent path traversal
+        if (name.Contains("..") || name.Contains("/") || name.Contains("\\"))
+        {
+            return ValidationResult.Failure(
+                $"Artifact name '{name}' contains invalid path characters");
+        }
+
+        // Check for null bytes (could indicate binary injection in text)
+        if (contentType.StartsWith("text/") && content.Contains((byte)0))
+        {
+            return ValidationResult.Failure(
+                "Text artifact contains null bytes, possible binary injection");
+        }
+
+        return ValidationResult.Success();
+    }
+}
+
+public record ValidationResult(bool IsValid, string? ErrorMessage)
+{
+    public static ValidationResult Success() => new(true, null);
+    public static ValidationResult Failure(string error) => new(false, error);
+}
+```
+
+### Threat 2: Entity ID Prediction Enabling Unauthorized Access
+
+**Risk**: If entity IDs are sequential or predictable, an attacker could guess valid IDs and attempt to access sessions or artifacts belonging to other users.
+
+**Mitigation Strategy**: Use UUID v7 with cryptographically random components. Never expose internal database sequence numbers as entity IDs.
+
+**Complete C# Implementation**:
+
+```csharp
+namespace AgenticCoder.Domain.Common;
+
+public abstract class EntityId : IEquatable<EntityId>
+{
+    public Guid Value { get; }
+
+    protected EntityId()
+    {
+        // UUID v7: timestamp (48 bits) + version (4 bits) +
+        // random (12 bits) + variant (2 bits) + random (62 bits)
+        Value = CreateUuidV7();
+    }
+
+    protected EntityId(Guid value)
+    {
+        if (value == Guid.Empty)
+            throw new ArgumentException("ID cannot be empty", nameof(value));
+
+        // Validate this is a UUID v7 (version bits should be 0111)
+        var bytes = value.ToByteArray();
+        var version = (bytes[7] >> 4) & 0x0F;
+        if (version != 7)
+        {
+            throw new ArgumentException(
+                $"GUID must be UUID v7 format, got version {version}",
+                nameof(value));
+        }
+
+        Value = value;
+    }
+
+    private static Guid CreateUuidV7()
+    {
+        var bytes = new byte[16];
+
+        // Fill first 6 bytes with timestamp (milliseconds since Unix epoch)
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        bytes[0] = (byte)((timestamp >> 40) & 0xFF);
+        bytes[1] = (byte)((timestamp >> 32) & 0xFF);
+        bytes[2] = (byte)((timestamp >> 24) & 0xFF);
+        bytes[3] = (byte)((timestamp >> 16) & 0xFF);
+        bytes[4] = (byte)((timestamp >> 8) & 0xFF);
+        bytes[5] = (byte)(timestamp & 0xFF);
+
+        // Fill remaining bytes with cryptographically secure random data
+        using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+        var randomBytes = new byte[10];
+        rng.GetBytes(randomBytes);
+        Array.Copy(randomBytes, 0, bytes, 6, 10);
+
+        // Set version (4 bits) to 7 (0111)
+        bytes[6] = (byte)((bytes[6] & 0x0F) | 0x70);
+
+        // Set variant (2 bits) to RFC 4122 (10)
+        bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80);
+
+        return new Guid(bytes);
+    }
+
+    public bool Equals(EntityId? other) =>
+        other is not null && Value == other.Value;
+
+    public override bool Equals(object? obj) =>
+        Equals(obj as EntityId);
+
+    public override int GetHashCode() =>
+        Value.GetHashCode();
+
+    public override string ToString() =>
+        Value.ToString();
+}
+```
+
+### Threat 3: Metadata JSON Injection
+
+**Risk**: Malicious JSON in metadata fields could cause deserialization vulnerabilities, denial of service through deeply nested structures, or injection attacks when metadata is displayed.
+
+**Mitigation Strategy**: Validate JSON depth, size, and structure before storing. Use a schema validator and size limits.
+
+**Complete C# Implementation**:
+
+```csharp
+namespace AgenticCoder.Domain.Common;
+
+public static class JsonMetadataValidator
+{
+    private const int MaxJsonSizeBytes = 64 * 1024; // 64 KB
+    private const int MaxJsonDepth = 10;
+    private const int MaxArrayLength = 1000;
+
+    public static ValidationResult Validate(JsonDocument? metadata)
+    {
+        if (metadata == null)
+            return ValidationResult.Success();
+
+        // Size validation
+        var jsonString = metadata.RootElement.GetRawText();
+        var sizeBytes = Encoding.UTF8.GetByteCount(jsonString);
+        if (sizeBytes > MaxJsonSizeBytes)
+        {
+            return ValidationResult.Failure(
+                $"Metadata size {sizeBytes} bytes exceeds maximum {MaxJsonSizeBytes} bytes");
+        }
+
+        // Depth validation
+        var depth = CalculateDepth(metadata.RootElement);
+        if (depth > MaxJsonDepth)
+        {
+            return ValidationResult.Failure(
+                $"Metadata depth {depth} exceeds maximum {MaxJsonDepth}");
+        }
+
+        // Array length validation
+        var arrayLengthResult = ValidateArrayLengths(metadata.RootElement);
+        if (!arrayLengthResult.IsValid)
+        {
+            return arrayLengthResult;
+        }
+
+        return ValidationResult.Success();
+    }
+
+    private static int CalculateDepth(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Object => 1 + element.EnumerateObject()
+                .Select(p => CalculateDepth(p.Value))
+                .DefaultIfEmpty(0)
+                .Max(),
+            JsonValueKind.Array => 1 + element.EnumerateArray()
+                .Select(CalculateDepth)
+                .DefaultIfEmpty(0)
+                .Max(),
+            _ => 0
+        };
+    }
+
+    private static ValidationResult ValidateArrayLengths(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            var length = element.GetArrayLength();
+            if (length > MaxArrayLength)
+            {
+                return ValidationResult.Failure(
+                    $"Array length {length} exceeds maximum {MaxArrayLength}");
+            }
+
+            foreach (var item in element.EnumerateArray())
+            {
+                var result = ValidateArrayLengths(item);
+                if (!result.IsValid)
+                    return result;
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                var result = ValidateArrayLengths(property.Value);
+                if (!result.IsValid)
+                    return result;
+            }
+        }
+
+        return ValidationResult.Success();
+    }
+}
+```
+
+### Threat 4: Hash Collision Attacks on Artifact Deduplication
+
+**Risk**: An attacker could craft artifacts with colliding hashes to bypass deduplication, causing storage DoS, or to replace legitimate artifacts with malicious ones.
+
+**Mitigation Strategy**: Use SHA-256 for content hashing (collision-resistant). Never use MD5 or SHA-1. Include artifact size in deduplication logic as an additional check.
+
+**Complete C# Implementation**:
+
+```csharp
+namespace AgenticCoder.Domain.Artifacts;
+
+public static class ContentHasher
+{
+    public static string ComputeHash(byte[] content)
+    {
+        if (content == null)
+            throw new ArgumentNullException(nameof(content));
+
+        // Use SHA-256 (not MD5/SHA-1 which have known collision attacks)
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var hashBytes = sha256.ComputeHash(content);
+        var hexHash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+
+        return $"sha256:{hexHash}";
+    }
+
+    public static bool VerifyHash(byte[] content, string expectedHash)
+    {
+        if (content == null)
+            throw new ArgumentNullException(nameof(content));
+        if (string.IsNullOrEmpty(expectedHash))
+            throw new ArgumentException("Hash cannot be null or empty", nameof(expectedHash));
+
+        var actualHash = ComputeHash(content);
+
+        // Use constant-time comparison to prevent timing attacks
+        return CryptographicEquals(actualHash, expectedHash);
+    }
+
+    private static bool CryptographicEquals(string a, string b)
+    {
+        if (a.Length != b.Length)
+            return false;
+
+        var result = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            result |= a[i] ^ b[i];
+        }
+
+        return result == 0;
+    }
+}
+
+// Artifact entity with hash validation
+public sealed class Artifact : EntityBase<ArtifactId>
+{
+    public byte[] Content { get; }
+    public string ContentHash { get; }
+    public long Size { get; }
+
+    public Artifact(
+        ToolCallId toolCallId,
+        ArtifactType type,
+        string name,
+        byte[] content,
+        string contentType)
+        : base(new ArtifactId())
+    {
+        Content = content ?? throw new ArgumentNullException(nameof(content));
+        Size = content.Length;
+        ContentHash = ContentHasher.ComputeHash(content);
+
+        // Verify hash immediately after computation
+        if (!ContentHasher.VerifyHash(content, ContentHash))
+        {
+            throw new InvalidOperationException(
+                "Content hash verification failed immediately after computation");
+        }
+
+        // Additional validation
+        var validationResult = ArtifactContentValidator.Validate(content, contentType, name);
+        if (!validationResult.IsValid)
+        {
+            throw new ArgumentException(validationResult.ErrorMessage, nameof(content));
+        }
+
+        ToolCallId = toolCallId;
+        Type = type;
+        Name = name;
+        ContentType = contentType;
+    }
+}
+```
+
+### Threat 5: Unauthorized State Transition
+
+**Risk**: External code could manipulate entity state directly, bypassing business rules and creating inconsistent data (e.g., marking a Session Complete while Tasks are still executing).
+
+**Mitigation Strategy**: Make state properties private setters. Expose only valid state transition methods. Validate transitions in aggregate root.
+
+**Complete C# Implementation**:
+
+```csharp
+namespace AgenticCoder.Domain.Sessions;
+
+public sealed class Session : EntityBase<SessionId>
+{
+    private readonly List<SessionTask> _tasks = new();
+    private readonly List<SessionEvent> _events = new();
+
+    public SessionState State { get; private set; } // Private setter!
+
+    public Session(string taskDescription, JsonDocument? metadata = null)
+        : base(new SessionId())
+    {
+        if (string.IsNullOrWhiteSpace(taskDescription))
+            throw new ArgumentException("Task description required", nameof(taskDescription));
+
+        TaskDescription = taskDescription;
+        State = SessionState.Created;
+        Metadata = metadata;
+    }
+
+    // Valid state transitions enforced through explicit methods
+    public void StartPlanning()
+    {
+        ValidateTransition(State, SessionState.Planning);
+        TransitionTo(SessionState.Planning, "Planning started");
+    }
+
+    public void RequestApproval()
+    {
+        if (_tasks.Count == 0)
+            throw new InvalidOperationException("Cannot request approval: session has no tasks");
+
+        ValidateTransition(State, SessionState.AwaitingApproval);
+        TransitionTo(SessionState.AwaitingApproval, "Awaiting user approval");
+    }
+
+    public void StartExecuting()
+    {
+        if (_tasks.Count == 0)
+            throw new InvalidOperationException("Cannot execute: session has no tasks");
+
+        ValidateTransition(State, SessionState.Executing);
+        TransitionTo(SessionState.Executing, "Execution started");
+    }
+
+    public void Complete()
+    {
+        // Validate all tasks are complete
+        if (_tasks.Any(t => t.State != TaskState.Completed && t.State != TaskState.Skipped))
+        {
+            throw new InvalidOperationException(
+                "Cannot complete session: not all tasks are completed or skipped");
+        }
+
+        ValidateTransition(State, SessionState.Completed);
+        TransitionTo(SessionState.Completed, "All tasks completed");
+    }
+
+    public void Fail(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new ArgumentException("Failure reason required", nameof(reason));
+
+        ValidateTransition(State, SessionState.Failed);
+        TransitionTo(SessionState.Failed, $"Session failed: {reason}");
+    }
+
+    private void ValidateTransition(SessionState from, SessionState to)
+    {
+        // Define valid state transitions
+        var validTransitions = new Dictionary<SessionState, HashSet<SessionState>>
+        {
+            [SessionState.Created] = new() { SessionState.Planning },
+            [SessionState.Planning] = new() { SessionState.AwaitingApproval, SessionState.Failed },
+            [SessionState.AwaitingApproval] = new() { SessionState.Executing, SessionState.Cancelled },
+            [SessionState.Executing] = new() { SessionState.Paused, SessionState.Completed, SessionState.Failed },
+            [SessionState.Paused] = new() { SessionState.Executing, SessionState.Cancelled },
+        };
+
+        if (!validTransitions.TryGetValue(from, out var allowed) || !allowed.Contains(to))
+        {
+            throw new InvalidOperationException(
+                $"Invalid state transition from {from} to {to}");
+        }
+    }
+
+    private void TransitionTo(SessionState newState, string reason)
+    {
+        var oldState = State;
+        State = newState;
+        _events.Add(new SessionEvent(oldState, newState, reason, DateTimeOffset.UtcNow));
+        MarkUpdated();
+    }
+}
+
+public record SessionEvent(
+    SessionState FromState,
+    SessionState ToState,
+    string Reason,
+    DateTimeOffset Timestamp);
+```
+
+---
+
+## Best Practices
+
+### Entity Design
+
+- **BP-001**: Design entities around business concepts, not database tables
+- **BP-002**: Keep entities focused on a single responsibility
+- **BP-003**: Use value objects for IDs to provide type safety
+- **BP-004**: Make all entity fields readonly when possible for immutability
+- **BP-005**: Validate all inputs in constructors before assigning to fields
+- **BP-006**: Throw exceptions immediately for invalid state, don't return error codes
+
+### Aggregate Root Pattern
+
+- **BP-007**: Access child entities only through the aggregate root
+- **BP-008**: Enforce invariants in the aggregate root, not in child entities
+- **BP-009**: Never expose internal collections directly, use IReadOnlyList
+- **BP-010**: Provide explicit methods for operations rather than property setters
+- **BP-011**: Keep aggregates small to avoid performance issues
+- **BP-012**: Design aggregate boundaries around transaction boundaries
+
+### State Management
+
+- **BP-013**: Derive state from child entities rather than storing it redundantly
+- **BP-014**: Use explicit state transition methods instead of property setters
+- **BP-015**: Record state transitions as events for audit trail
+- **BP-016**: Validate state transitions using allowed transition maps
+- **BP-017**: Make state properties have private setters to prevent external manipulation
+
+### Identity and Equality
+
+- **BP-018**: Use UUID v7 for time-sortable globally unique identifiers
+- **BP-019**: Implement IEquatable<T> for entity equality based on ID
+- **BP-020**: Override GetHashCode to use ID hash code
+- **BP-021**: Never expose entity ID setters after construction
+
+### Validation
+
+- **BP-022**: Validate inputs at construction time, not at persistence time
+- **BP-023**: Provide descriptive error messages that include the invalid value
+- **BP-024**: Use guard clauses at the start of methods for precondition checks
+- **BP-025**: Validate complex business rules in dedicated validator classes
+
+### Testing
+
+- **BP-026**: Write unit tests for each entity in isolation without mocks
+- **BP-027**: Test all validation rules with both valid and invalid inputs
+- **BP-028**: Test all state transitions including invalid transitions
+- **BP-029**: Test serialization round-trips to ensure no data loss
+
+### Performance
+
+- **BP-030**: Avoid lazy loading in domain entities to prevent N+1 queries
+- **BP-031**: Use AsReadOnly() for collections to avoid defensive copying
+- **BP-032**: Cache derived state if computation is expensive
+- **BP-033**: Consider pagination for large collections
+
+---
+
+## Troubleshooting
+
+### Issue 1: InvalidOperationException - "Cannot complete session: not all tasks are completed"
+
+**Symptoms**:
+- Session.Complete() throws InvalidOperationException
+- Error message indicates tasks are not in completed state
+- Session appears stuck in Executing state
+
+**Root Causes**:
+1. One or more Tasks are still in Pending or InProgress state
+2. Task state derivation logic not working correctly
+3. Steps within Tasks not marked complete
+
+**Solution Steps**:
+
+```csharp
+// Diagnostic code to identify incomplete tasks
+public static class SessionDiagnostics
+{
+    public static SessionCompletionReport AnalyzeCompletion(Session session)
+    {
+        var report = new SessionCompletionReport { SessionId = session.Id };
+
+        foreach (var task in session.Tasks)
+        {
+            if (task.State != TaskState.Completed && task.State != TaskState.Skipped)
+            {
+                var taskIssue = new TaskIssue
+                {
+                    TaskId = task.Id,
+                    TaskTitle = task.Title,
+                    CurrentState = task.State,
+                    IncompleteSteps = task.Steps
+                        .Where(s => s.State != StepState.Completed && s.State != StepState.Skipped)
+                        .Select(s => new StepIssue
+                        {
+                            StepId = s.Id,
+                            StepName = s.Name,
+                            CurrentState = s.State,
+                            PendingToolCalls = s.ToolCalls
+                                .Where(tc => tc.State == ToolCallState.Pending ||
+                                           tc.State == ToolCallState.Executing)
+                                .Count()
+                        })
+                        .ToList()
+                };
+
+                report.IncompleteTasks.Add(taskIssue);
+            }
+        }
+
+        report.CanComplete = report.IncompleteTasks.Count == 0;
+        return report;
+    }
+}
+
+public class SessionCompletionReport
+{
+    public Guid SessionId { get; set; }
+    public bool CanComplete { get; set; }
+    public List<TaskIssue> IncompleteTasks { get; set; } = new();
+}
+
+public class TaskIssue
+{
+    public Guid TaskId { get; set; }
+    public string TaskTitle { get; set; }
+    public TaskState CurrentState { get; set; }
+    public List<StepIssue> IncompleteSteps { get; set; } = new();
+}
+
+public class StepIssue
+{
+    public Guid StepId { get; set; }
+    public string StepName { get; set; }
+    public StepState CurrentState { get; set; }
+    public int PendingToolCalls { get; set; }
+}
+```
+
+### Issue 2: ArgumentException - "Content hash mismatch"
+
+**Symptoms**:
+- Artifact creation or validation throws ArgumentException
+- Error message indicates computed hash doesn't match provided hash
+- Artifact appears corrupt
+
+**Root Causes**:
+1. Artifact content was modified after hash computation
+2. Incorrect hash algorithm used (e.g., MD5 instead of SHA-256)
+3. Hash format mismatch (e.g., uppercase vs lowercase hex)
+4. Byte encoding issues when converting string to bytes
+
+**Solution Steps**:
+
+```csharp
+// Diagnostic and repair code
+public static class ArtifactHashDiagnostics
+{
+    public static HashMismatchReport DiagnoseHashMismatch(
+        byte[] content,
+        string providedHash)
+    {
+        var report = new HashMismatchReport
+        {
+            ProvidedHash = providedHash,
+            ContentSize = content.Length
+        };
+
+        // Compute hash with multiple algorithms to identify which was used
+        using (var sha256 = System.Security.Cryptography.SHA256.Create())
+        {
+            var sha256Hash = sha256.ComputeHash(content);
+            report.Sha256Hash = $"sha256:{Convert.ToHexString(sha256Hash).ToLowerInvariant()}";
+        }
+
+        using (var md5 = System.Security.Cryptography.MD5.Create())
+        {
+            var md5Hash = md5.ComputeHash(content);
+            report.Md5Hash = $"md5:{Convert.ToHexString(md5Hash).ToLowerInvariant()}";
+        }
+
+        // Check for common formatting issues
+        if (providedHash.Equals(report.Sha256Hash, StringComparison.OrdinalIgnoreCase))
+        {
+            report.Issue = "Hash is correct but case mismatch";
+            report.Recommendation = "Use lowercase hex encoding";
+        }
+        else if (providedHash.Replace("SHA256:", "sha256:") == report.Sha256Hash)
+        {
+            report.Issue = "Hash prefix has incorrect casing";
+            report.Recommendation = "Use 'sha256:' prefix (lowercase)";
+        }
+        else if (providedHash == report.Md5Hash)
+        {
+            report.Issue = "MD5 hash used instead of SHA-256";
+            report.Recommendation = "MD5 is deprecated, use SHA-256";
+        }
+        else
+        {
+            report.Issue = "Content has been modified or corrupted";
+            report.Recommendation = "Recompute hash from original content";
+        }
+
+        return report;
+    }
+}
+
+public class HashMismatchReport
+{
+    public string ProvidedHash { get; set; }
+    public string Sha256Hash { get; set; }
+    public string Md5Hash { get; set; }
+    public long ContentSize { get; set; }
+    public string Issue { get; set; }
+    public string Recommendation { get; set; }
+}
+```
+
+### Issue 3: JsonException - "Metadata JSON depth exceeds maximum"
+
+**Symptoms**:
+- Entity construction with metadata throws JsonException
+- Error mentions maximum depth exceeded
+- Metadata appears deeply nested
+
+**Root Causes**:
+1. Metadata contains circular references causing infinite nesting
+2. Malicious metadata designed to cause DoS through deep nesting
+3. Accidentally nested structure (e.g., wrapping metadata multiple times)
+
+**Solution Steps**:
+
+```csharp
+// Flatten deeply nested metadata
+public static class MetadataFlattener
+{
+    public static JsonDocument FlattenMetadata(JsonDocument deepMetadata, int maxDepth = 10)
+    {
+        var flattened = new Dictionary<string, object>();
+        FlattenElement(deepMetadata.RootElement, "", flattened, currentDepth: 0, maxDepth);
+
+        var json = JsonSerializer.Serialize(flattened);
+        return JsonDocument.Parse(json);
+    }
+
+    private static void FlattenElement(
+        JsonElement element,
+        string prefix,
+        Dictionary<string, object> result,
+        int currentDepth,
+        int maxDepth)
+    {
+        if (currentDepth >= maxDepth)
+        {
+            result[prefix] = "<truncated - max depth reached>";
+            return;
+        }
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    var key = string.IsNullOrEmpty(prefix)
+                        ? property.Name
+                        : $"{prefix}.{property.Name}";
+                    FlattenElement(property.Value, key, result, currentDepth + 1, maxDepth);
+                }
+                break;
+
+            case JsonValueKind.Array:
+                var index = 0;
+                foreach (var item in element.EnumerateArray())
+                {
+                    var key = $"{prefix}[{index}]";
+                    FlattenElement(item, key, result, currentDepth + 1, maxDepth);
+                    index++;
+                }
+                break;
+
+            case JsonValueKind.String:
+                result[prefix] = element.GetString();
+                break;
+
+            case JsonValueKind.Number:
+                result[prefix] = element.GetDouble();
+                break;
+
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+                result[prefix] = element.GetBoolean();
+                break;
+
+            case JsonValueKind.Null:
+                result[prefix] = null;
+                break;
+        }
+    }
+}
+```
+
+### Issue 4: OutOfMemoryException when loading Session with many Tasks
+
+**Symptoms**:
+- OutOfMemoryException when loading large Sessions
+- Application crashes or becomes unresponsive
+- Session has hundreds or thousands of Tasks
+
+**Root Causes**:
+1. Loading entire Session graph into memory at once
+2. Navigation properties causing N+1 query explosion
+3. No pagination for large collections
+
+**Solution Steps**:
+
+```csharp
+// Implement pagination for large Sessions
+public interface ISessionRepository
+{
+    Session GetSession(Guid sessionId);
+
+    // Paginated access to Tasks
+    PagedResult<SessionTask> GetTasks(
+        Guid sessionId,
+        int pageNumber = 1,
+        int pageSize = 50);
+
+    // Lazy loading for Steps
+    PagedResult<Step> GetSteps(
+        Guid taskId,
+        int pageNumber = 1,
+        int pageSize = 100);
+}
+
+public class PagedResult<T>
+{
+    public List<T> Items { get; set; } = new();
+    public int TotalCount { get; set; }
+    public int PageNumber { get; set; }
+    public int PageSize { get; set; }
+    public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
+    public bool HasNextPage => PageNumber < TotalPages;
+    public bool HasPreviousPage => PageNumber > 1;
+}
+
+// Lightweight Session projection for listings
+public class SessionSummary
+{
+    public Guid Id { get; set; }
+    public string TaskDescription { get; set; }
+    public SessionState State { get; set; }
+    public int TaskCount { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+// Repository implementation with pagination
+public class SessionRepository : ISessionRepository
+{
+    private readonly DbContext _context;
+
+    public SessionSummary[] GetSessionSummaries(int pageNumber, int pageSize)
+    {
+        return _context.Sessions
+            .OrderByDescending(s => s.CreatedAt)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .Select(s => new SessionSummary
+            {
+                Id = s.Id,
+                TaskDescription = s.TaskDescription,
+                State = s.State,
+                TaskCount = s.Tasks.Count,
+                CreatedAt = s.CreatedAt,
+                UpdatedAt = s.UpdatedAt
+            })
+            .ToArray();
+    }
+
+    public PagedResult<SessionTask> GetTasks(
+        Guid sessionId,
+        int pageNumber = 1,
+        int pageSize = 50)
+    {
+        var query = _context.Tasks.Where(t => t.SessionId == sessionId);
+
+        return new PagedResult<SessionTask>
+        {
+            TotalCount = query.Count(),
+            PageNumber = pageNumber,
+            PageSize = pageSize,
+            Items = query
+                .OrderBy(t => t.Order)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToList()
+        };
+    }
+}
+```
+
+### Issue 5: ArgumentException - "Invalid state transition from Executing to Planning"
+
+**Symptoms**:
+- State transition method throws ArgumentException
+- Error indicates transition is not valid
+- Cannot move Session back to earlier state
+
+**Root Causes**:
+1. Attempting invalid state transition (e.g., backward transition)
+2. State machine doesn't allow requested transition
+3. Missing intermediate state transition
+
+**Solution Steps**:
+
+```csharp
+// Visualize valid state transitions
+public static class SessionStateDiagnostics
+{
+    public static StateTransitionGraph GetTransitionGraph()
+    {
+        return new StateTransitionGraph
+        {
+            Transitions = new()
+            {
+                [SessionState.Created] = new[] { SessionState.Planning },
+                [SessionState.Planning] = new[] { SessionState.AwaitingApproval, SessionState.Failed },
+                [SessionState.AwaitingApproval] = new[] { SessionState.Executing, SessionState.Cancelled },
+                [SessionState.Executing] = new[] { SessionState.Paused, SessionState.Completed, SessionState.Failed },
+                [SessionState.Paused] = new[] { SessionState.Executing, SessionState.Cancelled },
+                [SessionState.Completed] = Array.Empty<SessionState>(), // Terminal state
+                [SessionState.Failed] = Array.Empty<SessionState>(), // Terminal state
+                [SessionState.Cancelled] = Array.Empty<SessionState>() // Terminal state
+            }
+        };
+    }
+
+    public static string GetValidTransitionsFromState(SessionState currentState)
+    {
+        var graph = GetTransitionGraph();
+        if (graph.Transitions.TryGetValue(currentState, out var validStates))
+        {
+            return validStates.Length == 0
+                ? $"{currentState} is a terminal state (no transitions allowed)"
+                : $"Valid transitions from {currentState}: {string.Join(", ", validStates)}";
+        }
+
+        return $"No transition information for state {currentState}";
+    }
+
+    public static bool CanTransition(SessionState from, SessionState to)
+    {
+        var graph = GetTransitionGraph();
+        return graph.Transitions.TryGetValue(from, out var validStates)
+            && validStates.Contains(to);
+    }
+}
+
+public class StateTransitionGraph
+{
+    public Dictionary<SessionState, SessionState[]> Transitions { get; set; } = new();
+}
+```
 
 ---
 
@@ -662,68 +2976,551 @@ Metadata is optional JSON with known shapes:
 - [ ] AC-069: Deserialization works
 - [ ] AC-070: Round-trip preserves data
 
+### State Transitions
+
+- [ ] AC-071: Session transitions from Created to Planning
+- [ ] AC-072: Session transitions from Planning to AwaitingApproval
+- [ ] AC-073: Session transitions from AwaitingApproval to Executing
+- [ ] AC-074: Session transitions from Executing to Completed
+- [ ] AC-075: Session transitions from Executing to Failed
+- [ ] AC-076: Invalid transitions throw InvalidOperationException
+- [ ] AC-077: State transition events recorded
+- [ ] AC-078: State transition timestamps captured
+
+### Collections
+
+- [ ] AC-079: Collections exposed as IReadOnlyList
+- [ ] AC-080: Collections maintain insertion order
+- [ ] AC-081: Collections do not allow null elements
+- [ ] AC-082: Collections support enumeration
+- [ ] AC-083: Internal collections mutable through aggregate root
+- [ ] AC-084: External code cannot modify collections directly
+
+### Equality
+
+- [ ] AC-085: Entities equal when IDs match
+- [ ] AC-086: Entities not equal when IDs differ
+- [ ] AC-087: GetHashCode uses ID hash
+- [ ] AC-088: IEquatable implemented correctly
+
+### Events
+
+- [ ] AC-089: SessionEvent records FromState
+- [ ] AC-090: SessionEvent records ToState
+- [ ] AC-091: SessionEvent records Reason
+- [ ] AC-092: SessionEvent records Timestamp
+- [ ] AC-093: Events append-only
+- [ ] AC-094: Events chronologically ordered
+
 ---
 
 ## Testing Requirements
 
-### Unit Tests
+### Unit Tests - Complete C# Implementations
 
+```csharp
+// File: tests/Acode.Domain.Tests/Sessions/SessionTests.cs
+namespace Acode.Domain.Tests.Sessions;
+
+using Acode.Domain.Sessions;
+using FluentAssertions;
+using System.Text.Json;
+using Xunit;
+
+public class SessionTests
+{
+    [Fact]
+    public void Should_Generate_UUIDv7_Id()
+    {
+        // Arrange & Act
+        var session = new Session("Implement feature X");
+
+        // Assert
+        session.Id.Should().NotBeNull();
+        session.Id.Value.Should().NotBe(Guid.Empty);
+
+        // Verify UUID v7 format (version bits should be 0111 = 7)
+        var bytes = session.Id.Value.ToByteArray();
+        var version = (bytes[7] >> 4) & 0x0F;
+        version.Should().Be(7);
+    }
+
+    [Fact]
+    public void Should_Require_TaskDescription()
+    {
+        // Arrange, Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new Session(""));
+
+        exception.Message.Should().Contain("Task description required");
+        exception.ParamName.Should().Be("taskDescription");
+    }
+
+    [Fact]
+    public void Should_Require_Non_Whitespace_TaskDescription()
+    {
+        // Arrange, Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new Session("   "));
+
+        exception.Message.Should().Contain("Task description required");
+    }
+
+    [Fact]
+    public void Should_Initialize_With_Created_State()
+    {
+        // Arrange & Act
+        var session = new Session("Implement feature X");
+
+        // Assert
+        session.State.Should().Be(SessionState.Created);
+    }
+
+    [Fact]
+    public void Should_Record_CreatedAt_Timestamp()
+    {
+        // Arrange
+        var before = DateTimeOffset.UtcNow;
+
+        // Act
+        var session = new Session("Implement feature X");
+
+        // Assert
+        var after = DateTimeOffset.UtcNow;
+        session.CreatedAt.Should().BeOnOrAfter(before);
+        session.CreatedAt.Should().BeOnOrBefore(after);
+    }
+
+    [Fact]
+    public void Should_Initialize_UpdatedAt_Equal_To_CreatedAt()
+    {
+        // Arrange & Act
+        var session = new Session("Implement feature X");
+
+        // Assert
+        session.UpdatedAt.Should().Be(session.CreatedAt);
+    }
+
+    [Fact]
+    public void Should_Initialize_Empty_Tasks_Collection()
+    {
+        // Arrange & Act
+        var session = new Session("Implement feature X");
+
+        // Assert
+        session.Tasks.Should().NotBeNull();
+        session.Tasks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Should_Add_Task_To_Session()
+    {
+        // Arrange
+        var session = new Session("Implement feature X");
+
+        // Act
+        var task = session.AddTask("Write unit tests", "Comprehensive test coverage");
+
+        // Assert
+        session.Tasks.Should().ContainSingle();
+        session.Tasks.Should().Contain(task);
+        task.SessionId.Should().Be(session.Id);
+    }
+
+    [Fact]
+    public void Should_Derive_Completed_State_When_All_Tasks_Completed()
+    {
+        // Arrange
+        var session = new Session("Implement feature X");
+        var task1 = session.AddTask("Task 1");
+        var task2 = session.AddTask("Task 2");
+
+        // Simulate task completion (would normally be done via Task.Complete())
+        // For this test, assume Tasks have internal state management
+        // This is a simplified example
+        var derivedState = session.DeriveState();
+
+        // Assert - with no completed tasks, should not be Completed
+        derivedState.Should().NotBe(SessionState.Completed);
+    }
+
+    [Fact]
+    public void Should_Transition_To_Planning_State()
+    {
+        // Arrange
+        var session = new Session("Implement feature X");
+
+        // Act
+        session.StartPlanning();
+
+        // Assert
+        session.State.Should().Be(SessionState.Planning);
+    }
+
+    [Fact]
+    public void Should_Record_State_Transition_Event()
+    {
+        // Arrange
+        var session = new Session("Implement feature X");
+
+        // Act
+        session.StartPlanning();
+
+        // Assert
+        session.Events.Should().ContainSingle();
+        var evt = session.Events.First();
+        evt.FromState.Should().Be(SessionState.Created);
+        evt.ToState.Should().Be(SessionState.Planning);
+        evt.Reason.Should().Contain("Planning started");
+    }
+
+    [Fact]
+    public void Should_Update_UpdatedAt_On_State_Transition()
+    {
+        // Arrange
+        var session = new Session("Implement feature X");
+        var originalUpdatedAt = session.UpdatedAt;
+
+        // Small delay to ensure timestamp changes
+        Thread.Sleep(10);
+
+        // Act
+        session.StartPlanning();
+
+        // Assert
+        session.UpdatedAt.Should().BeAfter(originalUpdatedAt);
+    }
+
+    [Fact]
+    public void Should_Throw_When_Completing_Session_Without_Tasks()
+    {
+        // Arrange
+        var session = new Session("Implement feature X");
+        session.StartPlanning();
+        session.RequestApproval();
+        session.StartExecuting();
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            session.Complete());
+
+        exception.Message.Should().Contain("not all tasks are completed");
+    }
+
+    [Fact]
+    public void Should_Serialize_To_JSON()
+    {
+        // Arrange
+        var session = new Session("Implement feature X");
+        session.AddTask("Task 1");
+
+        // Act
+        var json = JsonSerializer.Serialize(session);
+
+        // Assert
+        json.Should().NotBeNullOrEmpty();
+        json.Should().Contain("Implement feature X");
+        json.Should().Contain("Task 1");
+    }
+
+    [Fact]
+    public void Should_Deserialize_From_JSON()
+    {
+        // Arrange
+        var originalSession = new Session("Implement feature X");
+        originalSession.AddTask("Task 1");
+        var json = JsonSerializer.Serialize(originalSession);
+
+        // Act
+        var deserializedSession = JsonSerializer.Deserialize<Session>(json);
+
+        // Assert
+        deserializedSession.Should().NotBeNull();
+        deserializedSession.TaskDescription.Should().Be("Implement feature X");
+        deserializedSession.Tasks.Should().HaveCount(1);
+    }
+}
 ```
-Tests/Unit/Domain/Entities/
-├── SessionTests.cs
-│   ├── Should_Generate_UUIDv7_Id()
-│   ├── Should_Require_TaskDescription()
-│   ├── Should_Track_State()
-│   ├── Should_Record_Timestamps()
-│   ├── Should_Derive_State_From_Tasks()
-│   └── Should_Serialize_To_JSON()
-│
-├── SessionTaskTests.cs
-│   ├── Should_Generate_UUIDv7_Id()
-│   ├── Should_Require_SessionId()
-│   ├── Should_Require_Title()
-│   ├── Should_Derive_State_From_Steps()
-│   └── Should_Maintain_Order()
-│
-├── StepTests.cs
-│   ├── Should_Generate_UUIDv7_Id()
-│   ├── Should_Require_TaskId()
-│   ├── Should_Require_Name()
-│   ├── Should_Derive_State_From_ToolCalls()
-│   └── Should_Maintain_Order()
-│
-├── ToolCallTests.cs
-│   ├── Should_Generate_UUIDv7_Id()
-│   ├── Should_Require_StepId()
-│   ├── Should_Require_ToolName()
-│   ├── Should_Track_Completion()
-│   └── Should_Capture_Error()
-│
-└── ArtifactTests.cs
-    ├── Should_Generate_UUIDv7_Id()
-    ├── Should_Compute_ContentHash()
-    ├── Should_Calculate_Size()
-    ├── Should_Be_Immutable()
-    └── Should_Validate_Hash_Matches()
+
+```csharp
+// File: tests/Acode.Domain.Tests/Artifacts/ArtifactTests.cs
+namespace Acode.Domain.Tests.Artifacts;
+
+using Acode.Domain.Artifacts;
+using Acode.Domain.ToolCalls;
+using FluentAssertions;
+using System.Text;
+using Xunit;
+
+public class ArtifactTests
+{
+    [Fact]
+    public void Should_Generate_UUIDv7_Id()
+    {
+        // Arrange
+        var toolCallId = new ToolCallId();
+        var content = Encoding.UTF8.GetBytes("test content");
+
+        // Act
+        var artifact = new Artifact(
+            toolCallId,
+            ArtifactType.FileContent,
+            "test.txt",
+            content,
+            "text/plain");
+
+        // Assert
+        artifact.Id.Should().NotBeNull();
+        var bytes = artifact.Id.Value.ToByteArray();
+        var version = (bytes[7] >> 4) & 0x0F;
+        version.Should().Be(7);
+    }
+
+    [Fact]
+    public void Should_Compute_ContentHash()
+    {
+        // Arrange
+        var toolCallId = new ToolCallId();
+        var content = Encoding.UTF8.GetBytes("test content");
+
+        // Act
+        var artifact = new Artifact(
+            toolCallId,
+            ArtifactType.FileContent,
+            "test.txt",
+            content,
+            "text/plain");
+
+        // Assert
+        artifact.ContentHash.Should().NotBeNullOrEmpty();
+        artifact.ContentHash.Should().StartWith("sha256:");
+        artifact.ContentHash.Length.Should().Be(71); // "sha256:" (7) + 64 hex chars
+    }
+
+    [Fact]
+    public void Should_Calculate_Size()
+    {
+        // Arrange
+        var toolCallId = new ToolCallId();
+        var content = Encoding.UTF8.GetBytes("test content");
+
+        // Act
+        var artifact = new Artifact(
+            toolCallId,
+            ArtifactType.FileContent,
+            "test.txt",
+            content,
+            "text/plain");
+
+        // Assert
+        artifact.Size.Should().Be(content.Length);
+    }
+
+    [Fact]
+    public void Should_Be_Immutable_After_Creation()
+    {
+        // Arrange
+        var toolCallId = new ToolCallId();
+        var content = Encoding.UTF8.GetBytes("test content");
+
+        // Act
+        var artifact = new Artifact(
+            toolCallId,
+            ArtifactType.FileContent,
+            "test.txt",
+            content,
+            "text/plain");
+
+        // Assert - verify all properties are readonly
+        var contentProperty = typeof(Artifact).GetProperty(nameof(Artifact.Content));
+        contentProperty.SetMethod.Should().BeNull();
+
+        var hashProperty = typeof(Artifact).GetProperty(nameof(Artifact.ContentHash));
+        hashProperty.SetMethod.Should().BeNull();
+    }
+
+    [Fact]
+    public void Should_Validate_Hash_Matches_Content()
+    {
+        // Arrange
+        var toolCallId = new ToolCallId();
+        var content = Encoding.UTF8.GetBytes("test content");
+
+        // Act
+        var artifact = new Artifact(
+            toolCallId,
+            ArtifactType.FileContent,
+            "test.txt",
+            content,
+            "text/plain");
+
+        // Assert - recompute hash and verify it matches
+        var recomputedHash = ContentHasher.ComputeHash(content);
+        artifact.ContentHash.Should().Be(recomputedHash);
+    }
+
+    [Fact]
+    public void Should_Reject_Null_Content()
+    {
+        // Arrange
+        var toolCallId = new ToolCallId();
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            new Artifact(
+                toolCallId,
+                ArtifactType.FileContent,
+                "test.txt",
+                null,
+                "text/plain"));
+
+        exception.ParamName.Should().Be("content");
+    }
+
+    [Fact]
+    public void Should_Reject_Null_ToolCallId()
+    {
+        // Arrange
+        var content = Encoding.UTF8.GetBytes("test content");
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            new Artifact(
+                null,
+                ArtifactType.FileContent,
+                "test.txt",
+                content,
+                "text/plain"));
+
+        exception.ParamName.Should().Be("toolCallId");
+    }
+
+    [Fact]
+    public void Should_Set_ContentType()
+    {
+        // Arrange
+        var toolCallId = new ToolCallId();
+        var content = Encoding.UTF8.GetBytes("test content");
+
+        // Act
+        var artifact = new Artifact(
+            toolCallId,
+            ArtifactType.FileContent,
+            "test.txt",
+            content,
+            "text/plain");
+
+        // Assert
+        artifact.ContentType.Should().Be("text/plain");
+    }
+
+    [Fact]
+    public void Should_Support_All_Artifact_Types()
+    {
+        // Arrange
+        var toolCallId = new ToolCallId();
+        var content = Encoding.UTF8.GetBytes("test");
+
+        // Act & Assert - verify each type can be created
+        var types = new[]
+        {
+            ArtifactType.FileContent,
+            ArtifactType.FileWrite,
+            ArtifactType.FileDiff,
+            ArtifactType.CommandOutput,
+            ArtifactType.ModelResponse,
+            ArtifactType.SearchResult
+        };
+
+        foreach (var type in types)
+        {
+            var artifact = new Artifact(toolCallId, type, "test", content, "text/plain");
+            artifact.Type.Should().Be(type);
+        }
+    }
+}
 ```
 
 ### Integration Tests
 
-```
-Tests/Integration/Domain/
-├── HierarchyTests.cs
-│   ├── Should_Navigate_Session_To_Artifacts()
-│   ├── Should_Derive_States_Correctly()
-│   └── Should_Maintain_Referential_Integrity()
-```
+```csharp
+// File: tests/Acode.Domain.Tests/Integration/HierarchyTests.cs
+namespace Acode.Domain.Tests.Integration;
 
-### E2E Tests
+using Acode.Domain.Sessions;
+using Acode.Domain.Artifacts;
+using FluentAssertions;
+using System.Text;
+using Xunit;
 
-```
-Tests/E2E/Domain/
-├── EntityLifecycleTests.cs
-│   ├── Should_Create_Full_Hierarchy()
-│   └── Should_Persist_And_Retrieve()
+public class HierarchyTests
+{
+    [Fact]
+    public void Should_Navigate_From_Session_To_Artifacts()
+    {
+        // Arrange
+        var session = new Session("Implement feature X");
+        var task = session.AddTask("Write code");
+        var step = task.AddStep("Read file");
+        var toolCall = step.AddToolCall("read_file", JsonDocument.Parse("{\"path\":\"test.cs\"}"));
+        var content = Encoding.UTF8.GetBytes("file content");
+        var artifact = toolCall.AddArtifact(
+            ArtifactType.FileContent,
+            "test.cs",
+            content,
+            "text/x-csharp");
+
+        // Act & Assert - navigate down the hierarchy
+        session.Tasks.Should().ContainSingle();
+        session.Tasks.First().Should().Be(task);
+
+        task.Steps.Should().ContainSingle();
+        task.Steps.First().Should().Be(step);
+
+        step.ToolCalls.Should().ContainSingle();
+        step.ToolCalls.First().Should().Be(toolCall);
+
+        toolCall.Artifacts.Should().ContainSingle();
+        toolCall.Artifacts.First().Should().Be(artifact);
+    }
+
+    [Fact]
+    public void Should_Derive_States_Correctly_Through_Hierarchy()
+    {
+        // Arrange
+        var session = new Session("Implement feature X");
+        var task1 = session.AddTask("Task 1");
+        var task2 = session.AddTask("Task 2");
+
+        var step1 = task1.AddStep("Step 1");
+        var step2 = task1.AddStep("Step 2");
+
+        // Act - complete all steps
+        step1.Complete();
+        step2.Complete();
+
+        // Assert - task should derive Completed state
+        var task1DerivedState = task1.DeriveState();
+        task1DerivedState.Should().Be(TaskState.Completed);
+    }
+
+    [Fact]
+    public void Should_Maintain_Referential_Integrity()
+    {
+        // Arrange
+        var session = new Session("Implement feature X");
+        var task = session.AddTask("Task 1");
+
+        // Assert - task has reference back to session
+        task.SessionId.Should().Be(session.Id);
+
+        // Arrange - add step
+        var step = task.AddStep("Step 1");
+
+        // Assert - step has reference back to task
+        step.TaskId.Should().Be(task.Id);
+    }
+}
 ```
 
 ### Performance Benchmarks
@@ -962,6 +3759,330 @@ public sealed class Session : EntityBase<SessionId>
 }
 ```
 
+### SessionTask Entity
+
+```csharp
+namespace AgenticCoder.Domain.Tasks;
+
+public sealed class SessionTask : EntityBase<TaskId>
+{
+    private readonly List<Step> _steps = new();
+
+    public SessionId SessionId { get; }
+    public string Title { get; }
+    public string? Description { get; }
+    public TaskState State { get; private set; }
+    public int Order { get; }
+    public JsonDocument? Metadata { get; }
+
+    public IReadOnlyList<Step> Steps => _steps.AsReadOnly();
+
+    public SessionTask(
+        SessionId sessionId,
+        string title,
+        string? description,
+        int order,
+        JsonDocument? metadata = null)
+        : base(new TaskId())
+    {
+        SessionId = sessionId ?? throw new ArgumentNullException(nameof(sessionId));
+
+        if (string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("Title required", nameof(title));
+
+        if (order < 0)
+            throw new ArgumentException("Order must be >= 0", nameof(order));
+
+        Title = title;
+        Description = description;
+        Order = order;
+        State = TaskState.Pending;
+        Metadata = metadata;
+    }
+
+    public Step AddStep(string name, string? description = null)
+    {
+        var step = new Step(Id, name, description, _steps.Count);
+        _steps.Add(step);
+        MarkUpdated();
+        return step;
+    }
+
+    public void Start()
+    {
+        if (State != TaskState.Pending)
+            throw new InvalidOperationException($"Cannot start task in {State} state");
+
+        State = TaskState.InProgress;
+        MarkUpdated();
+    }
+
+    public void Complete()
+    {
+        if (_steps.Any(s => s.State != StepState.Completed && s.State != StepState.Skipped))
+            throw new InvalidOperationException("Cannot complete task: not all steps completed");
+
+        State = TaskState.Completed;
+        MarkUpdated();
+    }
+
+    public void Fail()
+    {
+        State = TaskState.Failed;
+        MarkUpdated();
+    }
+
+    public void Skip()
+    {
+        State = TaskState.Skipped;
+        MarkUpdated();
+    }
+
+    public TaskState DeriveState()
+    {
+        if (_steps.Count == 0) return State;
+        if (_steps.All(s => s.State == StepState.Completed || s.State == StepState.Skipped))
+            return TaskState.Completed;
+        if (_steps.Any(s => s.State == StepState.Failed))
+            return TaskState.Failed;
+        if (_steps.Any(s => s.State == StepState.InProgress))
+            return TaskState.InProgress;
+        return State;
+    }
+}
+
+public enum TaskState
+{
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+    Skipped
+}
+
+public sealed class TaskId : EntityId
+{
+    public TaskId() : base() { }
+    public TaskId(Guid value) : base(value) { }
+}
+```
+
+### Step Entity
+
+```csharp
+namespace AgenticCoder.Domain.Steps;
+
+public sealed class Step : EntityBase<StepId>
+{
+    private readonly List<ToolCall> _toolCalls = new();
+
+    public TaskId TaskId { get; }
+    public string Name { get; }
+    public string? Description { get; }
+    public StepState State { get; private set; }
+    public int Order { get; }
+    public JsonDocument? Metadata { get; }
+
+    public IReadOnlyList<ToolCall> ToolCalls => _toolCalls.AsReadOnly();
+
+    public Step(
+        TaskId taskId,
+        string name,
+        string? description,
+        int order,
+        JsonDocument? metadata = null)
+        : base(new StepId())
+    {
+        TaskId = taskId ?? throw new ArgumentNullException(nameof(taskId));
+
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Name required", nameof(name));
+
+        if (order < 0)
+            throw new ArgumentException("Order must be >= 0", nameof(order));
+
+        Name = name;
+        Description = description;
+        Order = order;
+        State = StepState.Pending;
+        Metadata = metadata;
+    }
+
+    public ToolCall AddToolCall(string toolName, JsonDocument parameters)
+    {
+        var toolCall = new ToolCall(Id, toolName, parameters, _toolCalls.Count);
+        _toolCalls.Add(toolCall);
+        MarkUpdated();
+        return toolCall;
+    }
+
+    public void Start()
+    {
+        if (State != StepState.Pending)
+            throw new InvalidOperationException($"Cannot start step in {State} state");
+
+        State = StepState.InProgress;
+        MarkUpdated();
+    }
+
+    public void Complete()
+    {
+        if (_toolCalls.Any(tc => tc.State != ToolCallState.Succeeded && tc.State != ToolCallState.Cancelled))
+            throw new InvalidOperationException("Cannot complete step: not all tool calls succeeded");
+
+        State = StepState.Completed;
+        MarkUpdated();
+    }
+
+    public void Fail()
+    {
+        State = StepState.Failed;
+        MarkUpdated();
+    }
+
+    public void Skip()
+    {
+        State = StepState.Skipped;
+        MarkUpdated();
+    }
+
+    public StepState DeriveState()
+    {
+        if (_toolCalls.Count == 0) return State;
+        if (_toolCalls.All(tc => tc.State == ToolCallState.Succeeded || tc.State == ToolCallState.Cancelled))
+            return StepState.Completed;
+        if (_toolCalls.Any(tc => tc.State == ToolCallState.Failed))
+            return StepState.Failed;
+        if (_toolCalls.Any(tc => tc.State == ToolCallState.Executing))
+            return StepState.InProgress;
+        return State;
+    }
+}
+
+public enum StepState
+{
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+    Skipped
+}
+
+public sealed class StepId : EntityId
+{
+    public StepId() : base() { }
+    public StepId(Guid value) : base(value) { }
+}
+```
+
+### ToolCall Entity
+
+```csharp
+namespace AgenticCoder.Domain.ToolCalls;
+
+public sealed class ToolCall : EntityBase<ToolCallId>
+{
+    private readonly List<Artifact> _artifacts = new();
+
+    public StepId StepId { get; }
+    public string ToolName { get; }
+    public JsonDocument Parameters { get; }
+    public ToolCallState State { get; private set; }
+    public int Order { get; }
+    public DateTimeOffset? CompletedAt { get; private set; }
+    public JsonDocument? Result { get; private set; }
+    public string? ErrorMessage { get; private set; }
+
+    public IReadOnlyList<Artifact> Artifacts => _artifacts.AsReadOnly();
+
+    public ToolCall(
+        StepId stepId,
+        string toolName,
+        JsonDocument parameters,
+        int order)
+        : base(new ToolCallId())
+    {
+        StepId = stepId ?? throw new ArgumentNullException(nameof(stepId));
+
+        if (string.IsNullOrWhiteSpace(toolName))
+            throw new ArgumentException("Tool name required", nameof(toolName));
+
+        if (order < 0)
+            throw new ArgumentException("Order must be >= 0", nameof(order));
+
+        ToolName = toolName;
+        Parameters = parameters ?? throw new ArgumentNullException(nameof(parameters));
+        Order = order;
+        State = ToolCallState.Pending;
+    }
+
+    public Artifact AddArtifact(
+        ArtifactType type,
+        string name,
+        byte[] content,
+        string contentType)
+    {
+        var artifact = new Artifact(Id, type, name, content, contentType);
+        _artifacts.Add(artifact);
+        MarkUpdated();
+        return artifact;
+    }
+
+    public void Start()
+    {
+        if (State != ToolCallState.Pending)
+            throw new InvalidOperationException($"Cannot start tool call in {State} state");
+
+        State = ToolCallState.Executing;
+        MarkUpdated();
+    }
+
+    public void Succeed(JsonDocument result)
+    {
+        if (State != ToolCallState.Executing)
+            throw new InvalidOperationException($"Cannot succeed tool call in {State} state");
+
+        Result = result;
+        CompletedAt = DateTimeOffset.UtcNow;
+        State = ToolCallState.Succeeded;
+        MarkUpdated();
+    }
+
+    public void Fail(string errorMessage)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage))
+            throw new ArgumentException("Error message required", nameof(errorMessage));
+
+        ErrorMessage = errorMessage;
+        CompletedAt = DateTimeOffset.UtcNow;
+        State = ToolCallState.Failed;
+        MarkUpdated();
+    }
+
+    public void Cancel()
+    {
+        CompletedAt = DateTimeOffset.UtcNow;
+        State = ToolCallState.Cancelled;
+        MarkUpdated();
+    }
+}
+
+public enum ToolCallState
+{
+    Pending,
+    Executing,
+    Succeeded,
+    Failed,
+    Cancelled
+}
+
+public sealed class ToolCallId : EntityId
+{
+    public ToolCallId() : base() { }
+    public ToolCallId(Guid value) : base(value) { }
+}
+```
+
 ### Artifact Entity
 
 ```csharp
@@ -976,7 +4097,7 @@ public sealed class Artifact : EntityBase<ArtifactId>
     public string ContentHash { get; }
     public string ContentType { get; }
     public long Size { get; }
-    
+
     public Artifact(
         ToolCallId toolCallId,
         ArtifactType type,
@@ -988,7 +4109,7 @@ public sealed class Artifact : EntityBase<ArtifactId>
         ToolCallId = toolCallId ?? throw new ArgumentNullException(nameof(toolCallId));
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Name required", nameof(name));
-        
+
         Type = type;
         Name = name;
         Content = content ?? throw new ArgumentNullException(nameof(content));
@@ -996,13 +4117,59 @@ public sealed class Artifact : EntityBase<ArtifactId>
         Size = content.Length;
         ContentHash = ComputeHash(content);
     }
-    
+
     private static string ComputeHash(byte[] content)
     {
         using var sha256 = SHA256.Create();
         var hash = sha256.ComputeHash(content);
         return $"sha256:{Convert.ToHexString(hash).ToLowerInvariant()}";
     }
+}
+
+public enum ArtifactType
+{
+    FileContent,
+    FileWrite,
+    FileDiff,
+    CommandOutput,
+    ModelResponse,
+    SearchResult
+}
+
+public sealed class ArtifactId : EntityId
+{
+    public ArtifactId() : base() { }
+    public ArtifactId(Guid value) : base(value) { }
+}
+```
+
+### SessionState and SessionEvent
+
+```csharp
+namespace AgenticCoder.Domain.Sessions;
+
+public enum SessionState
+{
+    Created,
+    Planning,
+    AwaitingApproval,
+    Executing,
+    Paused,
+    Completed,
+    Failed,
+    Cancelled
+}
+
+public record SessionEvent(
+    SessionState FromState,
+    SessionState ToState,
+    string Reason,
+    DateTimeOffset Timestamp);
+
+public sealed class SessionId : EntityId
+{
+    public SessionId() : base() { }
+    public SessionId(Guid value) : base(value) { }
 }
 ```
 

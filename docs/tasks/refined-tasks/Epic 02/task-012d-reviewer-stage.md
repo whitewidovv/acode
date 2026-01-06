@@ -573,53 +573,340 @@ ghi789    APPROVED   2d ago
 
 ### Unit Tests
 
-```
-Tests/Unit/Orchestration/Stages/Reviewer/
-├── ReviewerStageTests.cs
-│   ├── Should_Load_Full_Context()
-│   ├── Should_Assess_All_Dimensions()
-│   ├── Should_Approve_Good_Work()
-│   └── Should_Reject_Poor_Work()
-│
-├── DimensionTests.cs
-│   ├── Should_Assess_Intent_Alignment()
-│   ├── Should_Assess_Code_Quality()
-│   ├── Should_Assess_Completeness()
-│   ├── Should_Assess_Consistency()
-│   └── Should_Assess_Safety()
-│
-├── SummaryGeneratorTests.cs
-│   ├── Should_Generate_Summary()
-│   ├── Should_Include_Changes()
-│   └── Should_Include_Notes()
-│
-└── HumanReviewTests.cs
-    ├── Should_Prompt_When_Configured()
-    ├── Should_Auto_When_Configured()
-    └── Should_Handle_Override()
+```csharp
+namespace AgenticCoder.Application.Tests.Unit.Orchestration.Stages.Reviewer;
+
+public class ReviewerStageTests
+{
+    private readonly Mock<IDimensionAssessor> _mockAssessor;
+    private readonly Mock<ISummaryGenerator> _mockSummaryGenerator;
+    private readonly Mock<IHumanReviewService> _mockHumanReview;
+    private readonly ILogger<ReviewerStage> _logger;
+    private readonly ReviewerStage _reviewer;
+    
+    public ReviewerStageTests()
+    {
+        _mockAssessor = new Mock<IDimensionAssessor>();
+        _mockSummaryGenerator = new Mock<ISummaryGenerator>();
+        _mockHumanReview = new Mock<IHumanReviewService>();
+        _logger = NullLogger<ReviewerStage>.Instance;
+        _reviewer = new ReviewerStage(_mockAssessor.Object, _mockSummaryGenerator.Object, 
+            _mockHumanReview.Object, _logger);
+    }
+    
+    [Fact]
+    public async Task Should_Approve_When_All_Dimensions_Pass()
+    {
+        // Arrange
+        var context = CreateReviewContext();
+        var options = new ReviewOptions { HumanReview = false };
+        var excellentDimensions = new List<DimensionResult>
+        {
+            new DimensionResult("IntentAlignment", QualityLevel.Excellent, "Perfect alignment", Array.Empty<string>()),
+            new DimensionResult("CodeQuality", QualityLevel.Good, "Well written", Array.Empty<string>()),
+            new DimensionResult("Completeness", QualityLevel.Excellent, "All requirements met", Array.Empty<string>())
+        };
+        
+        _mockAssessor
+            .Setup(a => a.AssessAllAsync(It.IsAny<ReviewContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(excellentDimensions);
+        
+        var summary = new ReviewSummary(Guid.NewGuid(), "test goal", Array.Empty<string>(),
+            Array.Empty<string>(), ReviewDecision.Approved, new Dictionary<string, QualityLevel>());
+        
+        _mockSummaryGenerator
+            .Setup(s => s.Generate(It.IsAny<ReviewContext>(), ReviewDecision.Approved, excellentDimensions))
+            .Returns(summary);
+        
+        // Act
+        var result = await _reviewer.ReviewAsync(context, options, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(ReviewDecision.Approved, result.Decision);
+        Assert.Equal(3, result.DimensionResults.Count);
+        Assert.Null(result.Feedback);
+    }
+    
+    [Fact]
+    public async Task Should_Reject_And_Provide_Feedback_When_Dimensions_Fail()
+    {
+        // Arrange
+        var context = CreateReviewContext();
+        var options = new ReviewOptions { HumanReview = false };
+        var poorDimensions = new List<DimensionResult>
+        {
+            new DimensionResult("IntentAlignment", QualityLevel.Poor, "Misaligned", 
+                new[] { "Missing core feature X" }.ToList().AsReadOnly()),
+            new DimensionResult("CodeQuality", QualityLevel.NeedsWork, "Quality issues", 
+                new[] { "No error handling", "Magic numbers" }.ToList().AsReadOnly())
+        };
+        
+        _mockAssessor
+            .Setup(a => a.AssessAllAsync(It.IsAny<ReviewContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(poorDimensions);
+        
+        var summary = new ReviewSummary(Guid.NewGuid(), "test goal", Array.Empty<string>(),
+            Array.Empty<string>(), ReviewDecision.Rejected, new Dictionary<string, QualityLevel>());
+        
+        _mockSummaryGenerator
+            .Setup(s => s.Generate(It.IsAny<ReviewContext>(), ReviewDecision.Rejected, poorDimensions))
+            .Returns(summary);
+        
+        // Act
+        var result = await _reviewer.ReviewAsync(context, options, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(ReviewDecision.Rejected, result.Decision);
+        Assert.NotNull(result.Feedback);
+        Assert.Contains("Missing core feature X", result.Feedback.Issues.First());
+    }
+    
+    [Fact]
+    public async Task Should_Prompt_Human_Review_When_Configured()
+    {
+        // Arrange
+        var context = CreateReviewContext();
+        var options = new ReviewOptions { HumanReview = true };
+        var dimensions = CreateGoodDimensions();
+        
+        _mockAssessor
+            .Setup(a => a.AssessAllAsync(It.IsAny<ReviewContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dimensions);
+        
+        _mockHumanReview
+            .Setup(h => h.PromptForReviewAsync(It.IsAny<ReviewContext>(), dimensions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HumanReviewResponse(Approved: true, Reason: null));
+        
+        var summary = new ReviewSummary(Guid.NewGuid(), "test goal", Array.Empty<string>(),
+            Array.Empty<string>(), ReviewDecision.Approved, new Dictionary<string, QualityLevel>());
+        
+        _mockSummaryGenerator
+            .Setup(s => s.Generate(It.IsAny<ReviewContext>(), ReviewDecision.Approved, dimensions))
+            .Returns(summary);
+        
+        // Act
+        var result = await _reviewer.ReviewAsync(context, options, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(ReviewDecision.Approved, result.Decision);
+        _mockHumanReview.Verify(
+            h => h.PromptForReviewAsync(It.IsAny<ReviewContext>(), dimensions, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+    
+    private static ReviewContext CreateReviewContext()
+    {
+        return new ReviewContext(
+            Session: new SessionInfo(Guid.NewGuid(), "test"),
+            Request: new UserRequest("test goal"),
+            Plan: new Plan("plan", Array.Empty<PlanTask>()),
+            ExecutionResults: Array.Empty<StepResult>());
+    }
+    
+    private static List<DimensionResult> CreateGoodDimensions()
+    {
+        return new List<DimensionResult>
+        {
+            new DimensionResult("IntentAlignment", QualityLevel.Good, "Good alignment", Array.Empty<string>())
+        };
+    }
+}
+
+public class DimensionTests
+{
+    [Fact]
+    public async Task Should_Assess_Intent_Alignment()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmClient>();
+        var dimension = new IntentAlignmentDimension(mockLlm.Object, NullLogger<IntentAlignmentDimension>.Instance);
+        
+        var context = new ReviewContext(
+            Session: new SessionInfo(Guid.NewGuid(), "test"),
+            Request: new UserRequest("Create a user service"),
+            Plan: new Plan("plan", new[] { new PlanTask("Create UserService class") }),
+            ExecutionResults: new[] { new StepResult(StepStatus.Success, "Created UserService.cs", "Success", 100) });
+        
+        mockLlm
+            .Setup(l => l.GenerateAsync(It.IsAny<string>(), It.IsAny<LlmOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("<assessment level=\"excellent\">The implementation perfectly aligns with the user's intent.</assessment>");
+        
+        // Act
+        var result = await dimension.AssessAsync(context, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal("IntentAlignment", result.Name);
+        Assert.Equal(QualityLevel.Excellent, result.Level);
+        Assert.Contains("aligns", result.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+    
+    [Fact]
+    public async Task Should_Assess_Code_Quality()
+    {
+        // Arrange
+        var mockLlm = new Mock<ILlmClient>();
+        var dimension = new CodeQualityDimension(mockLlm.Object, NullLogger<CodeQualityDimension>.Instance);
+        
+        var context = new ReviewContext(
+            Session: new SessionInfo(Guid.NewGuid(), "test"),
+            Request: new UserRequest("test"),
+            Plan: new Plan("plan", Array.Empty<PlanTask>()),
+            ExecutionResults: Array.Empty<StepResult>());
+        
+        mockLlm
+            .Setup(l => l.GenerateAsync(It.IsAny<string>(), It.IsAny<LlmOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("<assessment level=\"good\"><issues>Missing null checks</issues>Well structured code.</assessment>");
+        
+        // Act
+        var result = await dimension.AssessAsync(context, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal("CodeQuality", result.Name);
+        Assert.Equal(QualityLevel.Good, result.Level);
+        Assert.Single(result.Issues);
+    }
+}
+
+public class SummaryGeneratorTests
+{
+    [Fact]
+    public void Should_Generate_Summary_With_Changes_And_Notes()
+    {
+        // Arrange
+        var generator = new SummaryGenerator(NullLogger<SummaryGenerator>.Instance);
+        var context = new ReviewContext(
+            Session: new SessionInfo(Guid.NewGuid(), "test"),
+            Request: new UserRequest("Create user service"),
+            Plan: new Plan("plan", Array.Empty<PlanTask>()),
+            ExecutionResults: new[] {
+                new StepResult(StepStatus.Success, "Created UserService.cs with 3 methods", "Success", 100),
+                new StepResult(StepStatus.Success, "Added IUserService interface", "Success", 50)
+            });
+        
+        var dimensions = new List<DimensionResult>
+        {
+            new DimensionResult("IntentAlignment", QualityLevel.Excellent, "Perfect", Array.Empty<string>()),
+            new DimensionResult("CodeQuality", QualityLevel.Good, "Well written", Array.Empty<string>())
+        };
+        
+        // Act
+        var summary = generator.Generate(context, ReviewDecision.Approved, dimensions);
+        
+        // Assert
+        Assert.Equal(ReviewDecision.Approved, summary.Decision);
+        Assert.Equal(2, summary.Changes.Count);
+        Assert.Contains("UserService.cs", summary.Changes[0]);
+        Assert.Contains("IUserService", summary.Changes[1]);
+        Assert.Equal(2, summary.DimensionLevels.Count);
+    }
+}
 ```
 
 ### Integration Tests
 
-```
-Tests/Integration/Orchestration/Stages/Reviewer/
-├── ReviewerIntegrationTests.cs
-│   ├── Should_Review_Real_Task()
-│   └── Should_Persist_Summary()
-│
-└── CycleIntegrationTests.cs
-    ├── Should_Cycle_To_Planner()
-    └── Should_Escalate_At_Limit()
+```csharp
+namespace AgenticCoder.Application.Tests.Integration.Orchestration.Stages.Reviewer;
+
+public class ReviewerIntegrationTests : IClassFixture<TestServerFixture>
+{
+    private readonly TestServerFixture _fixture;
+    
+    public ReviewerIntegrationTests(TestServerFixture fixture)
+    {
+        _fixture = fixture;
+    }
+    
+    [Fact]
+    public async Task Should_Review_Real_Task_End_To_End()
+    {
+        // Arrange
+        var reviewer = _fixture.GetService<IReviewerStage>();
+        var workspace = await _fixture.CreateTestWorkspaceAsync();
+        await File.WriteAllTextAsync(Path.Combine(workspace.RootPath, "UserService.cs"), 
+            "public class UserService { }");
+        
+        var context = new ReviewContext(
+            Session: new SessionInfo(Guid.NewGuid(), "test"),
+            Request: new UserRequest("Create user service"),
+            Plan: new Plan("plan", Array.Empty<PlanTask>()),
+            ExecutionResults: new[] { new StepResult(StepStatus.Success, "Created UserService.cs", "Success", 100) });
+        
+        var options = new ReviewOptions { HumanReview = false };
+        
+        // Act
+        var result = await reviewer.ReviewAsync(context, options, CancellationToken.None);
+        
+        // Assert
+        Assert.NotNull(result);
+        Assert.NotNull(result.Summary);
+    }
+}
 ```
 
 ### E2E Tests
 
-```
-Tests/E2E/Orchestration/Stages/Reviewer/
-├── ReviewerE2ETests.cs
-│   ├── Should_Complete_Good_Task()
-│   ├── Should_Reject_And_Retry()
-│   └── Should_Handle_Override()
+```csharp
+namespace AgenticCoder.Application.Tests.E2E.Orchestration.Stages.Reviewer;
+
+public class ReviewerE2ETests : IClassFixture<E2ETestFixture>
+{
+    private readonly E2ETestFixture _fixture;
+    
+    public ReviewerE2ETests(E2ETestFixture fixture)
+    {
+        _fixture = fixture;
+    }
+    
+    [Fact]
+    public async Task Should_Approve_Good_Task_Through_All_Dimensions()
+    {
+        // Arrange
+        var reviewer = _fixture.GetService<IReviewerStage>();
+        var workspace = await _fixture.CreateTestWorkspaceWithValidCodeAsync();
+        var executionResults = await _fixture.ExecuteGoodTaskAsync(workspace);
+        
+        var context = new ReviewContext(
+            Session: new SessionInfo(Guid.NewGuid(), "test"),
+            Request: new UserRequest("Create user service"),
+            Plan: new Plan("plan", Array.Empty<PlanTask>()),
+            ExecutionResults: executionResults);
+        
+        var options = new ReviewOptions { HumanReview = false };
+        
+        // Act
+        var result = await reviewer.ReviewAsync(context, options, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(ReviewDecision.Approved, result.Decision);
+        Assert.All(result.DimensionResults, d => 
+            Assert.True(d.Level >= QualityLevel.Acceptable, $"Dimension {d.Name} failed"));
+    }
+    
+    [Fact]
+    public async Task Should_Reject_And_Cycle_To_Planner_On_Poor_Quality()
+    {
+        // Arrange
+        var reviewer = _fixture.GetService<IReviewerStage>();
+        var workspace = await _fixture.CreateTestWorkspaceAsync();
+        await File.WriteAllTextAsync(Path.Combine(workspace.RootPath, "bad.cs"), "badcode");
+        
+        var context = new ReviewContext(
+            Session: new SessionInfo(Guid.NewGuid(), "test"),
+            Request: new UserRequest("Create service"),
+            Plan: new Plan("plan", Array.Empty<PlanTask>()),
+            ExecutionResults: new[] { new StepResult(StepStatus.Success, "Created bad.cs", "Success", 100) });
+        
+        var options = new ReviewOptions { HumanReview = false };
+        
+        // Act
+        var result = await reviewer.ReviewAsync(context, options, CancellationToken.None);
+        
+        // Assert
+        Assert.Equal(ReviewDecision.Rejected, result.Decision);
+        Assert.NotNull(result.Feedback);
+        Assert.NotEmpty(result.Feedback.Issues);
+    }
+}
 ```
 
 ### Performance Benchmarks
@@ -764,28 +1051,433 @@ public enum QualityLevel
 }
 ```
 
-### SummaryGenerator
+### ReviewerStage Complete Implementation
 
 ```csharp
 namespace AgenticCoder.Application.Orchestration.Stages.Reviewer;
 
-public sealed class SummaryGenerator
+public sealed class ReviewerStage : StageBase, IReviewerStage
 {
+    private readonly IDimensionAssessor _dimensionAssessor;
+    private readonly ISummaryGenerator _summaryGenerator;
+    private readonly IHumanReviewService _humanReviewService;
+    private readonly ILogger<ReviewerStage> _logger;
+    
+    public override StageType Type => StageType.Reviewer;
+    
+    public ReviewerStage(
+        IDimensionAssessor dimensionAssessor,
+        ISummaryGenerator summaryGenerator,
+        IHumanReviewService humanReviewService,
+        ILogger<ReviewerStage> logger) : base(logger)
+    {
+        _dimensionAssessor = dimensionAssessor ?? throw new ArgumentNullException(nameof(dimensionAssessor));
+        _summaryGenerator = summaryGenerator ?? throw new ArgumentNullException(nameof(summaryGenerator));
+        _humanReviewService = humanReviewService ?? throw new ArgumentNullException(nameof(humanReviewService));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    
+    protected override async Task<StageResult> ExecuteStageAsync(
+        StageContext context,
+        CancellationToken ct)
+    {
+        var reviewContext = (ReviewContext)context.StageData["review_context"];
+        var options = new ReviewOptions { HumanReview = false };
+        
+        var reviewResult = await ReviewAsync(reviewContext, options, ct);
+        
+        return new StageResult(
+            Status: reviewResult.Decision == ReviewDecision.Approved ? StageStatus.Success : StageStatus.Cycle,
+            Output: reviewResult,
+            NextStage: reviewResult.Decision == ReviewDecision.Approved ? null : StageType.Planner,
+            Message: $"Review {reviewResult.Decision}",
+            Metrics: new StageMetrics(StageType.Reviewer, TimeSpan.Zero, 0));
+    }
+    
+    public async Task<ReviewResult> ReviewAsync(
+        ReviewContext context,
+        ReviewOptions options,
+        CancellationToken ct)
+    {
+        _logger.LogInformation("Starting review for session {SessionId}", context.Session.Id);
+        
+        // Assess all quality dimensions
+        var dimensionResults = await _dimensionAssessor.AssessAllAsync(context, ct);
+        
+        // Determine decision based on dimension results
+        var decision = DetermineDecision(dimensionResults);
+        
+        // If human review is required, prompt for confirmation
+        if (options.HumanReview)
+        {
+            var humanResponse = await _humanReviewService.PromptForReviewAsync(context, dimensionResults, ct);
+            if (!humanResponse.Approved)
+            {
+                decision = ReviewDecision.Rejected;
+                _logger.LogWarning("Human reviewer rejected the work: {Reason}", humanResponse.Reason);
+            }
+        }
+        
+        // Generate summary
+        var summary = _summaryGenerator.Generate(context, decision, dimensionResults);
+        
+        // Generate feedback if rejected
+        ReviewFeedback? feedback = null;
+        if (decision == ReviewDecision.Rejected)
+        {
+            feedback = GenerateFeedback(dimensionResults);
+        }
+        
+        _logger.LogInformation("Review complete: {Decision}", decision);
+        
+        return new ReviewResult(decision, dimensionResults, summary, feedback);
+    }
+    
+    private ReviewDecision DetermineDecision(IReadOnlyList<DimensionResult> dimensions)
+    {
+        // Reject if any dimension is Poor or more than 2 are NeedsWork
+        var poorCount = dimensions.Count(d => d.Level == QualityLevel.Poor);
+        var needsWorkCount = dimensions.Count(d => d.Level == QualityLevel.NeedsWork);
+        
+        if (poorCount > 0 || needsWorkCount > 2)
+        {
+            return ReviewDecision.Rejected;
+        }
+        
+        return ReviewDecision.Approved;
+    }
+    
+    private ReviewFeedback GenerateFeedback(IReadOnlyList<DimensionResult> dimensions)
+    {
+        var issues = dimensions
+            .Where(d => d.Level <= QualityLevel.NeedsWork)
+            .SelectMany(d => d.Issues.Select(issue => $"{d.Name}: {issue}"))
+            .ToList();
+        
+        var suggestions = dimensions
+            .Where(d => d.Level <= QualityLevel.NeedsWork)
+            .Select(d => $"Improve {d.Name}: {d.Explanation}")
+            .ToList();
+        
+        return new ReviewFeedback(issues.AsReadOnly(), suggestions.AsReadOnly());
+    }
+}
+```
+
+### DimensionAssessor Implementation
+
+```csharp
+namespace AgenticCoder.Application.Orchestration.Stages.Reviewer;
+
+public interface IDimensionAssessor
+{
+    Task<IReadOnlyList<DimensionResult>> AssessAllAsync(ReviewContext context, CancellationToken ct);
+}
+
+public sealed class DimensionAssessor : IDimensionAssessor
+{
+    private readonly IEnumerable<IDimension> _dimensions;
+    private readonly ILogger<DimensionAssessor> _logger;
+    
+    public DimensionAssessor(IEnumerable<IDimension> dimensions, ILogger<DimensionAssessor> logger)
+    {
+        _dimensions = dimensions ?? throw new ArgumentNullException(nameof(dimensions));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    
+    public async Task<IReadOnlyList<DimensionResult>> AssessAllAsync(ReviewContext context, CancellationToken ct)
+    {
+        _logger.LogInformation("Assessing {DimensionCount} quality dimensions", _dimensions.Count());
+        
+        var results = new List<DimensionResult>();
+        
+        // Run dimensions in parallel for efficiency
+        var tasks = _dimensions.Select(dim => AssessDimensionAsync(dim, context, ct));
+        var dimensionResults = await Task.WhenAll(tasks);
+        
+        results.AddRange(dimensionResults);
+        
+        var excellentCount = results.Count(r => r.Level == QualityLevel.Excellent);
+        var poorCount = results.Count(r => r.Level <= QualityLevel.NeedsWork);
+        
+        _logger.LogInformation("Assessment complete: {Excellent} excellent, {Poor} poor/needs work",
+            excellentCount, poorCount);
+        
+        return results.AsReadOnly();
+    }
+    
+    private async Task<DimensionResult> AssessDimensionAsync(
+        IDimension dimension,
+        ReviewContext context,
+        CancellationToken ct)
+    {
+        _logger.LogDebug("Assessing dimension: {DimensionName}", dimension.Name);
+        
+        try
+        {
+            return await dimension.AssessAsync(context, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Dimension {DimensionName} assessment failed", dimension.Name);
+            return new DimensionResult(
+                Name: dimension.Name,
+                Level: QualityLevel.Poor,
+                Explanation: $"Assessment failed: {ex.Message}",
+                Issues: new[] { "Dimension assessment error" }.ToList().AsReadOnly());
+        }
+    }
+}
+```
+
+### SummaryGenerator Complete Implementation
+
+```csharp
+namespace AgenticCoder.Application.Orchestration.Stages.Reviewer;
+
+public interface ISummaryGenerator
+{
+    ReviewSummary Generate(
+        ReviewContext context,
+        ReviewDecision decision,
+        IReadOnlyList<DimensionResult> dimensions);
+}
+
+public sealed class SummaryGenerator : ISummaryGenerator
+{
+    private readonly ILogger<SummaryGenerator> _logger;
+    
+    public SummaryGenerator(ILogger<SummaryGenerator> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    
     public ReviewSummary Generate(
         ReviewContext context,
         ReviewDecision decision,
         IReadOnlyList<DimensionResult> dimensions)
     {
+        _logger.LogInformation("Generating review summary for session {SessionId}", context.Session.Id);
+        
         var changes = ExtractChanges(context.ExecutionResults);
         var notes = GenerateNotes(dimensions);
+        var dimensionLevels = dimensions.ToDictionary(d => d.Name, d => d.Level);
         
         return new ReviewSummary(
-            context.Session.Id,
-            context.Request.Goal,
-            changes,
-            notes,
-            decision,
-            dimensions.ToDictionary(d => d.Name, d => d.Level));
+            SessionId: context.Session.Id,
+            Goal: context.Request.Goal,
+            Changes: changes.AsReadOnly(),
+            Notes: notes.AsReadOnly(),
+            Decision: decision,
+            DimensionLevels: dimensionLevels);
+    }
+    
+    private List<string> ExtractChanges(IReadOnlyList<StepResult> executionResults)
+    {
+        return executionResults
+            .Where(r => r.Status == StepStatus.Success)
+            .Select(r => r.Output?.ToString() ?? "")
+            .Where(o => !string.IsNullOrWhiteSpace(o))
+            .ToList();
+    }
+    
+    private List<string> GenerateNotes(IReadOnlyList<DimensionResult> dimensions)
+    {
+        var notes = new List<string>();
+        
+        foreach (var dim in dimensions)
+        {
+            var levelText = dim.Level switch
+            {
+                QualityLevel.Excellent => "✓ Excellent",
+                QualityLevel.Good => "✓ Good",
+                QualityLevel.Acceptable => "~ Acceptable",
+                QualityLevel.NeedsWork => "! Needs Work",
+                QualityLevel.Poor => "✗ Poor",
+                _ => "?"
+            };
+            
+            notes.Add($"{dim.Name}: {levelText} - {dim.Explanation}");
+            
+            if (dim.Issues.Any())
+            {
+                notes.Add($"  Issues: {string.Join(", ", dim.Issues)}");
+            }
+        }
+        
+        return notes;
+    }
+}
+
+public sealed record ReviewSummary(
+    Guid SessionId,
+    string Goal,
+    IReadOnlyList<string> Changes,
+    IReadOnlyList<string> Notes,
+    ReviewDecision Decision,
+    IReadOnlyDictionary<string, QualityLevel> DimensionLevels);
+
+public sealed record ReviewFeedback(
+    IReadOnlyList<string> Issues,
+    IReadOnlyList<string> Suggestions);
+```
+
+### IntentAlignmentDimension Implementation
+
+```csharp
+namespace AgenticCoder.Application.Orchestration.Stages.Reviewer.Dimensions;
+
+public sealed class IntentAlignmentDimension : IDimension
+{
+    private readonly ILlmClient _llmClient;
+    private readonly ILogger<IntentAlignmentDimension> _logger;
+    
+    public string Name => "IntentAlignment";
+    
+    public IntentAlignmentDimension(ILlmClient llmClient, ILogger<IntentAlignmentDimension> logger)
+    {
+        _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    
+    public async Task<DimensionResult> AssessAsync(ReviewContext context, CancellationToken ct)
+    {
+        _logger.LogDebug("Assessing intent alignment for goal: {Goal}", context.Request.Goal);
+        
+        var prompt = $@"
+You are reviewing whether the implementation aligns with the user's intent.
+
+User Goal: {context.Request.Goal}
+
+Plan Tasks:
+{string.Join("\n", context.Plan.Tasks.Select((t, i) => $"{i + 1}. {t.Description}"))}
+
+Execution Results:
+{string.Join("\n", context.ExecutionResults.Select((r, i) => $"{i + 1}. {r.Output}"))}
+
+Assess how well the implementation aligns with the user's stated intent.
+Provide your assessment in this format:
+<assessment level=\"excellent|good|acceptable|needswork|poor\">
+<issues>Issue 1</issues>
+<issues>Issue 2</issues>
+Explanation text here.
+</assessment>
+";
+        
+        var response = await _llmClient.GenerateAsync(prompt, new LlmOptions(), ct);
+        
+        return ParseAssessmentResponse(response);
+    }
+    
+    private DimensionResult ParseAssessmentResponse(string response)
+    {
+        var match = Regex.Match(response, @"<assessment level=""(\w+)"">(.*?)</assessment>", RegexOptions.Singleline);
+        if (!match.Success)
+        {
+            return new DimensionResult(Name, QualityLevel.Acceptable, "Unable to parse assessment", Array.Empty<string>());
+        }
+        
+        var levelStr = match.Groups[1].Value.ToLowerInvariant();
+        var content = match.Groups[2].Value;
+        
+        var level = levelStr switch
+        {
+            "excellent" => QualityLevel.Excellent,
+            "good" => QualityLevel.Good,
+            "acceptable" => QualityLevel.Acceptable,
+            "needswork" => QualityLevel.NeedsWork,
+            "poor" => QualityLevel.Poor,
+            _ => QualityLevel.Acceptable
+        };
+        
+        var issues = Regex.Matches(content, @"<issues>(.*?)</issues>")
+            .Select(m => m.Groups[1].Value.Trim())
+            .ToList();
+        
+        var explanation = Regex.Replace(content, @"<issues>.*?</issues>", "").Trim();
+        
+        return new DimensionResult(Name, level, explanation, issues.AsReadOnly());
+    }
+}
+```
+
+### CodeQualityDimension Implementation
+
+```csharp
+namespace AgenticCoder.Application.Orchestration.Stages.Reviewer.Dimensions;
+
+public sealed class CodeQualityDimension : IDimension
+{
+    private readonly ILlmClient _llmClient;
+    private readonly ILogger<CodeQualityDimension> _logger;
+    
+    public string Name => "CodeQuality";
+    
+    public CodeQualityDimension(ILlmClient llmClient, ILogger<CodeQualityDimension> logger)
+    {
+        _llmClient = llmClient ?? throw new ArgumentNullException(nameof(llmClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    
+    public async Task<DimensionResult> AssessAsync(ReviewContext context, CancellationToken ct)
+    {
+        _logger.LogDebug("Assessing code quality");
+        
+        var prompt = $@"
+You are reviewing code quality.
+
+Execution Results:
+{string.Join("\n", context.ExecutionResults.Select((r, i) => $"{i + 1}. {r.Output}"))}
+
+Assess the code quality including:
+- Readability and maintainability
+- Error handling
+- Code organization
+- Best practices
+- Potential bugs
+
+Provide your assessment in this format:
+<assessment level=\"excellent|good|acceptable|needswork|poor\">
+<issues>Issue 1</issues>
+<issues>Issue 2</issues>
+Explanation text here.
+</assessment>
+";
+        
+        var response = await _llmClient.GenerateAsync(prompt, new LlmOptions(), ct);
+        
+        return ParseAssessmentResponse(response);
+    }
+    
+    private DimensionResult ParseAssessmentResponse(string response)
+    {
+        // Same parsing logic as IntentAlignmentDimension
+        var match = Regex.Match(response, @"<assessment level=""(\w+)"">(.*?)</assessment>", RegexOptions.Singleline);
+        if (!match.Success)
+        {
+            return new DimensionResult(Name, QualityLevel.Acceptable, "Unable to parse assessment", Array.Empty<string>());
+        }
+        
+        var levelStr = match.Groups[1].Value.ToLowerInvariant();
+        var content = match.Groups[2].Value;
+        
+        var level = levelStr switch
+        {
+            "excellent" => QualityLevel.Excellent,
+            "good" => QualityLevel.Good,
+            "acceptable" => QualityLevel.Acceptable,
+            "needswork" => QualityLevel.NeedsWork,
+            "poor" => QualityLevel.Poor,
+            _ => QualityLevel.Acceptable
+        };
+        
+        var issues = Regex.Matches(content, @"<issues>(.*?)</issues>")
+            .Select(m => m.Groups[1].Value.Trim())
+            .ToList();
+        
+        var explanation = Regex.Replace(content, @"<issues>.*?</issues>", "").Trim();
+        
+        return new DimensionResult(Name, level, explanation, issues.AsReadOnly());
     }
 }
 ```
