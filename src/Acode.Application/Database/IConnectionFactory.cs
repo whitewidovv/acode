@@ -1,39 +1,31 @@
 namespace Acode.Application.Database;
 
 /// <summary>
-/// Factory for creating database connections.
+/// Factory for creating database connections with proper lifecycle management.
 /// </summary>
 /// <remarks>
-/// Abstracts the creation of SQLite and PostgreSQL connections.
-/// Implementations handle provider-specific configuration, connection strings,
-/// WAL mode enablement (SQLite), connection pooling (PostgreSQL), and lifecycle management.
+/// Implementations manage provider-specific connection initialization,
+/// pooling (for PostgreSQL), and resource cleanup.
 /// </remarks>
 public interface IConnectionFactory
 {
     /// <summary>
-    /// Gets the database provider type for this factory.
+    /// Gets the database provider type implemented by this factory.
     /// </summary>
-    DbProviderType ProviderType { get; }
+    DatabaseProvider Provider { get; }
 
     /// <summary>
-    /// Gets the connection string for this factory.
+    /// Creates and opens a new database connection asynchronously.
     /// </summary>
-    /// <remarks>
-    /// For SQLite: file path (e.g., "Data Source=.agent/data/workspace.db").
-    /// For PostgreSQL: standard connection string (e.g., "Host=localhost;Port=5432;Database=acode").
-    /// </remarks>
-    string ConnectionString { get; }
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>An opened database connection that must be disposed after use.</returns>
+    /// <exception cref="InvalidOperationException">When connection cannot be created.</exception>
+    Task<IDbConnection> CreateAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Creates a new database connection.
+    /// Checks the health of the database connection.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An open database connection.</returns>
-    /// <remarks>
-    /// The connection is returned in Open state.
-    /// Caller is responsible for disposing the connection when done.
-    /// SQLite: Creates database file if not exists, enables WAL mode.
-    /// PostgreSQL: Returns connection from pool.
-    /// </remarks>
-    Task<IDbConnection> CreateAsync(CancellationToken cancellationToken = default);
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Health check result with status and diagnostic data.</returns>
+    Task<HealthCheckResult> CheckHealthAsync(CancellationToken ct = default);
 }

@@ -24,7 +24,7 @@ public interface IDbConnection : IAsyncDisposable
     /// <summary>
     /// Gets the database provider type for this connection.
     /// </summary>
-    DbProviderType ProviderType { get; }
+    DatabaseProvider ProviderType { get; }
 
     /// <summary>
     /// Executes a SQL command and returns the number of rows affected.
