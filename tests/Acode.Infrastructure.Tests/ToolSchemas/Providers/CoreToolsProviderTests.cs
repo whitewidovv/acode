@@ -3,7 +3,6 @@ namespace Acode.Infrastructure.Tests.ToolSchemas.Providers;
 using Acode.Application.Tools;
 using Acode.Infrastructure.ToolSchemas.Providers;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for the CoreToolsProvider which provides all 17 core tool schemas.

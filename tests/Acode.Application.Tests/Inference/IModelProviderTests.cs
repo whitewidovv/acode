@@ -8,7 +8,6 @@ using Acode.Application.Inference;
 using Acode.Domain.Models.Inference;
 using FluentAssertions;
 using NSubstitute;
-using Xunit;
 
 /// <summary>
 /// Tests for IModelProvider interface contract following TDD (RED phase).

@@ -1,7 +1,6 @@
 using Acode.Application.Security;
 using Acode.Domain.Security.PathProtection;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Application.Tests.Security;
 

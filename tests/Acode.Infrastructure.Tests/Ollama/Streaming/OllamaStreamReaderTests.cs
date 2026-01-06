@@ -2,7 +2,6 @@ using System.Text;
 using Acode.Infrastructure.Ollama.Models;
 using Acode.Infrastructure.Ollama.Streaming;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Ollama.Streaming;
 

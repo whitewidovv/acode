@@ -2,7 +2,6 @@ namespace Acode.Domain.Tests.Security.PathProtection;
 
 using Acode.Domain.Security.PathProtection;
 using FluentAssertions;
-using Xunit;
 
 public class PlatformTests
 {

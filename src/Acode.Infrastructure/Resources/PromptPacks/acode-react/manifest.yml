@@ -1,0 +1,26 @@
+format_version: '1.0'
+id: acode-react
+version: 1.0.0
+name: Acode React Pack
+description: Specialized pack for TypeScript and React development with strict minimal diff philosophy. Includes hooks best practices, component patterns, state management, and performance optimization.
+author: Acode Team
+content_hash: 0f4f9fdef1116bd6438851269476c4a37e3be3a9fa9f49f7349d30db9fe73bdb
+created_at: 2026-01-05T22:00:00Z
+components:
+  - path: system.md
+    type: system
+  - path: roles/planner.md
+    type: role
+    role: planner
+  - path: roles/coder.md
+    type: role
+    role: coder
+  - path: roles/reviewer.md
+    type: role
+    role: reviewer
+  - path: languages/typescript.md
+    type: language
+    language: typescript
+  - path: frameworks/react.md
+    type: framework
+    framework: react

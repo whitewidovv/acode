@@ -2,7 +2,6 @@ namespace Acode.Domain.Tests.Audit;
 
 using Acode.Domain.Audit;
 using FluentAssertions;
-using Xunit;
 
 public class AuditEventTypeTests
 {

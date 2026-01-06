@@ -1,7 +1,6 @@
 using Acode.Domain.Audit;
 using Acode.Infrastructure.Audit;
 using FluentAssertions;
-using Xunit;
 
 #pragma warning disable CA2007 // ConfigureAwait not needed in test methods
 
