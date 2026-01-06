@@ -87,7 +87,7 @@ public sealed class ConsoleFormatter : IOutputFormatter
         var columnWidths = headers.Select((h, i) =>
         {
             var headerWidth = h.Length;
-            var maxRowWidth = rows.Select(r => r.Length > i ? r[i].Length : 0).Max();
+            var maxRowWidth = rows.Select(r => r.Length > i ? r[i].Length : 0).DefaultIfEmpty(0).Max();
             return Math.Max(headerWidth, maxRowWidth);
         }).ToArray();
 
