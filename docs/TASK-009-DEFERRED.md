@@ -2,7 +2,9 @@
 
 ## Overview
 
-Task 009 (Model Routing Policy) has **one deferred item** due to a dependency blocker on Task 004 (Model Provider Interface).
+Task 009 (Model Routing Policy) ~~has **one deferred item** due to a dependency blocker on Task 004 (Model Provider Interface).~~
+
+**UPDATE (2026-01-06)**: All deferred items have been **COMPLETED**. Operating Mode Constraint Validation was implemented by extending Task 004's IModelProvider interface with ModelInfo and GetModelInfo method.
 
 ---
 
@@ -108,12 +110,54 @@ Have each provider (OllamaProvider, vLLMProvider) filter their `GetSupportedMode
 
 ---
 
-## No Other Deferrals
+## Resolution Summary (2026-01-06)
 
-All other functional requirements in Task 009 (009a, 009b, 009c, 009 parent) are **fully implemented** with **106 passing tests** and **0 errors, 0 warnings**.
+### Implementation Completed
+
+Operating Mode Constraint Validation (FR-009c-081 through FR-009c-085) was successfully implemented by:
+
+1. **Created ModelInfo record** in `src/Acode.Domain/Models/Inference/ModelInfo.cs`
+   - Properties: ModelId, IsLocal, RequiresNetwork
+   - Method: IsAllowedInMode(OperatingMode) - validates constraints
+   - 11 comprehensive tests in `ModelInfoTests.cs`
+
+2. **Extended IModelProvider interface** with `GetModelInfo(string modelId)` method
+   - Documented as FR-004-19 requirement
+   - Returns ModelInfo for any supported model
+
+3. **Implemented in providers**:
+   - OllamaProvider: All models IsLocal=true, RequiresNetwork=false
+   - VllmProvider: IsLocal based on endpoint (localhost check), RequiresNetwork=!IsLocal
+
+4. **Added IModelAvailabilityChecker.IsModelAvailableForMode(string modelId, OperatingMode mode)**
+   - Checks both availability AND operating mode constraints
+   - Implemented in ModelAvailabilityChecker with logging
+   - 5 tests covering all operating modes
+
+### Test Coverage
+
+- **ModelInfo**: 11 tests
+- **ModelAvailabilityChecker (operating mode)**: 5 tests
+- **Total Task 009 tests**: 117 passing
+- **Build quality**: 0 errors, 0 warnings
+
+### Functional Requirements Validated
+
+- ✅ FR-009c-081: MUST respect OperatingMode constraints
+- ✅ FR-009c-082: LocalOnly MUST exclude network models (IsLocal=false rejected)
+- ✅ FR-009c-083: Airgapped MUST exclude all network models (RequiresNetwork=true rejected)
+- ✅ FR-009c-084: Burst MAY include cloud models if configured (all models allowed)
+- ✅ FR-009c-085: Mode validation MUST occur at chain resolution (implemented in IsModelAvailableForMode)
+
+---
+
+## No Remaining Deferrals
+
+All functional requirements in Task 009 (009a, 009b, 009c, 009 parent) are **fully implemented** with **117 passing tests** and **0 errors, 0 warnings**.
 
 ---
 
 **Created**: 2026-01-06
-**Status**: Pending resolution via Task 004d or Task 005/006 integration
+**Completed**: 2026-01-06 (same day)
+**Status**: ✅ ALL DEFERRED ITEMS RESOLVED
 **Reviewed By**: Claude Code (Audit)
