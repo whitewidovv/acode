@@ -223,4 +223,27 @@ public sealed class OllamaProvider : IModelProvider
             "gemma2:27b",
         };
     }
+
+    /// <summary>
+    /// Gets metadata for a specific model.
+    /// </summary>
+    /// <param name="modelId">The model identifier.</param>
+    /// <returns>Model metadata.</returns>
+    /// <remarks>
+    /// FR-004-19: Returns model metadata.
+    /// All Ollama models are local and do not require network access since Ollama
+    /// runs models locally on the user's machine.
+    /// </remarks>
+    public ModelInfo GetModelInfo(string modelId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId, nameof(modelId));
+
+        // All Ollama models are local and don't require network
+        return new ModelInfo
+        {
+            ModelId = modelId,
+            IsLocal = true,
+            RequiresNetwork = false,
+        };
+    }
 }
