@@ -1,0 +1,26 @@
+format_version: '1.0'
+id: acode-dotnet
+version: 1.0.0
+name: Acode .NET Pack
+description: Specialized pack for C# and ASP.NET Core development with strict minimal diff philosophy. Includes async/await patterns, DI best practices, EF Core guidance, and API conventions.
+author: Acode Team
+content_hash: placeholder_will_compute
+created_at: 2026-01-05T22:00:00Z
+components:
+  - path: system.md
+    type: system
+  - path: roles/planner.md
+    type: role
+    role: planner
+  - path: roles/coder.md
+    type: role
+    role: coder
+  - path: roles/reviewer.md
+    type: role
+    role: reviewer
+  - path: languages/csharp.md
+    type: language
+    language: csharp
+  - path: frameworks/aspnetcore.md
+    type: framework
+    framework: aspnetcore
