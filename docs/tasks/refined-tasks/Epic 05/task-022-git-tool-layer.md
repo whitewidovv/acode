@@ -1193,6 +1193,424 @@ public async Task FetchAsync(string workingDir, FetchOptions? options = null, Ca
 
 ---
 
+## Troubleshooting
+
+### Issue 1: Git Operations Failing with "index.lock File exists"
+
+**Symptoms:**
+- All git operations fail with error: `fatal: Unable to create '.git/index.lock': File exists`
+- Status, add, commit, checkout all return exit code 128
+- Error persists even after waiting several minutes
+- No other git processes visible in task manager/`ps`
+- Repository was working fine previously, failure started suddenly
+
+**Root Causes:**
+1. **Crashed git process** - Previous git operation crashed without cleaning up lock file
+2. **Forced termination** - User or system killed git process (Ctrl+C, task kill, OOM killer)
+3. **Filesystem issues** - NFS/network filesystem delays causing stale lock perception
+4. **Concurrent operations** - Multiple git processes from different Acode instances conflicting
+5. **Permissions mismatch** - Lock file owned by different user (e.g., root vs normal user)
+6. **Disk full** - Git process crashed while writing index due to no space left
+7. **Antivirus interference** - Antivirus software holding lock on .git/index file
+
+**Solutions:**
+
+```bash
+# Solution 1: Check for running git processes
+ps aux | grep -i git
+# If git processes found, wait for them to complete or kill if hung:
+kill -9 <pid>
+# Wait 5 seconds, retry git operation
+acode git status
+
+# Solution 2: Remove stale lock file manually
+ls -la .git/index.lock
+# If file exists and no git processes running:
+rm .git/index.lock
+# Retry git operation
+acode git status
+# Expected: Operation succeeds
+
+# Solution 3: Check lock file ownership and permissions
+ls -l .git/index.lock
+# If owned by different user (e.g., root):
+sudo chown $USER:$USER .git/index.lock
+sudo rm .git/index.lock
+# Or use sudo for one-time fix:
+sudo git status
+# Expected: Operation succeeds
+
+# Solution 4: Check disk space
+df -h .
+# If disk full (100% used):
+# Free space by deleting temp files, logs, or old artifacts
+rm -rf /tmp/old-data
+# Retry git operation after freeing space
+
+# Solution 5: Check for filesystem issues (NFS)
+mount | grep $(df . | tail -1 | awk '{print $1}')
+# If NFS mounted, check for stale file handles:
+stat .git/index.lock
+# If stat hangs or returns "Stale file handle":
+# Unmount and remount NFS
+sudo umount /mnt/nfs
+sudo mount /mnt/nfs
+# Retry git operation
+
+# Solution 6: Disable antivirus temporarily
+# On Windows: Temporarily disable Windows Defender real-time protection
+# Add .git directory to exclusion list:
+Add-MpPreference -ExclusionPath "C:\repo\.git"
+# Retry git operation
+
+# Solution 7: Force git to ignore lock (DANGEROUS - last resort)
+git status --no-lock-index
+# This bypasses lock check but may corrupt repository if actual concurrent access
+# Only use if absolutely certain no other processes are accessing repo
+
+# Solution 8: Validate repository integrity after lock removal
+git fsck --full
+# Expected output: "no problems found"
+# If corruption detected, consider cloning fresh copy
+```
+
+---
+
+### Issue 2: Push Fails with "Authentication Failed" Despite Correct Credentials
+
+**Symptoms:**
+- `acode git push` fails with error: `fatal: Authentication failed`
+- Credentials are correct (tested with manual `git push`)
+- Same credentials work for other operations (fetch, clone)
+- Push from Acode fails but command-line git push succeeds
+- Error occurs in burst mode (not mode violation)
+
+**Root Causes:**
+1. **Credential helper not configured** - System git has credentials, but Acode spawns git without helper access
+2. **SSH key not in agent** - Using SSH URLs but key not loaded in ssh-agent
+3. **Token expiration** - Personal access token or OAuth token has expired
+4. **Two-factor authentication** - Remote requires 2FA but token doesn't have proper scopes
+5. **Credential prompt blocking** - Git attempting interactive credential prompt which blocks automation
+6. **GIT_ASKPASS not set** - Missing environment variable for non-interactive credential retrieval
+7. **PAT scope insufficient** - Token has read access but not write/push access
+
+**Solutions:**
+
+```bash
+# Solution 1: Configure credential helper globally
+git config --global credential.helper store
+git push  # Enter credentials once
+# Credentials saved to ~/.git-credentials
+# Retry Acode push
+acode git push
+# Expected: Push succeeds using stored credentials
+
+# Solution 2: Use SSH with ssh-agent
+# Generate SSH key if not exists:
+ssh-keygen -t ed25519 -C "your_email@example.com"
+# Add key to ssh-agent:
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+# Add public key to GitHub/GitLab
+# Change remote to SSH:
+git remote set-url origin git@github.com:user/repo.git
+# Retry push
+acode git push
+
+# Solution 3: Verify token scopes (GitHub example)
+# Go to Settings > Developer settings > Personal access tokens
+# Ensure token has 'repo' scope (full control of private repositories)
+# If missing, regenerate token with correct scopes
+# Update stored credentials:
+git config --global credential.helper cache
+git push  # Enter new token
+# Retry Acode push
+
+# Solution 4: Set GIT_ASKPASS to prevent interactive prompts
+export GIT_ASKPASS=/bin/true
+# Or set in .agent/config.yml:
+# git:
+#   environment:
+#     GIT_ASKPASS: /bin/true
+# Retry push - will fail fast instead of hanging
+
+# Solution 5: Use credential caching with timeout
+git config --global credential.helper 'cache --timeout=3600'
+git push  # Enter credentials
+# Credentials cached for 1 hour
+# Retry Acode push within timeout
+
+# Solution 6: Debug credential helper invocation
+GIT_TRACE=1 git push
+# Check output for credential helper execution
+# Verify helper is being called and returning credentials
+# If not called, ensure GIT_CONFIG includes credential.helper
+
+# Solution 7: Use URL with embedded token (less secure, for testing)
+git remote set-url origin https://ghp_yourtoken@github.com/user/repo.git
+acode git push
+# SECURITY WARNING: Token visible in URL, ensure logs redact it
+# Switch back to credential helper after testing
+
+# Solution 8: Verify remote URL and protocol
+git remote -v
+# If using http:// instead of https://, change to https:
+git remote set-url origin https://github.com/user/repo.git
+# Some hosts require https for authentication
+acode git push
+```
+
+---
+
+### Issue 3: GetStatusAsync Extremely Slow (>5 seconds) on Large Repository
+
+**Symptoms:**
+- `acode git status` takes 5-15 seconds to complete
+- Repository has 50k+ files
+- Status operation is fast with command-line git (<1 second)
+- Performance degraded over time as repository grew
+- CPU usage 100% during status check
+
+**Root Causes:**
+1. **Untracked files scanning** - Repository has many untracked files (node_modules, build outputs)
+2. **Working directory too large** - 100k+ files in working directory
+3. **Git version too old** - Using git <2.25 without performance improvements
+4. **Filesystem type** - NFS or network filesystem causing slow stat() calls
+5. **Gitignore patterns inefficient** - Complex regex patterns in .gitignore slowing matching
+6. **Git index fragmented** - .git/index file corrupted or fragmented
+7. **Submodules present** - Repository has many submodules requiring recursive status
+8. **Background processes** - Antivirus or indexing service scanning .git directory
+
+**Solutions:**
+
+```bash
+# Solution 1: Add untracked directories to .gitignore
+echo "node_modules/" >> .gitignore
+echo "build/" >> .gitignore
+echo "dist/" >> .gitignore
+echo ".idea/" >> .gitignore
+git add .gitignore
+git commit -m "chore: ignore build artifacts"
+# Retry status
+acode git status
+# Expected: <500ms for <10k tracked files
+
+# Solution 2: Use --untracked-files=no for faster status
+# Modify GitService.cs to add option:
+# args: ["status", "--porcelain=v2", "--branch", "--untracked-files=no"]
+acode git status
+# Expected: Significantly faster (skips untracked file scan)
+
+# Solution 3: Rebuild git index
+git update-index --refresh
+# Or if corrupted:
+rm .git/index
+git reset
+# Retry status
+acode git status
+
+# Solution 4: Update git to latest version
+git --version
+# If <2.25, update:
+# Ubuntu: sudo apt update && sudo apt install git
+# macOS: brew upgrade git
+# Windows: Download from git-scm.com
+# Retry with newer git
+acode git status
+
+# Solution 5: Use sparse checkout for large repos
+git sparse-checkout init --cone
+git sparse-checkout set src/
+# Only checkout src/ directory, ignore rest
+# Status only scans checked-out paths
+acode git status
+# Expected: Much faster
+
+# Solution 6: Optimize .gitignore patterns
+# Replace complex regex with simple prefix matching:
+# SLOW: **/node_modules/**
+# FAST: node_modules/
+# Review all .gitignore patterns for efficiency
+
+# Solution 7: Exclude .git from antivirus scanning
+# Windows Defender: Add-MpPreference -ExclusionPath "C:\repo\.git"
+# macOS: System Preferences > Security > Privacy > Full Disk Access > Exclude
+# Retry status
+
+# Solution 8: Use git status --short for minimal output
+# If only checking clean/dirty state:
+acode git status --short
+# Returns minimal output, faster parsing
+```
+
+---
+
+### Issue 4: Commit Fails with "Unable to Auto-Detect Email Address"
+
+**Symptoms:**
+- `acode git commit -m "message"` fails with error: `fatal: unable to auto-detect email address`
+- Error also mentions `fatal: empty ident name not allowed`
+- Manual `git commit` works fine
+- Acode git operations work but commit specifically fails
+- Fresh system/user account
+
+**Root Causes:**
+1. **Git user.name not configured** - Global git config missing user name
+2. **Git user.email not configured** - Global git config missing user email
+3. **Environment variables missing** - GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL not set
+4. **Running in container** - Docker container without git config volume mounted
+5. **User profile issues** - HOME or USERPROFILE environment variable not set
+6. **Repository-level config incomplete** - Repo config overrides global but missing fields
+7. **Service account** - Running as service/daemon user without proper environment
+
+**Solutions:**
+
+```bash
+# Solution 1: Configure git user globally
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+# Verify configuration:
+git config --global user.name
+git config --global user.email
+# Retry commit
+acode git commit -m "test commit"
+# Expected: Commit succeeds
+
+# Solution 2: Configure git user locally (repository-level)
+cd /path/to/repo
+git config user.name "Your Name"
+git config user.email "your.email@example.com"
+# This overrides global config for this repo only
+acode git commit -m "test commit"
+
+# Solution 3: Set environment variables
+export GIT_AUTHOR_NAME="Your Name"
+export GIT_AUTHOR_EMAIL="your.email@example.com"
+export GIT_COMMITTER_NAME="Your Name"
+export GIT_COMMITTER_EMAIL="your.email@example.com"
+# Retry commit
+acode git commit -m "test commit"
+
+# Solution 4: Set environment in .agent/config.yml
+# Edit ~/.agent/config.yml:
+git:
+  environment:
+    GIT_AUTHOR_NAME: "Your Name"
+    GIT_AUTHOR_EMAIL: "your.email@example.com"
+    GIT_COMMITTER_NAME: "Your Name"
+    GIT_COMMITTER_EMAIL: "your.email@example.com"
+# Restart Acode
+acode git commit -m "test commit"
+
+# Solution 5: Mount git config in Docker container
+docker run -v ~/.gitconfig:/root/.gitconfig acode/agent
+# Or pass environment variables:
+docker run -e GIT_AUTHOR_NAME="Your Name" -e GIT_AUTHOR_EMAIL="email@example.com" acode/agent
+
+# Solution 6: Check git config file permissions
+ls -la ~/.gitconfig
+# If not readable:
+chmod 644 ~/.gitconfig
+# Retry commit
+
+# Solution 7: Verify HOME variable is set
+echo $HOME
+# If empty:
+export HOME=/home/username
+# Retry commit
+
+# Solution 8: Use --author flag as workaround (one-time)
+acode git commit -m "message" --author="Your Name <your.email@example.com>"
+# Not permanent solution, but works for immediate need
+```
+
+---
+
+### Issue 5: Branch Checkout Fails with "Please Commit or Stash Your Changes"
+
+**Symptoms:**
+- `acode git checkout feature-branch` fails with error: `error: Your local changes would be overwritten by checkout`
+- Error message: `Please commit your changes or stash them before you switch branches`
+- `acode git status` shows modified files
+- User wants to switch branches without losing work
+- Files have uncommitted changes that conflict with target branch
+
+**Root Causes:**
+1. **Uncommitted changes** - Working directory has modified files that differ between branches
+2. **Conflicting changes** - Target branch has different content for same files
+3. **Untracked files conflict** - Untracked files in working directory exist in target branch
+4. **Partial commit** - Some changes staged but not committed
+5. **Detached HEAD state** - Currently in detached HEAD, changes not associated with branch
+6. **Merge in progress** - Previous merge not completed, repository in intermediate state
+
+**Solutions:**
+
+```bash
+# Solution 1: Commit changes before checkout
+acode git status
+acode git add .
+acode git commit -m "WIP: save work before branch switch"
+acode git checkout feature-branch
+# Expected: Checkout succeeds, changes preserved in original branch
+
+# Solution 2: Stash changes (git stash)
+acode git stash push -m "work in progress"
+# Checkout target branch
+acode git checkout feature-branch
+# Do work on feature-branch
+# Return to original branch and restore:
+acode git checkout original-branch
+acode git stash pop
+# Expected: Changes restored after branch switch
+
+# Solution 3: Force checkout (DISCARDS CHANGES - DANGEROUS)
+acode git checkout --force feature-branch
+# WARNING: All uncommitted changes LOST
+# Only use if changes are disposable
+
+# Solution 4: Create new branch with current changes
+acode git checkout -b temp-save-work
+acode git add .
+acode git commit -m "temp save work"
+# Now checkout target branch
+acode git checkout feature-branch
+# Work can be retrieved later from temp-save-work branch
+
+# Solution 5: Check which files are blocking
+acode git diff --name-only feature-branch
+# Shows files that differ
+# If specific files not needed, discard them:
+git checkout -- path/to/file
+# Then retry checkout
+
+# Solution 6: Handle untracked files conflict
+acode git clean -n  # Dry run
+# If untracked files listed exist in target branch:
+git clean -f  # Remove untracked files
+# Or move them:
+mkdir ../backup
+mv untracked-file ../backup/
+# Retry checkout
+acode git checkout feature-branch
+
+# Solution 7: Abort merge if in progress
+git merge --abort
+# Or abort rebase:
+git rebase --abort
+# Clean state restored
+acode git checkout feature-branch
+
+# Solution 8: Use worktrees for parallel work (advanced)
+git worktree add ../feature-branch-work feature-branch
+cd ../feature-branch-work
+# Work in separate directory, original branch unchanged
+# When done:
+cd ../original
+git worktree remove ../feature-branch-work
+```
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
