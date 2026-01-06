@@ -136,7 +136,7 @@ public class PromptComposerTests
         // Assert
         result.Should().Be("Hello World!");
         templateEngine.Received(1).Substitute("Hello {{name}}!", Arg.Is<Dictionary<string, string>>(
-            d => d.ContainsKey("name") && d["name"] == "World"));
+            d => d.GetValueOrDefault("name") == "World"));
     }
 
     [Fact]

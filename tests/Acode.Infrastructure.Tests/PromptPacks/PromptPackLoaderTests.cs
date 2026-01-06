@@ -1,3 +1,4 @@
+using System.Text;
 using Acode.Domain.PromptPacks;
 using Acode.Infrastructure.PromptPacks;
 using FluentAssertions;
@@ -243,16 +244,16 @@ components:
         var contentHash = hasher.Compute(components);
 
         // Create manifest
-        var manifestContent = $@"
-format_version: '1.0'
-id: {id}
-version: {version}
-name: Test Pack
-description: Test pack for unit tests
-content_hash: {contentHash.Value}
-created_at: 2024-01-15T10:30:00Z
-components:
-";
+        var manifestBuilder = new StringBuilder();
+        manifestBuilder.AppendLine();
+        manifestBuilder.AppendLine("format_version: '1.0'");
+        manifestBuilder.AppendLine($"id: {id}");
+        manifestBuilder.AppendLine($"version: {version}");
+        manifestBuilder.AppendLine("name: Test Pack");
+        manifestBuilder.AppendLine("description: Test pack for unit tests");
+        manifestBuilder.AppendLine($"content_hash: {contentHash.Value}");
+        manifestBuilder.AppendLine("created_at: 2024-01-15T10:30:00Z");
+        manifestBuilder.AppendLine("components:");
 
         foreach (var (path, content) in components)
         {
@@ -267,13 +268,12 @@ components:
                 _ => "custom",
             };
 
-            manifestContent += $@"
-  - path: {normalizedPath}
-    type: {componentType}
-";
+            manifestBuilder.AppendLine();
+            manifestBuilder.AppendLine($"  - path: {normalizedPath}");
+            manifestBuilder.AppendLine($"    type: {componentType}");
             if (componentType == "role" && parts.Length > 1)
             {
-                manifestContent += $"    role: {Path.GetFileNameWithoutExtension(parts[1])}\n";
+                manifestBuilder.AppendLine($"    role: {Path.GetFileNameWithoutExtension(parts[1])}");
             }
 
             // Create component file
@@ -282,7 +282,7 @@ components:
             File.WriteAllText(componentPath, content);
         }
 
-        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifestContent);
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifestBuilder.ToString());
         return packPath;
     }
 

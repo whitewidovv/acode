@@ -25,14 +25,16 @@ public sealed partial class TemplateEngine : ITemplateEngine
         }
 
         // Validate variable values don't exceed max length
-        foreach (var kvp in variables)
+        var oversizedVariable = variables
+            .Where(kvp => kvp.Value.Length > MaxVariableLength)
+            .Select(kvp => kvp.Key)
+            .FirstOrDefault();
+
+        if (oversizedVariable != null)
         {
-            if (kvp.Value.Length > MaxVariableLength)
-            {
-                throw new ArgumentException(
-                    $"Variable '{kvp.Key}' value exceeds maximum length of {MaxVariableLength} characters.",
-                    nameof(variables));
-            }
+            throw new ArgumentException(
+                $"Variable '{oversizedVariable}' value exceeds maximum length of {MaxVariableLength} characters.",
+                nameof(variables));
         }
 
         // Perform substitution with recursion detection
@@ -62,28 +64,31 @@ public sealed partial class TemplateEngine : ITemplateEngine
         }
 
         // Validate each variable name
-        foreach (Match match in matches)
+        var variableNames = matches.Cast<Match>()
+            .Select(match => match.Groups[1].Value)
+            .ToList();
+
+        var emptyVariables = variableNames.Where(string.IsNullOrWhiteSpace);
+        foreach (var emptyVariable in emptyVariables)
         {
-            var variableName = match.Groups[1].Value;
+            errors.Add(new ValidationError(
+                "TEMPLATE_EMPTY_VARIABLE",
+                "Template contains empty variable name {{}}",
+                null,
+                ValidationSeverity.Error));
+        }
 
-            if (string.IsNullOrWhiteSpace(variableName))
-            {
-                errors.Add(new ValidationError(
-                    "TEMPLATE_EMPTY_VARIABLE",
-                    "Template contains empty variable name {{}}",
-                    null,
-                    ValidationSeverity.Error));
-                continue;
-            }
+        var invalidVariables = variableNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Where(name => !GetVariableNamePattern().IsMatch(name));
 
-            if (!GetVariableNamePattern().IsMatch(variableName))
-            {
-                errors.Add(new ValidationError(
-                    "TEMPLATE_INVALID_VARIABLE_NAME",
-                    $"Template contains invalid variable name '{variableName}'. Variable names must contain only alphanumeric characters and underscores.",
-                    null,
-                    ValidationSeverity.Error));
-            }
+        foreach (var variableName in invalidVariables)
+        {
+            errors.Add(new ValidationError(
+                "TEMPLATE_INVALID_VARIABLE_NAME",
+                $"Template contains invalid variable name '{variableName}'. Variable names must contain only alphanumeric characters and underscores.",
+                null,
+                ValidationSeverity.Error));
         }
 
         // Check for empty variable names like {{}}
