@@ -45,12 +45,28 @@ This task covers status, diff, and log operations only. Branch operations are in
 - Renamed file → Detect rename, include old and new paths
 - Large log history → Stream results, respect limits
 
-### Assumptions
+---
 
-- Git is installed and accessible
-- Repository has at least one commit
-- User has read permissions on repository
-- Porcelain output formats are stable
+## Assumptions
+
+### Technical Assumptions
+1. **Git installed** - Git 2.20+ available in PATH
+2. **Porcelain output** - `--porcelain=v2` format is stable across git versions
+3. **Repository initialized** - Working directory is valid git repository
+4. **At least one commit** - Repository not empty (status/log/diff need commit history)
+5. **UTF-8 encoding** - Commit messages and file paths use UTF-8
+6. **Read permissions** - User has read access to .git/ directory and working tree
+7. **No concurrent modifications** - No other processes modifying repository during read
+8. **Reasonable repository size** - <100k files, <50k commits for performance targets
+9. **Standard git config** - No exotic git configurations that alter output format
+10. **Diff algorithm** - Default git diff algorithm (Myers) produces readable output
+
+### Operational Assumptions
+11. **Read-only operations** - Status/diff/log don't modify repository state
+12. **No network required** - All operations work offline (local-only/airgapped modes)
+13. **Filesystem responsive** - File system stat() calls complete in <10ms
+14. **Clean merges** - No in-progress merges or rebases (or handle gracefully)
+15. **No submodule complexity** - Submodules detected but not recursively analyzed
 
 ---
 
@@ -428,6 +444,165 @@ acode git log --limit 50
 - [ ] AC-034: Status <500ms for 10000 files
 - [ ] AC-035: Log <500ms for 100 commits
 - [ ] AC-036: Memory under limits
+
+---
+
+## Security Considerations
+
+### Threat 1: Path Injection in Diff Operations
+
+**Risk:** If file paths from user input are passed to `git diff` without validation, attacker can use path traversal to read files outside repository.
+
+**Attack Scenario:** Attacker provides path `../../../../etc/passwd` to diff operation, git attempts to diff system file, error message reveals file contents.
+
+**Mitigation:**
+
+```csharp
+public async Task<string> GetDiffAsync(string workingDir, DiffOptions options, CancellationToken ct = default)
+{
+    await EnsureRepositoryAsync(workingDir, ct);
+
+    // Validate all paths before passing to git
+    if (options.Paths != null)
+    {
+        foreach (var path in options.Paths)
+        {
+            var sanitized = _pathSanitizer.SanitizePath(path);
+            var normalized = Path.GetFullPath(Path.Combine(workingDir, sanitized));
+            if (!normalized.StartsWith(workingDir, StringComparison.Ordinal))
+                throw new GitException($"Path escapes repository: {path}", 0, null, workingDir, "GIT_INVALID_PATH");
+        }
+    }
+
+    // Safe to proceed with validated paths
+    var args = new List<string> { "diff" };
+    if (options.Paths != null)
+        args.AddRange(options.Paths.Select(p => _pathSanitizer.SanitizePath(p)));
+
+    var result = await ExecuteGitAsync(workingDir, args, ct);
+    return _diffRedactor.RedactDiff(result.StdOut);
+}
+```
+
+### Threat 2: Information Disclosure via Verbose Log Output
+
+**Risk:** Git log output may contain sensitive information in commit messages (issue numbers, internal project names, email addresses). If logged without redaction, this information is exposed.
+
+**Attack Scenario:** Agent logs full commit history including messages like "Fixed prod password: admin123". Logs are sent to external aggregator, attacker extracts credentials.
+
+**Mitigation:**
+
+```csharp
+public async Task<IReadOnlyList<GitCommit>> GetLogAsync(string workingDir, LogOptions options, CancellationToken ct = default)
+{
+    await EnsureRepositoryAsync(workingDir, ct);
+
+    var result = await ExecuteGitAsync(workingDir, BuildLogArgs(options), ct);
+    var commits = _parser.ParseLog(result.StdOut, LogFormat);
+
+    // Redact sensitive patterns from commit messages and bodies
+    var redactedCommits = commits.Select(c => new GitCommit
+    {
+        Sha = c.Sha,
+        ShortSha = c.ShortSha,
+        Author = c.Author,
+        AuthorEmail = RedactEmail(c.AuthorEmail), // mask@domain.com
+        AuthorDate = c.AuthorDate,
+        Committer = c.Committer,
+        CommitterEmail = RedactEmail(c.CommitterEmail),
+        CommitDate = c.CommitDate,
+        Subject = _messageRedactor.RedactSensitivePatterns(c.Subject),
+        Body = c.Body != null ? _messageRedactor.RedactSensitivePatterns(c.Body) : null,
+        ParentShas = c.ParentShas
+    }).ToList();
+
+    return redactedCommits;
+}
+
+private string RedactEmail(string email)
+{
+    if (string.IsNullOrEmpty(email)) return email;
+    var parts = email.Split('@');
+    if (parts.Length != 2) return email;
+    var localPart = parts[0].Length > 2 ? parts[0][..2] + "***" : "***";
+    return $"{localPart}@{parts[1]}";
+}
+```
+
+---
+
+## Troubleshooting
+
+### Issue 1: Status Shows Hundreds of Untracked Files Slowing Performance
+
+**Symptoms:**
+- `GetStatusAsync()` takes 3-5 seconds to complete
+- Repository has many untracked files (node_modules/, build/, .idea/)
+- Status output lists hundreds of untracked files
+- Performance acceptable on command-line git but slow via Acode
+
+**Solutions:**
+
+```bash
+# Solution 1: Add directories to .gitignore
+echo "node_modules/" >> .gitignore
+echo "build/" >> .gitignore
+echo ".idea/" >> .gitignore
+git add .gitignore
+git commit -m "chore: ignore untracked directories"
+
+# Solution 2: Use --untracked-files=no flag in GitService
+# Modify GetStatusAsync to add option for skipping untracked files
+args.Add("--untracked-files=no");
+
+# Solution 3: Clean untracked files if not needed
+git clean -fdx  # Remove all untracked files (DANGEROUS)
+git clean -fdn  # Dry run first to see what would be deleted
+```
+
+### Issue 2: Diff Output Truncated for Large Files
+
+**Symptoms:**
+- Diff for large file (>10MB) returns incomplete output
+- Error message: "diff too large"
+- Binary files shown as "Binary files differ" with no content
+
+**Solutions:**
+
+```bash
+# Solution 1: Use --stat for summary instead of full diff
+var args = new List<string> { "diff", "--stat" };
+# Returns file list with line counts, not full content
+
+# Solution 2: Set diff size limits
+git config diff.renameLimit 1000
+git config diff.renames true
+
+# Solution 3: Stream large diffs in chunks
+# Implement streaming parser instead of loading full output to memory
+```
+
+### Issue 3: Log Operation Missing Recent Commits
+
+**Symptoms:**
+- `GetLogAsync()` returns commits but missing most recent ones
+- Command-line `git log` shows all commits
+- Only returns commits from specific branch
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify HEAD is up to date
+git fetch origin
+git log origin/main  # Shows remote commits
+
+# Solution 2: Use --all flag to see all branches
+var args = new List<string> { "log", "--all", "--format=..." };
+
+# Solution 3: Check if detached HEAD
+git branch  # Shows current branch or "(HEAD detached at ...)"
+git checkout main  # Switch to main branch
+```
 
 ---
 
