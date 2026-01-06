@@ -105,6 +105,186 @@ This task delivers the following capabilities:
 
 ---
 
+## Use Cases
+
+### Use Case 1: DevBot Debugging Failed CI/CD Build
+
+**Persona:** DevBot (Automated CI/CD Agent)
+**Scenario:** Production build fails in CI pipeline with cryptic error
+
+**Before Artifact Collection:**
+- CI logs show "Build failed with exit code 1" without details
+- Developer must re-run build locally with verbose logging enabled
+- Reproduction attempts fail due to environment differences
+- Investigation time: 45 minutes average per build failure
+- Cost: $37.50 per incident × 48 incidents/year = $1,800/year per developer
+
+**After Artifact Collection:**
+- Run record captures full stdout/stderr, exit code, timing
+- Artifacts include build logs, test results, intermediate artifacts
+- Developer uses `acode run show <run-id> --artifacts` to see everything
+- Identifies issue in 5 minutes by reviewing artifact details
+- Investigation time: 5 minutes (89% reduction)
+- Cost: $4.16 per incident × 48 incidents/year = $200/year
+
+**Savings:** $1,600/year per developer, $16,000/year for 10-developer team
+
+**Commands Used:**
+```bash
+# CI pipeline captures run automatically
+acode task run build
+
+# Developer inspects failed run
+acode run list --status failed --last 24h
+acode run show <run-id>
+acode run show <run-id> --artifacts
+acode artifact cat <run-id> build.log
+```
+
+---
+
+### Use Case 2: Jordan Security Audit Trail Compliance
+
+**Persona:** Jordan (Security Engineer)
+**Scenario:** Annual SOC 2 audit requires proof of all automated code changes
+
+**Before Artifact Collection:**
+- Manual tracking of agent operations in spreadsheets
+- No automatic capture of what the agent did
+- Audit preparation requires 40 hours to reconstruct history
+- Missing data leads to audit findings requiring remediation
+- Cost: 40 hours × $100/hour = $4,000/audit
+
+**After Artifact Collection:**
+- Every agent operation automatically creates immutable run record
+- Artifacts include commands executed, files modified, results
+- Export bundle creates portable audit trail with signatures
+- Audit queries answered in minutes with `acode run list --export`
+- Audit preparation: 2 hours (95% reduction)
+- Cost: 2 hours × $100/hour = $200/audit
+
+**Savings:** $3,800/audit, $3,800/year assuming 1 audit/year
+
+**Commands Used:**
+```bash
+# Query all runs in audit period
+acode run list --from 2024-01-01 --to 2024-12-31 --format jsonl > audit.jsonl
+
+# Export bundle for specific session
+acode run export --session <session-id> --output audit-bundle.zip
+
+# Verify bundle integrity
+acode run verify audit-bundle.zip
+
+# List all file modifications
+acode run list --command "write" --format csv > file-changes.csv
+```
+
+---
+
+### Use Case 3: Alex Performance Optimization Analysis
+
+**Persona:** Alex (DevOps Engineer)
+**Scenario:** Identify slow operations to optimize agent performance
+
+**Before Artifact Collection:**
+- No historical performance data for agent operations
+- Optimization decisions based on guesswork and anecdotes
+- Performance regressions go unnoticed until severe
+- Manual timing instrumentation required for each investigation
+- Cost: 8 hours/month × $125/hour = $1,000/month investigation time
+
+**After Artifact Collection:**
+- Run records include start time, end time, duration for every operation
+- Historical data enables trend analysis and regression detection
+- Queries identify consistently slow operations: `acode run list --duration-gt 60s`
+- Performance dashboard shows P50/P95/P99 latencies
+- Investigation time: 30 minutes/month (94% reduction)
+- Cost: 30 min/month × $125/hour = $62.50/month
+
+**Savings:** $937.50/month, $11,250/year per engineer
+
+**Commands Used:**
+```bash
+# Find slowest operations
+acode run list --duration-gt 60s --limit 10
+
+# Analyze specific command performance
+acode run list --command "dotnet test" --format csv | \
+  awk -F',' '{sum+=$5; count++} END {print "Average:", sum/count "s"}'
+
+# Export performance data for visualization
+acode run list --from -7d --format jsonl | \
+  jq '.duration_ms' | \
+  python3 plot_distribution.py
+
+# Detect regressions by comparing time periods
+acode run stats --command "npm run build" --from -30d --to -15d
+acode run stats --command "npm run build" --from -15d --to now
+```
+
+---
+
+### Aggregate ROI Summary
+
+| Use Case | Persona | Annual Savings | Team Savings (10) |
+|----------|---------|----------------|-------------------|
+| CI/CD Build Debugging | DevBot | $1,600 | $16,000 |
+| Security Audit Compliance | Jordan | $3,800 | $3,800 |
+| Performance Optimization | Alex | $11,250 | $112,500 |
+| **Total** | | **$16,650** | **$132,300** |
+
+---
+
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **Run Record** | Immutable database record capturing a single command execution with metadata (ID, command, result, timing, artifacts). Each run represents one agent operation. |
+| **Artifact** | Output file, log, or data produced during a run (e.g., build.log, test-results.xml, generated code). Stored in artifact directory and referenced by run record. |
+| **Run ID** | Globally unique identifier (GUID/ULID) for a run record. Used to query, retrieve, and correlate artifacts. Format: `01HQRS7TGKMWXY123ABC456DEF`. |
+| **Artifact Collection** | Automated process of capturing artifacts during command execution. Includes stdout/stderr streaming, file copying, metadata extraction. Transparent to user. |
+| **Artifact Directory** | Structured filesystem location storing artifacts. Default: `.agent/artifacts/<run-id>/`. Includes manifest.json metadata file. See Task 021a for standards. |
+| **Run Store** | Persistence layer (SQLite database) storing run records. Provides CRUD operations, queries, and retention management. Implements IRunStore interface. |
+| **Run Inspection** | Process of querying and viewing historical run records and artifacts. Accessed via `acode run list`, `acode run show`, `acode artifact cat` commands. |
+| **Export Bundle** | Portable ZIP archive containing run records and artifacts. Used for sharing, auditing, or backup. Includes checksums and manifest. See Task 021c for format. |
+| **Retention Policy** | Rules determining how long run records and artifacts are kept. Configurable by age (days), count (max runs), size (GB), or status (keep failures longer). |
+| **Run Status** | Enumeration indicating execution outcome: Success (exit 0), Failure (exit ≠ 0), Timeout (exceeded limit), Cancelled (user/system interrupted). |
+| **Run Query** | Filtering operation to find runs matching criteria (status, time range, command pattern, session, duration). Returns paginated result set. |
+| **Artifact Reference** | Pointer from run record to artifact file. Includes path, size, checksum (SHA-256), and content type. Stored in run record metadata. |
+| **Run Duration** | Elapsed time for command execution in milliseconds. Calculated as `end_time - start_time`. Used for performance analysis and timeout enforcement. |
+| **Session Correlation** | Link between run record and parent session ID. Enables grouping runs by user interaction or CI pipeline. One session = many runs. |
+| **Artifact Manifest** | JSON file (`manifest.json`) in artifact directory listing all artifacts with metadata (name, size, checksum, timestamp). Enables integrity verification. |
+| **Run Metadata** | Additional key-value data attached to run record. Examples: agent version, workspace ID, task name, environment variables. Stored as JSON blob. |
+| **Stdout/Stderr** | Standard output and error streams from command execution. Captured as artifacts `stdout.txt` and `stderr.txt` with interleaved `combined.txt` for chronological view. |
+| **Exit Code** | Integer returned by command process indicating success (0) or failure (non-zero). Stored in run record for result determination. Null if timeout/cancel. |
+| **Truncation** | Process of limiting artifact size to prevent disk exhaustion. Default: 10MB per artifact. Truncated files include marker and byte count. See Task 007c for rules. |
+| **Redaction** | Removal of sensitive content (secrets, API keys, passwords) from artifacts before export or display. Pattern-based scanning with configurable rules. See Task 050e. |
+
+---
+
+## Out of Scope
+
+This task explicitly does NOT include the following capabilities (deferred to future tasks or other components):
+
+1. **Real-time Streaming UI** — No live-updating dashboard showing command progress. Use CLI polling or JSONL event stream (Task 010b) instead.
+2. **Artifact Search Content** — No full-text search inside artifact files. Query by run metadata only. Content search deferred to Epic 03 (Repo Intelligence).
+3. **Artifact Diffing** — No built-in comparison between artifacts from different runs. Users must export and use external diff tools.
+4. **Artifact Compression** — No automatic compression (gzip, zstd) of individual artifacts. Export bundles (Task 021c) are compressed, but stored artifacts are plain files.
+5. **Distributed Storage** — No object storage (S3, Azure Blob) integration. All artifacts stored on local filesystem. Cloud storage deferred to Epic 07 (Cloud Burst).
+6. **Artifact Deduplication** — No content-addressed storage to eliminate duplicate artifacts. Each run stores full artifacts even if identical to previous runs.
+7. **Artifact Annotations** — No user comments or tags on individual artifacts. Annotations on run records only, via metadata.
+8. **Artifact Preview** — No syntax highlighting, image thumbnails, or HTML rendering of artifacts. Use `acode artifact cat <run-id> <file>` and pipe to external viewers.
+9. **Retention Policies by Artifact Type** — No granular rules like "keep test results 7 days, keep logs 30 days". Single policy applies to entire run and all artifacts.
+10. **Concurrent Run Artifact Merging** — No automatic combining of artifacts from parallel task executions. Each run has isolated artifact directory.
+11. **Artifact Encryption at Rest** — No built-in encryption for stored artifacts. Use filesystem-level encryption (LUKS, FileVault, BitLocker) instead.
+12. **Artifact Signing** — No digital signatures on individual artifacts. Export bundles (Task 021c) include manifest checksum, but not per-artifact signatures.
+13. **Artifact Quota Enforcement per User** — No per-user or per-workspace storage limits. Global retention policy only. User quotas deferred to Epic 09 (Policy Engine).
+14. **Artifact Access Control Lists** — No fine-grained permissions on who can view artifacts. Workspace-level access only. ACLs deferred to Epic 09 (Safety/Policy).
+15. **Artifact Telemetry Aggregation** — No automatic metrics extraction from artifacts (e.g., test pass rates, code coverage). Manual analysis required. Telemetry deferred to Epic 10.
+
+---
+
 ## Functional Requirements
 
 ### Run Record Model (FR-021-01 through FR-021-20)
@@ -831,6 +1011,693 @@ acode runs optimize
 
 ---
 
+## Assumptions
+
+This task makes the following assumptions about the system, environment, dependencies, and operational context:
+
+### Technical Assumptions
+
+1. **Workspace Database Available** — Task 050 (Workspace Database) is implemented and accessible for run record persistence with SQLite as the default provider
+2. **Command Runner Integration** — Task 018 (Structured Command Runner) provides structured result objects including exit code, stdout, stderr, and timing information
+3. **Filesystem Access** — Local filesystem is writable for artifact storage with sufficient permissions (user read/write access to `.agent/artifacts/` directory)
+4. **GUID Generation** — System can generate globally unique identifiers (GUIDs/ULIDs) for run IDs with collision probability <1 in 10^18
+5. **File System Paths** — All file paths use forward slashes (`/`) for cross-platform compatibility, even on Windows (converted internally as needed)
+6. **Timestamp Precision** — System clock provides UTC timestamps with millisecond precision for accurate duration calculations and time-range queries
+7. **JSON Serialization** — .NET System.Text.Json is available for serializing run metadata, artifact manifests, and export bundle metadata
+8. **SHA-256 Hashing** — Cryptographic hash functions (SHA-256) are available for artifact integrity verification and checksum generation
+9. **Async I/O Support** — .NET async file I/O (FileStream with async) is used for non-blocking artifact writes and reads to prevent thread pool exhaustion
+10. **SQLite Version** — SQLite 3.35+ with FTS5 support is available (required for future artifact content search, but not used in this task)
+
+### Operational Assumptions
+
+11. **Artifact Directory Persistence** — `.agent/artifacts/` directory is persistent across agent restarts and not automatically cleaned by external processes
+12. **Retention Policy Configuration** — Retention policies are defined in `agent-config.yml` with defaults: 30 days for successful runs, 90 days for failures
+13. **Disk Space Monitoring** — External monitoring (not implemented in this task) alerts administrators before disk space exhaustion (e.g., <10% free)
+14. **Single Agent Instance** — Only one agent instance per workspace runs at a time (concurrent writes to run store protected by database locking)
+15. **User Permissions** — Agent process runs with user-level permissions, not elevated (no root/admin), with access limited to workspace directory
+16. **Artifact Size Limits** — Default artifact size limit is 10MB per file (configurable), enforced by Task 007c (Truncation Rules)
+17. **Retention Job Scheduling** — Retention cleanup runs daily at 2 AM local time (configurable), scheduled by background service (not implemented here)
+18. **Export Bundle Size** — Export bundles are limited to 1GB compressed size to prevent memory exhaustion during ZIP creation
+19. **Query Performance** — SQLite run store is indexed on `start_time`, `status`, and `session_id` columns for fast queries (indexes created by migration in Task 050a)
+20. **Workspace Scoping** — All run records and artifacts are scoped to a single workspace (no cross-workspace queries or artifact sharing)
+
+---
+
+## Security Considerations
+
+This section identifies security threats specific to artifact collection and run inspection, with complete C# mitigation implementations.
+
+---
+
+### Security Threat 1: Path Traversal in Artifact Storage
+
+**Risk:** Malicious command output contains paths like `../../etc/passwd`, allowing artifacts to be written outside artifact directory and overwrite system files.
+
+**Attack Scenario:**
+1. Attacker controls command output (e.g., malicious npm package generates files)
+2. Command stdout includes path: `../../../../../../tmp/malicious.sh`
+3. Artifact collector naively writes to calculated path
+4. Malicious script written to system temp directory
+5. Script executed by other process or scheduled task
+6. System compromise achieved
+
+**Mitigation:**
+
+Implement path validation and sanitization to ensure all artifact paths resolve within the artifact directory. Reject or sanitize any paths attempting traversal.
+
+```csharp
+// ArtifactPathValidator.cs
+using System;
+using System.IO;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class ArtifactPathValidator
+{
+    private readonly ILogger<ArtifactPathValidator> _logger;
+    private readonly string _artifactRootDirectory;
+
+    public ArtifactPathValidator(
+        ILogger<ArtifactPathValidator> logger,
+        string artifactRootDirectory)
+    {
+        _logger = logger;
+        _artifactRootDirectory = Path.GetFullPath(artifactRootDirectory); // Normalize root
+    }
+
+    public (bool IsValid, string SanitizedPath) ValidateAndSanitize(string runId, string relativePath)
+    {
+        // Remove dangerous characters
+        var sanitized = relativePath
+            .Replace("..", "__")          // Replace path traversal attempts
+            .Replace(":", "_")            // Remove drive letter colons (Windows)
+            .Replace("|", "_")            // Remove pipe characters
+            .Replace("<", "_")            // Remove redirection
+            .Replace(">", "_")
+            .Replace("\"", "_")
+            .Replace("*", "_")
+            .Replace("?", "_");
+
+        // Construct full path: root/runId/sanitizedRelativePath
+        var runDirectory = Path.Combine(_artifactRootDirectory, runId);
+        var fullPath = Path.Combine(runDirectory, sanitized);
+        var normalizedPath = Path.GetFullPath(fullPath);
+
+        // CRITICAL: Verify the normalized path is still inside artifact root
+        if (!normalizedPath.StartsWith(_artifactRootDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogError(
+                "Path traversal attempt detected: {OriginalPath} -> {NormalizedPath}. " +
+                "Path escapes artifact root: {ArtifactRoot}",
+                relativePath, normalizedPath, _artifactRootDirectory);
+
+            return (false, null);
+        }
+
+        // Verify it's inside the run directory
+        if (!normalizedPath.StartsWith(runDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogError(
+                "Path attempts to escape run directory: {OriginalPath} -> {NormalizedPath}. " +
+                "Run directory: {RunDirectory}",
+                relativePath, normalizedPath, runDirectory);
+
+            return (false, null);
+        }
+
+        _logger.LogDebug(
+            "Artifact path validated: {OriginalPath} -> {SanitizedPath}",
+            relativePath, normalizedPath);
+
+        return (true, normalizedPath);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test path traversal prevention
+cat > test-artifact.txt << 'EOF'
+../../etc/passwd
+../../../tmp/malicious.sh
+C:\Windows\System32\malware.exe
+normal-file.log
+EOF
+
+# Attempt to collect artifacts with traversal paths
+acode artifact collect --run-id test-123 --file test-artifact.txt
+
+# Expected: Traversal paths rejected, normal-file.log accepted
+acode artifact list test-123
+# Expected: Only "normal-file.log" in artifacts
+
+# Check logs for rejection
+acode log query --message "Path traversal attempt detected" --last 5m
+# Expected: Logs show rejected paths with details
+```
+
+---
+
+### Security Threat 2: Sensitive Data Exposure in Artifacts
+
+**Risk:** Artifacts contain secrets (API keys, passwords, tokens) that are exported in bundles or displayed in CLI, leading to credential leakage.
+
+**Attack Scenario:**
+1. Build process includes API key in environment variable
+2. Command stdout logs: `Using API_KEY=sk-abc123def456...`
+3. Artifact collector captures full stdout
+4. User exports bundle: `acode run export --run test-456 --output bundle.zip`
+5. Bundle shared with teammate via Slack/email
+6. Attacker intercepts bundle, extracts API key
+7. Attacker uses key to access production API
+
+**Mitigation:**
+
+Implement content redaction scanner that detects and masks sensitive patterns in artifact content before storage or export.
+
+```csharp
+// SensitiveContentRedactor.cs
+using System;
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class SensitiveContentRedactor
+{
+    private readonly ILogger<SensitiveContentRedactor> _logger;
+
+    // Regex patterns for common secret formats
+    private static readonly List<(Regex Pattern, string Name)> SecretPatterns = new()
+    {
+        (new Regex(@"(?i)(api[_-]?key|apikey)\s*[:=]\s*['""]?([a-z0-9_\-]{20,})['""]?", RegexOptions.Compiled), "API Key"),
+        (new Regex(@"(?i)(password|passwd|pwd)\s*[:=]\s*['""]?([^\s'"";]{8,})['""]?", RegexOptions.Compiled), "Password"),
+        (new Regex(@"(?i)(token|auth[_-]?token)\s*[:=]\s*['""]?([a-z0-9_\-\.]{20,})['""]?", RegexOptions.Compiled), "Auth Token"),
+        (new Regex(@"(?i)(secret[_-]?key|secret)\s*[:=]\s*['""]?([a-z0-9_\-]{16,})['""]?", RegexOptions.Compiled), "Secret Key"),
+        (new Regex(@"sk-[a-zA-Z0-9]{48}", RegexOptions.Compiled), "OpenAI API Key"),
+        (new Regex(@"ghp_[a-zA-Z0-9]{36}", RegexOptions.Compiled), "GitHub Personal Access Token"),
+        (new Regex(@"-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----", RegexOptions.Compiled), "Private Key"),
+        (new Regex(@"(?i)(aws[_-]?access[_-]?key[_-]?id)\s*[:=]\s*['""]?([A-Z0-9]{20})['""]?", RegexOptions.Compiled), "AWS Access Key"),
+        (new Regex(@"(?i)(aws[_-]?secret[_-]?access[_-]?key)\s*[:=]\s*['""]?([A-Za-z0-9/+=]{40})['""]?", RegexOptions.Compiled), "AWS Secret Key"),
+    };
+
+    public SensitiveContentRedactor(ILogger<SensitiveContentRedactor> logger)
+    {
+        _logger = logger;
+    }
+
+    public (string RedactedContent, int RedactionCount) Redact(string content, string artifactPath)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return (content, 0);
+        }
+
+        var redacted = content;
+        var totalRedactions = 0;
+
+        foreach (var (pattern, name) in SecretPatterns)
+        {
+            var matches = pattern.Matches(redacted);
+            if (matches.Count > 0)
+            {
+                _logger.LogWarning(
+                    "Detected {Count} {SecretType} pattern(s) in artifact: {Path}. Redacting.",
+                    matches.Count, name, artifactPath);
+
+                redacted = pattern.Replace(redacted, match =>
+                {
+                    // Keep the key name, redact the value
+                    var keyPart = match.Groups[1].Value;
+                    var valuePart = match.Groups.Count > 2 ? match.Groups[2].Value : match.Value;
+
+                    // Show first 4 chars, redact rest
+                    var preview = valuePart.Length > 4
+                        ? valuePart.Substring(0, 4) + "***REDACTED***"
+                        : "***REDACTED***";
+
+                    return match.Groups.Count > 2
+                        ? $"{keyPart}={preview}"
+                        : preview;
+                });
+
+                totalRedactions += matches.Count;
+            }
+        }
+
+        if (totalRedactions > 0)
+        {
+            _logger.LogInformation(
+                "Artifact redaction complete: {Path}. Total redactions: {Count}",
+                artifactPath, totalRedactions);
+        }
+
+        return (redacted, totalRedactions);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Create artifact with secrets
+cat > test-secrets.log << 'EOF'
+Connecting with API_KEY=sk-abc123def456ghi789jkl012mno345pqr678stu901vwx234
+Password: SuperSecret123!
+GitHub Token: ghp_1234567890abcdefghijklmnopqrstuv12345
+EOF
+
+# Collect artifact (automatic redaction)
+acode artifact collect --run-id test-789 --file test-secrets.log
+
+# Verify redaction
+acode artifact cat test-789 test-secrets.log
+# Expected:
+# Connecting with API_KEY=sk-a***REDACTED***
+# Password: Supe***REDACTED***
+# GitHub Token: ghp_***REDACTED***
+
+# Check redaction audit log
+acode log query --message "Detected.*pattern.*Redacting" --last 5m
+# Expected: Shows 3 redactions (API Key, Password, GitHub Token)
+```
+
+---
+
+### Security Threat 3: Denial of Service via Large Artifacts
+
+**Risk:** Malicious command generates massive output (GB-sized logs, infinite loops), filling disk and causing system-wide failures.
+
+**Attack Scenario:**
+1. Malicious npm package includes postinstall script: `while true; do echo "AAAA..."; done`
+2. Command runner executes script, stdout produces infinite output
+3. Artifact collector attempts to capture all stdout
+4. Disk fills to 100% capacity
+5. Database writes fail, agent crashes
+6. System becomes unresponsive
+
+**Mitigation:**
+
+Implement size limits and quota enforcement at multiple levels: per-artifact, per-run, and workspace-wide. Truncate or reject artifacts exceeding limits.
+
+```csharp
+// ArtifactSizeEnforcer.cs
+using System;
+using System.IO;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class ArtifactSizeEnforcer
+{
+    private readonly ILogger<ArtifactSizeEnforcer> _logger;
+    private readonly long _maxArtifactSizeBytes;
+    private readonly long _maxRunTotalSizeBytes;
+
+    public ArtifactSizeEnforcer(
+        ILogger<ArtifactSizeEnforcer> logger,
+        long maxArtifactSizeBytes = 10 * 1024 * 1024,      // 10MB per artifact
+        long maxRunTotalSizeBytes = 100 * 1024 * 1024)     // 100MB per run
+    {
+        _logger = logger;
+        _maxArtifactSizeBytes = maxArtifactSizeBytes;
+        _maxRunTotalSizeBytes = maxRunTotalSizeBytes;
+    }
+
+    public async Task<(bool IsAccepted, long BytesWritten, bool WasTruncated)> WriteWithSizeLimit(
+        Stream sourceStream,
+        string destinationPath,
+        long currentRunTotalSize)
+    {
+        // Check if run already exceeds total size limit
+        if (currentRunTotalSize >= _maxRunTotalSizeBytes)
+        {
+            _logger.LogError(
+                "Run total size limit exceeded: {CurrentSize}MB >= {MaxSize}MB. " +
+                "Artifact rejected: {Path}",
+                currentRunTotalSize / (1024.0 * 1024.0),
+                _maxRunTotalSizeBytes / (1024.0 * 1024.0),
+                destinationPath);
+
+            return (false, 0, false);
+        }
+
+        var remainingRunQuota = _maxRunTotalSizeBytes - currentRunTotalSize;
+        var effectiveLimit = Math.Min(_maxArtifactSizeBytes, remainingRunQuota);
+
+        using var destinationStream = new FileStream(
+            destinationPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 8192,
+            useAsync: true);
+
+        var buffer = new byte[8192];
+        long totalBytesWritten = 0;
+        var wasTruncated = false;
+
+        int bytesRead;
+        while ((bytesRead = await sourceStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+        {
+            var bytesToWrite = bytesRead;
+
+            // Check if writing these bytes would exceed limit
+            if (totalBytesWritten + bytesToWrite > effectiveLimit)
+            {
+                // Write only up to the limit
+                bytesToWrite = (int)(effectiveLimit - totalBytesWritten);
+                wasTruncated = true;
+            }
+
+            await destinationStream.WriteAsync(buffer, 0, bytesToWrite);
+            totalBytesWritten += bytesToWrite;
+
+            if (wasTruncated)
+            {
+                // Append truncation marker
+                var marker = System.Text.Encoding.UTF8.GetBytes(
+                    $"\n\n[TRUNCATED: Artifact exceeded {effectiveLimit / (1024.0 * 1024.0):F2}MB limit. " +
+                    $"Original size unknown. Truncated at {totalBytesWritten} bytes.]\n");
+
+                await destinationStream.WriteAsync(marker, 0, marker.Length);
+                totalBytesWritten += marker.Length;
+
+                _logger.LogWarning(
+                    "Artifact truncated due to size limit: {Path}. " +
+                    "Limit: {LimitMB}MB, Written: {WrittenMB}MB",
+                    destinationPath,
+                    effectiveLimit / (1024.0 * 1024.0),
+                    totalBytesWritten / (1024.0 * 1024.0));
+
+                break;
+            }
+        }
+
+        _logger.LogDebug(
+            "Artifact written: {Path}. Size: {SizeMB}MB, Truncated: {Truncated}",
+            destinationPath,
+            totalBytesWritten / (1024.0 * 1024.0),
+            wasTruncated);
+
+        return (true, totalBytesWritten, wasTruncated);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Generate large file (15MB, exceeds 10MB limit)
+dd if=/dev/urandom of=large-artifact.bin bs=1M count=15
+
+# Attempt to collect large artifact
+acode artifact collect --run-id test-size --file large-artifact.bin
+
+# Verify truncation
+ls -lh .agent/artifacts/test-size/large-artifact.bin
+# Expected: ~10MB (truncated)
+
+tail -n 5 .agent/artifacts/test-size/large-artifact.bin
+# Expected: [TRUNCATED: Artifact exceeded 10.00MB limit...]
+
+# Check logs
+acode log query --message "Artifact truncated" --last 5m
+# Expected: Warning log with size details
+```
+
+---
+
+### Security Threat 4: Unauthorized Access to Run Records
+
+**Risk:** User queries run records from other workspaces or sessions, accessing sensitive command history and artifacts from other projects.
+
+**Attack Scenario:**
+1. Attacker knows or guesses run ID from another workspace
+2. Executes: `acode run show <other-workspace-run-id>`
+3. CLI does not validate workspace ownership
+4. Attacker sees sensitive commands, API endpoints, infrastructure details
+5. Attacker downloads artifacts: `acode artifact cat <other-run-id> credentials.json`
+6. Credentials stolen, lateral movement to other systems
+
+**Mitigation:**
+
+Implement workspace scoping in all run queries and artifact access operations. Validate that requested run belongs to current workspace before returning data.
+
+```csharp
+// WorkspaceScopedRunStore.cs
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class WorkspaceScopedRunStore : IRunStore
+{
+    private readonly IRunStore _innerStore;
+    private readonly IWorkspaceContext _workspaceContext;
+    private readonly ILogger<WorkspaceScopedRunStore> _logger;
+
+    public WorkspaceScopedRunStore(
+        IRunStore innerStore,
+        IWorkspaceContext workspaceContext,
+        ILogger<WorkspaceScopedRunStore> logger)
+    {
+        _innerStore = innerStore;
+        _workspaceContext = workspaceContext;
+        _logger = logger;
+    }
+
+    public async Task<RunRecord> GetByIdAsync(string runId)
+    {
+        var run = await _innerStore.GetByIdAsync(runId);
+
+        if (run == null)
+        {
+            return null;
+        }
+
+        // CRITICAL: Verify run belongs to current workspace
+        if (run.WorkspaceId != _workspaceContext.CurrentWorkspaceId)
+        {
+            _logger.LogWarning(
+                "Unauthorized access attempt: User in workspace {CurrentWorkspace} " +
+                "attempted to access run {RunId} from workspace {RunWorkspace}",
+                _workspaceContext.CurrentWorkspaceId,
+                runId,
+                run.WorkspaceId);
+
+            // Return null (not found) rather than permission error
+            // Prevents workspace enumeration attacks
+            return null;
+        }
+
+        return run;
+    }
+
+    public async Task<IReadOnlyList<RunRecord>> QueryAsync(RunQuery query)
+    {
+        // CRITICAL: Force workspace filter on all queries
+        var scopedQuery = query with
+        {
+            WorkspaceId = _workspaceContext.CurrentWorkspaceId
+        };
+
+        _logger.LogDebug(
+            "Run query scoped to workspace: {WorkspaceId}",
+            _workspaceContext.CurrentWorkspaceId);
+
+        return await _innerStore.QueryAsync(scopedQuery);
+    }
+
+    public async Task SaveAsync(RunRecord run)
+    {
+        // Ensure run is tagged with current workspace on creation
+        if (string.IsNullOrEmpty(run.WorkspaceId))
+        {
+            run = run with { WorkspaceId = _workspaceContext.CurrentWorkspaceId };
+        }
+
+        // Verify workspace match
+        if (run.WorkspaceId != _workspaceContext.CurrentWorkspaceId)
+        {
+            throw new InvalidOperationException(
+                $"Cannot save run {run.Id} with workspace {run.WorkspaceId} " +
+                $"when current workspace is {_workspaceContext.CurrentWorkspaceId}");
+        }
+
+        await _innerStore.SaveAsync(run);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# In workspace A, create a run
+cd /workspace-a
+acode task run build
+# Note the run ID from output: run-abc-123
+
+# Switch to workspace B
+cd /workspace-b
+
+# Attempt to access workspace A's run
+acode run show run-abc-123
+# Expected: Error - "Run not found" (not permission denied, prevents enumeration)
+
+acode artifact cat run-abc-123 build.log
+# Expected: Error - "Run not found"
+
+# Verify current workspace runs are accessible
+acode run list
+# Expected: Only shows runs from workspace B
+
+# Check audit logs for unauthorized access attempt
+acode log query --message "Unauthorized access attempt" --last 5m
+# Expected: Warning log showing workspace mismatch
+```
+
+---
+
+### Security Threat 5: Artifact Tampering and Integrity Violation
+
+**Risk:** Attacker modifies artifacts on disk after collection, altering evidence for audit trails or injecting malicious content into exported bundles.
+
+**Attack Scenario:**
+1. Agent collects artifacts for security audit run
+2. Attacker gains filesystem access (compromised user account)
+3. Modifies `.agent/artifacts/<run-id>/build.log` to remove evidence of malicious activity
+4. Audit export bundle created: `acode run export --run audit-run-456`
+5. Bundle contains tampered artifacts, audit finds no issues
+6. Security incident goes undetected
+
+**Mitigation:**
+
+Implement artifact integrity verification using checksums. Store SHA-256 hashes in artifact manifest and database. Verify checksums before displaying or exporting artifacts.
+
+```csharp
+// ArtifactIntegrityVerifier.cs
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class ArtifactIntegrityVerifier
+{
+    private readonly ILogger<ArtifactIntegrityVerifier> _logger;
+
+    public ArtifactIntegrityVerifier(ILogger<ArtifactIntegrityVerifier> logger)
+    {
+        _logger = logger;
+    }
+
+    public async Task<string> ComputeChecksumAsync(string filePath)
+    {
+        using var sha256 = SHA256.Create();
+        using var fileStream = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 8192,
+            useAsync: true);
+
+        var hashBytes = await sha256.ComputeHashAsync(fileStream);
+        return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+    }
+
+    public async Task<(bool IsValid, string ActualChecksum)> VerifyAsync(
+        string filePath,
+        string expectedChecksum)
+    {
+        if (!File.Exists(filePath))
+        {
+            _logger.LogError(
+                "Integrity verification failed: File not found: {Path}",
+                filePath);
+
+            return (false, null);
+        }
+
+        var actualChecksum = await ComputeChecksumAsync(filePath);
+
+        // Use constant-time comparison to prevent timing attacks
+        var isValid = ConstantTimeEquals(actualChecksum, expectedChecksum);
+
+        if (!isValid)
+        {
+            _logger.LogError(
+                "Artifact integrity violation detected: {Path}. " +
+                "Expected checksum: {Expected}, Actual: {Actual}",
+                filePath, expectedChecksum, actualChecksum);
+        }
+        else
+        {
+            _logger.LogDebug(
+                "Artifact integrity verified: {Path}. Checksum: {Checksum}",
+                filePath, actualChecksum);
+        }
+
+        return (isValid, actualChecksum);
+    }
+
+    private static bool ConstantTimeEquals(string a, string b)
+    {
+        if (a == null || b == null || a.Length != b.Length)
+        {
+            return false;
+        }
+
+        var result = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            result |= a[i] ^ b[i];
+        }
+
+        return result == 0;
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Collect artifact with checksum
+echo "Original content" > test.txt
+acode artifact collect --run-id test-integrity --file test.txt
+
+# Verify original checksum
+acode artifact verify test-integrity test.txt
+# Expected: ✓ Integrity verified (checksum matches)
+
+# Tamper with artifact
+echo "Modified content" > .agent/artifacts/test-integrity/test.txt
+
+# Attempt to verify tampered artifact
+acode artifact verify test-integrity test.txt
+# Expected: ✗ Integrity violation detected (checksum mismatch)
+
+# Attempt to export bundle with tampered artifact
+acode run export --run test-integrity --output bundle.zip
+# Expected: Error - "Artifact integrity violation: test.txt"
+
+# Check audit logs
+acode log query --message "integrity violation" --last 5m
+# Expected: Error log with expected vs actual checksums
+```
+
+---
+
 ## Best Practices
 
 ### Artifact Collection
@@ -853,6 +1720,359 @@ acode runs optimize
 10. **Size limits per run** - Prevent individual runs from consuming all storage
 11. **Cleanup on failure** - Remove partial artifacts on failed runs
 12. **Export for archival** - Bundle runs for long-term storage
+
+---
+
+## Troubleshooting
+
+This section provides solutions to common issues encountered with artifact collection and run inspection.
+
+---
+
+### Issue 1: Run Records Not Being Created
+
+**Symptoms:**
+- Commands execute successfully but no run records appear in `acode run list`
+- Database query returns empty result set
+- Artifact directory `.agent/artifacts/` is empty or missing runs
+- No run ID returned after command execution
+
+**Causes:**
+1. Run store not initialized or database connection failed
+2. Workspace database (Task 050) not set up correctly
+3. Command runner (Task 018) not integrated with artifact collector
+4. Database write permissions denied
+5. Run store disabled in configuration
+6. Exception during run record creation silently caught
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify database exists and is accessible
+ls -la .agent/workspace.db
+# Expected: File exists with read/write permissions
+
+# Solution 2: Check database connection
+acode db status
+# Expected: Connected, migrations applied
+
+# Solution 3: Enable debug logging
+export ACODE_LOG_LEVEL=Debug
+acode task run test
+# Check logs for "RunStore.SaveAsync" entries
+
+# Solution 4: Verify run store configuration
+acode config get runs.store.enabled
+# Expected: true
+
+# If disabled, enable it:
+acode config set runs.store.enabled true
+
+# Solution 5: Check database permissions
+chmod 644 .agent/workspace.db
+chmod 755 .agent/
+
+# Solution 6: Test database write directly
+acode db query "INSERT INTO runs (id, command, status) VALUES ('test-1', 'test', 'Success')"
+# Expected: 1 row inserted
+
+# Solution 7: Check for database locks
+lsof .agent/workspace.db
+# Expected: Only acode process, or empty
+
+# Kill stale locks if found:
+kill -9 <PID>
+```
+
+---
+
+### Issue 2: Artifacts Not Being Collected from Command Output
+
+**Symptoms:**
+- Run record exists but artifact count is 0
+- `acode artifact list <run-id>` shows no artifacts
+- `stdout.txt` and `stderr.txt` files missing from artifact directory
+- Command produces output but artifacts directory is empty
+
+**Causes:**
+1. Artifact collection disabled in configuration
+2. Command output too large, exceeds size limits, silently truncated to zero
+3. Artifact directory not writable
+4. Path traversal validation rejected all artifact paths
+5. Content redaction removed all content (entire artifact was secrets)
+6. Artifact collector not subscribed to command output streams
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify artifact collection is enabled
+acode config get runs.artifacts.enabled
+# Expected: true
+
+# If disabled, enable it:
+acode config set runs.artifacts.enabled true
+
+# Solution 2: Check artifact size limits
+acode config get runs.artifacts.max-size-mb
+# Expected: 10 or higher
+
+# Increase if needed:
+acode config set runs.artifacts.max-size-mb 50
+
+# Solution 3: Verify artifact directory permissions
+ls -ld .agent/artifacts/
+# Expected: drwxr-xr-x (755)
+
+chmod 755 .agent/artifacts/
+
+# Solution 4: Check for path traversal rejections in logs
+acode log query --message "Path traversal attempt" --last 1h
+# If found, review artifact paths for "../" patterns
+
+# Solution 5: Test artifact collection manually
+echo "test output" | acode artifact collect --run-id test-manual --name test.txt
+acode artifact list test-manual
+# Expected: test.txt appears
+
+# Solution 6: Check redaction is not removing everything
+acode config get runs.artifacts.redaction-patterns
+# Review patterns, ensure not too aggressive
+
+# Temporarily disable redaction for testing:
+acode config set runs.artifacts.redaction-enabled false
+
+# Solution 7: Enable verbose command output
+acode --verbose task run test 2>&1 | tee debug.log
+# Review debug.log for "ArtifactCollector" entries
+```
+
+---
+
+### Issue 3: Query Performance Degradation with Large Run History
+
+**Symptoms:**
+- `acode run list` takes >5 seconds to return results
+- Database query timeouts after 30 seconds
+- High CPU usage during run queries
+- Paginated queries slow even with limits
+
+**Causes:**
+1. Missing database indexes on frequently queried columns
+2. Run table has millions of rows without retention policy
+3. Full table scans due to unoptimized queries
+4. Database fragmentation after many deletions
+5. Artifact directory has thousands of subdirectories causing filesystem slowness
+6. SQLite journal mode is DELETE instead of WAL
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify indexes exist
+acode db query "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='runs'"
+# Expected: idx_runs_start_time, idx_runs_status, idx_runs_session_id
+
+# If missing, create indexes (should be in migration, but can add manually):
+acode db query "CREATE INDEX IF NOT EXISTS idx_runs_start_time ON runs(start_time DESC)"
+acode db query "CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status)"
+acode db query "CREATE INDEX IF NOT EXISTS idx_runs_session_id ON runs(session_id)"
+
+# Solution 2: Check row count
+acode db query "SELECT COUNT(*) FROM runs"
+# If >100,000, implement retention policy
+
+# Solution 3: Configure aggressive retention
+acode config set runs.retention.max-age-days 30
+acode config set runs.retention.max-count 10000
+
+# Trigger manual retention cleanup:
+acode run cleanup --dry-run
+acode run cleanup --confirm
+
+# Solution 4: Vacuum database to reclaim space
+acode db vacuum
+# Expected: Database size reduced, fragmentation removed
+
+# Solution 5: Enable WAL mode for better concurrency
+acode db query "PRAGMA journal_mode=WAL"
+# Expected: wal
+
+# Solution 6: Add composite indexes for common queries
+acode db query "CREATE INDEX IF NOT EXISTS idx_runs_status_time ON runs(status, start_time DESC)"
+
+# Solution 7: Use query filtering to reduce result set
+acode run list --status failed --from -7d --limit 50
+# Much faster than full scan
+```
+
+---
+
+### Issue 4: Export Bundle Creation Fails with "File Too Large"
+
+**Symptoms:**
+- `acode run export` fails with error message
+- Error: "Export bundle exceeds 1GB limit"
+- ZIP creation process terminated mid-creation
+- Export bundle file is corrupt or partially created
+
+**Causes:**
+1. Run has >1GB of artifacts (e.g., large build outputs, Docker images)
+2. Export includes multiple runs with combined size >1GB
+3. Compression ineffective for binary artifacts
+4. Temporary directory insufficient space during ZIP creation
+5. Export process out of memory
+
+**Solutions:**
+
+```bash
+# Solution 1: Check artifact sizes before export
+acode artifact summary <run-id>
+# Shows total size, count, breakdown by file
+
+# Solution 2: Export individual runs instead of session
+acode run export --run <run-id> --output single-run.zip
+# Avoids bundling multiple large runs
+
+# Solution 3: Exclude large artifacts from export
+acode run export --run <run-id> --exclude "*.bin,*.iso,*.tar" --output filtered.zip
+
+# Solution 4: Use compression level 0 (store only) for speed
+acode run export --run <run-id> --compression-level 0 --output uncompressed.zip
+
+# Solution 5: Split into multiple bundles by time range
+acode run export --from 2024-01-01 --to 2024-01-15 --output part1.zip
+acode run export --from 2024-01-16 --to 2024-01-31 --output part2.zip
+
+# Solution 6: Clean up large artifacts before export
+acode artifact delete <run-id> large-file.bin
+acode run export --run <run-id> --output cleaned.zip
+
+# Solution 7: Increase export size limit in config
+acode config set runs.export.max-size-gb 5
+# Warning: May cause memory issues
+
+# Solution 8: Free up temp directory space
+df -h /tmp
+# Ensure >5GB free
+
+# Clean temp files:
+rm -rf /tmp/acode-export-*
+```
+
+---
+
+### Issue 5: Artifact Integrity Verification Fails After System Restore
+
+**Symptoms:**
+- `acode artifact verify` reports checksum mismatches
+- Many artifacts show integrity violations
+- Error: "Expected checksum: abc123, Actual: def456"
+- Artifacts appear intact but verification fails
+
+**Causes:**
+1. Backup/restore process modified file timestamps, triggering re-computation
+2. Filesystem corruption during system crash
+3. Backup software altered line endings (LF ↔ CRLF) in text files
+4. Checksums stored in database but artifacts restored from older backup
+5. Database and artifact directory restored from different points in time
+6. Symbolic links resolved differently after restore
+
+**Solutions:**
+
+```bash
+# Solution 1: Recompute all checksums from current artifacts
+acode artifact recompute-checksums --all
+# Warning: This trusts current artifact content as source of truth
+
+# Solution 2: Verify database and artifact timestamps match
+acode db query "SELECT id, created_at FROM runs ORDER BY created_at DESC LIMIT 10"
+ls -lt .agent/artifacts/ | head -10
+# Check if timestamps are consistent
+
+# Solution 3: Restore artifacts and database together
+# Always backup together:
+tar czf backup.tar.gz .agent/workspace.db .agent/artifacts/
+
+# Restore together:
+tar xzf backup.tar.gz -C .agent/
+
+# Solution 4: Check for line ending changes
+file .agent/artifacts/*/stdout.txt | grep CRLF
+# If found, standardize line endings:
+find .agent/artifacts/ -name "*.txt" -exec dos2unix {} \;
+
+# Then recompute checksums:
+acode artifact recompute-checksums --run <run-id>
+
+# Solution 5: Compare database run count vs artifact directories
+run_count=$(acode db query "SELECT COUNT(*) FROM runs" --format csv | tail -1)
+artifact_dirs=$(ls .agent/artifacts/ | wc -l)
+echo "Runs in DB: $run_count, Artifact directories: $artifact_dirs"
+# If mismatch, determine which is authoritative and sync
+
+# Solution 6: Use export bundles for archival instead
+# Bundles include checksums in manifest, self-verifying:
+acode run export --all --output full-backup-$(date +%Y%m%d).zip
+
+# Solution 7: Disable strict verification temporarily
+acode config set runs.artifacts.strict-verification false
+# Allows access despite checksum mismatches (use with caution)
+```
+
+---
+
+### Issue 6: Redaction Patterns Too Aggressive, Removing Valid Content
+
+**Symptoms:**
+- Artifacts displayed as `***REDACTED***` for non-sensitive content
+- Legitimate configuration values masked in exports
+- Error messages in logs show: "Detected 50+ redactions"
+- Exported bundles unusable due to excessive redaction
+
+**Causes:**
+1. Redaction regex patterns too broad (e.g., matching all `key=` patterns)
+2. Custom patterns added without sufficient testing
+3. False positive matches on common words (e.g., "secret" in "secretariat")
+4. Redaction applied to metadata fields unnecessarily
+5. Redaction enabled for internal-only artifacts that won't be shared
+
+**Solutions:**
+
+```bash
+# Solution 1: Review current redaction patterns
+acode config get runs.artifacts.redaction-patterns
+# Check for overly broad patterns
+
+# Solution 2: Test patterns against sample data
+echo "API_KEY=abc123 and secret meetings" > test.txt
+acode artifact collect --run-id test-redaction --file test.txt
+acode artifact cat test-redaction test.txt
+# Review what was redacted
+
+# Solution 3: Adjust patterns to be more specific
+# Bad pattern: key=.*
+# Good pattern: (?i)api[_-]?key[:=]\s*[a-z0-9]{20,}
+
+acode config set runs.artifacts.redaction-patterns "[
+  '(?i)api[_-]?key[:=]\\s*[a-z0-9]{20,}',
+  '(?i)password[:=]\\s*[^\\s]{8,}',
+  'sk-[a-zA-Z0-9]{48}'
+]"
+
+# Solution 4: Use word boundaries to prevent partial matches
+# Bad: "secret" matches "secretariat"
+# Good: "\bsecret\b" matches only full word "secret"
+
+# Solution 5: Disable redaction for specific runs (internal use)
+acode artifact collect --run-id internal-debug --no-redaction --file debug.log
+
+# Solution 6: Use dry-run mode to preview redactions
+acode artifact preview-redaction --file test.log
+# Shows what would be redacted without actually redacting
+
+# Solution 7: Export with original (unredacted) content for authorized users
+acode run export --run <run-id> --no-redaction --output unredacted.zip
+# Requires confirmation: "Export contains unredacted secrets. Continue? (yes/no)"
+```
 
 ---
 
