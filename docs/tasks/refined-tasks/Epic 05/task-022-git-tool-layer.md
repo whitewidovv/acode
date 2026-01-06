@@ -48,12 +48,43 @@ This task defines the core Git service interface and shared infrastructure. Spec
 - Network timeout → Configurable timeout, retry with backoff
 - Merge conflict → Detect and report, block commit
 
-### Assumptions
+---
 
-- Git 2.20+ is installed on the system
-- System Git credentials are configured for remotes
-- Repository has at least one commit (not empty)
-- Working directory is within repository bounds
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git availability** - Git 2.20+ is installed and accessible via PATH on all target systems
+2. **Repository initialized** - Working directory is within a valid Git repository with at least one commit
+3. **Commit history exists** - Repository is not empty (has at least initial commit for log operations)
+4. **Command execution layer available** - Task 018 command execution infrastructure is functional and tested
+5. **Porcelain output stability** - Git porcelain output format (--porcelain=v2) remains stable across patch versions
+6. **UTF-8 encoding** - All file paths and commit messages use UTF-8 encoding
+7. **Shell escaping works** - Command execution layer properly escapes shell metacharacters
+8. **Process spawning reliable** - System can reliably spawn git child processes without resource exhaustion
+9. **Working directory writable** - User has write permissions to .git/ directory for local operations
+10. **Index lock handling** - Git index.lock file contention is rare and transient (retry once is sufficient)
+
+### Operational Assumptions
+
+11. **Credentials pre-configured** - System Git credentials are already configured via git-credential-store, SSH keys, or credential helper
+12. **Network available for remotes** - When in burst mode, network connectivity to git remotes is available and stable
+13. **No credential prompts** - Git credential helper is configured to never prompt interactively (breaks automation)
+14. **Reasonable repository size** - Repositories are <1GB, with <100k files, <50k commits for performance targets
+15. **Single user per repository** - Concurrent git operations from different Acode instances on same repository are rare
+16. **Clean working state** - Most operations assume no merge conflicts or rebase in progress
+17. **Standard branch names** - Default branch is "main" or "master" (configurable via .agent/config.yml)
+18. **Shallow clones acceptable** - Operations work with shallow clones (no --depth=1 assumptions)
+
+### Integration Assumptions
+
+19. **Mode resolver available** - Task 001 operating mode system is functional and mode transitions are rare mid-operation
+20. **Configuration accessible** - Task 002 .agent/config.yml is readable and parsed correctly
+21. **Workspace DB writable** - Task 011 workspace database is available for logging git operations
+22. **Artifact directory available** - Task 021 artifact collection can store git command output for debugging
+23. **Command timeout enforcement** - Task 018 command execution enforces timeouts and properly kills hung processes
+24. **Logging infrastructure ready** - Structured logging (ILogger) is available and properly configured
+25. **Exception serialization** - All exceptions can be serialized for cross-process logging
 
 ---
 
