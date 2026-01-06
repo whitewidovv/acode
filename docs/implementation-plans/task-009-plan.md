@@ -247,29 +247,42 @@ Task 009 Parent (Policy orchestration + Configuration)
 ## Progress Tracking
 
 ### Current Status
-- **Phase:** Phase 2 (Task 009b) - Routing Heuristics
-- **Next Action:** Phase 2.4 - Implement SingleModelStrategy
+- **Phase:** Phase 3 (Task 009c) - Fallback Rules
+- **Next Action:** Phase 3.1 - Implement FallbackHandler
 
 ### Metrics
-- **Commits:** 11
-- **Tests Written:** 33 (AgentRole: 7, RoleDefinition: 7, RoleRegistry: 12, RoutingRequest: 8, RoutingDecision: 6)
-- **Tests Passing:** 33/33 ✅
+- **Commits:** 15
+- **Tests Written:** 47 total
+  - AgentRole: 7
+  - RoleDefinition: 7
+  - RoleRegistry: 12
+  - RoutingRequest: 8
+  - RoutingDecision: 6
+  - SingleModelStrategy: 11 (includes override tests)
+  - RoleBasedStrategy: 13 (includes override tests)
+- **Tests Passing:** 47/47 ✅
 - **Code Quality:** 0 errors, 0 warnings
 
 ### Components Completed
-- ✅ AgentRole enum
-- ✅ RoleDefinition record
-- ✅ IRoleRegistry interface
-- ✅ RoleRegistry implementation (4 core roles)
-- ✅ RoutingRequest record
-- ✅ RoutingDecision record
-- ✅ IRoutingPolicy interface
-- ✅ RoutingConfig domain model
+- ✅ Task 009a: Planner/Coder/Reviewer Roles (COMPLETE)
+  - ✅ AgentRole enum
+  - ✅ RoleDefinition record
+  - ✅ IRoleRegistry interface
+  - ✅ RoleRegistry implementation (4 core roles)
+- ✅ Task 009b: Routing Heuristics + Overrides (COMPLETE)
+  - ✅ RoutingRequest record
+  - ✅ RoutingDecision record
+  - ✅ IRoutingPolicy interface
+  - ✅ RoutingConfig domain model
+  - ✅ IRoutingStrategy interface
+  - ✅ SingleModelStrategy implementation
+  - ✅ RoleBasedStrategy implementation
+  - ✅ User override handling in both strategies
 
 ### Next Steps
-- Phase 2.4: SingleModelStrategy (TDD)
-- Phase 2.5: RoleBasedStrategy (TDD)
-- Phase 2.6: User Override Handling
+- Phase 3.1: FallbackHandler (TDD)
+- Phase 3.2: Model Availability Checking
+- Phase 3.3: Operating Mode Constraint Validation
 
 ---
 
