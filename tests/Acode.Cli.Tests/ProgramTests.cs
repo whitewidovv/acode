@@ -5,6 +5,7 @@ namespace Acode.Cli.Tests;
 /// <summary>
 /// Tests for the CLI Program entry point.
 /// </summary>
+[Collection("Sequential")]
 public class ProgramTests
 {
     [Fact]
