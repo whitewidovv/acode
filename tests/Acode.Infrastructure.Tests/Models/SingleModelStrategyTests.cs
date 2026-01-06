@@ -178,4 +178,48 @@ public class SingleModelStrategyTests
         act.Should().Throw<ArgumentNullException>()
             .WithParameterName("request");
     }
+
+    [Fact]
+    public void GetModel_WithUserOverride_ReturnsOverrideModel()
+    {
+        // Arrange
+        var strategy = new SingleModelStrategy(_logger, _config);
+        var request = new RoutingRequest
+        {
+            Role = AgentRole.Planner,
+            UserOverride = "qwen2.5:32b",
+        };
+
+        // Act
+        var decision = strategy.GetModel(request);
+
+        // Assert
+        decision.ModelId.Should().Be("qwen2.5:32b");
+        decision.IsFallback.Should().BeFalse();
+        decision.Reason.Should().Contain("user override");
+        decision.Reason.Should().Contain("qwen2.5:32b");
+    }
+
+    [Fact]
+    public void GetModel_WithUserOverride_LogsOverrideDecision()
+    {
+        // Arrange
+        var strategy = new SingleModelStrategy(_logger, _config);
+        var request = new RoutingRequest
+        {
+            Role = AgentRole.Coder,
+            UserOverride = "mistral:7b",
+        };
+
+        // Act
+        var decision = strategy.GetModel(request);
+
+        // Assert
+        _logger.Received(1).Log(
+            LogLevel.Information,
+            Arg.Any<EventId>(),
+            Arg.Is<object>(o => o.ToString()!.Contains("mistral:7b") && o.ToString()!.Contains("override")),
+            null,
+            Arg.Any<Func<object, Exception?, string>>());
+    }
 }

@@ -42,6 +42,24 @@ public sealed class RoleBasedStrategy : IRoutingStrategy
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Check for user override first
+        if (request.HasUserOverride)
+        {
+            var overrideDecision = new RoutingDecision
+            {
+                ModelId = request.UserOverride!,
+                IsFallback = false,
+                Reason = $"user override: {request.UserOverride}",
+            };
+
+            _logger.LogInformation(
+                "Routing decision (user override): Role={Role}, Model={Model}, Strategy=role-based",
+                request.Role,
+                overrideDecision.ModelId);
+
+            return overrideDecision;
+        }
+
         // Convert role enum to lowercase string for case-insensitive lookup
         var roleName = request.Role.ToString().ToLowerInvariant();
 

@@ -41,6 +41,25 @@ public sealed class SingleModelStrategy : IRoutingStrategy
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Check for user override first
+        if (request.HasUserOverride)
+        {
+            var overrideDecision = new RoutingDecision
+            {
+                ModelId = request.UserOverride!,
+                IsFallback = false,
+                Reason = $"user override: {request.UserOverride}",
+            };
+
+            _logger.LogInformation(
+                "Routing decision (user override): Role={Role}, Model={Model}, Strategy=single",
+                request.Role,
+                overrideDecision.ModelId);
+
+            return overrideDecision;
+        }
+
+        // Use default model
         var decision = new RoutingDecision
         {
             ModelId = _config.DefaultModel,
