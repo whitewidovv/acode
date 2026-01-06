@@ -22,7 +22,7 @@ public class ConfigCommandTests
     }
 
     [Fact]
-    public async Task ValidateAsync_WithValidConfig_ReturnsSuccessExitCode()
+    public async Task ExecuteAsync_ValidateWithValidConfig_ReturnsSuccess()
     {
         // Arrange
         var command = new ConfigCommand(_mockLoader, _mockValidator);
@@ -34,28 +34,27 @@ public class ConfigCommandTests
         _mockValidator.Validate(config)
             .Returns(validationResult);
 
-        var originalOut = Console.Out;
-        try
+        var output = new StringWriter();
+        var context = new CommandContext
         {
-            using var consoleOutput = new StringWriter();
-            Console.SetOut(consoleOutput);
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "validate" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
 
-            // Act
-            var exitCode = await command.ValidateAsync(".agent/config.yml").ConfigureAwait(true);
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
-            // Assert
-            exitCode.Should().Be(0, "validation should succeed for valid config");
-            consoleOutput.ToString().Should().Contain("✓", "success marker should be shown");
-            consoleOutput.ToString().Should().Contain("valid", "validation result should be shown");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        // Assert
+        exitCode.Should().Be(ExitCode.Success, "validation should succeed for valid config");
+        output.ToString().Should().Contain("✓", "success marker should be shown");
+        output.ToString().Should().Contain("valid", "validation result should be shown");
     }
 
     [Fact]
-    public async Task ValidateAsync_WithInvalidConfig_ReturnsErrorExitCode()
+    public async Task ExecuteAsync_ValidateWithInvalidConfig_ReturnsError()
     {
         // Arrange
         var command = new ConfigCommand(_mockLoader, _mockValidator);
@@ -80,27 +79,26 @@ public class ConfigCommandTests
         _mockValidator.Validate(config)
             .Returns(validationResult);
 
-        var originalOut = Console.Out;
-        try
+        var output = new StringWriter();
+        var context = new CommandContext
         {
-            using var consoleOutput = new StringWriter();
-            Console.SetOut(consoleOutput);
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "validate" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
 
-            // Act
-            var exitCode = await command.ValidateAsync(".agent/config.yml").ConfigureAwait(true);
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
-            // Assert
-            exitCode.Should().Be(1, "validation should return error code for invalid config");
-            consoleOutput.ToString().Should().Contain("Invalid mode", "error message should be shown");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        // Assert
+        exitCode.Should().Be(ExitCode.GeneralError, "validation should return error code for invalid config");
+        output.ToString().Should().Contain("Invalid mode", "error message should be shown");
     }
 
     [Fact]
-    public async Task ValidateAsync_WithFileNotFound_ReturnsErrorExitCode()
+    public async Task ExecuteAsync_ValidateWithFileNotFound_ReturnsError()
     {
         // Arrange
         var command = new ConfigCommand(_mockLoader, _mockValidator);
@@ -108,27 +106,26 @@ public class ConfigCommandTests
         _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new FileNotFoundException("Config file not found"));
 
-        var originalOut = Console.Out;
-        try
+        var output = new StringWriter();
+        var context = new CommandContext
         {
-            using var consoleOutput = new StringWriter();
-            Console.SetOut(consoleOutput);
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "validate" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
 
-            // Act
-            var exitCode = await command.ValidateAsync(".agent/config.yml").ConfigureAwait(true);
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
-            // Assert
-            exitCode.Should().Be(1, "file not found should return error code");
-            consoleOutput.ToString().Should().Contain("not found", "error message should be shown");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        // Assert
+        exitCode.Should().Be(ExitCode.GeneralError, "file not found should return error code");
+        output.ToString().Should().Contain("not found", "error message should be shown");
     }
 
     [Fact]
-    public async Task ShowAsync_WithValidConfig_DisplaysConfig()
+    public async Task ExecuteAsync_ShowWithValidConfig_DisplaysConfig()
     {
         // Arrange
         var command = new ConfigCommand(_mockLoader, _mockValidator);
@@ -141,29 +138,28 @@ public class ConfigCommandTests
         _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(config);
 
-        var originalOut = Console.Out;
-        try
+        var output = new StringWriter();
+        var context = new CommandContext
         {
-            using var consoleOutput = new StringWriter();
-            Console.SetOut(consoleOutput);
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "show" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
 
-            // Act
-            var exitCode = await command.ShowAsync(".agent/config.yml", format: "yaml").ConfigureAwait(true);
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
-            // Assert
-            exitCode.Should().Be(0, "show should succeed for valid config");
-            var output = consoleOutput.ToString();
-            output.Should().Contain("1.0.0", "schema version should be shown");
-            output.Should().Contain("test-project", "project name should be shown");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        // Assert
+        exitCode.Should().Be(ExitCode.Success, "show should succeed for valid config");
+        var outputText = output.ToString();
+        outputText.Should().Contain("1.0.0", "schema version should be shown");
+        outputText.Should().Contain("test-project", "project name should be shown");
     }
 
     [Fact]
-    public async Task ShowAsync_WithJsonFormat_DisplaysJson()
+    public async Task ExecuteAsync_ShowWithJsonFormat_DisplaysJson()
     {
         // Arrange
         var command = new ConfigCommand(_mockLoader, _mockValidator);
@@ -176,30 +172,29 @@ public class ConfigCommandTests
         _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(config);
 
-        var originalOut = Console.Out;
-        try
+        var output = new StringWriter();
+        var context = new CommandContext
         {
-            using var consoleOutput = new StringWriter();
-            Console.SetOut(consoleOutput);
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "show", "--format", "json" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
 
-            // Act
-            var exitCode = await command.ShowAsync(".agent/config.yml", format: "json").ConfigureAwait(true);
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
-            // Assert
-            exitCode.Should().Be(0, "show should succeed for JSON format");
-            var output = consoleOutput.ToString();
-            output.Should().Contain("{", "JSON should start with brace");
-            output.Should().Contain("\"schema_version\"", "JSON should contain snake_case keys");
-            output.Should().Contain("\"test-project\"", "JSON should contain project name");
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        // Assert
+        exitCode.Should().Be(ExitCode.Success, "show should succeed for JSON format");
+        var outputText = output.ToString();
+        outputText.Should().Contain("{", "JSON should start with brace");
+        outputText.Should().Contain("\"schema_version\"", "JSON should contain snake_case keys");
+        outputText.Should().Contain("\"test-project\"", "JSON should contain project name");
     }
 
     [Fact]
-    public async Task ShowAsync_WithFileNotFound_ReturnsErrorExitCode()
+    public async Task ExecuteAsync_ShowWithFileNotFound_ReturnsError()
     {
         // Arrange
         var command = new ConfigCommand(_mockLoader, _mockValidator);
@@ -207,22 +202,69 @@ public class ConfigCommandTests
         _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new FileNotFoundException("Config file not found"));
 
-        var originalOut = Console.Out;
-        try
+        var output = new StringWriter();
+        var context = new CommandContext
         {
-            using var consoleOutput = new StringWriter();
-            Console.SetOut(consoleOutput);
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "show" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
 
-            // Act
-            var exitCode = await command.ShowAsync(".agent/config.yml").ConfigureAwait(true);
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
-            // Assert
-            exitCode.Should().Be(1, "file not found should return error code");
-            consoleOutput.ToString().Should().Contain("not found", "error message should be shown");
-        }
-        finally
+        // Assert
+        exitCode.Should().Be(ExitCode.ConfigurationError, "file not found should return error code");
+        output.ToString().Should().Contain("not found", "error message should be shown");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithNoSubcommand_ReturnsInvalidArguments()
+    {
+        // Arrange
+        var command = new ConfigCommand(_mockLoader, _mockValidator);
+
+        var output = new StringWriter();
+        var context = new CommandContext
         {
-            Console.SetOut(originalOut);
-        }
+            Configuration = new Dictionary<string, object>(),
+            Args = Array.Empty<string>(),
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
+
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+        // Assert
+        exitCode.Should().Be(ExitCode.InvalidArguments, "missing subcommand should return invalid arguments");
+        output.ToString().Should().Contain("Missing subcommand", "error message should be shown");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithUnknownSubcommand_ReturnsInvalidArguments()
+    {
+        // Arrange
+        var command = new ConfigCommand(_mockLoader, _mockValidator);
+
+        var output = new StringWriter();
+        var context = new CommandContext
+        {
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "unknown" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
+
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+        // Assert
+        exitCode.Should().Be(ExitCode.InvalidArguments, "unknown subcommand should return invalid arguments");
+        output.ToString().Should().Contain("Unknown subcommand", "error message should be shown");
     }
 }

@@ -5,6 +5,7 @@ namespace Acode.Cli.Tests;
 /// <summary>
 /// Tests for the CLI Program entry point.
 /// </summary>
+[Collection("Sequential")]
 public class ProgramTests
 {
     [Fact]
@@ -76,7 +77,7 @@ public class ProgramTests
             var exitCode = Program.Main(args);
 
             // Assert
-            exitCode.Should().Be(1, "unknown commands should return error code");
+            exitCode.Should().Be(2, "unknown commands should return invalid arguments exit code");
             consoleOutput.ToString().Should().Contain("Unknown command", "error message should be shown");
         }
         finally
