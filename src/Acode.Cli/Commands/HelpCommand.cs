@@ -39,6 +39,8 @@ public sealed class HelpCommand : ICommand
 
         formatter.WriteHeading("Acode - Agentic Coding Bot");
 
+        formatter.WriteMessage("Usage: acode <command> [options]");
+        formatter.WriteBlankLine();
         formatter.WriteMessage("Available commands:");
         formatter.WriteBlankLine();
 

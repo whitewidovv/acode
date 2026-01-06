@@ -20,75 +20,65 @@ public static class Program
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        // Handle version/help
-        if (args.Length == 0 || args[0] == "--help" || args[0] == "-h")
-        {
-            ShowHelp();
-            return 0;
-        }
-
-        if (args[0] == "--version" || args[0] == "-v")
-        {
-            ShowVersion();
-            return 0;
-        }
-
         // Setup DI
         var services = new ServiceCollection();
         services.AddAcodeApplication();
         services.AddAcodeInfrastructure();
         var serviceProvider = services.BuildServiceProvider();
 
-        // Route commands
-        if (args[0] == "config" && args.Length >= 2)
+        // Initialize command router
+        var router = new CommandRouter();
+
+        // Register commands that implement ICommand
+        router.RegisterCommand(new HelpCommand(router));
+        router.RegisterCommand(new VersionCommand());
+
+        // Handle config command (legacy implementation from Task 002)
+        if (args.Length >= 1 && args[0] == "config")
         {
             var loader = serviceProvider.GetRequiredService<IConfigLoader>();
             var validator = serviceProvider.GetRequiredService<IConfigValidator>();
             var configCommand = new ConfigCommand(loader, validator);
-
             var repositoryRoot = Directory.GetCurrentDirectory();
 
-            if (args[1] == "validate")
+            if (args.Length >= 2 && args[1] == "validate")
             {
                 return configCommand.ValidateAsync(repositoryRoot).GetAwaiter().GetResult();
             }
 
-            if (args[1] == "show")
+            if (args.Length >= 2 && args[1] == "show")
             {
                 var format = "yaml";
-                if (args.Length >= 3 && args[2] == "--format" && args.Length >= 4)
+                if (args.Length >= 4 && args[2] == "--format")
                 {
                     format = args[3];
                 }
 
                 return configCommand.ShowAsync(repositoryRoot, format).GetAwaiter().GetResult();
             }
+
+            Console.WriteLine("Unknown config subcommand. Use 'acode config validate' or 'acode config show'.");
+            return (int)ExitCode.InvalidArguments;
         }
 
-        Console.WriteLine($"Unknown command: {args[0]}");
-        Console.WriteLine("Run 'acode --help' for usage information.");
-        return 1;
-    }
+        // If no arguments, show help
+        if (args.Length == 0)
+        {
+            args = new[] { "help" };
+        }
 
-    private static void ShowVersion()
-    {
-        Console.WriteLine("Acode - Agentic Coding Bot");
-        Console.WriteLine("Version: 0.1.0-alpha");
-    }
+        // Create command context
+        var context = new CommandContext
+        {
+            Configuration = new Dictionary<string, object>(),
+            Args = Array.Empty<string>(), // Will be populated by router
+            Output = Console.Out,
+            CancellationToken = CancellationToken.None,
+        };
 
-    private static void ShowHelp()
-    {
-        Console.WriteLine("Acode - Agentic Coding Bot");
-        Console.WriteLine();
-        Console.WriteLine("Usage: acode <command> [options]");
-        Console.WriteLine();
-        Console.WriteLine("Commands:");
-        Console.WriteLine("  config validate              Validate configuration file");
-        Console.WriteLine("  config show                  Show configuration");
-        Console.WriteLine("  config show --format json    Show configuration as JSON");
-        Console.WriteLine();
-        Console.WriteLine("Options:");
-        Console.WriteLine("  -h, --help                   Show help");
-        Console.WriteLine("  -v, --version                Show version");
+        // Route and execute command
+        var exitCode = router.RouteAsync(args, context).GetAwaiter().GetResult();
+
+        return (int)exitCode;
     }
 }

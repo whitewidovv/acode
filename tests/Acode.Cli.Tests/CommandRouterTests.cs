@@ -198,6 +198,7 @@ public class CommandRouterTests
         return new CommandContext
         {
             Configuration = new Dictionary<string, object>(),
+            Args = Array.Empty<string>(),
             Output = new StringWriter(),
             CancellationToken = CancellationToken.None,
         };

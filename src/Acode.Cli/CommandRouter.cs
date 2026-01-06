@@ -63,8 +63,12 @@ public sealed class CommandRouter : ICommandRouter
             return ExitCode.InvalidArguments;
         }
 
+        // Create updated context with remaining args (excluding command name)
+        var commandArgs = args.Length > 1 ? args[1..] : Array.Empty<string>();
+        var commandContext = context with { Args = commandArgs };
+
         // Execute command
-        return await command.ExecuteAsync(context).ConfigureAwait(false);
+        return await command.ExecuteAsync(commandContext).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>

@@ -16,6 +16,7 @@ public class CommandContextTests
             ["model"] = "llama3.2:7b",
             ["verbose"] = true,
         };
+        var args = new[] { "arg1", "arg2" };
         var output = new StringWriter();
         var cancellationToken = CancellationToken.None;
 
@@ -23,12 +24,14 @@ public class CommandContextTests
         var context = new CommandContext
         {
             Configuration = config,
+            Args = args,
             Output = output,
             CancellationToken = cancellationToken,
         };
 
         // Assert
         context.Configuration.Should().BeSameAs(config);
+        context.Args.Should().BeSameAs(args);
         context.Output.Should().BeSameAs(output);
         context.CancellationToken.Should().Be(cancellationToken);
     }
@@ -44,6 +47,7 @@ public class CommandContextTests
         var context = new CommandContext
         {
             Configuration = config,
+            Args = Array.Empty<string>(),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -63,6 +67,7 @@ public class CommandContextTests
         var context1 = new CommandContext
         {
             Configuration = config,
+            Args = Array.Empty<string>(),
             Output = output,
             CancellationToken = token,
         };
@@ -70,6 +75,7 @@ public class CommandContextTests
         var context2 = new CommandContext
         {
             Configuration = config,
+            Args = Array.Empty<string>(),
             Output = output,
             CancellationToken = token,
         };
@@ -89,6 +95,7 @@ public class CommandContextTests
         var context1 = new CommandContext
         {
             Configuration = config1,
+            Args = Array.Empty<string>(),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -96,6 +103,7 @@ public class CommandContextTests
         var context2 = new CommandContext
         {
             Configuration = config2,
+            Args = Array.Empty<string>(),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -118,6 +126,7 @@ public class CommandContextTests
         var context = new CommandContext
         {
             Configuration = config,
+            Args = Array.Empty<string>(),
             Output = output,
             CancellationToken = CancellationToken.None,
         };

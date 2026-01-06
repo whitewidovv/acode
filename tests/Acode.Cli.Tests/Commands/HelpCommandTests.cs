@@ -87,6 +87,7 @@ public class HelpCommandTests
         var context = new CommandContext
         {
             Configuration = new Dictionary<string, object>(),
+            Args = Array.Empty<string>(),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -121,6 +122,7 @@ public class HelpCommandTests
         var context = new CommandContext
         {
             Configuration = new Dictionary<string, object>(),
+            Args = Array.Empty<string>(),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -168,6 +170,7 @@ public class HelpCommandTests
         return new CommandContext
         {
             Configuration = new Dictionary<string, object>(),
+            Args = Array.Empty<string>(),
             Output = new StringWriter(),
             CancellationToken = CancellationToken.None,
         };

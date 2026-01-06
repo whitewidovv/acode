@@ -20,6 +20,15 @@ public sealed record CommandContext
     public required IReadOnlyDictionary<string, object> Configuration { get; init; }
 
     /// <summary>
+    /// Gets the command-line arguments passed to the command (excluding the command name itself).
+    /// </summary>
+    /// <remarks>
+    /// For "acode config validate --verbose", Args would be ["validate", "--verbose"].
+    /// Commands can parse these arguments to handle subcommands and options.
+    /// </remarks>
+    public required string[] Args { get; init; }
+
+    /// <summary>
     /// Gets the output writer for command output.
     /// </summary>
     /// <remarks>
