@@ -1,4 +1,6 @@
 using Acode.Application.Inference;
+using Acode.Domain.Models.Inference;
+using Acode.Domain.Modes;
 using Acode.Infrastructure.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
@@ -242,5 +244,124 @@ public class ModelAvailabilityCheckerTests
 
         // Assert
         act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void IsModelAvailableForMode_LocalMode_AllowsLocalModels()
+    {
+        // Arrange
+        var provider = Substitute.For<IModelProvider>();
+        provider.ProviderName.Returns("ollama");
+        provider.GetSupportedModels().Returns(new[] { "llama3.2:7b" });
+        provider.GetModelInfo("llama3.2:7b").Returns(new ModelInfo
+        {
+            ModelId = "llama3.2:7b",
+            IsLocal = true,
+            RequiresNetwork = false,
+        });
+
+        _providerRegistry.GetAllProviders().Returns(new[] { provider });
+
+        var checker = new ModelAvailabilityChecker(_logger, _providerRegistry);
+
+        // Act
+        var isAvailable = checker.IsModelAvailableForMode("llama3.2:7b", OperatingMode.LocalOnly);
+
+        // Assert
+        isAvailable.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsModelAvailableForMode_LocalMode_RejectsRemoteModels()
+    {
+        // Arrange
+        var provider = Substitute.For<IModelProvider>();
+        provider.ProviderName.Returns("vllm");
+        provider.GetSupportedModels().Returns(new[] { "remote-model" });
+        provider.GetModelInfo("remote-model").Returns(new ModelInfo
+        {
+            ModelId = "remote-model",
+            IsLocal = false,
+            RequiresNetwork = true,
+        });
+
+        _providerRegistry.GetAllProviders().Returns(new[] { provider });
+
+        var checker = new ModelAvailabilityChecker(_logger, _providerRegistry);
+
+        // Act
+        var isAvailable = checker.IsModelAvailableForMode("remote-model", OperatingMode.LocalOnly);
+
+        // Assert
+        isAvailable.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsModelAvailableForMode_AirgappedMode_RejectsNetworkModels()
+    {
+        // Arrange
+        var provider = Substitute.For<IModelProvider>();
+        provider.ProviderName.Returns("vllm");
+        provider.GetSupportedModels().Returns(new[] { "network-model" });
+        provider.GetModelInfo("network-model").Returns(new ModelInfo
+        {
+            ModelId = "network-model",
+            IsLocal = true,
+            RequiresNetwork = true,
+        });
+
+        _providerRegistry.GetAllProviders().Returns(new[] { provider });
+
+        var checker = new ModelAvailabilityChecker(_logger, _providerRegistry);
+
+        // Act
+        var isAvailable = checker.IsModelAvailableForMode("network-model", OperatingMode.Airgapped);
+
+        // Assert
+        isAvailable.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsModelAvailableForMode_BurstMode_AllowsAllModels()
+    {
+        // Arrange
+        var provider = Substitute.For<IModelProvider>();
+        provider.ProviderName.Returns("vllm");
+        provider.GetSupportedModels().Returns(new[] { "remote-model" });
+        provider.GetModelInfo("remote-model").Returns(new ModelInfo
+        {
+            ModelId = "remote-model",
+            IsLocal = false,
+            RequiresNetwork = true,
+        });
+
+        _providerRegistry.GetAllProviders().Returns(new[] { provider });
+
+        var checker = new ModelAvailabilityChecker(_logger, _providerRegistry);
+
+        // Act
+        var isAvailable = checker.IsModelAvailableForMode("remote-model", OperatingMode.Burst);
+
+        // Assert
+        isAvailable.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsModelAvailableForMode_ModelNotFound_ReturnsFalse()
+    {
+        // Arrange
+        var provider = Substitute.For<IModelProvider>();
+        provider.ProviderName.Returns("ollama");
+        provider.GetSupportedModels().Returns(new[] { "llama3.2:7b" });
+
+        _providerRegistry.GetAllProviders().Returns(new[] { provider });
+
+        var checker = new ModelAvailabilityChecker(_logger, _providerRegistry);
+
+        // Act
+        var isAvailable = checker.IsModelAvailableForMode("nonexistent-model", OperatingMode.LocalOnly);
+
+        // Assert
+        isAvailable.Should().BeFalse();
     }
 }

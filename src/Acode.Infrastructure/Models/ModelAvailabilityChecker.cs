@@ -1,5 +1,6 @@
 using Acode.Application.Inference;
 using Acode.Application.Models;
+using Acode.Domain.Modes;
 using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.Models;
@@ -55,6 +56,57 @@ public sealed class ModelAvailabilityChecker : IModelAvailabilityChecker
 
         var availableModels = GetAvailableModelsWithCache();
         return availableModels.Contains(modelId);
+    }
+
+    /// <inheritdoc/>
+    public bool IsModelAvailableForMode(string modelId, OperatingMode mode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+
+        // First check if model is available at all
+        if (!IsModelAvailable(modelId))
+        {
+            return false;
+        }
+
+        // Find the provider that has this model and get its metadata
+        var providers = _providerRegistry.GetAllProviders();
+        foreach (var provider in providers)
+        {
+            try
+            {
+                var supportedModels = provider.GetSupportedModels();
+                if (supportedModels.Contains(modelId, StringComparer.OrdinalIgnoreCase))
+                {
+                    var modelInfo = provider.GetModelInfo(modelId);
+                    var isAllowed = modelInfo.IsAllowedInMode(mode);
+
+                    if (!isAllowed)
+                    {
+                        _logger.LogWarning(
+                            "Model {ModelId} is available but not allowed in mode {Mode} " +
+                            "(IsLocal={IsLocal}, RequiresNetwork={RequiresNetwork})",
+                            modelId,
+                            mode,
+                            modelInfo.IsLocal,
+                            modelInfo.RequiresNetwork);
+                    }
+
+                    return isAllowed;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to get model info for {ModelId} from provider {ProviderName}",
+                    modelId,
+                    provider.ProviderName);
+            }
+        }
+
+        // Model not found (shouldn't happen since IsModelAvailable passed)
+        return false;
     }
 
     /// <inheritdoc/>
