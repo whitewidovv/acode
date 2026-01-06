@@ -1501,117 +1501,495 @@ public sealed class ContainerCreationRateLimiter
 
 ## Testing Requirements
 
-### Unit Tests
+**File:** `tests/Acode.Infrastructure.Tests/Docker/PerTaskContainerEnforcerTests.cs`
 
-```
-Tests/Unit/Domain/Docker/
-├── ContainerConfigTests.cs
-│   ├── Name_FollowsPattern()
-│   ├── Name_IsDnsCompatible()
-│   ├── Name_DoesNotExceed63Chars()
-│   ├── Labels_ContainSessionAndTask()
-│   ├── ResourceLimits_HaveDefaults()
-│   └── Image_MatchesLanguage()
-│
-└── ContainerNameGeneratorTests.cs
-    ├── Generate_IncludesSessionId()
-    ├── Generate_IncludesTaskId()
-    ├── Generate_IsDnsCompatible()
-    ├── Generate_ReplacesInvalidChars()
-    ├── Generate_TruncatesToMaxLength()
-    ├── Parse_ExtractsSessionId()
-    └── Parse_ExtractsTaskId()
+```csharp
+using Acode.Domain.Security;
+using Acode.Infrastructure.Docker;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Null NullLogger;
+using NSubstitute;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Docker;
+
+public sealed class PerTaskContainerEnforcerTests
+{
+    private readonly IDockerClient _mockDockerClient;
+    private readonly PerTaskContainerEnforcer _enforcer;
+
+    public PerTaskContainerEnforcerTests()
+    {
+        _mockDockerClient = Substitute.For<IDockerClient>();
+        _enforcer = new PerTaskContainerEnforcer(_mockDockerClient, NullLogger<PerTaskContainerEnforcer>.Instance);
+    }
+
+    [Fact]
+    public async Task CreateFreshContainerAsync_WithValidParameters_CreatesContainer()
+    {
+        // Arrange
+        var sessionId = "session-abc123";
+        var taskId = "task-001";
+        var imageName = "alpine:latest";
+        var parameters = new CreateContainerParameters { Image = imageName };
+
+        _mockDockerClient.Containers.CreateContainerAsync(Arg.Any<CreateContainerParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new CreateContainerResponse { ID = "container-xyz789" });
+
+        // Act
+        var containerId = await _enforcer.CreateFreshContainerAsync(sessionId, taskId, imageName, parameters, CancellationToken.None);
+
+        // Assert
+        containerId.Should().Be("container-xyz789");
+        await _mockDockerClient.Containers.Received(1).CreateContainerAsync(
+            Arg.Is<CreateContainerParameters>(p =>
+                p.Labels.ContainsKey("acode.managed") &&
+                p.Labels["acode.session"] == sessionId &&
+                p.Labels["acode.task"] == taskId &&
+                p.HostConfig.NetworkMode == "none"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateFreshContainerAsync_WithExistingContainerForTask_ThrowsSecurityException()
+    {
+        // Arrange
+        var sessionId = "session-abc123";
+        var taskId = "task-duplicate";
+        var parameters = new CreateContainerParameters { Image = "alpine" };
+
+        _mockDockerClient.Containers.CreateContainerAsync(Arg.Any<CreateContainerParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new CreateContainerResponse { ID = "container-first" });
+
+        await _enforcer.CreateFreshContainerAsync(sessionId, taskId, "alpine", parameters, CancellationToken.None);
+
+        // Act
+        var act = async () => await _enforcer.CreateFreshContainerAsync(
+            sessionId, taskId, "alpine", new CreateContainerParameters { Image = "alpine" }, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<SecurityPolicyViolationException>()
+            .WithMessage("*Container reuse is FORBIDDEN*");
+    }
+
+    [Fact]
+    public async Task CreateFreshContainerAsync_WithHostNamespaceSharing_ThrowsSecurityException()
+    {
+        // Arrange
+        var parameters = new CreateContainerParameters
+        {
+            Image = "alpine",
+            HostConfig = new HostConfig { PidMode = "host" }
+        };
+
+        // Act
+        var act = async () => await _enforcer.CreateFreshContainerAsync(
+            "session-123", "task-001", "alpine", parameters, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<SecurityPolicyViolationException>()
+            .WithMessage("*Host namespace sharing*FORBIDDEN*");
+    }
+
+    [Fact]
+    public async Task RemoveContainerAsync_RemovesContainerAndClearsTracking()
+    {
+        // Arrange
+        var sessionId = "session-abc";
+        var taskId = "task-remove";
+        var containerId = "container-to-remove";
+        var parameters = new CreateContainerParameters { Image = "alpine" };
+
+        _mockDockerClient.Containers.CreateContainerAsync(Arg.Any<CreateContainerParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new CreateContainerResponse { ID = containerId });
+
+        await _enforcer.CreateFreshContainerAsync(sessionId, taskId, "alpine", parameters, CancellationToken.None);
+
+        // Act
+        await _enforcer.RemoveContainerAsync(sessionId, taskId, containerId, CancellationToken.None);
+
+        // Assert
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync(
+            containerId,
+            Arg.Is<ContainerRemoveParameters>(p => p.Force == true && p.RemoveVolumes == true),
+            Arg.Any<CancellationToken>());
+
+        // Verify can create again (tracking cleared)
+        var act = async () => await _enforcer.CreateFreshContainerAsync(
+            sessionId, taskId, "alpine", new CreateContainerParameters { Image = "alpine" }, CancellationToken.None);
+        await act.Should().NotThrowAsync();
+    }
+}
 ```
 
+**File:** `tests/Acode.Infrastructure.Tests/Docker/SecureContainerNameGeneratorTests.cs`
+
+```csharp
+using Acode.Infrastructure.Docker;
+using FluentAssertions;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Docker;
+
+public sealed class SecureContainerNameGeneratorTests
+{
+    private readonly SecureContainerNameGenerator _generator = new();
+
+    [Fact]
+    public void GenerateSecureName_WithValidInputs_ReturnsValidName()
+    {
+        // Arrange
+        var sessionId = "abc123-def456";
+        var taskId = "task-001";
+
+        // Act
+        var name = _generator.GenerateSecureName(sessionId, taskId);
+
+        // Assert
+        name.Should().StartWith("acode-");
+        name.Should().MatchRegex("^[a-z0-9-]+$"); // DNS compatible
+        name.Length.Should().BeLessOrEqualTo(63); // DNS label limit
+    }
+
+    [Fact]
+    public void GenerateSecureName_CalledTwiceWithSameInputs_ReturnsDifferentNames()
+    {
+        // Arrange
+        var sessionId = "session-abc";
+        var taskId = "task-001";
+
+        // Act
+        var name1 = _generator.GenerateSecureName(sessionId, taskId);
+        var name2 = _generator.GenerateSecureName(sessionId, taskId);
+
+        // Assert
+        name1.Should().NotBe(name2); // Cryptographic randomness ensures uniqueness
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void GenerateSecureName_WithInvalidSessionId_ThrowsArgumentException(string invalidSessionId)
+    {
+        // Act
+        var act = () => _generator.GenerateSecureName(invalidSessionId, "task-001");
+
+        // Assert
+        act.Should().Throw<ArgumentException>().WithParameterName("sessionId");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void GenerateSecureName_WithInvalidTaskId_ThrowsArgumentException(string invalidTaskId)
+    {
+        // Act
+        var act = () => _generator.GenerateSecureName("session-123", invalidTaskId);
+
+        // Assert
+        act.Should().Throw<ArgumentException>().WithParameterName("taskId");
+    }
+
+    [Fact]
+    public void ValidateNameEntropy_WithHighEntropyName_ReturnsTrue()
+    {
+        // Arrange
+        var highEntropyName = "acode-abc123-def456-0123456789abcdef01234567";
+
+        // Act
+        var result = _generator.ValidateNameEntropy(highEntropyName);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("acode-abc")] // Too few parts
+    [InlineData("acode-abc-def-123")] // Random portion too short
+    [InlineData("acode-abc-def-GHIJKLMNOP")] // Not hex
+    public void ValidateNameEntropy_WithLowEntropyName_ReturnsFalse(string lowEntropyName)
+    {
+        // Act
+        var result = _generator.ValidateNameEntropy(lowEntropyName);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GenerateSecureName_WithSpecialCharactersInSessionId_SanitizesCorrectly()
+    {
+        // Arrange
+        var sessionId = "session_WITH_special@chars!";
+        var taskId = "task-001";
+
+        // Act
+        var name = _generator.GenerateSecureName(sessionId, taskId);
+
+        // Assert
+        name.Should().MatchRegex("^[a-z0-9-]+$"); // Only lowercase, digits, hyphens
+        name.Should().NotContain("_");
+        name.Should().NotContain("@");
+        name.Should().NotContain("!");
+    }
+}
 ```
-Tests/Unit/Infrastructure/Docker/
-├── ContainerLifecycleManagerTests.cs
-│   ├── CreateAsync_CallsDockerCreate()
-│   ├── CreateAsync_AppliesNameAndLabels()
-│   ├── CreateAsync_AppliesResourceLimits()
-│   ├── CreateAsync_PullsImageIfMissing()
-│   ├── CreateAsync_ReturnsContainerIdAndName()
-│   ├── CreateAsync_WhenFails_ThrowsException()
-│   ├── CreateAsync_WhenFails_NoOrphansLeft()
-│   ├── CreateAsync_SupportsCanellation()
-│   ├── StartAsync_CallsDockerStart()
-│   ├── StartAsync_WhenFails_ThrowsException()
-│   ├── StopAsync_CallsDockerStop()
-│   ├── StopAsync_WhenTimeout_ForcesKill()
-│   ├── RemoveAsync_CallsDockerRemove()
-│   ├── RemoveAsync_SupportsForce()
-│   ├── RemoveAsync_WhenFails_Retries()
-│   ├── GetStatusAsync_ReturnsCorrectStatus()
-│   └── Operations_AreThreadSafe()
-│
-├── ImageManagerTests.cs
-│   ├── SelectImage_ForDotNet_ReturnsDotNetSdk()
-│   ├── SelectImage_ForNode_ReturnsNodeImage()
-│   ├── SelectImage_UsesConfigOverride()
-│   ├── SelectImage_UsesContractOverride()
-│   ├── IsPresent_WhenExists_ReturnsTrue()
-│   ├── IsPresent_WhenMissing_ReturnsFalse()
-│   ├── PullAsync_PullsImage()
-│   ├── PullAsync_ReportsProgress()
-│   └── PullAsync_WhenFails_ThrowsException()
-│
-├── OrphanCleanupServiceTests.cs
-│   ├── FindOrphans_ByNamePattern()
-│   ├── FindOrphans_ByLabel()
-│   ├── FindOrphans_ExcludesCurrentSession()
-│   ├── Cleanup_RemovesAllOrphans()
-│   ├── Cleanup_LogsRemovedContainers()
-│   ├── Cleanup_ContinuesOnFailure()
-│   └── Cleanup_ReportsCount()
-│
-└── ResourceLimitValidatorTests.cs
-    ├── Validate_ValidLimits_ReturnsSuccess()
-    ├── Validate_NegativeMemory_ReturnsError()
-    ├── Validate_ZeroCpu_ReturnsError()
-    ├── Validate_ExcessiveLimits_ReturnsWarning()
-    └── ApplyDefaults_FillsMissingLimits()
+
+**File:** `tests/Acode.Infrastructure.Tests/Docker/OrphanContainerCleanupTests.cs`
+
+```csharp
+using Acode.Infrastructure.Docker;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Docker;
+
+public sealed class OrphanContainerCleanupTests
+{
+    private readonly IDockerClient _mockDockerClient;
+    private readonly string _currentSessionId = "current-session-abc123";
+    private readonly OrphanContainerCleanup _cleanup;
+
+    public OrphanContainerCleanupTests()
+    {
+        _mockDockerClient = Substitute.For<IDockerClient>();
+        _cleanup = new OrphanContainerCleanup(
+            _mockDockerClient,
+            NullLogger<OrphanContainerCleanup>.Instance,
+            _currentSessionId);
+    }
+
+    [Fact]
+    public async Task DetectAndRemoveOrphansAsync_WithNoContainers_ReturnsZeroOrphans()
+    {
+        // Arrange
+        _mockDockerClient.Containers.ListContainersAsync(Arg.Any<ContainersListParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new List<ContainerListResponse>());
+
+        // Act
+        var result = await _cleanup.DetectAndRemoveOrphansAsync(CancellationToken.None);
+
+        // Assert
+        result.TotalScanned.Should().Be(0);
+        result.OrphansFound.Should().Be(0);
+        result.RemovedContainers.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DetectAndRemoveOrphansAsync_WithOnlyCurrentSessionContainers_DoesNotRemoveThem()
+    {
+        // Arrange
+        var containers = new List<ContainerListResponse>
+        {
+            new ContainerListResponse
+            {
+                ID = "container-current-1",
+                Labels = new Dictionary<string, string>
+                {
+                    ["acode.managed"] = "true",
+                    ["acode.session"] = _currentSessionId
+                }
+            }
+        };
+
+        _mockDockerClient.Containers.ListContainersAsync(Arg.Any<ContainersListParameters>(), Arg.Any<CancellationToken>())
+            .Returns(containers);
+
+        // Act
+        var result = await _cleanup.DetectAndRemoveOrphansAsync(CancellationToken.None);
+
+        // Assert
+        result.TotalScanned.Should().Be(1);
+        result.OrphansFound.Should().Be(0);
+        result.RemovedContainers.Should().BeEmpty();
+        await _mockDockerClient.Containers.DidNotReceive().RemoveContainerAsync(Arg.Any<string>(), Arg.Any<ContainerRemoveParameters>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DetectAndRemoveOrphansAsync_WithOrphanedContainers_RemovesThem()
+    {
+        // Arrange
+        var orphanSessionId = "old-defunct-session";
+        var containers = new List<ContainerListResponse>
+        {
+            new ContainerListResponse
+            {
+                ID = "orphan-container-1",
+                State = "running",
+                Created = DateTimeOffset.UtcNow.AddHours(-2).ToUnixTimeSeconds(),
+                Labels = new Dictionary<string, string>
+                {
+                    ["acode.managed"] = "true",
+                    ["acode.session"] = orphanSessionId,
+                    ["acode.task"] = "task-orphaned"
+                }
+            },
+            new ContainerListResponse
+            {
+                ID = "current-container-1",
+                State = "running",
+                Created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                Labels = new Dictionary<string, string>
+                {
+                    ["acode.managed"] = "true",
+                    ["acode.session"] = _currentSessionId
+                }
+            }
+        };
+
+        _mockDockerClient.Containers.ListContainersAsync(Arg.Any<ContainersListParameters>(), Arg.Any<CancellationToken>())
+            .Returns(containers);
+
+        // Act
+        var result = await _cleanup.DetectAndRemoveOrphansAsync(CancellationToken.None);
+
+        // Assert
+        result.TotalScanned.Should().Be(2);
+        result.OrphansFound.Should().Be(1);
+        result.RemovedContainers.Should().HaveCount(1);
+        result.RemovedContainers[0].ContainerId.Should().Be("orphan-container-1");
+        result.RemovedContainers[0].SessionId.Should().Be(orphanSessionId);
+
+        // Verify orphan was killed (it was running)
+        await _mockDockerClient.Containers.Received(1).KillContainerAsync(
+            "orphan-container-1",
+            Arg.Any<ContainerKillParameters>(),
+            Arg.Any<CancellationToken>());
+
+        // Verify orphan was removed
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync(
+            "orphan-container-1",
+            Arg.Is<ContainerRemoveParameters>(p => p.Force == true && p.RemoveVolumes == true),
+            Arg.Any<CancellationToken>());
+
+        // Verify current session container was NOT touched
+        await _mockDockerClient.Containers.DidNotReceive().KillContainerAsync(
+            "current-container-1",
+            Arg.Any<ContainerKillParameters>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DetectAndRemoveOrphansAsync_WithStoppedOrphan_RemovesWithoutKilling()
+    {
+        // Arrange
+        var containers = new List<ContainerListResponse>
+        {
+            new ContainerListResponse
+            {
+                ID = "orphan-stopped",
+                State = "exited",
+                Created = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds(),
+                Labels = new Dictionary<string, string>
+                {
+                    ["acode.managed"] = "true",
+                    ["acode.session"] = "old-session"
+                }
+            }
+        };
+
+        _mockDockerClient.Containers.ListContainersAsync(Arg.Any<ContainersListParameters>(), Arg.Any<CancellationToken>())
+            .Returns(containers);
+
+        // Act
+        var result = await _cleanup.DetectAndRemoveOrphansAsync(CancellationToken.None);
+
+        // Assert
+        result.OrphansFound.Should().Be(1);
+        await _mockDockerClient.Containers.DidNotReceive().KillContainerAsync(Arg.Any<string>(), Arg.Any<ContainerKillParameters>(), Arg.Any<CancellationToken>());
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync("orphan-stopped", Arg.Any<ContainerRemoveParameters>(), Arg.Any<CancellationToken>());
+    }
+}
 ```
 
 ### Integration Tests
 
-```
-Tests/Integration/Infrastructure/Docker/
-├── ContainerLifecycleIntegrationTests.cs
-│   ├── Should_Create_Container_With_Correct_Name()
-│   ├── Should_Start_And_Stop_Container()
-│   ├── Should_Remove_Container()
-│   ├── Should_Force_Remove_Running_Container()
-│   ├── Should_Apply_Resource_Limits()
-│   ├── Should_Pull_Missing_Image()
-│   ├── Should_Apply_Labels()
-│   ├── Should_Execute_Command_In_Container()
-│   └── Should_Cleanup_On_Error()
-│
-├── OrphanCleanupIntegrationTests.cs
-│   ├── Should_Detect_Orphaned_Containers()
-│   ├── Should_Remove_Orphaned_Containers()
-│   ├── Should_Not_Remove_Current_Session_Containers()
-│   └── Should_Handle_Mixed_Container_States()
-│
-└── ParallelContainerTests.cs
-    ├── Should_Create_Multiple_Containers_Concurrently()
-    ├── Should_Isolate_Parallel_Tasks()
-    ├── Should_Respect_Max_Concurrent_Limit()
-    └── Should_Cleanup_All_Parallel_Containers()
-```
+**File:** `tests/Acode.Infrastructure.IntegrationTests/Docker/ContainerLifecycleIntegrationTests.cs`
 
-### E2E Tests
+```csharp
+using Acode.Infrastructure.Docker;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
-```
-Tests/E2E/CLI/
-└── DockerSandboxE2ETests.cs
-    ├── Should_Execute_Task_In_Container()
-    ├── Should_Isolate_Consecutive_Tasks()
-    ├── Should_Cleanup_After_Task()
-    ├── Should_Cleanup_After_Failure()
-    ├── Should_List_Active_Containers()
-    ├── Should_Show_Container_Logs()
-    └── Should_Cleanup_Orphans()
+namespace Acode.Infrastructure.IntegrationTests.Docker;
+
+[Collection("Docker")]
+public sealed class ContainerLifecycleIntegrationTests : IAsyncLifetime
+{
+    private readonly IDockerClient _dockerClient;
+    private readonly PerTaskContainerEnforcer _enforcer;
+    private readonly List<string> _createdContainerIds = new();
+
+    public ContainerLifecycleIntegrationTests()
+    {
+        _dockerClient = new DockerClientConfiguration().CreateClient();
+        _enforcer = new PerTaskContainerEnforcer(_dockerClient, NullLogger<PerTaskContainerEnforcer>.Instance);
+    }
+
+    [Fact]
+    public async Task CreatesAndRemovesContainer_WithIsolatedNamespaces()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid().ToString();
+        var taskId = "integration-test-001";
+        var parameters = new CreateContainerParameters
+        {
+            Image = "alpine:latest",
+            Cmd = new[] { "echo", "Hello from isolated container" }
+        };
+
+        // Act
+        var containerId = await _enforcer.CreateFreshContainerAsync(
+            sessionId, taskId, "alpine:latest", parameters, CancellationToken.None);
+        _createdContainerIds.Add(containerId);
+
+        // Assert - Verify container exists
+        var inspectResponse = await _dockerClient.Containers.InspectContainerAsync(containerId);
+        inspectResponse.Should().NotBeNull();
+        inspectResponse.HostConfig.NetworkMode.Should().Be("none");
+        inspectResponse.Config.Labels.Should().ContainKey("acode.managed");
+        inspectResponse.Config.Labels["acode.session"].Should().Be(sessionId);
+
+        // Cleanup
+        await _enforcer.RemoveContainerAsync(sessionId, taskId, containerId, CancellationToken.None);
+
+        // Verify removed
+        var act = async () => await _dockerClient.Containers.InspectContainerAsync(containerId);
+        await act.Should().ThrowAsync<DockerContainerNotFoundException>();
+    }
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        foreach (var containerId in _createdContainerIds)
+        {
+            try
+            {
+                await _dockerClient.Containers.RemoveContainerAsync(
+                    containerId,
+                    new ContainerRemoveParameters { Force = true },
+                    CancellationToken.None);
+            }
+            catch
+            {
+                // Best effort cleanup
+            }
+        }
+        _dockerClient.Dispose();
+    }
+}
 ```
 
 ### Performance Benchmarks
@@ -1630,11 +2008,11 @@ Tests/E2E/CLI/
 
 | Component | Minimum | Target |
 |-----------|---------|--------|
-| `ContainerLifecycleManager` | 85% | 95% |
-| `ImageManager` | 85% | 95% |
-| `OrphanCleanupService` | 90% | 98% |
-| `ContainerNameGenerator` | 100% | 100% |
-| `ResourceLimitValidator` | 95% | 100% |
+| `PerTaskContainerEnforcer` | 90% | 98% |
+| `SecureContainerNameGenerator` | 100% | 100% |
+| `OrphanContainerCleanup` | 95% | 98% |
+| `ContainerStatePrevention` | 90% | 95% |
+| `ContainerCreationRateLimiter` | 85% | 95% |
 | Domain models | 100% | 100% |
 | **Overall** | **90%** | **95%** |
 
