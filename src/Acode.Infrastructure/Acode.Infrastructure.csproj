@@ -16,4 +16,8 @@
       <LogicalName>Acode.Infrastructure.Resources.config-schema.json</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\PromptPacks\**\*.md" />
+    <EmbeddedResource Include="Resources\PromptPacks\**\*.yml" />
+  </ItemGroup>
 </Project>
