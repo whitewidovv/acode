@@ -44,11 +44,117 @@ This task covers add, reset, commit, and push. Status and diff are in Task 022.a
 - Push rejected → NonFastForwardException
 - Mode violation → ModeViolationException
 
-### Assumptions
+---
 
-- Git is installed and accessible
-- For push, credentials are configured
-- Repository has at least one commit
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git installed** - Git 2.20+ available in PATH with add/commit/push commands
+2. **Repository initialized** - Working directory is valid git repository
+3. **Initial commit exists** - Repository not empty (for most operations except initial commit)
+4. **Write permissions** - User has write access to .git/ directory and working tree
+5. **Git config present** - user.name and user.email configured for commits
+6. **Index writable** - .git/index file is accessible and lockable
+7. **Object store writable** - .git/objects/ directory has write permissions
+8. **Network stack available** - For push operations in Burst mode
+9. **Remote configured** - For push, at least 'origin' remote exists
+10. **Credential helper** - Credentials available via credential helper, SSH agent, or token
+
+### Operational Assumptions
+
+11. **Single committer** - No concurrent commits from same working directory (locking handles this)
+12. **Staging area managed** - User stages files explicitly before commit (agent doesn't auto-stage all)
+13. **Commit message validation** - Project may have commit message format requirements (Task 024.b)
+14. **Push requires authentication** - Remote requires valid credentials (HTTPS token, SSH key)
+15. **Push enabled by mode** - Operating mode permits network operations (LocalOnly/Airgapped block push)
+16. **Reasonable commit size** - Commits <100MB (larger requires chunking or LFS)
+17. **Push timeout reasonable** - Default 60s sufficient for typical pushes
+18. **Network reliability** - Transient failures retried, but permanent failures reported
+
+### Integration Assumptions
+
+19. **Task 001 functional** - Operating mode resolver available for push mode checks
+20. **Task 022a functional** - Status operations work for pre-commit validation
+21. **Task 018 functional** - Command execution layer handles git commands
+22. **Credential redaction** - Infrastructure layer redacts credentials from logs (Task 009)
+23. **Audit logging ready** - Write operations logged to audit trail
+24. **Pre-commit hooks** - Task 024 pre-commit verification may be integrated (optional)
+
+---
+
+## Use Cases
+
+### Use Case 1: DevBot Automated Feature Implementation with Commit Workflow
+
+**Persona:** DevBot implements feature task-045. Modifies 3 files, stages changes, creates commit with conventional message, pushes to remote to trigger CI/CD.
+
+**Before (manual developer workflow):**
+1. Developer implements feature (10 minutes coding)
+2. Manually stages files: `git add src/file1.cs src/file2.cs src/file3.cs` (20 seconds, sometimes forgets files)
+3. Writes commit message: `git commit -m "..."` (45 seconds, often typos or wrong format, rejected by pre-commit hook 30% of time)
+4. Retries commit with corrected message (30 seconds)
+5. Pushes: `git push` (5 seconds)
+6. Checks CI/CD triggered (15 seconds)
+**Total time:** 11 minutes 55 seconds (with typo retry), human attention required throughout
+
+**After (automated agent workflow):**
+1. Agent implements feature (10 minutes coding)
+2. Agent stages: `await git.StageAsync(workingDir, ["src/file1.cs", "src/file2.cs", "src/file3.cs"])` (300ms)
+3. Agent commits: `await git.CommitAsync(workingDir, "feat(task-045): implement feature X per specification")` (800ms, no typos, format perfect)
+4. Agent pushes: `await git.PushAsync(workingDir)` (2.5s including auth)
+5. CI/CD automatically triggered (0s agent time)
+**Total time:** 10 minutes 3.6 seconds, zero human attention
+
+**ROI:** Saves 1 minute 51.4 seconds per feature, eliminates 30% commit message retry overhead, 100% CI/CD triggering reliability. For 10-developer team averaging 8 features/day = 80 features × 111.4 seconds = 148 minutes/day = 24.7 hours/week × 50 weeks = 1,235 hours/year × $100/hour = **$123,500/year team savings**.
+
+### Use Case 2: Jordan Automated Hotfix Deployment with Fast Push
+
+**Persona:** Jordan detects production incident. Creates hotfix branch, fixes critical bug, commits, pushes to trigger emergency deployment pipeline.
+
+**Before (manual emergency response):**
+1. Detect incident, create hotfix branch (30 seconds)
+2. Fix bug in code (5 minutes)
+3. Stage: `git add src/buggy-file.cs` (10 seconds)
+4. Commit: `git commit -m "..."` (30 seconds, stress typos, may forget ticket reference)
+5. Push: `git push` (5 seconds, may forget --set-upstream first time, retry 15 seconds)
+6. Verify push succeeded, wait for pipeline trigger (20 seconds)
+7. Monitor pipeline start (30 seconds)
+**Total MTTM (Mean Time To Merge):** 6 minutes 40 seconds under stress conditions
+
+**After (automated emergency response):**
+1. Detect incident, agent creates hotfix branch (2 seconds)
+2. Agent or human fixes bug in code (5 minutes)
+3. Agent stages, commits, pushes: `await git.StageAsync(...); await git.CommitAsync(...); await git.PushAsync(..., new PushOptions { SetUpstream = true })` (3.5 seconds total, handles --set-upstream automatically)
+4. Pipeline automatically triggered (0s agent time)
+**Total MTTM:** 5 minutes 5.5 seconds, 23.6% faster response
+
+**ROI:** Saves 1 minute 34.5 seconds per hotfix. For 5-engineer DevOps team averaging 2 hotfixes/week = 100 hotfixes/year × 94.5 seconds = 157.5 minutes = 2.625 hours × $150/hour (DevOps rate) = **$393.75/year per team**. But more important: **23.6% faster incident response = reduced downtime costs** (for $1M/hour downtime, 1.5 minute savings = $25,000 per incident).
+
+### Use Case 3: Alex Compliance Audit of Commit History with Metadata Validation
+
+**Persona:** Alex audits commit history for compliance (SOC2, PCI-DSS). Needs to verify all commits have: (1) valid author, (2) proper message format, (3) audit trail entry, (4) no sensitive data in diffs.
+
+**Before (manual audit):**
+1. Export git log: `git log --pretty=full --since="3 months ago"` (30 seconds)
+2. Manually review 500 commits for author correctness (45 minutes)
+3. Check commit message formats against policy (60 minutes)
+4. Sample 50 commits, manually review diffs for secrets (`git show <sha>`) (90 minutes)
+5. Cross-reference audit logs with git commits (60 minutes)
+6. Generate compliance report (30 minutes)
+**Total audit time:** 4 hours 15 minutes per quarter = 17 hours/year
+
+**After (automated compliance audit):**
+1. Agent queries: `await git.GetLogAsync(workingDir, new LogOptions { Since = DateTimeOffset.Now.AddMonths(-3) })` (1.2 seconds)
+2. Agent validates all 500 commits programmatically: author format, message format per policy (8 seconds)
+3. Agent samples 50 commits, scans diffs with secret detection (15 seconds with Task 009 integration)
+4. Agent cross-references audit trail automatically (5 seconds with Task 009 integration)
+5. Agent generates compliance report (2 seconds)
+**Total audit time:** 31.2 seconds per quarter = 2.1 minutes/year
+
+**ROI:** Saves 16 hours 58 minutes per auditor per year. For 3-auditor compliance team = 50.9 hours × $200/hour (compliance specialist rate) = **$10,180/year**. Plus: **100% coverage vs 10% sample = better compliance posture**.
+
+**Combined ROI for Suite 022c:** $123,500 + $393.75 + $10,180 = **$134,073.75/year** (plus incident response time value).
 
 ---
 
