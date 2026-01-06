@@ -1473,26 +1473,61 @@ acode artifact cat test-legitimate test.txt
 
 ## Best Practices
 
-### Directory Structure
+### Directory Structure Best Practices
 
-1. **Consistent hierarchy** - Same structure across all projects
-2. **Predictable naming** - {runId}/{artifactType}/{filename}
-3. **Shallow directories** - Avoid deeply nested structures
-4. **Separate by type** - Logs, test results, coverage in own directories
+1. **Use flat structure within run directories** — Store all artifacts at the root of each run directory (`.acode/artifacts/{run-id}/stdout.txt`) rather than creating subdirectories. This simplifies path resolution, reduces nesting depth, and improves compatibility with tools expecting flat structures. Only use subdirectories if artifact count exceeds 50 files per run.
 
-### File Naming
+2. **Enforce consistent naming across projects** — Standardize artifact filenames: `stdout.txt`, `stderr.txt`, `run.json` must be identical across all workspaces and project types. This enables generic tooling (scripts, exporters) to work without project-specific customization. Document standard names in project README.
 
-5. **Include timestamps** - ISO8601 format in filenames when relevant
-6. **Avoid special characters** - Alphanumeric, hyphen, underscore only
-7. **Preserve extensions** - Keep original file extensions
-8. **Unique names** - Prevent overwrites with UUID or sequence
+3. **Keep directory depth minimal** — Limit structure to 3 levels: `workspace-root/.acode/artifacts/{run-id}/`. Deeper nesting causes issues on Windows (MAX_PATH 260 chars), NFS (performance degradation), and makes paths harder to copy/paste. If sharding needed for >100k runs, use 2-level scheme: `.acode/artifacts/01/HQ/{run-id}/`.
 
-### Maintenance
+4. **Separate standard from custom artifacts** — Standard artifacts (stdout.txt, stderr.txt, run.json) are always present; custom artifacts (test-results.trx, coverage.json) are optional. Custom artifacts use descriptive names indicating tool/format: `dotnet-test-results.trx`, `jest-coverage.json`. Avoid generic names like `output.txt`.
 
-9. **Gitignore artifacts** - Never commit artifacts to source control
-10. **Document structure** - README in artifacts directory explaining layout
-11. **Size monitoring** - Warn when artifacts directory grows large
-12. **Periodic cleanup** - Script or command to prune old artifacts
+### File Naming Best Practices
+
+5. **Use lowercase filenames consistently** — All artifact filenames should be lowercase (stdout.txt, build.log) to avoid case-sensitivity issues on different filesystems. Windows/macOS are case-insensitive (stdout.txt == STDOUT.txt), Linux is case-sensitive. Lowercase-only prevents collisions and confusion.
+
+6. **Preserve original file extensions** — When collecting artifacts, retain the original extension (.log, .trx, .xml, .json). Extensions enable text editors/IDEs to apply correct syntax highlighting and allow file-type based filtering (`ls *.json`). Don't rename `test-results.trx` to `test-results.txt`.
+
+7. **Avoid special characters in filenames** — Restrict filenames to alphanumeric, hyphens, underscores, and dots: `[a-zA-Z0-9\-_\.]+`. Reject spaces, slashes, colons, pipes, wildcards. Special characters break shell scripts (`rm *.log` fails if filename is `*.log`), URLs (artifact download links), and .gitignore patterns.
+
+8. **Include timestamps only when needed** — Standard artifacts (stdout.txt) don't need timestamps; the run directory name (ULID with embedded timestamp) provides chronological ordering. Only add timestamps to custom artifacts when multiple instances generated per run: `screenshot-14-32-15.png`, `profile-14-35-42.json`.
+
+### Artifact Collection Best Practices
+
+9. **Collect artifacts immediately after generation** — Don't defer artifact collection to end of run. Write stdout/stderr to files as data arrives (streaming), not buffered. Immediate collection ensures partial artifacts available if process crashes, and reduces memory usage (no buffering GB of output).
+
+10. **Set size limits per artifact** — Configure maximum artifact size (default 10MB) to prevent disk exhaustion from runaway processes. Truncate oversized artifacts with marker: `[TRUNCATED: exceeded 10MB limit]`. Preserve first 10MB for debugging (usually contains relevant errors), not last 10MB.
+
+11. **Compute checksums on write** — Calculate SHA-256 checksum while writing each artifact, store in run.json metadata. Enables integrity verification after filesystem issues, backups, or security audits. Use streaming hash computation to avoid reading file twice: `using var sha256 = SHA256.Create(); sha256.ComputeHash(fileStream);`
+
+12. **Capture environment context** — Store critical environment variables in run.json: PATH, DOTNET_CLI_TELEMETRY_OPTOUT, JAVA_HOME, NODE_ENV. Exclude sensitive vars (API_KEY, PASSWORD). Context enables reproducibility ("why did this work in CI but not locally?"). Limit to 50 vars max to avoid bloat.
+
+### Retention and Cleanup Best Practices
+
+13. **Configure aggressive retention policies** — Default retention: delete runs older than 30 days (success) or 90 days (failures). Aggressive policies prevent disk exhaustion. Users who need long-term history should export bundles (Task 021c) to external storage, not rely on local artifacts.
+
+14. **Prune during low-activity periods** — Schedule retention cleanup at 2 AM local time, avoiding peak development hours. Pruning is I/O intensive (deleting thousands of files), causes VCS performance issues if run during active development. Use cron/Task Scheduler: `0 2 * * * acode artifacts prune`.
+
+15. **Delete atomically: database then filesystem** — When pruning run, delete database record first, then artifact directory. If deletion fails mid-operation, database has no orphaned records pointing to missing artifacts. Orphaned artifacts (no database record) cleaned up by separate orphan scan job.
+
+16. **Monitor disk usage proactively** — Alert when `.acode/artifacts/` exceeds 10GB or 80% of disk. Don't wait for disk full errors. Provide command to check usage: `acode artifacts stats` shows total size, run count, oldest run date. Dashboard UI (future) graphs trends over time.
+
+### Gitignore Integration Best Practices
+
+17. **Auto-add gitignore entry on first run** — When agent creates `.acode/artifacts/` for first time, automatically append `.acode/artifacts/` to workspace `.gitignore`. Log action: "Added .acode/artifacts/ to .gitignore". If user later removes entry, warn: "Artifacts may be committed to VCS. Re-add gitignore entry?"
+
+18. **Use directory-level ignore, not file patterns** — Gitignore entry should be `.acode/artifacts/` (entire directory), not `.acode/artifacts/*.txt` (file patterns). Directory-level ignore is simpler, faster for git, and prevents accidentally committing files if pattern doesn't match (e.g., forgot to ignore `.xml` files).
+
+19. **Respect user's existing gitignore** — Don't overwrite or reformat user's .gitignore. Append new entry at end with comment: `# Acode artifacts (auto-generated)`. If .gitignore is tracked in VCS, agent modification creates uncommitted change; this is acceptable (user reviews and commits).
+
+### Documentation and Communication Best Practices
+
+20. **Log all artifact operations** — Log artifact directory creation, file writes, retention actions with INFO level. Include paths, sizes, durations: "Created artifact directory: .acode/artifacts/run-123 (755)", "Wrote stdout.txt: 45KB in 12ms", "Pruned 127 runs older than 30 days (freed 1.2GB)". Logs enable troubleshooting and auditing.
+
+21. **Provide artifact discovery commands** — Users shouldn't manually browse `.acode/artifacts/`. Provide commands: `acode artifact list {run-id}` (list artifacts), `acode artifact cat {run-id} {file}` (display content), `acode artifact path {run-id}` (show filesystem path for external tools). CLI is safer than direct filesystem access.
+
+22. **Document upgrade path for structure changes** — If artifact directory structure changes in future versions (e.g., adding sharding), provide migration tool: `acode artifacts migrate --from v1 --to v2`. Don't break existing workspaces. Migration tool moves files to new structure, updates database paths.
 
 ---
 
