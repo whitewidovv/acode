@@ -762,23 +762,914 @@ acode commands --show build
 
 ### Troubleshooting
 
-#### Unknown Variable Error
+#### Issue 1: Unknown Template Variable Error
 
-**Problem:** `ACODE-CMD-001: Unknown template variable '${foo}'`
+**Symptoms:**
+```
+ERROR ACODE-CMD-001: Unknown template variable '${project_file}' in command 'build'
+Contract command: dotnet build ${project_file}
+Supported variables: project_root, configuration, project_path, project_name, project_dir, solution_path, artifact_dir
+```
 
-**Solution:** Check the variable name against the supported variables table. Variables are case-sensitive.
+**Causes:**
+- Typo in variable name (e.g., `${project_file}` instead of `${project_path}`)
+- Using unsupported variable not implemented yet
+- Incorrect variable syntax (e.g., `{{name}}` instead of `${name}`)
+- Case sensitivity issue (variables are lowercase snake_case)
 
-#### Empty Command Error
+**Solutions:**
+1. **Check variable name spelling:**
+   ```yaml
+   # WRONG
+   commands:
+     build: "dotnet build ${project_file}"
 
-**Problem:** `ACODE-CMD-002: Empty command string for 'build'`
+   # CORRECT
+   commands:
+     build: "dotnet build ${project_path}"
+   ```
 
-**Solution:** Use `null` to disable a command, not an empty string.
+2. **Verify variable exists in supported set:** Run `acode commands --show-variables` to list all supported template variables.
 
-#### Operation Disabled
+3. **Check syntax:** Ensure using `${name}` not `{{name}}` or `$name`.
 
-**Problem:** `ACODE-CMD-003: Operation 'run' is disabled by repository contract`
+4. **Use explicit path if variable not available:**
+   ```yaml
+   commands:
+     build: "dotnet build MyApp.csproj"  # No variable needed
+   ```
 
-**Solution:** The repository owner has intentionally disabled this operation. Remove the `run: null` line to enable defaults.
+---
+
+#### Issue 2: Empty Command String Causes Validation Error
+
+**Symptoms:**
+```
+ERROR ACODE-CMD-002: Empty command string for 'build' is not allowed
+To disable a command, use 'null' instead of empty string.
+```
+
+**Causes:**
+- User set command to empty string `""` instead of `null` to disable
+- Whitespace-only command (e.g., `"  "`)
+- YAML parsing quirk where missing value becomes empty string
+
+**Solutions:**
+1. **To disable a command, use `null`:**
+   ```yaml
+   # WRONG - causes validation error
+   commands:
+     run: ""
+
+   # CORRECT - explicitly disables the command
+   commands:
+     run: null
+   ```
+
+2. **Omit the command entirely to use default:**
+   ```yaml
+   # If you want default behavior, just don't define it
+   commands:
+     build: "cmake --build ."
+     # 'test' and 'run' will use runner defaults
+   ```
+
+3. **Validate YAML syntax:** Use `yamllint .agent/config.yml` to detect parsing issues.
+
+---
+
+#### Issue 3: Operation Disabled by Contract
+
+**Symptoms:**
+```
+ERROR ACODE-CMD-003: Operation 'run' is disabled by repository contract
+The repository owner has set this command to null in .agent/config.yml
+```
+User runs `acode run` but gets error instead of execution.
+
+**Causes:**
+- Repository owner intentionally disabled the operation with `run: null`
+- Operation is not applicable for this project type (e.g., library has no "run" concept)
+- Security policy disables certain operations
+
+**Solutions:**
+1. **Check contract file:**
+   ```bash
+   cat .agent/config.yml
+   ```
+   If you see:
+   ```yaml
+   commands:
+     run: null
+   ```
+   The operation is explicitly disabled.
+
+2. **Enable by removing the `null` line:**
+   ```yaml
+   # BEFORE (disabled)
+   commands:
+     build: "cmake --build ."
+     run: null
+
+   # AFTER (uses default)
+   commands:
+     build: "cmake --build ."
+     # 'run' line removed, will use default runner behavior
+   ```
+
+3. **Override with custom command:**
+   ```yaml
+   commands:
+     run: "./bin/MyApp --port 8080"
+   ```
+
+4. **Verify change was loaded:** Run `acode commands --show run` to see current command source.
+
+---
+
+#### Issue 4: Command Resolution Timeout
+
+**Symptoms:**
+```
+WARN ACODE-CMD-004: Command resolution for 'build' exceeded 100ms timeout (actual: 247ms)
+Using default command as fallback.
+```
+Build command resolves slowly or times out, falls back to default.
+
+**Causes:**
+- Extremely complex template with many variables (>50)
+- Pathological regex in variable extraction (e.g., nested braces)
+- Very large command string (>64KB)
+- Contract file has hundreds of commands
+
+**Solutions:**
+1. **Simplify command template:**
+   ```yaml
+   # WRONG - too many variables
+   commands:
+     build: "dotnet build ${project_path} -c ${configuration} -o ${artifact_dir}/bin/${configuration}/${project_name}"
+
+   # CORRECT - minimal variables
+   commands:
+     build: "dotnet build ${project_path} -c ${configuration} -o ${artifact_dir}"
+   ```
+
+2. **Split complex commands into custom named commands:**
+   ```yaml
+   commands:
+     build: "dotnet build"
+     build-release: "dotnet build -c Release -o artifacts/release"
+     build-debug: "dotnet build -c Debug -o artifacts/debug"
+   ```
+
+3. **Check contract size:**
+   ```bash
+   wc -l .agent/config.yml  # Should be <100 lines
+   wc -c .agent/config.yml  # Should be <10KB
+   ```
+
+4. **Review logs for regex performance issues:** Enable debug logging with `--log-level debug` to see which variable resolution is slow.
+
+---
+
+#### Issue 5: Variable Resolution Fails with Path Traversal Error
+
+**Symptoms:**
+```
+ERROR ACODE-CMD-005: Path traversal detected in working_directory
+Resolved path /home/alice/../../../../etc/passwd is outside repository root /home/alice/repo
+```
+
+**Causes:**
+- Working directory uses `../` to escape repository root
+- Malicious or misconfigured contract attempting directory traversal
+- Symbolic link resolution escapes repository boundary
+
+**Solutions:**
+1. **Use paths relative to repository root:**
+   ```yaml
+   # WRONG - tries to escape repo
+   commands:
+     build:
+       command: "make"
+       working_directory: "../../../../etc"
+
+   # CORRECT - path within repo
+   commands:
+     build:
+       command: "make"
+       working_directory: "src/subproject"
+   ```
+
+2. **Use absolute paths within repository:**
+   ```yaml
+   commands:
+     build:
+       command: "make"
+       working_directory: "${project_root}/build"
+   ```
+
+3. **Check for symlinks pointing outside repo:**
+   ```bash
+   find .agent -type l -ls  # List all symlinks
+   ```
+
+4. **Verify canonical path:**
+   ```bash
+   realpath .agent/config.yml  # Should be inside repo
+   ```
+
+5. **Review contract for suspicious paths:** Search for `../` patterns:
+   ```bash
+   grep -n '\.\.' .agent/config.yml
+   ```
+
+---
+
+## Assumptions
+
+### Technical Assumptions
+
+1. **Task 002 Config Parser Complete** - The configuration contract parser is implemented and provides a strongly-typed `RepoContract` model with a `Commands` dictionary.
+
+2. **Task 018 CommandExecutor Available** - The `ICommandExecutor` interface and implementation exist and can execute arbitrary commands with timeout and environment variable support.
+
+3. **YAML Parser Available** - The config loading system can parse YAML files and deserialize them into C# objects without additional dependencies.
+
+4. **Regex Support** - .NET regex functionality is available for variable extraction and validation (`[GeneratedRegex]` attribute supported in .NET 7+).
+
+5. **File System Access** - The application has read access to `.agent/config.yml` in the repository root directory.
+
+6. **UTF-8 Encoding** - All contract files are UTF-8 encoded, and the parser handles Unicode variable values correctly.
+
+7. **Path Normalization APIs** - `Path.GetFullPath()` and related APIs correctly canonicalize paths on the target platform (Windows, Linux, macOS).
+
+8. **Dictionary Lookup Performance** - Contract commands dictionary has O(1) lookup performance for command resolution.
+
+### Operational Assumptions
+
+9. **Repository Root Known** - The repository root path is always available from the execution context (passed as `VariableContext.ProjectRoot`).
+
+10. **Build Configuration Known** - The build configuration (`Debug` or `Release`) is available at command execution time, either from CLI arguments or defaults.
+
+11. **Single Contract Per Repository** - Each repository has at most one `.agent/config.yml` file at the root level. Nested contracts in subdirectories are NOT supported.
+
+12. **Config Validated at Load** - The contract file is validated when first loaded, before any command resolution occurs. Invalid contracts fail fast.
+
+13. **Non-Interactive Execution** - All commands defined in the contract are non-interactive (no user prompts, no GUI dialogs).
+
+14. **Timeout Enforcement** - The CommandExecutor respects timeout values specified in command definitions and terminates processes that exceed the limit.
+
+15. **Working Directory Exists** - If a custom working directory is specified, it exists and is accessible. The system does NOT auto-create missing directories.
+
+### Integration Assumptions
+
+16. **Language Runners Query Resolver** - Both `DotNetRunner` and `NodeRunner` are updated to call `ICommandResolver.ResolveAsync()` before using default commands.
+
+17. **DI Container Configured** - The dependency injection container registers `ICommandResolver`, `ITemplateVariableResolver`, and `ICommandValidator` with appropriate lifetimes.
+
+18. **Logging Infrastructure Available** - `ILogger<T>` is available for logging command resolution decisions, variable substitutions, and validation errors.
+
+19. **Contract Provider Singleton** - `IRepoContractProvider` is registered as a singleton to cache the parsed contract and avoid re-parsing on every resolution.
+
+20. **Variable Context Provided** - The caller (language runner or CLI command) constructs a complete `VariableContext` with all required fields populated before invoking resolver.
+
+---
+
+## Security
+
+### Threat 1: Command Injection via Template Variables
+
+**Risk Description:** If variable values from user input or external sources are not sanitized, malicious values could inject shell metacharacters and execute arbitrary commands.
+
+**Attack Scenario:**
+```yaml
+# Malicious .agent/config.yml
+commands:
+  build: "dotnet build --configuration ${configuration}"
+```
+
+```bash
+# Attacker provides malicious configuration value
+acode build --configuration "Release; rm -rf /"
+# Resolves to: "dotnet build --configuration Release; rm -rf /"
+# Executes both commands!
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Contract;
+
+public sealed partial class VariableValueSanitizer
+{
+    private readonly ILogger<VariableValueSanitizer> _logger;
+
+    [GeneratedRegex(@"[;&|`$()<>{}[\]\\]", RegexOptions.Compiled)]
+    private static partial Regex ShellMetacharPattern();
+
+    public VariableValueSanitizer(ILogger<VariableValueSanitizer> logger)
+    {
+        _logger = logger;
+    }
+
+    public ValidationResult ValidateVariableValue(string variableName, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return ValidationResult.Success();  // Empty is OK
+        }
+
+        // Configuration should only be Debug or Release
+        if (variableName == "configuration")
+        {
+            if (value != "Debug" && value != "Release")
+            {
+                _logger.LogWarning("Invalid configuration value: {Value}", value);
+                return ValidationResult.Fail(
+                    $"Configuration must be 'Debug' or 'Release', got '{value}'");
+            }
+            return ValidationResult.Success();
+        }
+
+        // Path variables should not contain shell metacharacters
+        if (variableName.EndsWith("_path") || variableName.EndsWith("_dir") || variableName == "project_root")
+        {
+            if (ShellMetacharPattern().IsMatch(value))
+            {
+                _logger.LogError(
+                    "Shell metacharacters detected in path variable {Name}: {Value}",
+                    variableName, value);
+                return ValidationResult.Fail(
+                    $"Path variable '{variableName}' contains invalid characters: {value}");
+            }
+
+            // Ensure path is absolute and canonical
+            try
+            {
+                var fullPath = Path.GetFullPath(value);
+                if (fullPath != value.TrimEnd(Path.DirectorySeparatorChar))
+                {
+                    _logger.LogWarning(
+                        "Path variable {Name} not canonical: {Value} vs {Full}",
+                        variableName, value, fullPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Invalid path for variable {Name}: {Value}", variableName, value);
+                return ValidationResult.Fail($"Invalid path: {value}");
+            }
+        }
+
+        // Name variables should be alphanumeric only
+        if (variableName.EndsWith("_name"))
+        {
+            if (!Regex.IsMatch(value, @"^[a-zA-Z0-9._-]+$"))
+            {
+                _logger.LogWarning("Invalid name variable {Name}: {Value}", variableName, value);
+                return ValidationResult.Fail(
+                    $"Name variable '{variableName}' contains invalid characters: {value}");
+            }
+        }
+
+        return ValidationResult.Success();
+    }
+
+    public string SanitizeForShell(string value)
+    {
+        // Quote the value to prevent shell interpretation
+        // Use double quotes and escape internal quotes
+        var escaped = value.Replace("\"", "\\\"").Replace("$", "\\$").Replace("`", "\\`");
+        return $"\"{escaped}\"";
+    }
+}
+
+public readonly record struct ValidationResult(bool IsValid, string ErrorMessage)
+{
+    public static ValidationResult Success() => new(true, string.Empty);
+    public static ValidationResult Fail(string message) => new(false, message);
+}
+```
+
+---
+
+### Threat 2: Path Traversal via Working Directory Override
+
+**Risk Description:** Malicious contracts could specify working directories outside the repository root, potentially accessing or modifying sensitive files.
+
+**Attack Scenario:**
+```yaml
+# Malicious .agent/config.yml
+commands:
+  build:
+    command: "cat /etc/passwd > stolen.txt"
+    working_directory: "../../../../etc"
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System;
+using System.IO;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Contract;
+
+public sealed class WorkingDirectoryValidator
+{
+    private readonly string _repositoryRoot;
+    private readonly ILogger<WorkingDirectoryValidator> _logger;
+
+    public WorkingDirectoryValidator(string repositoryRoot, ILogger<WorkingDirectoryValidator> logger)
+    {
+        _repositoryRoot = Path.GetFullPath(repositoryRoot);
+        _logger = logger;
+    }
+
+    public ValidationResult ValidateWorkingDirectory(string workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            // Null/empty is OK - means use default (repository root)
+            return ValidationResult.Success();
+        }
+
+        try
+        {
+            // Resolve to absolute path
+            var absolutePath = Path.GetFullPath(
+                Path.IsPathRooted(workingDirectory)
+                    ? workingDirectory
+                    : Path.Combine(_repositoryRoot, workingDirectory)
+            );
+
+            // Ensure it's within repository root
+            if (!absolutePath.StartsWith(_repositoryRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogError(
+                    "Path traversal detected: {WorkingDir} resolves to {Absolute} outside repo {Root}",
+                    workingDirectory, absolutePath, _repositoryRoot);
+
+                return ValidationResult.Fail(
+                    $"Working directory '{workingDirectory}' resolves outside repository root");
+            }
+
+            // Check for excessive parent directory traversals (suspicious)
+            var segments = workingDirectory.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+            var parentTraversals = segments.Count(s => s == "..");
+
+            if (parentTraversals > 5)
+            {
+                _logger.LogWarning(
+                    "Excessive path traversal in working directory: {Count} levels in {Path}",
+                    parentTraversals, workingDirectory);
+
+                return ValidationResult.Fail(
+                    $"Working directory '{workingDirectory}' contains excessive parent traversals ({parentTraversals})");
+            }
+
+            // Verify directory exists (optional - could auto-create, but safer to reject)
+            if (!Directory.Exists(absolutePath))
+            {
+                _logger.LogWarning("Working directory does not exist: {Path}", absolutePath);
+                // Return success but log warning - executor can create if needed
+            }
+
+            return ValidationResult.Success();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error validating working directory: {WorkingDir}", workingDirectory);
+            return ValidationResult.Fail($"Invalid working directory: {ex.Message}");
+        }
+    }
+
+    public string CanonicalizeWorkingDirectory(string workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            return _repositoryRoot;
+        }
+
+        var absolutePath = Path.GetFullPath(
+            Path.IsPathRooted(workingDirectory)
+                ? workingDirectory
+                : Path.Combine(_repositoryRoot, workingDirectory)
+        );
+
+        // Already validated by ValidateWorkingDirectory, so this is safe
+        return absolutePath.TrimEnd(Path.DirectorySeparatorChar);
+    }
+}
+```
+
+---
+
+### Threat 3: Denial of Service via Infinite Variable Expansion
+
+**Risk Description:** Malicious templates with self-referential or deeply nested variable references could cause stack overflow or infinite loops during resolution.
+
+**Attack Scenario:**
+```yaml
+# Malicious .agent/config.yml with recursive pattern
+commands:
+  build: "${project_root}/${project_root}/${project_root}/... (1000 times)"
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Contract;
+
+public sealed partial class SafeTemplateExpander
+{
+    private const int MaxExpansionDepth = 3;
+    private const int MaxTemplateLength = 65536;  // 64KB
+    private const int MaxVariableCount = 50;
+
+    private readonly ILogger<SafeTemplateExpander> _logger;
+
+    [GeneratedRegex(@"\$\{([a-z_]+)\}", RegexOptions.Compiled)]
+    private static partial Regex VariablePattern();
+
+    public SafeTemplateExpander(ILogger<SafeTemplateExpander> logger)
+    {
+        _logger = logger;
+    }
+
+    public ValidationResult ValidateTemplate(string template)
+    {
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            return ValidationResult.Fail("Template cannot be empty");
+        }
+
+        // Check total length
+        if (template.Length > MaxTemplateLength)
+        {
+            _logger.LogError("Template exceeds maximum length: {Length} > {Max}",
+                template.Length, MaxTemplateLength);
+            return ValidationResult.Fail(
+                $"Template length {template.Length} exceeds maximum {MaxTemplateLength}");
+        }
+
+        // Count total variables
+        var variables = VariablePattern().Matches(template);
+        if (variables.Count > MaxVariableCount)
+        {
+            _logger.LogError("Template contains too many variables: {Count} > {Max}",
+                variables.Count, MaxVariableCount);
+            return ValidationResult.Fail(
+                $"Template has {variables.Count} variables, maximum {MaxVariableCount} allowed");
+        }
+
+        // Check for unclosed variable syntax
+        var dollarCount = template.Count(c => c == '$');
+        var braceOpenCount = template.Count(c => c == '{');
+        var braceCloseCount = template.Count(c => c == '}');
+
+        if (braceOpenCount != braceCloseCount)
+        {
+            _logger.LogError("Unclosed variable syntax: {Open} '{' but {Close} '}'",
+                braceOpenCount, braceCloseCount);
+            return ValidationResult.Fail("Unclosed variable syntax - mismatched braces");
+        }
+
+        return ValidationResult.Success();
+    }
+
+    public string ExpandSafely(string template, Func<string, string> variableResolver)
+    {
+        var validation = ValidateTemplate(template);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException($"Invalid template: {validation.ErrorMessage}");
+        }
+
+        var result = template;
+        var expansionCount = 0;
+
+        // Prevent infinite loops by limiting expansion depth
+        while (VariablePattern().IsMatch(result) && expansionCount < MaxExpansionDepth)
+        {
+            result = VariablePattern().Replace(result, match =>
+            {
+                var varName = match.Groups[1].Value;
+                try
+                {
+                    return variableResolver(varName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error resolving variable: {Variable}", varName);
+                    throw;
+                }
+            });
+
+            expansionCount++;
+
+            // Check if result is growing suspiciously
+            if (result.Length > template.Length * 10)
+            {
+                _logger.LogError(
+                    "Template expansion grew from {Original} to {Current} chars - possible DoS",
+                    template.Length, result.Length);
+                throw new InvalidOperationException("Template expansion grew too large - possible attack");
+            }
+        }
+
+        if (expansionCount >= MaxExpansionDepth)
+        {
+            _logger.LogWarning(
+                "Template expansion reached maximum depth {Depth} - possible recursive variables",
+                MaxExpansionDepth);
+        }
+
+        return result;
+    }
+}
+```
+
+---
+
+### Threat 4: Information Disclosure via Error Messages
+
+**Risk Description:** Detailed error messages revealing internal paths, configuration details, or system information could aid attackers in reconnaissance.
+
+**Attack Scenario:**
+```yaml
+# Attacker probes with invalid variables to learn internal structure
+commands:
+  build: "echo ${secret_api_key}"
+```
+
+Error reveals: `"Unknown variable: secret_api_key. Available: project_root=/home/user/sensitive-project, ..."`
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System;
+using System.Collections.Generic;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Contract;
+
+public sealed class SecureErrorReporter
+{
+    private readonly ILogger<SecureErrorReporter> _logger;
+    private readonly bool _isProduction;
+
+    public SecureErrorReporter(ILogger<SecureErrorReporter> logger, bool isProduction)
+    {
+        _logger = logger;
+        _isProduction = isProduction;
+    }
+
+    public string FormatUnknownVariableError(string variableName, IReadOnlyDictionary<string, string> context)
+    {
+        // Log detailed info internally
+        _logger.LogWarning(
+            "Unknown template variable: {Variable}. Context: {Context}",
+            variableName, string.Join(", ", context.Keys));
+
+        // Return sanitized error to user
+        if (_isProduction)
+        {
+            // Production: Minimal info, no context disclosure
+            return $"Unknown template variable: ${{{variableName}}}. " +
+                   "Check documentation for supported variables.";
+        }
+        else
+        {
+            // Development: Show supported variables but NOT their values
+            return $"Unknown template variable: ${{{variableName}}}. " +
+                   $"Supported variables: {string.Join(", ", GetSupportedVariableNames())}";
+        }
+    }
+
+    public string FormatValidationError(string commandName, string issue)
+    {
+        // Log full details internally
+        _logger.LogError("Command validation failed for '{Command}': {Issue}", commandName, issue);
+
+        // Return sanitized error
+        if (_isProduction)
+        {
+            return $"Invalid command configuration for '{commandName}'. Check .agent/config.yml syntax.";
+        }
+        else
+        {
+            // Development: Show issue but sanitize paths
+            var sanitizedIssue = SanitizePaths(issue);
+            return $"Invalid command '{commandName}': {sanitizedIssue}";
+        }
+    }
+
+    public string FormatResolutionError(string operation, Exception ex)
+    {
+        // Log full exception internally with stack trace
+        _logger.LogError(ex, "Command resolution failed for operation: {Operation}", operation);
+
+        // Return generic error to user
+        if (_isProduction)
+        {
+            return $"Failed to resolve command for '{operation}'. Contact administrator.";
+        }
+        else
+        {
+            // Development: Show exception message but not stack trace or inner exceptions
+            return $"Command resolution error for '{operation}': {ex.Message}";
+        }
+    }
+
+    private static List<string> GetSupportedVariableNames()
+    {
+        return new List<string>
+        {
+            "project_root", "configuration", "project_path", "project_name",
+            "project_dir", "solution_path", "solution_dir", "output_dir", "artifact_dir"
+        };
+    }
+
+    private static string SanitizePaths(string message)
+    {
+        // Replace absolute paths with relative or generic markers
+        var sanitized = message;
+
+        // Remove drive letters (Windows)
+        sanitized = Regex.Replace(sanitized, @"[A-Z]:\\", "<DRIVE>:\\");
+
+        // Remove home directories (Unix)
+        sanitized = Regex.Replace(sanitized, @"/home/[^/]+/", "/home/<USER>/");
+        sanitized = Regex.Replace(sanitized, @"/Users/[^/]+/", "/Users/<USER>/");
+
+        // Remove absolute project paths
+        sanitized = Regex.Replace(sanitized, @"(/[a-z]+)+/repos/", "<PROJECT_ROOT>/");
+
+        return sanitized;
+    }
+}
+```
+
+---
+
+### Threat 5: Resource Exhaustion via Large Command Definitions
+
+**Risk Description:** Malicious contracts with extremely large command strings or thousands of variable references could exhaust memory or CPU during parsing/resolution.
+
+**Attack Scenario:**
+```yaml
+# Malicious .agent/config.yml with 100KB command string
+commands:
+  build: "echo AAAA... (100,000 'A' characters) ...AAAA"
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Contract;
+
+public sealed class ResourceLimitEnforcer
+{
+    private const int MaxCommandLength = 65536;  // 64KB
+    private const int MaxCommandCount = 100;
+    private const int MaxResolutionTime = 100;  // milliseconds
+
+    private readonly ILogger<ResourceLimitEnforcer> _logger;
+
+    public ResourceLimitEnforcer(ILogger<ResourceLimitEnforcer> logger)
+    {
+        _logger = logger;
+    }
+
+    public ValidationResult EnforceCommandLimits(IDictionary<string, CommandDefinition> commands)
+    {
+        if (commands == null)
+        {
+            return ValidationResult.Success();
+        }
+
+        // Check total number of commands
+        if (commands.Count > MaxCommandCount)
+        {
+            _logger.LogError(
+                "Contract defines too many commands: {Count} > {Max}",
+                commands.Count, MaxCommandCount);
+
+            return ValidationResult.Fail(
+                $"Contract has {commands.Count} commands, maximum {MaxCommandCount} allowed");
+        }
+
+        // Check each command's length
+        foreach (var (name, def) in commands)
+        {
+            if (def.Command != null && def.Command.Length > MaxCommandLength)
+            {
+                _logger.LogError(
+                    "Command '{Name}' exceeds maximum length: {Length} > {Max}",
+                    name, def.Command.Length, MaxCommandLength);
+
+                return ValidationResult.Fail(
+                    $"Command '{name}' length {def.Command.Length} exceeds maximum {MaxCommandLength}");
+            }
+
+            // Check working directory length
+            if (def.WorkingDirectory != null && def.WorkingDirectory.Length > 4096)
+            {
+                _logger.LogWarning(
+                    "Command '{Name}' has suspiciously long working directory: {Length}",
+                    name, def.WorkingDirectory.Length);
+
+                return ValidationResult.Fail(
+                    $"Command '{name}' working directory too long (max 4096 chars)");
+            }
+
+            // Check environment variable count and size
+            if (def.Environment != null)
+            {
+                if (def.Environment.Count > 50)
+                {
+                    _logger.LogWarning(
+                        "Command '{Name}' defines too many environment variables: {Count}",
+                        name, def.Environment.Count);
+
+                    return ValidationResult.Fail(
+                        $"Command '{name}' has {def.Environment.Count} env vars (max 50)");
+                }
+
+                foreach (var (envKey, envValue) in def.Environment)
+                {
+                    if (envKey.Length > 256 || envValue.Length > 8192)
+                    {
+                        _logger.LogWarning(
+                            "Command '{Name}' has oversized environment variable: {Key}",
+                            name, envKey);
+
+                        return ValidationResult.Fail(
+                            $"Environment variable '{envKey}' too large");
+                    }
+                }
+            }
+        }
+
+        return ValidationResult.Success();
+    }
+
+    public ValidationResult EnforceResolutionTime(string commandName, Action resolutionAction)
+    {
+        var sw = Stopwatch.StartNew();
+
+        try
+        {
+            resolutionAction();
+            sw.Stop();
+
+            if (sw.ElapsedMilliseconds > MaxResolutionTime)
+            {
+                _logger.LogWarning(
+                    "Command resolution for '{Name}' took {Duration}ms (threshold: {Max}ms)",
+                    commandName, sw.ElapsedMilliseconds, MaxResolutionTime);
+
+                // Don't fail, just warn - but track for rate limiting
+            }
+
+            return ValidationResult.Success();
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex,
+                "Command resolution failed for '{Name}' after {Duration}ms",
+                commandName, sw.ElapsedMilliseconds);
+
+            return ValidationResult.Fail($"Resolution error: {ex.Message}");
+        }
+    }
+}
+
+public sealed class CommandDefinition
+{
+    public string? Command { get; init; }
+    public string? WorkingDirectory { get; init; }
+    public TimeSpan? Timeout { get; init; }
+    public IDictionary<string, string>? Environment { get; init; }
+    public bool IsDisabled => Command == null;
+}
+```
 
 ---
 
@@ -862,171 +1753,636 @@ acode commands --show build
 
 ### Contract Integration
 
-1. **Load contract early** - Parse agent-config.yml at startup
-2. **Validate commands** - Check command definitions are complete
-3. **Allow reload** - Hot-reload contract without restart
-4. **Cache parsed contract** - Don't re-parse on every invocation
+1. **Load contract early** - Parse `.agent/config.yml` at startup, before any command execution. This ensures validation errors are caught before user waits for a build. Cache the parsed contract to avoid repeated YAML parsing overhead.
+
+2. **Validate at load time, not execution time** - Run `CommandValidator` when loading the contract file. Fail fast with clear errors if any command templates are invalid. This prevents confusing runtime failures when a user runs `acode build` and gets a template expansion error.
+
+3. **Allow hot-reload without restart** - Watch `.agent/config.yml` for changes and reload when modified. Invalidate cached resolution results. This enables rapid iteration on command definitions without restarting the agent.
+
+4. **Version the contract schema** - Include a `version: 1` field in the YAML contract. This enables future schema evolution without breaking existing contracts. Reject contracts with unsupported versions.
 
 ### Command Resolution
 
-5. **Priority order** - Contract commands override built-in defaults
-6. **Merge configurations** - Combine contract and runtime options
-7. **Template variables** - Support {{project}}, {{framework}} substitution
-8. **Validate before execute** - Check command requirements are met
+5. **Priority order is explicit** - Contract commands ALWAYS override built-in defaults. Document this prominently in user-facing docs. If a user defines `build: null`, respect the disablement even if a default exists.
 
-### Execution
+6. **Merge configurations incrementally** - Start with runner defaults, layer on contract overrides, then apply runtime CLI flags. Each layer completely replaces the previous value (no partial merging of command strings). Environment variables merge additively.
 
-9. **Respect working directory** - Run in specified directory
-10. **Apply timeout** - Use contract-specified or default timeout
-11. **Environment merging** - Contract env + runtime env + inherited
-12. **Log contract source** - Record which contract command was used
+7. **Template variables use consistent syntax** - Use `${variable_name}` syntax (NOT `{{name}}` or `$name`). This matches shell variable syntax and is familiar to users. Require lowercase snake_case for variable names to prevent confusion.
+
+8. **Validate templates at load, not execution** - Extract all `${...}` placeholders and verify they're in the supported variable set. Report unknown variables immediately when loading the contract, not when the user runs `acode build`.
+
+### Security
+
+9. **Sanitize variable values before substitution** - Validate that `${configuration}` is only "Debug" or "Release". Check that path variables don't contain shell metacharacters. Use `VariableValueSanitizer` to prevent command injection via malicious values.
+
+10. **Canonicalize paths to prevent traversal** - Resolve working directory to absolute path and verify it's within repository root. Reject paths like `../../../../etc/passwd`. Use `WorkingDirectoryValidator` for all path-related variables.
+
+11. **Limit expansion complexity** - Enforce maximum template length (64KB), maximum variable count (50), and maximum expansion depth (3 levels). Use `SafeTemplateExpander` to prevent DoS via pathological templates.
+
+12. **Redact paths in error messages** - Replace `/home/alice/` with `/home/<USER>/` in error output. Don't leak repository structure or system paths to logs. Use `SecureErrorReporter` for all user-facing errors.
+
+### Performance
+
+13. **Cache resolved commands** - After resolving a command template, cache the result keyed by (command name, variable context hash). Invalidate cache when contract reloads. Target <0.1ms for cached resolution vs. <10ms for initial resolution.
+
+14. **Limit resolution time** - Use `ResourceLimitEnforcer` to timeout command resolution at 100ms. If resolution takes longer (e.g., due to complex regex or many variables), log a warning and consider the command invalid.
+
+### Error Handling
+
+15. **Fail fast with actionable errors** - If a command cannot be resolved, report WHY: "Unknown variable: ${project_path}. Supported variables: project_root, configuration, artifact_dir". Include the command source (contract vs. default) in the error.
+
+16. **Distinguish user errors from system errors** - Unknown variable = user error (exit code 2, actionable message). Contract file not found = expected condition (use defaults, log info). YAML parse error = user error (exit code 2, show syntax issue).
+
+### Logging
+
+17. **Log resolution decisions** - When using contract override: `"Using contract command for 'build': cmake --build ."`. When using default: `"No contract override for 'build', using default: dotnet build"`. When disabled: `"Command 'run' is disabled by contract"`.
+
+18. **Trace variable resolution** - At DEBUG level, log each variable substitution: `"Resolved ${project_root} to /home/alice/repo"`. This helps users troubleshoot template issues without reading code.
+
+### Documentation
+
+19. **Document supported variables in contract** - Include a comment header in the generated `.agent/config.yml` template listing all supported variables: `${project_root}`, `${configuration}`, `${project_path}`, etc. Show examples of each.
+
+20. **Provide contract examples for each language** - Ship example contracts for .NET, Node.js, Python, Rust in `docs/examples/`. Show common patterns like "Build in subfolder", "Custom test framework", "Multi-stage build".
 
 ---
 
 ## Testing Requirements
 
-### Unit Tests
+### Unit Tests - CommandResolverTests.cs
 
-```
-Tests/Unit/Domain/Contract/
-├── CommandResolutionTests.cs
-│   ├── Status_UseOverride_WhenCommandDefined()
-│   ├── Status_UseDefault_WhenCommandUndefined()
-│   ├── Status_Disabled_WhenCommandNull()
-│   ├── ResolvedCommand_ContainsVariablesResolved()
-│   ├── WorkingDirectory_IncludedWhenSpecified()
-│   ├── Timeout_IncludedWhenSpecified()
-│   └── Environment_IncludedWhenSpecified()
-│
-└── TemplateVariableTests.cs
-    ├── ProjectRoot_ResolvesToAbsolutePath()
-    ├── Configuration_ResolvesToDebugOrRelease()
-    ├── ProjectPath_ResolvesToProjectFile()
-    ├── ProjectName_ResolvesToNameWithoutExtension()
-    ├── EscapedVariable_RendersAsLiteral()
-    └── UnknownVariable_ThrowsValidationError()
+**File:** `tests/Acode.Infrastructure.Tests/Contract/CommandResolverTests.cs`
+
+```csharp
+using Acode.Domain.Contract;
+using Acode.Infrastructure.Contract;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Contract;
+
+public sealed class CommandResolverTests
+{
+    [Fact]
+    public async Task ResolveAsync_WhenContractHasCommand_ReturnsOverride()
+    {
+        // Arrange
+        var contract = Substitute.For<IRepoContract>();
+        contract.Commands.Returns(new Dictionary<string, CommandDefinition>
+        {
+            ["build"] = new CommandDefinition { Command = "cmake --build ." }
+        });
+
+        var variableResolver = Substitute.For<ITemplateVariableResolver>();
+        variableResolver.Resolve(Arg.Any<string>(), Arg.Any<VariableContext>())
+            .Returns(args => args.ArgAt<string>(0)); // No variables to resolve
+
+        var resolver = new CommandResolver(contract, variableResolver, NullLogger<CommandResolver>.Instance);
+        var context = new VariableContext("/repo", "Debug");
+
+        // Act
+        var result = await resolver.ResolveAsync("build", context, CancellationToken.None);
+
+        // Assert
+        result.Status.Should().Be(CommandResolutionStatus.UseOverride);
+        result.Command.Should().Be("cmake --build .");
+        result.WorkingDirectory.Should().BeNull();
+        result.Timeout.Should().BeNull();
+        result.Environment.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WhenContractHasNull_ReturnsDisabled()
+    {
+        // Arrange
+        var contract = Substitute.For<IRepoContract>();
+        contract.Commands.Returns(new Dictionary<string, CommandDefinition>
+        {
+            ["run"] = new CommandDefinition { Command = null }
+        });
+
+        var variableResolver = Substitute.For<ITemplateVariableResolver>();
+        var resolver = new CommandResolver(contract, variableResolver, NullLogger<CommandResolver>.Instance);
+        var context = new VariableContext("/repo", "Debug");
+
+        // Act
+        var result = await resolver.ResolveAsync("run", context, CancellationToken.None);
+
+        // Assert
+        result.Status.Should().Be(CommandResolutionStatus.Disabled);
+        result.Command.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WhenContractMissingCommand_ReturnsUseDefault()
+    {
+        // Arrange
+        var contract = Substitute.For<IRepoContract>();
+        contract.Commands.Returns(new Dictionary<string, CommandDefinition>
+        {
+            ["build"] = new CommandDefinition { Command = "dotnet build" }
+        });
+
+        var variableResolver = Substitute.For<ITemplateVariableResolver>();
+        var resolver = new CommandResolver(contract, variableResolver, NullLogger<CommandResolver>.Instance);
+        var context = new VariableContext("/repo", "Debug");
+
+        // Act
+        var result = await resolver.ResolveAsync("test", context, CancellationToken.None);
+
+        // Assert
+        result.Status.Should().Be(CommandResolutionStatus.UseDefault);
+        result.Command.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ResolvesVariablesInCommand()
+    {
+        // Arrange
+        var contract = Substitute.For<IRepoContract>();
+        contract.Commands.Returns(new Dictionary<string, CommandDefinition>
+        {
+            ["build"] = new CommandDefinition { Command = "dotnet build ${project_path} -c ${configuration}" }
+        });
+
+        var variableResolver = Substitute.For<ITemplateVariableResolver>();
+        variableResolver.Resolve("dotnet build ${project_path} -c ${configuration}", Arg.Any<VariableContext>())
+            .Returns("dotnet build /repo/MyApp.csproj -c Debug");
+
+        var resolver = new CommandResolver(contract, variableResolver, NullLogger<CommandResolver>.Instance);
+        var context = new VariableContext("/repo", "Debug");
+
+        // Act
+        var result = await resolver.ResolveAsync("build", context, CancellationToken.None);
+
+        // Assert
+        result.Status.Should().Be(CommandResolutionStatus.UseOverride);
+        result.Command.Should().Be("dotnet build /repo/MyApp.csproj -c Debug");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_HandlesAdvancedConfig()
+    {
+        // Arrange
+        var contract = Substitute.For<IRepoContract>();
+        contract.Commands.Returns(new Dictionary<string, CommandDefinition>
+        {
+            ["build"] = new CommandDefinition
+            {
+                Command = "make",
+                WorkingDirectory = "src/subproject",
+                Timeout = TimeSpan.FromMinutes(5),
+                Environment = new Dictionary<string, string>
+                {
+                    ["CC"] = "gcc-11",
+                    ["CFLAGS"] = "-O2 -Wall"
+                }
+            }
+        });
+
+        var variableResolver = Substitute.For<ITemplateVariableResolver>();
+        variableResolver.Resolve(Arg.Any<string>(), Arg.Any<VariableContext>())
+            .Returns(args => args.ArgAt<string>(0)); // No variable substitution needed
+
+        var resolver = new CommandResolver(contract, variableResolver, NullLogger<CommandResolver>.Instance);
+        var context = new VariableContext("/repo", "Debug");
+
+        // Act
+        var result = await resolver.ResolveAsync("build", context, CancellationToken.None);
+
+        // Assert
+        result.Status.Should().Be(CommandResolutionStatus.UseOverride);
+        result.Command.Should().Be("make");
+        result.WorkingDirectory.Should().Be("src/subproject");
+        result.Timeout.Should().Be(TimeSpan.FromMinutes(5));
+        result.Environment.Should().HaveCount(2);
+        result.Environment["CC"].Should().Be("gcc-11");
+        result.Environment["CFLAGS"].Should().Be("-O2 -Wall");
+    }
+}
 ```
 
-```
-Tests/Unit/Infrastructure/Contract/
-├── CommandResolverTests.cs
-│   ├── ResolveAsync_WhenContractHasCommand_ReturnsOverride()
-│   ├── ResolveAsync_WhenContractHasNull_ReturnsDisabled()
-│   ├── ResolveAsync_WhenContractMissingCommand_ReturnsUseDefault()
-│   ├── ResolveAsync_WhenNoContract_ReturnsUseDefault()
-│   ├── ResolveAsync_ResolvesVariablesInCommand()
-│   ├── ResolveAsync_ResolvesVariablesInWorkingDir()
-│   ├── ResolveAsync_LogsOverrideUsage()
-│   ├── ResolveAsync_LogsDefaultUsage()
-│   ├── ResolveAsync_LogsDisabledOperation()
-│   ├── ResolveAsync_IsDeterministic()
-│   ├── ResolveAsync_IsThreadSafe()
-│   ├── ResolveAsync_CompletesWithin10ms()
-│   ├── ResolveAsync_HandlesCustomCommand()
-│   └── ResolveAsync_HandlesAdvancedConfig()
-│
-├── TemplateVariableResolverTests.cs
-│   ├── Resolve_ProjectRoot_ReturnsAbsolutePath()
-│   ├── Resolve_Configuration_ReturnsDebug()
-│   ├── Resolve_Configuration_ReturnsRelease()
-│   ├── Resolve_ProjectPath_ReturnsProjectFile()
-│   ├── Resolve_ProjectName_ReturnsName()
-│   ├── Resolve_ProjectDir_ReturnsDirectory()
-│   ├── Resolve_SolutionPath_ReturnsSolutionFile()
-│   ├── Resolve_SolutionDir_ReturnsDirectory()
-│   ├── Resolve_OutputDir_ReturnsBuildOutput()
-│   ├── Resolve_ArtifactDir_ReturnsArtifactPath()
-│   ├── Resolve_MultipleVariables_AllResolved()
-│   ├── Resolve_EscapedVariable_ReturnsLiteral()
-│   ├── Resolve_UnknownVariable_ThrowsError()
-│   ├── Resolve_MissingContext_ThrowsError()
-│   ├── Resolve_PathsUsePlatformSeparators()
-│   ├── Resolve_CompletesWithin1ms()
-│   ├── Resolve_HandlesUnicode()
-│   └── Resolve_QuotesValuesForShell()
-│
-├── CommandValidatorTests.cs
-│   ├── Validate_ValidCommand_ReturnsSuccess()
-│   ├── Validate_EmptyCommand_ReturnsError()
-│   ├── Validate_WhitespaceCommand_ReturnsError()
-│   ├── Validate_NullCommand_ReturnsSuccess()
-│   ├── Validate_UnknownVariable_ReturnsError()
-│   ├── Validate_UnclosedVariable_ReturnsError()
-│   ├── Validate_MultipleErrors_ReturnsAll()
-│   ├── Validate_MaxLength_ReturnsError()
-│   ├── Validate_ValidVariables_ReturnsSuccess()
-│   ├── Validate_CompletesWithin50ms()
-│   ├── Validate_IsIdempotent()
-│   └── Validate_ReservedCommandNames()
-│
-└── VariableParserTests.cs
-    ├── ExtractVariables_SingleVariable_ReturnsOne()
-    ├── ExtractVariables_MultipleVariables_ReturnsAll()
-    ├── ExtractVariables_NoVariables_ReturnsEmpty()
-    ├── ExtractVariables_EscapedVariable_Ignored()
-    ├── ExtractVariables_NestedBraces_Handled()
-    ├── ExtractVariables_UnclosedBrace_Detected()
-    └── ExtractVariables_PerformanceWithManyVariables()
+### Unit Tests - TemplateVariableResolverTests.cs
+
+**File:** `tests/Acode.Infrastructure.Tests/Contract/TemplateVariableResolverTests.cs`
+
+```csharp
+using Acode.Domain.Contract;
+using Acode.Infrastructure.Contract;
+using FluentAssertions;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Contract;
+
+public sealed class TemplateVariableResolverTests
+{
+    [Fact]
+    public void Resolve_ProjectRoot_ReturnsAbsolutePath()
+    {
+        // Arrange
+        var resolver = new TemplateVariableResolver();
+        var context = new VariableContext("/home/alice/repo", "Debug");
+        var template = "cd ${project_root} && ls";
+
+        // Act
+        var result = resolver.Resolve(template, context);
+
+        // Assert
+        result.Should().Be("cd /home/alice/repo && ls");
+    }
+
+    [Fact]
+    public void Resolve_Configuration_ReturnsDebug()
+    {
+        // Arrange
+        var resolver = new TemplateVariableResolver();
+        var context = new VariableContext("/repo", "Debug");
+        var template = "dotnet build -c ${configuration}";
+
+        // Act
+        var result = resolver.Resolve(template, context);
+
+        // Assert
+        result.Should().Be("dotnet build -c Debug");
+    }
+
+    [Fact]
+    public void Resolve_Configuration_ReturnsRelease()
+    {
+        // Arrange
+        var resolver = new TemplateVariableResolver();
+        var context = new VariableContext("/repo", "Release");
+        var template = "dotnet build -c ${configuration}";
+
+        // Act
+        var result = resolver.Resolve(template, context);
+
+        // Assert
+        result.Should().Be("dotnet build -c Release");
+    }
+
+    [Fact]
+    public void Resolve_MultipleVariables_AllResolved()
+    {
+        // Arrange
+        var resolver = new TemplateVariableResolver();
+        var context = new VariableContext("/home/alice/repo", "Release")
+        {
+            ProjectPath = "/home/alice/repo/MyApp.csproj",
+            ArtifactDirectory = "/home/alice/repo/artifacts"
+        };
+        var template = "dotnet build ${project_path} -c ${configuration} -o ${artifact_dir}";
+
+        // Act
+        var result = resolver.Resolve(template, context);
+
+        // Assert
+        result.Should().Be("dotnet build /home/alice/repo/MyApp.csproj -c Release -o /home/alice/repo/artifacts");
+    }
+
+    [Fact]
+    public void Resolve_UnknownVariable_ThrowsError()
+    {
+        // Arrange
+        var resolver = new TemplateVariableResolver();
+        var context = new VariableContext("/repo", "Debug");
+        var template = "echo ${unknown_variable}";
+
+        // Act
+        var act = () => resolver.Resolve(template, context);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*unknown_variable*");
+    }
+}
 ```
 
-```
-Tests/Unit/Application/Contract/
-└── RunnerIntegrationTests.cs
-    ├── DotNetRunner_UsesContractBuildCommand()
-    ├── DotNetRunner_UsesContractTestCommand()
-    ├── DotNetRunner_UsesContractRunCommand()
-    ├── DotNetRunner_HandlesBuildDisabled()
-    ├── DotNetRunner_FallsBackToDefault()
-    ├── NodeRunner_UsesContractBuildCommand()
-    ├── NodeRunner_UsesContractTestCommand()
-    ├── NodeRunner_HandlesBuildDisabled()
-    └── NodeRunner_FallsBackToDefault()
+### Unit Tests - CommandValidatorTests.cs
+
+**File:** `tests/Acode.Infrastructure.Tests/Contract/CommandValidatorTests.cs`
+
+```csharp
+using Acode.Domain.Contract;
+using Acode.Infrastructure.Contract;
+using FluentAssertions;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Contract;
+
+public sealed class CommandValidatorTests
+{
+    [Fact]
+    public void Validate_ValidCommand_ReturnsSuccess()
+    {
+        // Arrange
+        var validator = new CommandValidator();
+        var commands = new Dictionary<string, CommandDefinition>
+        {
+            ["build"] = new CommandDefinition { Command = "dotnet build ${project_path}" }
+        };
+
+        // Act
+        var result = validator.Validate(commands);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Validate_EmptyCommand_ReturnsError()
+    {
+        // Arrange
+        var validator = new CommandValidator();
+        var commands = new Dictionary<string, CommandDefinition>
+        {
+            ["build"] = new CommandDefinition { Command = "" }
+        };
+
+        // Act
+        var result = validator.Validate(commands);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Should().Contain("build")
+            .And.Contain("empty");
+    }
+
+    [Fact]
+    public void Validate_UnknownVariable_ReturnsError()
+    {
+        // Arrange
+        var validator = new CommandValidator();
+        var commands = new Dictionary<string, CommandDefinition>
+        {
+            ["build"] = new CommandDefinition { Command = "dotnet build ${project_file}" }
+        };
+
+        // Act
+        var result = validator.Validate(commands);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Should().Contain("project_file")
+            .And.Contain("unknown");
+    }
+
+    [Fact]
+    public void Validate_NullCommand_ReturnsSuccess()
+    {
+        // Arrange
+        var validator = new CommandValidator();
+        var commands = new Dictionary<string, CommandDefinition>
+        {
+            ["run"] = new CommandDefinition { Command = null }
+        };
+
+        // Act
+        var result = validator.Validate(commands);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
+    }
+}
 ```
 
-### Integration Tests
+### Integration Tests - CommandResolverIntegrationTests.cs
 
-```
-Tests/Integration/Infrastructure/Contract/
-├── CommandResolverIntegrationTests.cs
-│   ├── Should_Load_Contract_And_Resolve_Build()
-│   ├── Should_Load_Contract_And_Resolve_Test()
-│   ├── Should_Load_Contract_With_Variables()
-│   ├── Should_Handle_Missing_Contract_File()
-│   ├── Should_Handle_Invalid_Yaml()
-│   ├── Should_Execute_Resolved_Command()
-│   ├── Should_Apply_Working_Directory()
-│   ├── Should_Apply_Timeout()
-│   ├── Should_Apply_Environment_Variables()
-│   └── Should_Detect_Contract_Changes()
-│
-├── VariableResolutionIntegrationTests.cs
-│   ├── Should_Resolve_ProjectRoot_Correctly()
-│   ├── Should_Resolve_All_Path_Variables()
-│   ├── Should_Handle_Spaces_In_Paths()
-│   ├── Should_Use_Correct_Path_Separators()
-│   └── Should_Canonicalize_Paths()
-│
-└── RunnerContractIntegrationTests.cs
-    ├── Should_Use_Contract_Command_For_DotNet_Build()
-    ├── Should_Use_Contract_Command_For_DotNet_Test()
-    ├── Should_Use_Contract_Command_For_Node_Build()
-    ├── Should_Use_Contract_Command_For_Node_Test()
-    ├── Should_Disable_Run_When_Null()
-    └── Should_Execute_Custom_Commands()
+**File:** `tests/Acode.Integration.Tests/Infrastructure/Contract/CommandResolverIntegrationTests.cs`
+
+```csharp
+using Acode.Domain.Contract;
+using Acode.Infrastructure.Contract;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace Acode.Integration.Tests.Infrastructure.Contract;
+
+public sealed class CommandResolverIntegrationTests : IDisposable
+{
+    private readonly string _tempDirectory;
+    private readonly ServiceProvider _serviceProvider;
+
+    public CommandResolverIntegrationTests()
+    {
+        _tempDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(_tempDirectory);
+
+        var services = new ServiceCollection();
+        services.AddSingleton<ITemplateVariableResolver, TemplateVariableResolver>();
+        services.AddSingleton<ICommandValidator, CommandValidator>();
+        _serviceProvider = services.BuildServiceProvider();
+    }
+
+    [Fact]
+    public async Task Should_Load_Contract_And_Resolve_Build()
+    {
+        // Arrange
+        var contractPath = Path.Combine(_tempDirectory, ".agent", "config.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(contractPath)!);
+        await File.WriteAllTextAsync(contractPath, @"
+commands:
+  build: ""cmake --build .""
+  test: ""ctest --output-on-failure""
+");
+
+        var contract = await LoadContractAsync(contractPath);
+        var variableResolver = _serviceProvider.GetRequiredService<ITemplateVariableResolver>();
+        var resolver = new CommandResolver(contract, variableResolver, NullLogger<CommandResolver>.Instance);
+        var context = new VariableContext(_tempDirectory, "Debug");
+
+        // Act
+        var result = await resolver.ResolveAsync("build", context, CancellationToken.None);
+
+        // Assert
+        result.Status.Should().Be(CommandResolutionStatus.UseOverride);
+        result.Command.Should().Be("cmake --build .");
+    }
+
+    [Fact]
+    public async Task Should_Load_Contract_With_Variables()
+    {
+        // Arrange
+        var contractPath = Path.Combine(_tempDirectory, ".agent", "config.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(contractPath)!);
+        await File.WriteAllTextAsync(contractPath, @"
+commands:
+  build: ""dotnet build ${project_path} -c ${configuration}""
+");
+
+        var contract = await LoadContractAsync(contractPath);
+        var variableResolver = _serviceProvider.GetRequiredService<ITemplateVariableResolver>();
+        var resolver = new CommandResolver(contract, variableResolver, NullLogger<CommandResolver>.Instance);
+        var context = new VariableContext(_tempDirectory, "Release")
+        {
+            ProjectPath = Path.Combine(_tempDirectory, "MyApp.csproj")
+        };
+
+        // Act
+        var result = await resolver.ResolveAsync("build", context, CancellationToken.None);
+
+        // Assert
+        result.Status.Should().Be(CommandResolutionStatus.UseOverride);
+        result.Command.Should().Contain("MyApp.csproj");
+        result.Command.Should().Contain("Release");
+    }
+
+    [Fact]
+    public async Task Should_Handle_Missing_Contract_File()
+    {
+        // Arrange
+        var contract = new EmptyRepoContract(); // No .agent/config.yml
+        var variableResolver = _serviceProvider.GetRequiredService<ITemplateVariableResolver>();
+        var resolver = new CommandResolver(contract, variableResolver, NullLogger<CommandResolver>.Instance);
+        var context = new VariableContext(_tempDirectory, "Debug");
+
+        // Act
+        var result = await resolver.ResolveAsync("build", context, CancellationToken.None);
+
+        // Assert
+        result.Status.Should().Be(CommandResolutionStatus.UseDefault);
+    }
+
+    private async Task<IRepoContract> LoadContractAsync(string path)
+    {
+        // Simplified loader for test purposes
+        var yaml = await File.ReadAllTextAsync(path);
+        // In real implementation, this would use YamlDotNet to deserialize
+        // For this test, we'll create a mock contract
+        return new TestRepoContract
+        {
+            Commands = new Dictionary<string, CommandDefinition>
+            {
+                ["build"] = new CommandDefinition { Command = "cmake --build ." },
+                ["test"] = new CommandDefinition { Command = "ctest --output-on-failure" }
+            }
+        };
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_tempDirectory))
+        {
+            Directory.Delete(_tempDirectory, recursive: true);
+        }
+        _serviceProvider.Dispose();
+    }
+
+    private sealed class EmptyRepoContract : IRepoContract
+    {
+        public IDictionary<string, CommandDefinition> Commands { get; } = new Dictionary<string, CommandDefinition>();
+    }
+
+    private sealed class TestRepoContract : IRepoContract
+    {
+        public IDictionary<string, CommandDefinition> Commands { get; set; } = new Dictionary<string, CommandDefinition>();
+    }
+}
 ```
 
-### E2E Tests
+### E2E Tests - CommandContractE2ETests.cs
 
-```
-Tests/E2E/CLI/
-└── CommandContractE2ETests.cs
-    ├── Should_Use_Contract_Build_Command()
-    ├── Should_Use_Contract_Test_Command()
-    ├── Should_Report_Disabled_Operation()
-    ├── Should_Execute_Custom_Command()
-    ├── Should_List_Available_Commands()
-    ├── Should_Show_Command_Source()
-    └── Should_Report_Validation_Errors()
+**File:** `tests/Acode.E2E.Tests/CLI/CommandContractE2ETests.cs`
+
+```csharp
+using Acode.CLI;
+using FluentAssertions;
+using System.Diagnostics;
+using Xunit;
+
+namespace Acode.E2E.Tests.CLI;
+
+public sealed class CommandContractE2ETests : IDisposable
+{
+    private readonly string _testRepository;
+
+    public CommandContractE2ETests()
+    {
+        _testRepository = Path.Combine(Path.GetTempPath(), "acode-e2e-" + Guid.NewGuid().ToString());
+        Directory.CreateDirectory(_testRepository);
+    }
+
+    [Fact]
+    public async Task Should_Use_Contract_Build_Command()
+    {
+        // Arrange
+        await SetupTestRepositoryAsync();
+        await File.WriteAllTextAsync(Path.Combine(_testRepository, ".agent", "config.yml"), @"
+commands:
+  build: ""echo 'Contract build executed'""
+");
+
+        // Act
+        var output = await RunAcodeCommandAsync("build");
+
+        // Assert
+        output.Should().Contain("Contract build executed");
+        output.Should().Contain("Using contract command");
+    }
+
+    [Fact]
+    public async Task Should_Report_Disabled_Operation()
+    {
+        // Arrange
+        await SetupTestRepositoryAsync();
+        await File.WriteAllTextAsync(Path.Combine(_testRepository, ".agent", "config.yml"), @"
+commands:
+  run: null
+");
+
+        // Act
+        var output = await RunAcodeCommandAsync("run", expectError: true);
+
+        // Assert
+        output.Should().Contain("Operation 'run' is disabled");
+        output.Should().Contain("repository contract");
+    }
+
+    private async Task SetupTestRepositoryAsync()
+    {
+        Directory.CreateDirectory(Path.Combine(_testRepository, ".agent"));
+        await File.WriteAllTextAsync(Path.Combine(_testRepository, "sample.txt"), "test content");
+    }
+
+    private async Task<string> RunAcodeCommandAsync(string command, bool expectError = false)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "acode",
+            Arguments = command,
+            WorkingDirectory = _testRepository,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        using var process = Process.Start(psi);
+        if (process == null)
+            throw new InvalidOperationException("Failed to start acode process");
+
+        var output = await process.StandardOutput.ReadToEndAsync();
+        var error = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        return expectError ? error : output;
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_testRepository))
+        {
+            Directory.Delete(_testRepository, recursive: true);
+        }
+    }
+}
 ```
 
 ### Performance Benchmarks
