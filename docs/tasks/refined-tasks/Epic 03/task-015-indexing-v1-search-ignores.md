@@ -1898,31 +1898,450 @@ Rebuilding index...
 
 ### Troubleshooting
 
-#### Search Returns Nothing
+#### Issue 1: Search Returns No Results for Known Content
 
-**Problem:** No results for known content
+**Error Code:** ACODE-IDX-002
+
+**Symptoms:**
+- `acode search "className"` returns "No results found"
+- User is certain the term exists in the repository
+- Search worked previously but now returns nothing
+
+**Possible Causes:**
+1. Index is stale (not updated after file changes)
+2. File is excluded by ignore patterns
+3. File extension not in `include_extensions` whitelist
+4. File exceeds `max_file_size_kb` limit
+5. Index was built before the file was created
+6. Term is split differently than expected (tokenization issue)
+
+**Diagnostic Steps:**
+```bash
+# Check index status
+acode index status
+
+# Check if file is being indexed
+acode index status --verbose | grep "myfile.cs"
+
+# Test ignore patterns
+acode ignore check src/MyClass.cs
+
+# Verify tokenization
+acode search --debug "className"
+```
 
 **Solutions:**
-1. Rebuild index: `acode index rebuild`
-2. Check ignore rules
-3. Verify file type is indexed
 
-#### Index Build Slow
+```csharp
+// Solution 1: Force index rebuild
+// Use when index is stale or corrupted
 
-**Problem:** Indexing takes too long
+public async Task DiagnoseSearchIssueAsync(string searchTerm, string expectedFile)
+{
+    // Check if file exists
+    if (!await _repoFs.FileExistsAsync(expectedFile))
+    {
+        _logger.LogError("File {File} does not exist", expectedFile);
+        return;
+    }
+    
+    // Check if file is ignored
+    var ignoreResult = await _ignoreRules.ShouldIgnoreAsync(expectedFile);
+    if (ignoreResult.IsIgnored)
+    {
+        _logger.LogWarning(
+            "File {File} is ignored by pattern '{Pattern}' in {Source}",
+            expectedFile, ignoreResult.MatchedPattern, ignoreResult.Source);
+        return;
+    }
+    
+    // Check if file is indexed
+    var indexStats = await _indexService.GetFileStatsAsync(expectedFile);
+    if (indexStats == null)
+    {
+        _logger.LogWarning("File {File} is not in index, triggering update", expectedFile);
+        await _indexService.UpdateAsync(CancellationToken.None);
+        return;
+    }
+    
+    // Check tokenization
+    var tokens = _tokenizer.Tokenize(searchTerm);
+    _logger.LogInformation("Search term tokenizes to: {Tokens}", string.Join(", ", tokens));
+    
+    // Suggest rebuild if all else fails
+    _logger.LogInformation("Try: acode index rebuild");
+}
+```
+
+**Prevention:**
+- Run `acode index update` after major file changes
+- Configure `.agentignore` carefully
+- Review `include_extensions` in config
+
+---
+
+#### Issue 2: Index Build Extremely Slow or Hangs
+
+**Error Code:** ACODE-IDX-001
+
+**Symptoms:**
+- `acode index build` takes > 10 minutes for small repository
+- Progress bar freezes at certain percentage
+- High CPU usage but no progress
+- Memory usage grows continuously
+
+**Possible Causes:**
+1. Very large files being processed (> 10 MB source files)
+2. Too many files (missing ignore patterns for node_modules, etc.)
+3. Network file system with high latency
+4. File system permission issues causing retry loops
+5. Circular symlinks
+6. Binary files incorrectly detected as text
+
+**Diagnostic Steps:**
+```bash
+# Check file count
+find . -type f | wc -l
+
+# Check for large files
+find . -type f -size +10M
+
+# Check for common bloat directories
+ls -la node_modules/ .git/objects/ bin/ obj/
+
+# Run with verbose logging
+acode index build --verbose 2>&1 | tee index-build.log
+```
 
 **Solutions:**
-1. Add ignore patterns for large directories
-2. Limit file extensions
-3. Reduce max_file_size_kb
 
-#### Index Corrupt
+```csharp
+// Solution: Add comprehensive ignore patterns
+// .agentignore file content for typical projects:
 
-**Problem:** Search crashes or errors
+/*
+# Dependencies
+node_modules/
+vendor/
+packages/
+.nuget/
+
+# Build outputs
+bin/
+obj/
+dist/
+build/
+out/
+target/
+
+# IDE and tools
+.idea/
+.vs/
+.vscode/
+*.suo
+*.user
+
+# Large generated files
+*.min.js
+*.bundle.js
+*.map
+
+# Logs and caches
+*.log
+.cache/
+.tmp/
+
+# Test artifacts
+coverage/
+test-results/
+*/
+
+// Programmatic optimization
+public async Task OptimizeIndexBuildAsync()
+{
+    var options = new IndexBuildOptions
+    {
+        MaxFileSizeKb = 500,        // Skip files > 500 KB
+        MaxConcurrentFiles = 4,      // Limit parallel processing
+        TimeoutPerFileMs = 5000,     // 5 second timeout per file
+        SkipSymlinks = true,         // Avoid symlink loops
+        StreamLargeFiles = true      // Stream instead of loading entire file
+    };
+    
+    await _indexService.BuildAsync(options, CancellationToken.None);
+}
+```
+
+**Prevention:**
+- Always configure ignore patterns before first build
+- Set reasonable `max_file_size_kb` (default: 500 KB)
+- Exclude dependency directories (node_modules, vendor)
+
+---
+
+#### Issue 3: Index File Corruption After System Crash
+
+**Error Code:** ACODE-IDX-004
+
+**Symptoms:**
+- Error message: "Index file corrupted, checksum mismatch"
+- Error message: "SQLite database disk image is malformed"
+- Search returns random or incorrect results
+- `acode index status` fails with database error
+
+**Possible Causes:**
+1. System crash or power failure during index write
+2. Disk failure or bad sectors
+3. Index file manually modified
+4. Concurrent access from multiple processes
+5. Incomplete previous build/update
+
+**Diagnostic Steps:**
+```bash
+# Check index file integrity
+sqlite3 .agent/index.db "PRAGMA integrity_check"
+
+# Check checksum
+cat .agent/index.checksum
+sha256sum .agent/index.db
+
+# Check for lock files
+ls -la .agent/*.lock
+```
 
 **Solutions:**
-1. Delete index: `rm .agent/index.db`
-2. Rebuild: `acode index rebuild`
+
+```csharp
+// Solution: Index recovery service
+public sealed class IndexRecoveryService
+{
+    private readonly ILogger<IndexRecoveryService> _logger;
+    private readonly IIndexService _indexService;
+    
+    public async Task<RecoveryResult> RecoverAsync(string indexPath)
+    {
+        _logger.LogWarning("Starting index recovery for {Path}", indexPath);
+        
+        // Step 1: Backup corrupted index for analysis
+        var backupPath = indexPath + $".corrupted.{DateTime.UtcNow:yyyyMMddHHmmss}";
+        if (File.Exists(indexPath))
+        {
+            File.Move(indexPath, backupPath);
+            _logger.LogInformation("Backed up corrupted index to {Backup}", backupPath);
+        }
+        
+        // Step 2: Remove stale lock files
+        var lockPath = indexPath + ".lock";
+        if (File.Exists(lockPath))
+        {
+            var lockAge = DateTime.UtcNow - File.GetLastWriteTimeUtc(lockPath);
+            if (lockAge > TimeSpan.FromMinutes(10))
+            {
+                File.Delete(lockPath);
+                _logger.LogWarning("Removed stale lock file (age: {Age})", lockAge);
+            }
+        }
+        
+        // Step 3: Rebuild index from scratch
+        _logger.LogInformation("Rebuilding index from source files...");
+        await _indexService.RebuildAsync(CancellationToken.None);
+        
+        // Step 4: Verify new index
+        var verifyResult = await _indexService.VerifyIntegrityAsync();
+        if (!verifyResult.IsValid)
+        {
+            _logger.LogError("Rebuild failed verification: {Error}", verifyResult.Error);
+            return RecoveryResult.Failed(verifyResult.Error);
+        }
+        
+        _logger.LogInformation("Index recovery completed successfully");
+        return RecoveryResult.Success();
+    }
+}
+```
+
+**Prevention:**
+- Enable atomic writes (temp file + rename)
+- Run on local disk, not network storage
+- Avoid killing acode process during index operations
+
+---
+
+#### Issue 4: Search Performance Degraded Over Time
+
+**Error Code:** ACODE-IDX-008
+
+**Symptoms:**
+- Search that was < 50ms now takes 500ms+
+- Performance degrades with more searches
+- Memory usage grows over session
+- Index file size seems larger than expected
+
+**Possible Causes:**
+1. Index fragmentation from many incremental updates
+2. Many deleted files leaving orphaned entries
+3. Search cache not being cleaned
+4. Index compaction never run
+5. Too many small incremental updates
+
+**Diagnostic Steps:**
+```bash
+# Check index size vs file count
+acode index status
+
+# Check for fragmentation (SQLite)
+sqlite3 .agent/index.db "PRAGMA page_count; PRAGMA freelist_count;"
+
+# Check cache statistics
+acode search --stats "test"
+```
+
+**Solutions:**
+
+```csharp
+// Solution: Index maintenance service
+public sealed class IndexMaintenanceService
+{
+    public async Task PerformMaintenanceAsync(string indexPath)
+    {
+        _logger.LogInformation("Starting index maintenance...");
+        
+        // Step 1: Compact index (reclaim deleted space)
+        await CompactIndexAsync(indexPath);
+        
+        // Step 2: Analyze for query optimization
+        await OptimizeIndexAsync(indexPath);
+        
+        // Step 3: Clear search cache
+        _searchCache.Clear();
+        
+        // Step 4: Update statistics
+        await UpdateStatisticsAsync(indexPath);
+        
+        _logger.LogInformation("Maintenance completed, index optimized");
+    }
+    
+    private async Task CompactIndexAsync(string indexPath)
+    {
+        using var connection = new SqliteConnection($"Data Source={indexPath}");
+        await connection.OpenAsync();
+        
+        using var command = connection.CreateCommand();
+        command.CommandText = "VACUUM;";
+        await command.ExecuteNonQueryAsync();
+        
+        _logger.LogInformation("Index compacted, space reclaimed");
+    }
+    
+    private async Task OptimizeIndexAsync(string indexPath)
+    {
+        using var connection = new SqliteConnection($"Data Source={indexPath}");
+        await connection.OpenAsync();
+        
+        using var command = connection.CreateCommand();
+        command.CommandText = "ANALYZE;";
+        await command.ExecuteNonQueryAsync();
+        
+        _logger.LogInformation("Query statistics updated");
+    }
+}
+```
+
+**Prevention:**
+- Run `acode index rebuild` periodically (weekly for active repos)
+- Enable automatic compaction after N incremental updates
+- Monitor index size vs file count ratio
+
+---
+
+#### Issue 5: Ignore Patterns Not Working as Expected
+
+**Error Code:** ACODE-IDX-005
+
+**Symptoms:**
+- Files are indexed despite matching ignore pattern
+- Negation patterns (!) don't work
+- Patterns work in Git but not in acode
+- Nested .gitignore not being respected
+
+**Possible Causes:**
+1. Pattern syntax incorrect for Git specification
+2. Pattern precedence misunderstood
+3. .agentignore overriding .gitignore unexpectedly
+4. Negation pattern undoing previous match
+5. Directory vs file pattern confusion (trailing slash)
+6. Pattern not anchored to correct directory
+
+**Diagnostic Steps:**
+```bash
+# Test specific file against patterns
+acode ignore check path/to/file.cs
+
+# List all active ignore patterns
+acode ignore list --verbose
+
+# Show pattern matching trace
+acode ignore trace path/to/file.cs
+```
+
+**Solutions:**
+
+```csharp
+// Solution: Ignore pattern debugger
+public sealed class IgnorePatternDebugger
+{
+    public IgnoreTraceResult TraceFile(string filePath, IReadOnlyList<IgnoreSource> sources)
+    {
+        var trace = new List<TraceEntry>();
+        var isIgnored = false;
+        
+        foreach (var source in sources)
+        {
+            foreach (var pattern in source.Patterns)
+            {
+                var matches = pattern.Matches(filePath);
+                if (matches)
+                {
+                    trace.Add(new TraceEntry
+                    {
+                        Source = source.FilePath,
+                        Pattern = pattern.Raw,
+                        LineNumber = pattern.LineNumber,
+                        IsNegation = pattern.IsNegation,
+                        Matches = true,
+                        Effect = pattern.IsNegation ? "INCLUDE" : "EXCLUDE"
+                    });
+                    
+                    isIgnored = !pattern.IsNegation;
+                }
+            }
+        }
+        
+        return new IgnoreTraceResult
+        {
+            FilePath = filePath,
+            FinalResult = isIgnored ? "IGNORED" : "INDEXED",
+            Trace = trace
+        };
+    }
+}
+
+// Common pattern fixes:
+// WRONG: node_modules    -> Matches file named "node_modules", not directory
+// RIGHT: node_modules/   -> Matches directory named "node_modules"
+// 
+// WRONG: *.log           -> Matches only in root directory
+// RIGHT: **/*.log        -> Matches in any directory
+//
+// WRONG: !important.log  -> Negation ignored if pattern after it re-excludes
+// RIGHT: Place negations LAST in file
+```
+
+**Prevention:**
+- Use `acode ignore check` before building index
+- Understand Git ignore specification (man gitignore)
+- Place negation patterns at end of file
+- Use trailing slash for directories
 
 ---
 
