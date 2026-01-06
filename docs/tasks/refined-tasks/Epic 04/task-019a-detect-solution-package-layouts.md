@@ -297,6 +297,56 @@ The following items are explicitly excluded from Task 019.a:
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **SDK-Style Projects:** Repository uses modern .NET SDK-style project files (`.csproj` with `<Project Sdk="...">`) rather than legacy `.csproj` format. Task 019a parsers are optimized for SDK-style XML structure.
+
+2. **Standard package.json Format:** Node.js projects use standard `package.json` format compliant with npm specification. Non-standard or corrupted JSON will cause parser failures.
+
+3. **UTF-8 Encoding:** All project files (.sln, .csproj, package.json) use UTF-8 encoding. Files with other encodings (UTF-16, ANSI) may not parse correctly.
+
+4. **File System Access:** File system is accessible via Task-014 RepoFS abstraction. Direct file system calls are not used, relying on RepoFS for reads.
+
+5. **Bounded Scan Depth:** Repository directory structure does not exceed configured `max_depth` (default 10 levels). Extremely nested structures may not be fully scanned.
+
+6. **Text File Sizes:** Project manifest files (.sln, .csproj, package.json) are under 1MB each. Files larger than 1MB are skipped to prevent memory exhaustion.
+
+7. **Valid XML/JSON:** Project files are well-formed XML or JSON. Malformed files will throw parse exceptions and be reported as errors, but detection continues with other files.
+
+8. **Standard Project Extensions:** .NET projects use standard file extensions (`.sln`, `.csproj`, `.fsproj`, `.vbproj`). Custom or non-standard extensions will not be detected unless explicitly configured.
+
+9. **No Code Execution Required:** Detection is passive and does not require compiling or executing any code. All information is extracted from static file analysis.
+
+10. **Symlinks Resolve Safely:** Symbolic links in the repository resolve to valid targets and do not create circular references. Circular symlink detection prevents infinite loops.
+
+### Operational Assumptions
+
+11. **Read Permissions:** The runtime user has read permissions for all project files and directories being scanned. Permission-denied errors are logged but do not stop detection.
+
+12. **Single Repository Root:** Each detection operation scans a single repository root path. Multi-root scenarios (e.g., detecting across multiple cloned repositories) require multiple detection calls.
+
+13. **Stable File System:** The file system is relatively stable during detection. Concurrent file modifications (e.g., build outputs being written) may cause inconsistent results but won't crash detection.
+
+14. **Cache Storage Available:** Sufficient memory is available for in-memory cache. Optional disk cache requires write permissions to cache directory (default: `.agent/cache/`).
+
+15. **Time-Based Cache Expiry:** Cached results expire based on configured TTL (default: 300 seconds). File watchers may invalidate cache earlier if project files change, but watchers are not guaranteed to trigger.
+
+### Integration Assumptions
+
+16. **RepoFS Availability:** Task-014 RepoFS abstraction is initialized and functional. Detection delegates all file operations to RepoFS rather than using direct System.IO.
+
+17. **Configuration Loaded:** Task-002 configuration system has loaded `.agent/config.yml` successfully. Detection options default to safe values if configuration is missing or invalid.
+
+18. **Logging Infrastructure:** Structured logging is available via dependency injection. Detection logs progress, errors, and warnings to configured logger (Microsoft.Extensions.Logging).
+
+19. **No External Dependencies for Parsing:** Parsers do not depend on external tools (e.g., `dotnet` CLI, `npm` command) for parsing. All parsing is in-process using .NET libraries (System.Xml, System.Text.Json).
+
+20. **Test Framework Conventions:** Test projects follow standard naming conventions (`.Tests`, `.UnitTests` suffixes) or include well-known test framework packages (xUnit, NUnit, MSTest, Jest). Non-standard test setups may not be detected correctly.
+
+---
+
 ## Functional Requirements
 
 ### Detection Interface (FR-019A-01 to FR-019A-12)
@@ -841,105 +891,1977 @@ Summary:
 
 ---
 
+## Security Considerations
+
+### Threat 1: Path Traversal via Malicious Project References
+
+**Risk Description:** A malicious .csproj file contains project references with path traversal sequences (`../../etc/passwd`) that, when resolved, cause the detector to read files outside the repository.
+
+**Attack Scenario:**
+```xml
+<!-- Malicious.csproj -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../../etc/passwd" />
+    <ProjectReference Include="..\..\Windows\System32\config\SAM" />
+  </ItemGroup>
+</Project>
+```
+
+When detection resolves these references, it attempts to read system files outside the repository boundaries.
+
+**Mitigation (Complete C# Implementation):**
+
+```csharp
+namespace AgenticCoder.Infrastructure.Detection.Security;
+
+public sealed class PathTraversalValidator
+{
+    private readonly string _repositoryRoot;
+    private readonly ILogger<PathTraversalValidator> _logger;
+
+    public PathTraversalValidator(string repositoryRoot, ILogger<PathTraversalValidator> logger)
+    {
+        _repositoryRoot = Path.GetFullPath(repositoryRoot);
+        _logger = logger;
+    }
+
+    public ValidationResult ValidateProjectReference(string baseProjectPath, string referencePath)
+    {
+        try
+        {
+            // Get directory of base project
+            var baseDir = Path.GetDirectoryName(Path.GetFullPath(baseProjectPath));
+            if (baseDir == null)
+                return ValidationResult.Fail("Invalid base project path");
+
+            // Resolve reference path relative to base project
+            var absoluteReferencePath = Path.GetFullPath(Path.Combine(baseDir, referencePath));
+
+            // Check if resolved path is within repository boundaries
+            if (!absoluteReferencePath.StartsWith(_repositoryRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "Path traversal detected: {Reference} resolves to {Absolute} outside repo {Root}",
+                    referencePath, absoluteReferencePath, _repositoryRoot);
+
+                return ValidationResult.Fail(
+                    $"Project reference '{referencePath}' resolves outside repository boundaries");
+            }
+
+            // Check for explicit traversal patterns
+            if (referencePath.Contains("..") && CountTraversals(referencePath) > 3)
+            {
+                _logger.LogWarning(
+                    "Suspicious path with excessive traversals: {Reference}",
+                    referencePath);
+
+                return ValidationResult.Warn(
+                    $"Project reference '{referencePath}' contains excessive parent directory traversals");
+            }
+
+            return ValidationResult.Success();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Path validation error for {Reference}", referencePath);
+            return ValidationResult.Fail($"Path validation failed: {ex.Message}");
+        }
+    }
+
+    private static int CountTraversals(string path)
+    {
+        return path.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+            .Count(segment => segment == "..");
+    }
+}
+```
+
+---
+
+### Threat 2: XML Entity Expansion (Billion Laughs Attack) in .csproj
+
+**Risk Description:** A malicious .csproj file contains recursive XML entity definitions that expand exponentially during parsing, consuming all available memory and causing denial of service.
+
+**Attack Scenario:**
+```xml
+<!DOCTYPE csproj [
+  <!ENTITY lol "lol">
+  <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY lol2 "&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;">
+  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+]>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>&lol3;</TargetFramework>
+  </PropertyGroup>
+</Project>
+```
+
+Parsing this file causes exponential expansion: `lol3` expands to 10³ = 1,000 "lol" strings, consuming gigabytes of memory.
+
+**Mitigation (Complete C# Implementation):**
+
+```csharp
+namespace AgenticCoder.Infrastructure.Detection.Security;
+
+public sealed class SafeXmlParser
+{
+    private readonly ILogger<SafeXmlParser> _logger;
+    private const int MaxDocumentSize = 1_048_576; // 1MB
+    private const int MaxElementDepth = 50;
+
+    public SafeXmlParser(ILogger<SafeXmlParser> logger)
+    {
+        _logger = logger;
+    }
+
+    public XDocument ParseProjectFile(string filePath)
+    {
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length > MaxDocumentSize)
+        {
+            throw new XmlException(
+                $"Project file exceeds maximum size of {MaxDocumentSize} bytes: {fileInfo.Length}");
+        }
+
+        var settings = new XmlReaderSettings
+        {
+            // Disable DTD processing to prevent entity expansion attacks
+            DtdProcessing = DtdProcessing.Prohibit,
+
+            // Prevent external resource resolution
+            XmlResolver = null,
+
+            // Limit document complexity
+            MaxCharactersInDocument = MaxDocumentSize,
+            MaxCharactersFromEntities = 1024,
+
+            // Ignore whitespace and comments
+            IgnoreWhitespace = true,
+            IgnoreComments = true
+        };
+
+        try
+        {
+            using var fileStream = File.OpenRead(filePath);
+            using var reader = XmlReader.Create(fileStream, settings);
+
+            var doc = XDocument.Load(reader, LoadOptions.None);
+
+            // Validate element depth
+            var maxDepth = GetMaxDepth(doc.Root);
+            if (maxDepth > MaxElementDepth)
+            {
+                _logger.LogWarning(
+                    "Project file has excessive nesting depth: {Depth} (max: {Max})",
+                    maxDepth, MaxElementDepth);
+
+                throw new XmlException(
+                    $"Project file nesting depth {maxDepth} exceeds maximum {MaxElementDepth}");
+            }
+
+            return doc;
+        }
+        catch (XmlException ex)
+        {
+            _logger.LogError(ex, "XML parsing failed for {File}", filePath);
+            throw;
+        }
+    }
+
+    private static int GetMaxDepth(XElement? element)
+    {
+        if (element == null || !element.HasElements)
+            return 0;
+
+        return 1 + element.Elements().Max(child => GetMaxDepth(child));
+    }
+}
+```
+
+---
+
+### Threat 3: Malicious JSON Payload in package.json Causing Resource Exhaustion
+
+**Risk Description:** A malicious package.json contains deeply nested objects or enormous arrays that cause the JSON parser to consume excessive memory or CPU during deserialization.
+
+**Attack Scenario:**
+```json
+{
+  "name": "malicious-package",
+  "scripts": {
+    "nested": "{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{...10000 levels deep...}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}"
+  },
+  "dependencies": {
+    "a": "1.0.0",
+    "b": "1.0.0",
+    ... 50,000 more dependencies ...
+  }
+}
+```
+
+Parsing this file consumes gigabytes of memory as the JSON deserializer creates deeply nested object graphs.
+
+**Mitigation (Complete C# Implementation):**
+
+```csharp
+namespace AgenticCoder.Infrastructure.Detection.Security;
+
+public sealed class SafeJsonParser
+{
+    private readonly ILogger<SafeJsonParser> _logger;
+    private const int MaxJsonSize = 524_288; // 512KB
+    private const int MaxDepth = 32;
+
+    public SafeJsonParser(ILogger<SafeJsonParser> logger)
+    {
+        _logger = logger;
+    }
+
+    public PackageJsonModel ParsePackageJson(string filePath)
+    {
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length > MaxJsonSize)
+        {
+            throw new JsonException(
+                $"package.json exceeds maximum size of {MaxJsonSize} bytes: {fileInfo.Length}");
+        }
+
+        var options = new JsonSerializerOptions
+        {
+            // Limit recursion depth to prevent stack overflow
+            MaxDepth = MaxDepth,
+
+            // Allow trailing commas (common in package.json)
+            AllowTrailingCommas = true,
+
+            // Ignore comments (JSON5-style)
+            ReadCommentHandling = JsonCommentHandling.Skip,
+
+            // Case-insensitive property names
+            PropertyNameCaseInsensitive = true
+        };
+
+        try
+        {
+            var json = File.ReadAllText(filePath);
+
+            // Pre-validation: check for suspiciously long lines
+            var lines = json.Split('\n');
+            var maxLineLength = lines.Max(l => l.Length);
+            if (maxLineLength > 10_000)
+            {
+                _logger.LogWarning(
+                    "package.json contains very long line: {Length} chars",
+                    maxLineLength);
+            }
+
+            var package = JsonSerializer.Deserialize<PackageJsonModel>(json, options);
+            if (package == null)
+            {
+                throw new JsonException("Failed to deserialize package.json");
+            }
+
+            // Post-validation: check for excessive dependencies
+            var depCount = (package.Dependencies?.Count ?? 0) +
+                          (package.DevDependencies?.Count ?? 0);
+            if (depCount > 1000)
+            {
+                _logger.LogWarning(
+                    "package.json declares {Count} dependencies (unusually high)",
+                    depCount);
+            }
+
+            return package;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "JSON parsing failed for {File}", filePath);
+            throw;
+        }
+    }
+}
+```
+
+---
+
+### Threat 4: Symlink Loop Causing Infinite Recursion
+
+**Risk Description:** A malicious repository contains symlink loops (directory A → B → C → A) that cause the file system scanner to recurse indefinitely, consuming all stack space and crashing.
+
+**Attack Scenario:**
+```bash
+# Attacker creates circular symlink structure
+mkdir /repo/dir1
+mkdir /repo/dir2
+ln -s /repo/dir1 /repo/dir2/link_to_dir1
+ln -s /repo/dir2 /repo/dir1/link_to_dir2
+```
+
+When detection scans `/repo`, it follows symlinks infinitely: `dir1 → dir2 → dir1 → dir2 → ...`
+
+**Mitigation (Complete C# Implementation):**
+
+```csharp
+namespace AgenticCoder.Infrastructure.Detection.Security;
+
+public sealed class SymlinkLoopDetector
+{
+    private readonly HashSet<string> _visitedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ILogger<SymlinkLoopDetector> _logger;
+
+    public SymlinkLoopDetector(ILogger<SymlinkLoopDetector> logger)
+    {
+        _logger = logger;
+    }
+
+    public bool IsLoopDetected(string path)
+    {
+        try
+        {
+            // Resolve symlink to absolute path
+            var realPath = new DirectoryInfo(path).FullName;
+
+            // Check if we've visited this path before
+            if (_visitedPaths.Contains(realPath))
+            {
+                _logger.LogWarning(
+                    "Symlink loop detected: {Path} already visited",
+                    realPath);
+                return true;
+            }
+
+            _visitedPaths.Add(realPath);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error checking for symlink loop at {Path}", path);
+            return true; // Assume loop to be safe
+        }
+    }
+
+    public void Reset()
+    {
+        _visitedPaths.Clear();
+    }
+
+    public int GetVisitedPathCount() => _visitedPaths.Count;
+}
+
+public sealed class SafeDirectoryScanner
+{
+    private readonly SymlinkLoopDetector _loopDetector;
+    private readonly ILogger<SafeDirectoryScanner> _logger;
+
+    public SafeDirectoryScanner(
+        SymlinkLoopDetector loopDetector,
+        ILogger<SafeDirectoryScanner> logger)
+    {
+        _loopDetector = loopDetector;
+        _logger = logger;
+    }
+
+    public async IAsyncEnumerable<string> ScanDirectoryAsync(
+        string rootPath,
+        string pattern,
+        int maxDepth,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        _loopDetector.Reset();
+        await foreach (var file in ScanDirectoryRecursiveAsync(rootPath, pattern, 0, maxDepth, ct))
+        {
+            yield return file;
+        }
+    }
+
+    private async IAsyncEnumerable<string> ScanDirectoryRecursiveAsync(
+        string currentPath,
+        string pattern,
+        int currentDepth,
+        int maxDepth,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (currentDepth > maxDepth)
+        {
+            _logger.LogDebug("Max depth {MaxDepth} reached at {Path}", maxDepth, currentPath);
+            yield break;
+        }
+
+        // Check for symlink loops
+        if (_loopDetector.IsLoopDetected(currentPath))
+        {
+            _logger.LogWarning("Skipping directory due to symlink loop: {Path}", currentPath);
+            yield break;
+        }
+
+        // Return matching files in current directory
+        foreach (var file in Directory.EnumerateFiles(currentPath, pattern))
+        {
+            yield return file;
+        }
+
+        // Recurse into subdirectories
+        foreach (var dir in Directory.EnumerateDirectories(currentPath))
+        {
+            await foreach (var file in ScanDirectoryRecursiveAsync(dir, pattern, currentDepth + 1, maxDepth, ct))
+            {
+                yield return file;
+            }
+        }
+    }
+}
+```
+
+---
+
+### Threat 5: Cache Poisoning via Race Condition
+
+**Risk Description:** An attacker modifies project files while detection is running, causing inconsistent cache entries. Subsequent cache reads return partial or corrupted detection results.
+
+**Attack Scenario:**
+1. Detection starts scanning repository (takes 2 seconds)
+2. At 1 second, attacker modifies `App.csproj` to add malicious references
+3. Detection completes at 2 seconds with mixed state (some projects scanned before modification, some after)
+4. Corrupted detection result is cached
+5. Future operations use poisoned cache showing incorrect project references
+
+**Mitigation (Complete C# Implementation):**
+
+```csharp
+namespace AgenticCoder.Infrastructure.Detection.Security;
+
+public sealed class AtomicDetectionCache
+{
+    private readonly ConcurrentDictionary<string, CacheEntry> _cache = new();
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly ILogger<AtomicDetectionCache> _logger;
+
+    public AtomicDetectionCache(ILogger<AtomicDetectionCache> logger)
+    {
+        _logger = logger;
+    }
+
+    public async Task<DetectionResult?> GetAsync(string rootPath, CancellationToken ct)
+    {
+        if (_cache.TryGetValue(rootPath, out var entry))
+        {
+            // Verify cache entry hasn't expired
+            if (DateTimeOffset.UtcNow - entry.CachedAt < TimeSpan.FromSeconds(300))
+            {
+                // Verify file checksums haven't changed (anti-tampering)
+                var currentChecksum = await ComputeRepositoryChecksumAsync(rootPath, ct);
+                if (currentChecksum == entry.RepositoryChecksum)
+                {
+                    _logger.LogDebug("Cache hit for {Path}", rootPath);
+                    return entry.Result;
+                }
+
+                _logger.LogInformation(
+                    "Cache invalidated for {Path}: checksum mismatch (cached: {Cached}, current: {Current})",
+                    rootPath, entry.RepositoryChecksum, currentChecksum);
+
+                // Remove poisoned cache entry
+                _cache.TryRemove(rootPath, out _);
+            }
+        }
+
+        return null;
+    }
+
+    public async Task SetAsync(string rootPath, DetectionResult result, CancellationToken ct)
+    {
+        // Use lock to prevent concurrent writes
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            var checksum = await ComputeRepositoryChecksumAsync(rootPath, ct);
+
+            var entry = new CacheEntry
+            {
+                Result = result,
+                CachedAt = DateTimeOffset.UtcNow,
+                RepositoryChecksum = checksum
+            };
+
+            _cache.AddOrUpdate(rootPath, entry, (_, _) => entry);
+
+            _logger.LogDebug("Cached detection result for {Path} with checksum {Checksum}",
+                rootPath, checksum);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    private static async Task<string> ComputeRepositoryChecksumAsync(string rootPath, CancellationToken ct)
+    {
+        using var sha256 = SHA256.Create();
+        var projectFiles = Directory.EnumerateFiles(rootPath, "*.*proj", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(rootPath, "*.sln", SearchOption.AllDirectories))
+            .Concat(Directory.EnumerateFiles(rootPath, "package.json", SearchOption.AllDirectories))
+            .Where(f => !f.Contains("node_modules"))
+            .OrderBy(f => f);
+
+        foreach (var file in projectFiles)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var fileInfo = new FileInfo(file);
+            var fileData = $"{file}:{fileInfo.LastWriteTimeUtc:O}:{fileInfo.Length}";
+            var bytes = Encoding.UTF8.GetBytes(fileData);
+            sha256.TransformBlock(bytes, 0, bytes.Length, null, 0);
+        }
+
+        sha256.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return Convert.ToHexString(sha256.Hash!);
+    }
+
+    private sealed record CacheEntry
+    {
+        public required DetectionResult Result { get; init; }
+        public required DateTimeOffset CachedAt { get; init; }
+        public required string RepositoryChecksum { get; init; }
+    }
+}
+```
+
+---
+
+## Troubleshooting
+
+### Issue 1: Detection Fails to Find Projects
+
+**Symptoms:**
+- `acode detect` returns empty result despite projects existing
+- Log shows "No .sln or .csproj files found"
+- Manual `find` command shows files exist
+
+**Causes:**
+- Repository root path incorrect (scanning wrong directory)
+- Detection excluded by `.gitignore` patterns (e.g., `src/` accidentally excluded)
+- RepoFS permissions issue (read access denied)
+- Files excluded by default ignore patterns (`node_modules/`, `bin/`, `obj/`)
+- Case sensitivity mismatch on Linux (e.g., looking for `.csproj` but file is `.Csproj`)
+
+**Solutions:**
+
+**Solution 1: Verify Repository Root**
+```bash
+# Check current working directory
+pwd
+
+# Verify RepoFS is scanning correct path
+acode config get repo.root
+
+# Manually scan to verify files exist
+find . -name "*.sln" -o -name "*.csproj" -o -name "package.json" | head -20
+```
+
+**Solution 2: Check Ignore Patterns**
+```bash
+# View current ignore patterns
+acode config get detection.ignore-patterns
+
+# Temporarily disable ignore patterns
+acode detect --no-ignore
+
+# Add custom ignore patterns (YAML config)
+cat >> .acode/config.yml << 'EOF'
+detection:
+  ignore-patterns:
+    - node_modules/
+    - "**/bin/"
+    - "**/obj/"
+    # DO NOT add src/ or your projects won't be found!
+EOF
+```
+
+**Solution 3: Enable Verbose Logging**
+```bash
+# Run detection with debug logging
+acode detect --verbose --log-level Debug
+
+# Check logs for permission errors
+grep -i "access denied\|permission" ~/.acode/logs/detection.log
+
+# Fix permissions if needed
+chmod -R u+r /path/to/repo
+```
+
+**Solution 4: Force Case-Insensitive Search**
+```bash
+# On Linux, ensure case-insensitive glob matching
+# (Update DetectorOptions in code)
+dotnet run -- detect --case-insensitive
+```
+
+**Solution 5: Bypass Cache**
+```bash
+# Force fresh detection (bypass cache)
+acode detect --force-refresh
+
+# Clear detection cache manually
+rm -rf ~/.acode/cache/detection/
+```
+
+---
+
+### Issue 2: Slow Detection Performance (>10 seconds for medium repo)
+
+**Symptoms:**
+- Detection takes >10 seconds for repository with <1000 files
+- CPU usage spikes to 100% during scan
+- Large monorepos time out (>60 seconds)
+- Log shows "Scanned 50,000 files..."
+
+**Causes:**
+- Not excluding `node_modules/` (contains 100,000+ files in large projects)
+- Scanning nested `.git/` subdirectories (submodules)
+- Inefficient regex patterns in ignore matching
+- Cache disabled or ineffective
+- Symlink loops causing infinite traversal
+- Parsing every file instead of just metadata scanning
+
+**Solutions:**
+
+**Solution 1: Add node_modules to Ignore Patterns**
+```yaml
+# .acode/config.yml
+detection:
+  ignore-patterns:
+    - "**/node_modules/**"
+    - "**/.git/**"
+    - "**/bower_components/**"
+    - "**/vendor/**"
+    - "**/__pycache__/**"
+```
+
+**Solution 2: Reduce Max Depth**
+```bash
+# Limit directory traversal depth
+acode detect --max-depth 5
+
+# For monorepos, detect per workspace
+cd packages/frontend && acode detect
+cd packages/backend && acode detect
+```
+
+**Solution 3: Enable Parallel Scanning**
+```csharp
+// In LayoutDetector.cs - enable parallel file enumeration
+var detectionOptions = new EnumerationOptions
+{
+    RecurseSubdirectories = true,
+    IgnoreInaccessible = true,
+    MaxRecursionDepth = _options.MaxDepth,
+    // Enable parallel enumeration for large directories
+    ReturnSpecialDirectories = false
+};
+
+var tasks = directories.Select(async dir =>
+{
+    await foreach (var file in _repoFs.EnumerateFilesAsync(dir, "*.sln", detectionOptions, ct))
+    {
+        // Process in parallel
+    }
+}).ToArray();
+
+await Task.WhenAll(tasks);
+```
+
+**Solution 4: Optimize Cache Strategy**
+```bash
+# Verify cache is enabled
+acode config get detection.cache-enabled  # Should be true
+
+# Increase cache TTL for stable repos
+acode config set detection.cache-ttl-seconds 3600  # 1 hour
+
+# Monitor cache hit rate
+acode detect --verbose | grep "cache hit"
+```
+
+**Solution 5: Profile with Diagnostics**
+```bash
+# Run with performance profiling
+dotnet run --configuration Release -- detect --profile
+
+# Output:
+# Detection Performance Report:
+#   - File enumeration: 450ms (5,234 files)
+#   - .sln parsing: 120ms (3 solutions)
+#   - .csproj parsing: 890ms (47 projects)
+#   - package.json parsing: 230ms (12 packages)
+#   - Total: 1,690ms
+```
+
+---
+
+### Issue 3: Cache Never Invalidates (Stale Detection Results)
+
+**Symptoms:**
+- `acode detect` returns old results after adding new projects
+- Recently deleted projects still appear in detection output
+- Modified `.csproj` changes not reflected
+- `--force-refresh` flag has no effect
+
+**Causes:**
+- File checksum validation disabled
+- Cache TTL set to infinity (`-1` or very large value)
+- Cache key not considering file modification times
+- Race condition in cache write operations
+- Cache stored in read-only directory
+
+**Solutions:**
+
+**Solution 1: Verify Cache Invalidation Logic**
+```csharp
+// In AtomicDetectionCache.cs - ensure checksum validation is enabled
+public async Task<DetectionResult?> GetAsync(string rootPath, CancellationToken ct)
+{
+    if (_cache.TryGetValue(rootPath, out var entry))
+    {
+        // CRITICAL: Always validate checksum
+        var currentChecksum = await ComputeRepositoryChecksumAsync(rootPath, ct);
+        if (currentChecksum != entry.RepositoryChecksum)
+        {
+            _logger.LogInformation("Cache invalidated: checksum mismatch for {Root}", rootPath);
+            _cache.TryRemove(rootPath, out _);
+            return null;  // Force re-detection
+        }
+
+        // Verify TTL hasn't expired
+        if (DateTimeOffset.UtcNow - entry.Timestamp > _options.CacheTtl)
+        {
+            _logger.LogInformation("Cache invalidated: TTL expired for {Root}", rootPath);
+            _cache.TryRemove(rootPath, out _);
+            return null;
+        }
+
+        return entry.Result;
+    }
+    return null;
+}
+```
+
+**Solution 2: Clear Cache Manually**
+```bash
+# Delete cache directory
+rm -rf ~/.acode/cache/detection/
+
+# Or use CLI command
+acode cache clear --type detection
+
+# Verify cache is empty
+acode cache stats
+# Output: Detection cache: 0 entries, 0 KB
+```
+
+**Solution 3: Reduce Cache TTL**
+```bash
+# Set shorter TTL for active development
+acode config set detection.cache-ttl-seconds 300  # 5 minutes
+
+# Disable cache entirely for troubleshooting
+acode config set detection.cache-enabled false
+```
+
+**Solution 4: Check File System Permissions**
+```bash
+# Verify cache directory is writable
+ls -ld ~/.acode/cache/detection/
+# Should show: drwxr-xr-x (user writable)
+
+# Fix permissions if needed
+chmod u+w ~/.acode/cache/detection/
+```
+
+**Solution 5: Monitor Cache Operations**
+```bash
+# Enable cache debug logging
+acode detect --log-level Trace | grep -i cache
+
+# Example output:
+# [TRACE] DetectionCache: GetAsync(/repo) - MISS
+# [DEBUG] DetectionCache: SetAsync(/repo) - storing 47 projects, checksum abc123def
+# [TRACE] DetectionCache: GetAsync(/repo) - HIT (checksum validated)
+```
+
+---
+
+### Issue 4: XML Parsing Errors ("Invalid XML" for Valid .csproj)
+
+**Symptoms:**
+- Detection fails with "XmlException: Invalid XML"
+- Error: "DTD processing is prohibited"
+- `.csproj` files open fine in Visual Studio
+- Manual `xmllint` validation passes
+
+**Causes:**
+- `.csproj` contains DTD declaration (legacy format)
+- `.csproj` has XML comments with `--` or `<!DOCTYPE>`
+- Encoding mismatch (UTF-16 file read as UTF-8)
+- BOM (Byte Order Mark) causing parse failure
+- XML entity references not escaped (`&`, `<`, `>` in strings)
+
+**Solutions:**
+
+**Solution 1: Handle Legacy Project Files**
+```csharp
+// In SafeXmlParser.cs - allow DTD for legacy .csproj only
+public XDocument ParseProjectFile(string filePath, bool allowDtd = false)
+{
+    var settings = new XmlReaderSettings
+    {
+        DtdProcessing = allowDtd ? DtdProcessing.Ignore : DtdProcessing.Prohibit,
+        XmlResolver = null,  // Still prevent external entities
+        MaxCharactersInDocument = MaxDocumentSize,
+        MaxCharactersFromEntities = 1024,
+        IgnoreComments = true,  // Skip problematic comments
+        IgnoreWhitespace = true
+    };
+
+    try
+    {
+        using var fileStream = File.OpenRead(filePath);
+        using var reader = XmlReader.Create(fileStream, settings);
+        return XDocument.Load(reader, LoadOptions.None);
+    }
+    catch (XmlException ex) when (ex.Message.Contains("DTD"))
+    {
+        // Retry with DTD allowed for legacy .csproj
+        _logger.LogWarning("Retrying {File} with DTD processing enabled (legacy format)", filePath);
+        return ParseProjectFile(filePath, allowDtd: true);
+    }
+}
+```
+
+**Solution 2: Detect and Handle BOM**
+```csharp
+// In CsprojParser.cs - auto-detect encoding
+public ProjectMetadata Parse(string filePath)
+{
+    // Read raw bytes to detect BOM
+    var bytes = File.ReadAllBytes(filePath);
+    var encoding = DetectEncoding(bytes);
+
+    var content = encoding.GetString(bytes);
+    // Remove BOM if present
+    if (content.StartsWith("\uFEFF"))
+    {
+        content = content.Substring(1);
+    }
+
+    using var stringReader = new StringReader(content);
+    using var xmlReader = XmlReader.Create(stringReader, _xmlSettings);
+    var doc = XDocument.Load(xmlReader);
+    // ... parse
+}
+
+private static Encoding DetectEncoding(byte[] bytes)
+{
+    if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+        return Encoding.Unicode;  // UTF-16 LE
+    if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+        return Encoding.BigEndianUnicode;  // UTF-16 BE
+    if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);  // UTF-8 with BOM
+    return Encoding.UTF8;
+}
+```
+
+**Solution 3: Skip Invalid Files with Warning**
+```bash
+# Configure detection to skip unparseable files instead of failing
+acode config set detection.skip-invalid-xml true
+
+# Detection will log warnings but continue:
+# [WARN] Skipping invalid project file: src/Legacy/Old.csproj (XmlException)
+# [INFO] Detection complete: 46 projects (1 skipped)
+```
+
+**Solution 4: Validate XML Before Parsing**
+```bash
+# Manually validate problematic .csproj files
+xmllint --noout src/MyProject/MyProject.csproj
+
+# Check for common issues
+grep -E "<!DOCTYPE|<!ENTITY" **/*.csproj
+
+# Remove DTD declarations from legacy files
+sed -i '/<\!DOCTYPE/d' src/Legacy/*.csproj
+```
+
+**Solution 5: Increase Error Detail Logging**
+```bash
+# Get full stack trace for XML errors
+acode detect --log-level Debug --log-exceptions
+
+# Example output:
+# [ERROR] Failed to parse /repo/src/Legacy/Old.csproj
+#   XmlException: The 'Project' start tag on line 2 does not match the end tag of 'PropertyGroup'. Line 45, position 3.
+#   at System.Xml.XmlTextReaderImpl.Throw(Exception e)
+#   at Acode.Infrastructure.ProjectDetection.SafeXmlParser.ParseProjectFile(String filePath)
+```
+
+---
+
+### Issue 5: Workspace Detection Fails for npm/yarn Monorepo
+
+**Symptoms:**
+- Node.js monorepo detected as single package
+- Nested `package.json` files not discovered
+- Workspace members not linked to root
+- `acode detect --verbose` shows "0 workspaces found"
+
+**Causes:**
+- `package.json` missing `workspaces` field
+- Glob patterns in `workspaces` not expanded correctly
+- `yarn.lock` exists but workspace config in `package.json` is malformed
+- pnpm workspace using `pnpm-workspace.yaml` (separate file)
+- Lerna config in `lerna.json` not detected
+
+**Solutions:**
+
+**Solution 1: Verify Workspace Configuration**
+```bash
+# Check if workspaces field exists
+jq '.workspaces' package.json
+
+# Valid npm/yarn workspaces format:
+{
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
+}
+
+# Also supports object format:
+{
+  "workspaces": {
+    "packages": ["packages/*"],
+    "nohoist": ["**/react-native"]
+  }
+}
+```
+
+**Solution 2: Add pnpm Workspace Support**
+```csharp
+// In WorkspaceDetector.cs - check pnpm-workspace.yaml
+public async Task<WorkspaceInfo?> DetectWorkspaceAsync(string rootPath, CancellationToken ct)
+{
+    // Check npm/yarn workspaces in package.json
+    var packageJsonPath = Path.Combine(rootPath, "package.json");
+    if (File.Exists(packageJsonPath))
+    {
+        var package = await _packageJsonParser.ParseAsync(packageJsonPath, ct);
+        if (package.Workspaces?.Any() == true)
+        {
+            return await BuildWorkspaceInfoAsync(rootPath, package.Workspaces, ct);
+        }
+    }
+
+    // Check pnpm-workspace.yaml
+    var pnpmWorkspacePath = Path.Combine(rootPath, "pnpm-workspace.yaml");
+    if (File.Exists(pnpmWorkspacePath))
+    {
+        var workspaces = await ParsePnpmWorkspaceYamlAsync(pnpmWorkspacePath, ct);
+        return await BuildWorkspaceInfoAsync(rootPath, workspaces, ct);
+    }
+
+    // Check lerna.json
+    var lernaPath = Path.Combine(rootPath, "lerna.json");
+    if (File.Exists(lernaPath))
+    {
+        var lernaConfig = await ParseLernaConfigAsync(lernaPath, ct);
+        return await BuildWorkspaceInfoAsync(rootPath, lernaConfig.Packages, ct);
+    }
+
+    return null;  // Not a workspace
+}
+
+private async Task<List<string>> ParsePnpmWorkspaceYamlAsync(string path, CancellationToken ct)
+{
+    var yaml = await File.ReadAllTextAsync(path, ct);
+    var deserializer = new DeserializerBuilder().Build();
+    var config = deserializer.Deserialize<PnpmWorkspaceConfig>(yaml);
+    return config.Packages ?? new List<string>();
+}
+
+public class PnpmWorkspaceConfig
+{
+    public List<string>? Packages { get; set; }
+}
+```
+
+**Solution 3: Expand Glob Patterns Correctly**
+```csharp
+// In WorkspaceDetector.cs - use Glob library for pattern matching
+private async Task<List<string>> ExpandGlobPatternAsync(string rootPath, string pattern, CancellationToken ct)
+{
+    // Handle both Unix-style (packages/*) and Windows-style (packages\*)
+    var normalizedPattern = pattern.Replace('\\', '/');
+
+    var matcher = new Matcher();
+    matcher.AddInclude(normalizedPattern);
+
+    var results = matcher.Execute(
+        new DirectoryInfoWrapper(new DirectoryInfo(rootPath))
+    );
+
+    return results.Files
+        .Select(f => Path.Combine(rootPath, f.Path))
+        .Where(p => File.Exists(Path.Combine(p, "package.json")))
+        .ToList();
+}
+```
+
+**Solution 4: Handle Workspace Hoisting**
+```bash
+# Ensure detection follows symlinks in node_modules (hoisted dependencies)
+acode detect --follow-symlinks
+
+# For yarn workspaces with .pnp.cjs (Plug'n'Play)
+yarn dlx acode detect  # Run via yarn to use .pnp.cjs resolution
+```
+
+**Solution 5: Manually Verify Workspace Members**
+```bash
+# Use npm to list workspaces
+npm query .workspace | jq '.[].name'
+
+# Use yarn workspaces
+yarn workspaces list
+
+# Use pnpm
+pnpm list -r --depth 0
+
+# Compare with Acode detection output
+acode detect --format json | jq '.nodeProjects[] | select(.isWorkspaceMember) | .name'
+```
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
 
-#### LayoutDetectorTests
-- DetectAsync_EmptyDirectory_ReturnsEmptyResult
-- DetectAsync_SingleSolution_ReturnsSolution
-- DetectAsync_MultipleSolutions_ReturnsAll
-- DetectAsync_WithCancellation_ReturnsPartialResult
-- DetectAsync_WithMaxDepth_RespectsLimit
-- DetectAsync_SkipsConfiguredDirectories
-- DetectAsync_ForceRefresh_BypassesCache
-- DetectAsync_ParallelCalls_ThreadSafe
+```csharp
+using Xunit;
+using FluentAssertions;
+using NSubstitute;
+using Acode.Infrastructure.ProjectDetection;
+using Acode.Domain.Abstractions;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
-#### SlnParserTests
-- Parse_ValidSln_ExtractsProjects
-- Parse_EmptySln_ReturnsEmptyList
-- Parse_SolutionFolders_ParsesHierarchy
-- Parse_RelativePaths_ResolvesCorrectly
-- Parse_InvalidFormat_ThrowsParseException
-- Parse_MissingProjects_ReportsErrors
-- Parse_MultiplePlatforms_HandlesAll
-- Parse_GuidExtraction_Works
+namespace Acode.Infrastructure.Tests.ProjectDetection
+{
+    public sealed class LayoutDetectorTests
+    {
+        private readonly ILayoutDetector _sut;
+        private readonly IRepoFileSystem _repoFs;
+        private readonly ISlnParser _slnParser;
+        private readonly ICsprojParser _csprojParser;
+        private readonly IPackageJsonParser _packageJsonParser;
+        private readonly IDetectionCache _cache;
+        private readonly DetectorOptions _options;
 
-#### CsprojParserTests
-- Parse_ValidCsproj_ExtractsMetadata
-- Parse_SdkStyle_DetectsSdk
-- Parse_LegacyStyle_Handles
-- Parse_TargetFramework_Extracts
-- Parse_TargetFrameworks_ExtractsMultiple
-- Parse_OutputType_Extracts
-- Parse_ProjectReferences_Extracts
-- Parse_PackageReferences_Extracts
-- Parse_IsTestProject_Detects
-- Parse_TestSdkReference_DetectsTest
-- Parse_InvalidXml_ThrowsException
+        public LayoutDetectorTests()
+        {
+            _repoFs = Substitute.For<IRepoFileSystem>();
+            _slnParser = Substitute.For<ISlnParser>();
+            _csprojParser = Substitute.For<ICsprojParser>();
+            _packageJsonParser = Substitute.For<IPackageJsonParser>();
+            _cache = Substitute.For<IDetectionCache>();
+            _options = new DetectorOptions
+            {
+                MaxDepth = 10,
+                IgnorePatterns = new List<string> { "node_modules/", "bin/", "obj/" },
+                CacheEnabled = true,
+                CacheTtlSeconds = 600
+            };
 
-#### TestProjectDetectorTests
-- IsTest_NameEndsWithTests_ReturnsTrue
-- IsTest_NameEndsWithTest_ReturnsTrue
-- IsTest_HasTestSdkReference_ReturnsTrue
-- IsTest_HasXUnitReference_ReturnsTrue
-- IsTest_HasNUnitReference_ReturnsTrue
-- IsTest_HasMSTestReference_ReturnsTrue
-- IsTest_IsTestProjectProperty_ReturnsTrue
-- IsTest_RegularProject_ReturnsFalse
-- GetFramework_XUnit_ReturnsXUnit
-- GetFramework_NUnit_ReturnsNUnit
-- GetFramework_MSTest_ReturnsMSTest
+            _sut = new LayoutDetector(
+                _repoFs,
+                _slnParser,
+                _csprojParser,
+                _packageJsonParser,
+                _cache,
+                _options
+            );
+        }
 
-#### PackageJsonParserTests
-- Parse_ValidPackageJson_ExtractsMetadata
-- Parse_WithName_ExtractsName
-- Parse_WithMain_ExtractsEntry
-- Parse_WithScripts_ExtractsScripts
-- Parse_TestScript_DetectsTest
-- Parse_NpmWorkspaces_DetectsWorkspaces
-- Parse_YarnWorkspaces_DetectsWorkspaces
-- Parse_PnpmWorkspaces_DetectsWorkspaces
-- Parse_LernaConfig_DetectsLerna
-- Parse_InvalidJson_ThrowsException
-- Parse_MissingName_UsesDirectoryName
+        [Fact]
+        public async Task DetectAsync_EmptyDirectory_ReturnsEmptyResult()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            _repoFs.EnumerateFilesAsync(rootPath, "*.sln", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+            _repoFs.EnumerateFilesAsync(rootPath, "*.csproj", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+            _repoFs.EnumerateFilesAsync(rootPath, "package.json", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+            _cache.GetAsync(rootPath, Arg.Any<CancellationToken>()).Returns((DetectionResult?)null);
 
-#### WorkspaceDetectorTests
-- Detect_NpmWorkspaces_MapsMembers
-- Detect_YarnWorkspaces_MapsMembers
-- Detect_NestedPackages_LinksToParent
-- Detect_GlobPatterns_ExpandsCorrectly
-- Detect_NoWorkspaces_ReturnsEmpty
+            // Act
+            var result = await _sut.DetectAsync(rootPath, CancellationToken.None);
 
-#### DetectionCacheTests
-- Get_CachedResult_ReturnsCached
-- Get_ExpiredResult_ReturnsNull
-- Get_NoResult_ReturnsNull
-- Set_NewResult_Stores
-- Set_ExistingResult_Overwrites
-- Invalidate_RemovesEntry
-- InvalidateAll_ClearsCache
-- Get_ConcurrentAccess_ThreadSafe
+            // Assert
+            result.Should().NotBeNull();
+            result.Solutions.Should().BeEmpty();
+            result.DotNetProjects.Should().BeEmpty();
+            result.NodeProjects.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task DetectAsync_SingleSolution_ReturnsSolution()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            var slnPath = "/repo/MyApp.sln";
+            var slnFiles = new[] { slnPath }.ToAsyncEnumerable();
+
+            _repoFs.EnumerateFilesAsync(rootPath, "*.sln", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(slnFiles);
+            _repoFs.EnumerateFilesAsync(rootPath, "*.csproj", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+            _repoFs.EnumerateFilesAsync(rootPath, "package.json", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+            _cache.GetAsync(rootPath, Arg.Any<CancellationToken>()).Returns((DetectionResult?)null);
+
+            var solutionInfo = new SolutionInfo
+            {
+                Path = slnPath,
+                Name = "MyApp",
+                Projects = new List<ProjectReference>
+                {
+                    new ProjectReference { Name = "MyApp.Web", Path = "/repo/src/MyApp.Web/MyApp.Web.csproj" }
+                }
+            };
+            _slnParser.ParseAsync(slnPath, Arg.Any<CancellationToken>()).Returns(solutionInfo);
+
+            // Act
+            var result = await _sut.DetectAsync(rootPath, CancellationToken.None);
+
+            // Assert
+            result.Solutions.Should().HaveCount(1);
+            result.Solutions[0].Name.Should().Be("MyApp");
+            result.Solutions[0].Projects.Should().HaveCount(1);
+        }
+
+        [Fact]
+        public async Task DetectAsync_MultipleSolutions_ReturnsAll()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            var slnFiles = new[] { "/repo/App1.sln", "/repo/App2.sln" }.ToAsyncEnumerable();
+
+            _repoFs.EnumerateFilesAsync(rootPath, "*.sln", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(slnFiles);
+            _repoFs.EnumerateFilesAsync(rootPath, "*.csproj", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+            _repoFs.EnumerateFilesAsync(rootPath, "package.json", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+            _cache.GetAsync(rootPath, Arg.Any<CancellationToken>()).Returns((DetectionResult?)null);
+
+            _slnParser.ParseAsync("/repo/App1.sln", Arg.Any<CancellationToken>())
+                .Returns(new SolutionInfo { Path = "/repo/App1.sln", Name = "App1", Projects = new List<ProjectReference>() });
+            _slnParser.ParseAsync("/repo/App2.sln", Arg.Any<CancellationToken>())
+                .Returns(new SolutionInfo { Path = "/repo/App2.sln", Name = "App2", Projects = new List<ProjectReference>() });
+
+            // Act
+            var result = await _sut.DetectAsync(rootPath, CancellationToken.None);
+
+            // Assert
+            result.Solutions.Should().HaveCount(2);
+            result.Solutions.Select(s => s.Name).Should().Contain(new[] { "App1", "App2" });
+        }
+
+        [Fact]
+        public async Task DetectAsync_WithCancellation_ThrowsOperationCanceledException()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            // Act
+            Func<Task> act = async () => await _sut.DetectAsync(rootPath, cts.Token);
+
+            // Assert
+            await act.Should().ThrowAsync<OperationCanceledException>();
+        }
+
+        [Fact]
+        public async Task DetectAsync_WithMaxDepth_RespectsLimit()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            var options = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                MaxRecursionDepth = 3
+            };
+
+            _repoFs.EnumerateFilesAsync(rootPath, "*.sln", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(call =>
+                {
+                    var enumOptions = call.Arg<EnumerationOptions>();
+                    enumOptions.MaxRecursionDepth.Should().Be(3);
+                    return AsyncEnumerable.Empty<string>();
+                });
+            _repoFs.EnumerateFilesAsync(rootPath, "*.csproj", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+            _repoFs.EnumerateFilesAsync(rootPath, "package.json", Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+            _cache.GetAsync(rootPath, Arg.Any<CancellationToken>()).Returns((DetectionResult?)null);
+
+            var detectorWithMaxDepth = new LayoutDetector(
+                _repoFs,
+                _slnParser,
+                _csprojParser,
+                _packageJsonParser,
+                _cache,
+                new DetectorOptions { MaxDepth = 3, CacheEnabled = false }
+            );
+
+            // Act
+            var result = await detectorWithMaxDepth.DetectAsync(rootPath, CancellationToken.None);
+
+            // Assert
+            await _repoFs.Received().EnumerateFilesAsync(
+                rootPath,
+                "*.sln",
+                Arg.Is<EnumerationOptions>(o => o.MaxRecursionDepth == 3),
+                Arg.Any<CancellationToken>()
+            );
+        }
+
+        [Fact]
+        public async Task DetectAsync_ForceRefresh_BypassesCache()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            var cachedResult = new DetectionResult
+            {
+                Solutions = new List<SolutionInfo> { new SolutionInfo { Name = "Cached" } }
+            };
+
+            _cache.GetAsync(rootPath, Arg.Any<CancellationToken>()).Returns(cachedResult);
+            _repoFs.EnumerateFilesAsync(rootPath, Arg.Any<string>(), Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+
+            // Act
+            var result = await _sut.DetectAsync(rootPath, CancellationToken.None, forceRefresh: true);
+
+            // Assert
+            await _cache.DidNotReceive().GetAsync(rootPath, Arg.Any<CancellationToken>());
+            result.Solutions.Should().BeEmpty();  // Fresh detection, not cached
+        }
+
+        [Fact]
+        public async Task DetectAsync_ParallelCalls_ThreadSafe()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            _repoFs.EnumerateFilesAsync(rootPath, Arg.Any<string>(), Arg.Any<EnumerationOptions>(), Arg.Any<CancellationToken>())
+                .Returns(AsyncEnumerable.Empty<string>());
+            _cache.GetAsync(rootPath, Arg.Any<CancellationToken>()).Returns((DetectionResult?)null);
+
+            // Act
+            var tasks = Enumerable.Range(0, 10)
+                .Select(_ => _sut.DetectAsync(rootPath, CancellationToken.None))
+                .ToArray();
+
+            var results = await Task.WhenAll(tasks);
+
+            // Assert
+            results.Should().HaveCount(10);
+            results.Should().AllSatisfy(r => r.Should().NotBeNull());
+        }
+    }
+
+    public sealed class CsprojParserTests
+    {
+        private readonly ICsprojParser _sut;
+        private readonly IPathTraversalValidator _pathValidator;
+
+        public CsprojParserTests()
+        {
+            _pathValidator = Substitute.For<IPathTraversalValidator>();
+            _pathValidator.ValidateProjectReference(Arg.Any<string>(), Arg.Any<string>())
+                .Returns(ValidationResult.Success());
+
+            _sut = new CsprojParser(_pathValidator);
+        }
+
+        [Fact]
+        public void Parse_ValidSdkStyleCsproj_ExtractsMetadata()
+        {
+            // Arrange
+            var csprojPath = "/repo/src/MyApp/MyApp.csproj";
+            var csprojContent = @"
+<Project Sdk=""Microsoft.NET.Sdk.Web"">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>MyCompany.MyApp</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include=""Newtonsoft.Json"" Version=""13.0.3"" />
+  </ItemGroup>
+</Project>";
+            File.WriteAllText(csprojPath, csprojContent);
+
+            // Act
+            var metadata = _sut.Parse(csprojPath);
+
+            // Assert
+            metadata.Name.Should().Be("MyApp");
+            metadata.TargetFramework.Should().Be("net8.0");
+            metadata.OutputType.Should().Be("Exe");
+            metadata.RootNamespace.Should().Be("MyCompany.MyApp");
+            metadata.IsSdkStyle.Should().BeTrue();
+            metadata.PackageReferences.Should().ContainKey("Newtonsoft.Json");
+            metadata.PackageReferences["Newtonsoft.Json"].Should().Be("13.0.3");
+
+            // Cleanup
+            File.Delete(csprojPath);
+        }
+
+        [Fact]
+        public void Parse_TargetFrameworks_ExtractsMultiple()
+        {
+            // Arrange
+            var csprojPath = "/repo/src/MultiTarget/MultiTarget.csproj";
+            var csprojContent = @"
+<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net7.0;net48</TargetFrameworks>
+  </PropertyGroup>
+</Project>";
+            File.WriteAllText(csprojPath, csprojContent);
+
+            // Act
+            var metadata = _sut.Parse(csprojPath);
+
+            // Assert
+            metadata.TargetFrameworks.Should().HaveCount(3);
+            metadata.TargetFrameworks.Should().Contain(new[] { "net8.0", "net7.0", "net48" });
+
+            // Cleanup
+            File.Delete(csprojPath);
+        }
+
+        [Fact]
+        public void Parse_ProjectReferences_Extracts()
+        {
+            // Arrange
+            var csprojPath = "/repo/src/MyApp/MyApp.csproj";
+            var csprojContent = @"
+<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include=""../MyApp.Core/MyApp.Core.csproj"" />
+    <ProjectReference Include=""../MyApp.Data/MyApp.Data.csproj"" />
+  </ItemGroup>
+</Project>";
+            File.WriteAllText(csprojPath, csprojContent);
+
+            // Act
+            var metadata = _sut.Parse(csprojPath);
+
+            // Assert
+            metadata.ProjectReferences.Should().HaveCount(2);
+            metadata.ProjectReferences.Should().Contain("../MyApp.Core/MyApp.Core.csproj");
+            metadata.ProjectReferences.Should().Contain("../MyApp.Data/MyApp.Data.csproj");
+
+            // Cleanup
+            File.Delete(csprojPath);
+        }
+
+        [Fact]
+        public void Parse_IsTestProject_DetectsXUnit()
+        {
+            // Arrange
+            var csprojPath = "/repo/tests/MyApp.Tests/MyApp.Tests.csproj";
+            var csprojContent = @"
+<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include=""xunit"" Version=""2.6.2"" />
+    <PackageReference Include=""xunit.runner.visualstudio"" Version=""2.5.4"" />
+  </ItemGroup>
+</Project>";
+            File.WriteAllText(csprojPath, csprojContent);
+
+            // Act
+            var metadata = _sut.Parse(csprojPath);
+
+            // Assert
+            metadata.IsTestProject.Should().BeTrue();
+            metadata.TestFramework.Should().Be("xunit");
+
+            // Cleanup
+            File.Delete(csprojPath);
+        }
+
+        [Fact]
+        public void Parse_TestSdkReference_DetectsTest()
+        {
+            // Arrange
+            var csprojPath = "/repo/tests/MyApp.Tests/MyApp.Tests.csproj";
+            var csprojContent = @"
+<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include=""Microsoft.NET.Test.Sdk"" Version=""17.8.0"" />
+    <PackageReference Include=""NUnit"" Version=""4.0.1"" />
+  </ItemGroup>
+</Project>";
+            File.WriteAllText(csprojPath, csprojContent);
+
+            // Act
+            var metadata = _sut.Parse(csprojPath);
+
+            // Assert
+            metadata.IsTestProject.Should().BeTrue();
+            metadata.TestFramework.Should().Be("nunit");
+
+            // Cleanup
+            File.Delete(csprojPath);
+        }
+
+        [Fact]
+        public void Parse_InvalidXml_ThrowsXmlException()
+        {
+            // Arrange
+            var csprojPath = "/repo/src/Invalid/Invalid.csproj";
+            var invalidXml = @"
+<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  <!-- Missing closing tag -->";
+            File.WriteAllText(csprojPath, invalidXml);
+
+            // Act
+            Action act = () => _sut.Parse(csprojPath);
+
+            // Assert
+            act.Should().Throw<System.Xml.XmlException>();
+
+            // Cleanup
+            File.Delete(csprojPath);
+        }
+    }
+
+    public sealed class PackageJsonParserTests
+    {
+        private readonly IPackageJsonParser _sut;
+
+        public PackageJsonParserTests()
+        {
+            _sut = new PackageJsonParser();
+        }
+
+        [Fact]
+        public async Task Parse_ValidPackageJson_ExtractsMetadata()
+        {
+            // Arrange
+            var packageJsonPath = "/repo/package.json";
+            var packageJsonContent = @"{
+  ""name"": ""my-app"",
+  ""version"": ""1.0.0"",
+  ""main"": ""index.js"",
+  ""scripts"": {
+    ""start"": ""node index.js"",
+    ""test"": ""jest""
+  },
+  ""dependencies"": {
+    ""express"": ""^4.18.2""
+  },
+  ""devDependencies"": {
+    ""jest"": ""^29.7.0""
+  }
+}";
+            File.WriteAllText(packageJsonPath, packageJsonContent);
+
+            // Act
+            var metadata = await _sut.ParseAsync(packageJsonPath, CancellationToken.None);
+
+            // Assert
+            metadata.Name.Should().Be("my-app");
+            metadata.Version.Should().Be("1.0.0");
+            metadata.Main.Should().Be("index.js");
+            metadata.Scripts.Should().ContainKey("start");
+            metadata.Scripts.Should().ContainKey("test");
+            metadata.Dependencies.Should().ContainKey("express");
+            metadata.DevDependencies.Should().ContainKey("jest");
+
+            // Cleanup
+            File.Delete(packageJsonPath);
+        }
+
+        [Fact]
+        public async Task Parse_TestScript_DetectsTest()
+        {
+            // Arrange
+            var packageJsonPath = "/repo/package.json";
+            var packageJsonContent = @"{
+  ""name"": ""my-lib"",
+  ""scripts"": {
+    ""test"": ""jest --coverage"",
+    ""test:watch"": ""jest --watch""
+  }
+}";
+            File.WriteAllText(packageJsonPath, packageJsonContent);
+
+            // Act
+            var metadata = await _sut.ParseAsync(packageJsonPath, CancellationToken.None);
+
+            // Assert
+            metadata.HasTestScript.Should().BeTrue();
+            metadata.TestCommand.Should().Be("jest --coverage");
+
+            // Cleanup
+            File.Delete(packageJsonPath);
+        }
+
+        [Fact]
+        public async Task Parse_NpmWorkspaces_DetectsWorkspaces()
+        {
+            // Arrange
+            var packageJsonPath = "/repo/package.json";
+            var packageJsonContent = @"{
+  ""name"": ""monorepo"",
+  ""private"": true,
+  ""workspaces"": [
+    ""packages/*"",
+    ""apps/*""
+  ]
+}";
+            File.WriteAllText(packageJsonPath, packageJsonContent);
+
+            // Act
+            var metadata = await _sut.ParseAsync(packageJsonPath, CancellationToken.None);
+
+            // Assert
+            metadata.IsWorkspaceRoot.Should().BeTrue();
+            metadata.Workspaces.Should().HaveCount(2);
+            metadata.Workspaces.Should().Contain("packages/*");
+            metadata.Workspaces.Should().Contain("apps/*");
+
+            // Cleanup
+            File.Delete(packageJsonPath);
+        }
+
+        [Fact]
+        public async Task Parse_YarnWorkspaces_DetectsWorkspaces()
+        {
+            // Arrange
+            var packageJsonPath = "/repo/package.json";
+            var packageJsonContent = @"{
+  ""name"": ""yarn-monorepo"",
+  ""private"": true,
+  ""workspaces"": {
+    ""packages"": [""packages/*""],
+    ""nohoist"": [""**/react-native""]
+  }
+}";
+            File.WriteAllText(packageJsonPath, packageJsonContent);
+
+            // Act
+            var metadata = await _sut.ParseAsync(packageJsonPath, CancellationToken.None);
+
+            // Assert
+            metadata.IsWorkspaceRoot.Should().BeTrue();
+            metadata.Workspaces.Should().Contain("packages/*");
+
+            // Cleanup
+            File.Delete(packageJsonPath);
+        }
+
+        [Fact]
+        public async Task Parse_InvalidJson_ThrowsJsonException()
+        {
+            // Arrange
+            var packageJsonPath = "/repo/package.json";
+            var invalidJson = @"{
+  ""name"": ""broken"",
+  ""version"": ""1.0.0""
+  // Missing closing brace";
+            File.WriteAllText(packageJsonPath, invalidJson);
+
+            // Act
+            Func<Task> act = async () => await _sut.ParseAsync(packageJsonPath, CancellationToken.None);
+
+            // Assert
+            await act.Should().ThrowAsync<System.Text.Json.JsonException>();
+
+            // Cleanup
+            File.Delete(packageJsonPath);
+        }
+
+        [Fact]
+        public async Task Parse_MissingName_UsesDirectoryName()
+        {
+            // Arrange
+            var packageJsonPath = "/repo/my-project/package.json";
+            Directory.CreateDirectory("/repo/my-project");
+            var packageJsonContent = @"{
+  ""version"": ""1.0.0""
+}";
+            File.WriteAllText(packageJsonPath, packageJsonContent);
+
+            // Act
+            var metadata = await _sut.ParseAsync(packageJsonPath, CancellationToken.None);
+
+            // Assert
+            metadata.Name.Should().Be("my-project");
+
+            // Cleanup
+            File.Delete(packageJsonPath);
+            Directory.Delete("/repo/my-project");
+        }
+    }
+
+    public sealed class DetectionCacheTests
+    {
+        private readonly IDetectionCache _sut;
+        private readonly TimeProvider _timeProvider;
+
+        public DetectionCacheTests()
+        {
+            _timeProvider = Substitute.For<TimeProvider>();
+            _timeProvider.GetUtcNow().Returns(DateTimeOffset.UtcNow);
+
+            _sut = new DetectionCache(_timeProvider, new CacheOptions { TtlSeconds = 600 });
+        }
+
+        [Fact]
+        public async Task Get_CachedResult_ReturnsCached()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            var cachedResult = new DetectionResult
+            {
+                Solutions = new List<SolutionInfo> { new SolutionInfo { Name = "App" } }
+            };
+
+            await _sut.SetAsync(rootPath, cachedResult, "checksum123", CancellationToken.None);
+
+            // Act
+            var result = await _sut.GetAsync(rootPath, CancellationToken.None);
+
+            // Assert
+            result.Should().NotBeNull();
+            result!.Solutions.Should().HaveCount(1);
+            result.Solutions[0].Name.Should().Be("App");
+        }
+
+        [Fact]
+        public async Task Get_ExpiredResult_ReturnsNull()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            var cachedResult = new DetectionResult { Solutions = new List<SolutionInfo>() };
+
+            var initialTime = new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.Zero);
+            _timeProvider.GetUtcNow().Returns(initialTime);
+
+            await _sut.SetAsync(rootPath, cachedResult, "checksum123", CancellationToken.None);
+
+            // Advance time past TTL (600 seconds)
+            var expiredTime = initialTime.AddSeconds(601);
+            _timeProvider.GetUtcNow().Returns(expiredTime);
+
+            // Act
+            var result = await _sut.GetAsync(rootPath, CancellationToken.None);
+
+            // Assert
+            result.Should().BeNull();
+        }
+
+        [Fact]
+        public async Task Set_NewResult_Stores()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            var result = new DetectionResult
+            {
+                DotNetProjects = new List<ProjectMetadata>
+                {
+                    new ProjectMetadata { Name = "MyApp" }
+                }
+            };
+
+            // Act
+            await _sut.SetAsync(rootPath, result, "checksum456", CancellationToken.None);
+            var retrieved = await _sut.GetAsync(rootPath, CancellationToken.None);
+
+            // Assert
+            retrieved.Should().NotBeNull();
+            retrieved!.DotNetProjects.Should().HaveCount(1);
+            retrieved.DotNetProjects[0].Name.Should().Be("MyApp");
+        }
+
+        [Fact]
+        public async Task Invalidate_RemovesEntry()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            var result = new DetectionResult();
+            await _sut.SetAsync(rootPath, result, "checksum789", CancellationToken.None);
+
+            // Act
+            await _sut.InvalidateAsync(rootPath, CancellationToken.None);
+            var retrieved = await _sut.GetAsync(rootPath, CancellationToken.None);
+
+            // Assert
+            retrieved.Should().BeNull();
+        }
+
+        [Fact]
+        public async Task Get_ConcurrentAccess_ThreadSafe()
+        {
+            // Arrange
+            var rootPath = "/repo";
+            var result = new DetectionResult();
+            await _sut.SetAsync(rootPath, result, "checksumABC", CancellationToken.None);
+
+            // Act
+            var tasks = Enumerable.Range(0, 100)
+                .Select(_ => _sut.GetAsync(rootPath, CancellationToken.None))
+                .ToArray();
+
+            var results = await Task.WhenAll(tasks);
+
+            // Assert
+            results.Should().HaveCount(100);
+            results.Should().AllSatisfy(r => r.Should().NotBeNull());
+        }
+    }
+}
+```
 
 ### Integration Tests
 
-#### LayoutDetectorIntegrationTests
-- Detect_RealDotNetRepo_FindsAllProjects
-- Detect_RealNodeRepo_FindsAllPackages
-- Detect_MonorepoWithWorkspaces_MapsHierarchy
-- Detect_MixedRepo_FindsBothTypes
-- Detect_WithGitignore_RespectsPatterns
-- Detect_LargeRepo_CompletesInTime
+```csharp
+using Xunit;
+using FluentAssertions;
+using Acode.Infrastructure.ProjectDetection;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
-### End-to-End Tests
+namespace Acode.Infrastructure.Tests.ProjectDetection.Integration
+{
+    [Collection("FileSystem")]
+    public sealed class LayoutDetectorIntegrationTests : IAsyncLifetime
+    {
+        private string _testRepoPath = null!;
+        private ILayoutDetector _sut = null!;
 
-#### DetectionE2ETests
-- CLI_Detect_OutputsProjectList
-- CLI_DetectJson_ValidJsonOutput
-- CLI_DetectVerbose_ShowsDetails
-- CLI_DetectRefresh_BypassesCache
-- CLI_Detect_ShowsTestProjects
-- CLI_Detect_ShowsWorkspaces
+        public async Task InitializeAsync()
+        {
+            _testRepoPath = Path.Combine(Path.GetTempPath(), "acode-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_testRepoPath);
+
+            var repoFs = new RepoFileSystem(_testRepoPath);
+            var slnParser = new SlnParser();
+            var csprojParser = new CsprojParser(new PathTraversalValidator(_testRepoPath));
+            var packageJsonParser = new PackageJsonParser();
+            var cache = new InMemoryDetectionCache();
+
+            _sut = new LayoutDetector(
+                repoFs,
+                slnParser,
+                csprojParser,
+                packageJsonParser,
+                cache,
+                new DetectorOptions { MaxDepth = 10, CacheEnabled = false }
+            );
+
+            await Task.CompletedTask;
+        }
+
+        public async Task DisposeAsync()
+        {
+            if (Directory.Exists(_testRepoPath))
+            {
+                Directory.Delete(_testRepoPath, recursive: true);
+            }
+            await Task.CompletedTask;
+        }
+
+        [Fact]
+        public async Task Detect_RealDotNetRepo_FindsAllProjects()
+        {
+            // Arrange
+            var srcDir = Path.Combine(_testRepoPath, "src");
+            Directory.CreateDirectory(srcDir);
+
+            var webProjDir = Path.Combine(srcDir, "MyApp.Web");
+            Directory.CreateDirectory(webProjDir);
+            var webCsproj = Path.Combine(webProjDir, "MyApp.Web.csproj");
+            File.WriteAllText(webCsproj, @"
+<Project Sdk=""Microsoft.NET.Sdk.Web"">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>");
+
+            var coreProjDir = Path.Combine(srcDir, "MyApp.Core");
+            Directory.CreateDirectory(coreProjDir);
+            var coreCsproj = Path.Combine(coreProjDir, "MyApp.Core.csproj");
+            File.WriteAllText(coreCsproj, @"
+<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>");
+
+            // Act
+            var result = await _sut.DetectAsync(_testRepoPath, CancellationToken.None);
+
+            // Assert
+            result.DotNetProjects.Should().HaveCount(2);
+            result.DotNetProjects.Should().Contain(p => p.Name == "MyApp.Web");
+            result.DotNetProjects.Should().Contain(p => p.Name == "MyApp.Core");
+        }
+
+        [Fact]
+        public async Task Detect_RealNodeRepo_FindsAllPackages()
+        {
+            // Arrange
+            var rootPackageJson = Path.Combine(_testRepoPath, "package.json");
+            File.WriteAllText(rootPackageJson, @"{
+  ""name"": ""my-node-app"",
+  ""version"": ""1.0.0"",
+  ""scripts"": {
+    ""start"": ""node index.js"",
+    ""test"": ""jest""
+  }
+}");
+
+            // Act
+            var result = await _sut.DetectAsync(_testRepoPath, CancellationToken.None);
+
+            // Assert
+            result.NodeProjects.Should().HaveCount(1);
+            result.NodeProjects[0].Name.Should().Be("my-node-app");
+            result.NodeProjects[0].HasTestScript.Should().BeTrue();
+        }
+
+        [Fact]
+        public async Task Detect_MonorepoWithWorkspaces_MapsHierarchy()
+        {
+            // Arrange
+            var rootPackageJson = Path.Combine(_testRepoPath, "package.json");
+            File.WriteAllText(rootPackageJson, @"{
+  ""name"": ""monorepo"",
+  ""private"": true,
+  ""workspaces"": [""packages/*""]
+}");
+
+            var packagesDir = Path.Combine(_testRepoPath, "packages");
+            Directory.CreateDirectory(packagesDir);
+
+            var package1Dir = Path.Combine(packagesDir, "package1");
+            Directory.CreateDirectory(package1Dir);
+            File.WriteAllText(Path.Combine(package1Dir, "package.json"), @"{
+  ""name"": ""@monorepo/package1"",
+  ""version"": ""1.0.0""
+}");
+
+            // Act
+            var result = await _sut.DetectAsync(_testRepoPath, CancellationToken.None);
+
+            // Assert
+            result.NodeProjects.Should().HaveCount(2);  // Root + package1
+            result.NodeProjects.Should().Contain(p => p.Name == "monorepo" && p.IsWorkspaceRoot);
+            result.NodeProjects.Should().Contain(p => p.Name == "@monorepo/package1" && p.IsWorkspaceMember);
+        }
+
+        [Fact]
+        public async Task Detect_MixedRepo_FindsBothTypes()
+        {
+            // Arrange
+            var srcDir = Path.Combine(_testRepoPath, "src");
+            Directory.CreateDirectory(srcDir);
+
+            var backendDir = Path.Combine(srcDir, "Backend");
+            Directory.CreateDirectory(backendDir);
+            File.WriteAllText(Path.Combine(backendDir, "Backend.csproj"), @"
+<Project Sdk=""Microsoft.NET.Sdk.Web"">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+</Project>");
+
+            var frontendDir = Path.Combine(srcDir, "Frontend");
+            Directory.CreateDirectory(frontendDir);
+            File.WriteAllText(Path.Combine(frontendDir, "package.json"), @"{
+  ""name"": ""frontend"",
+  ""scripts"": {""build"": ""vite build""}
+}");
+
+            // Act
+            var result = await _sut.DetectAsync(_testRepoPath, CancellationToken.None);
+
+            // Assert
+            result.DotNetProjects.Should().HaveCount(1);
+            result.NodeProjects.Should().HaveCount(1);
+            result.DotNetProjects[0].Name.Should().Be("Backend");
+            result.NodeProjects[0].Name.Should().Be("frontend");
+        }
+
+        [Fact]
+        public async Task Detect_LargeRepo_CompletesInTime()
+        {
+            // Arrange - Create 100 projects
+            for (int i = 0; i < 100; i++)
+            {
+                var projDir = Path.Combine(_testRepoPath, $"Project{i}");
+                Directory.CreateDirectory(projDir);
+                File.WriteAllText(Path.Combine(projDir, $"Project{i}.csproj"), @"
+<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+</Project>");
+            }
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            // Act
+            var result = await _sut.DetectAsync(_testRepoPath, CancellationToken.None);
+
+            sw.Stop();
+
+            // Assert
+            result.DotNetProjects.Should().HaveCount(100);
+            sw.ElapsedMilliseconds.Should().BeLessThan(5000);  // Should complete in < 5 seconds
+        }
+    }
+}
+```
 
 ### Performance Benchmarks
 
