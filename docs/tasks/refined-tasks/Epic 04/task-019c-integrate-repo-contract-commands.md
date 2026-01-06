@@ -25,6 +25,155 @@ The repo contract (defined in Task 002) includes an optional `commands` section 
 5. **Disable Capability** - Intentionally disable operations that shouldn't be run automatically
 6. **Custom Operations** - Define project-specific commands beyond the standard set
 
+### ROI Calculation
+
+**Scenario:** 8-developer team with 4 projects using non-standard build systems (CMake, Make, Bazel, custom scripts)
+
+**Without Repo Contract Commands:**
+- Manual documentation: "To build project X, run `./scripts/build.sh --config=prod`"
+- AI agent attempts standard detection: `dotnet build` (fails)
+- Developer manually intervenes: 10 minutes per failure × 5 failures/day × 8 devs = 400 minutes/day
+- Annual cost: 400 min/day × 220 working days × $100/hour ÷ 60 min/hour = **$146,667/year**
+
+**With Repo Contract Commands:**
+- One-time configuration in `.agent/config.yml`: 15 minutes per project
+- AI agent reads contract, executes correct command: 0 failures
+- Developer intervention: 0 minutes
+- Annual cost: 15 min × 4 projects × $100/hour ÷ 60 min/hour = **$100**
+
+**Savings:** $146,667 - $100 = **$146,567/year**
+**ROI:** ($146,567 ÷ $100) × 100 = **146,467%**
+**Payback period:** (15 min × 4 projects) ÷ (400 min/day) = **0.15 days (1.2 hours)**
+
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Repo Contract Command Flow                  │
+└─────────────────────────────────────────────────────────────┘
+
+┌──────────────────┐
+│   CLI Command    │  acode build --configuration Release
+│  (User/Agent)    │
+└────────┬─────────┘
+         │
+         ▼
+┌────────────────────────────┐
+│    ILanguageRunner         │  1. Query contract for 'build' command
+│  (DotNetRunner/NodeRunner) │
+└────────┬───────────────────┘
+         │
+         ▼
+┌────────────────────────────┐
+│   ICommandResolver         │  2. Check .agent/config.yml existence
+│ (CommandResolver)          │
+└────────┬───────────────────┘
+         │
+         ▼
+   ┌────┴─────┐
+   │ Contract │
+   │ Exists?  │
+   └────┬─────┘
+        │
+     ┌──┴──────────────────────────────┐
+     │                                  │
+    YES                                NO
+     │                                  │
+     ▼                                  ▼
+┌────────────────────┐         ┌──────────────────┐
+│ IRepoContract      │         │ Return:          │
+│   .Commands["build"]│         │   UseDefault     │
+│                    │         └──────────────────┘
+└────────┬───────────┘
+         │
+         ▼
+   ┌────┴─────┐
+   │ Command  │
+   │ Defined? │
+   └────┬─────┘
+        │
+     ┌──┴──────────────────────────────┐
+     │                │                  │
+    null          undefined           string
+     │                │                  │
+     ▼                ▼                  ▼
+┌──────────┐  ┌──────────────┐  ┌────────────────────┐
+│ Return:  │  │ Return:      │  │ ITemplateVariable  │
+│ Disabled │  │  UseDefault  │  │    Resolver        │
+└──────────┘  └──────────────┘  └────────┬───────────┘
+                                          │
+                                          ▼
+                              ┌───────────────────────────┐
+                              │ Resolve ${project_root},  │
+                              │ ${configuration}, etc.    │
+                              └───────────┬───────────────┘
+                                          │
+                                          ▼
+                              ┌───────────────────────────┐
+                              │ Return: UseOverride       │
+                              │   + ResolvedCommand       │
+                              │     - Command: "make..."  │
+                              │     - WorkingDir: "..."   │
+                              │     - Timeout: 120s       │
+                              │     - Environment: {...}  │
+                              └───────────┬───────────────┘
+                                          │
+                                          ▼
+                              ┌───────────────────────────┐
+                              │   ICommandExecutor        │
+                              │ (Execute resolved command)│
+                              └───────────────────────────┘
+```
+
+### Trade-Off Decisions
+
+**Trade-Off 1: Validation Timing (Config Load vs Runtime)**
+
+| Option | Pros | Cons | Decision |
+|--------|------|------|----------|
+| Validate at config load | Fast fail, clear errors before execution, prevents runtime surprises | Requires config reload on change, harder to implement hot-reload | ✅ **CHOSEN** - Fail fast principle |
+| Validate at runtime | Allows hot-reload, simpler implementation | Late error discovery, wasted execution time, confusing errors | ❌ Rejected |
+
+**Rationale:** Config files change infrequently. Catching errors at load time provides better UX.
+
+**Trade-Off 2: Variable Syntax (${var} vs {{var}} vs %var%)**
+
+| Option | Pros | Cons | Decision |
+|--------|------|------|----------|
+| `${var}` (Shell-style) | Familiar to bash/sh users, works in scripts | Conflicts with actual shell variables | ✅ **CHOSEN** - Most common |
+| `{{var}}` (Jinja/Mustache) | Clear separation from shell vars, template-like | Less familiar to shell users | ❌ Rejected |
+| `%var%` (Windows-style) | Familiar to Windows users | Alien to Unix users, uncommon in CI tools | ❌ Rejected |
+
+**Rationale:** `${var}` is ubiquitous in CI/CD systems (GitHub Actions, GitLab CI). Can be escaped as `$${var}` when needed.
+
+**Trade-Off 3: Contract Override Precedence (Always vs Explicit Flag)**
+
+| Option | Pros | Cons | Decision |
+|--------|------|------|----------|
+| Contract always overrides | Simple mental model, explicit control | No way to temporarily use defaults without editing file | ✅ **CHOSEN** - Contract is source of truth |
+| `--use-default` flag to bypass | Flexible, good for debugging | Confusing semantics, undermines contract authority | ❌ Rejected |
+
+**Rationale:** Repository contract is the authoritative source. To use defaults, delete the override from config.
+
+**Trade-Off 4: Unknown Variable Handling (Error vs Warning vs Ignore)**
+
+| Option | Pros | Cons | Decision |
+|--------|------|------|----------|
+| Validation error (reject) | Prevents typos, enforces correctness | Breaks on new variables until added | ✅ **CHOSEN** - Type safety |
+| Warning (resolve as empty) | Flexible, allows experimentation | Silent bugs, confusing behavior | ❌ Rejected |
+| Pass through literally | Maximum flexibility | `${typo}` appears in command, total confusion | ❌ Rejected |
+
+**Rationale:** Unknown variables are almost always typos. Failing loudly is better than silent failures.
+
+**Trade-Off 5: Custom Command Namespace (Flat vs Hierarchical)**
+
+| Option | Pros | Cons | Decision |
+|--------|------|------|----------|
+| Flat (`lint`, `docs`, `deploy`) | Simple, easy to understand | Potential naming conflicts, no organization | ✅ **CHOSEN** - Sufficient for 90% of cases |
+| Hierarchical (`ci.lint`, `docs.build`) | Organized, avoids conflicts | More complex, overkill for most projects | ❌ Rejected (future enhancement) |
+
+**Rationale:** Most projects have <10 custom commands. Flat namespace is adequate. Can add namespacing in v2 if needed.
+
 ### Scope
 
 This task delivers:
@@ -77,22 +226,216 @@ This task delivers:
 
 ---
 
+## Use Cases
+
+### Use Case 1: Derek the DevOps Engineer — Integrating Legacy CMake Project
+
+**Persona:** Derek is a DevOps engineer at a company migrating legacy C++ projects (CMake-based) to work with the AI coding assistant. The projects have complex build scripts that don't match .NET or Node.js conventions.
+
+**Before (Without Repo Contract Commands):**
+- Derek attempts to use `acode build` on CMake project
+- AI agent runs auto-detection: tries `dotnet build`, fails with "No project file found"
+- Agent tries `npm install`, fails with "No package.json found"
+- Derek must manually run: `cd build && cmake .. && cmake --build . --config Release`
+- Agent cannot assist with builds, tests, or deployments
+- **Time spent per build**: 5 minutes (context switch + manual execution)
+- **Builds per day**: 12 (CI runs, local testing)
+- **Total time wasted**: 60 minutes/day = **$100/day** at $100/hour
+
+**After (With Repo Contract Commands):**
+- Derek adds to `.agent/config.yml`:
+```yaml
+commands:
+  build:
+    command: "cmake --build build --config ${configuration}"
+    working_directory: "${project_root}"
+    timeout: 600
+  test:
+    command: "ctest --test-dir build --output-on-failure"
+    timeout: 300
+  clean:
+    command: "cmake --build build --target clean"
+```
+- Derek runs `acode build --configuration Release`
+- Agent reads contract, resolves `${configuration}` to `Release`
+- Executes: `cmake --build build --config Release`
+- Build completes successfully in 45 seconds
+- Agent can now autonomously build, test, and deploy CMake projects
+- **Time spent per build**: 0 minutes (fully automated)
+- **Total time saved**: 60 minutes/day = **$100/day**
+
+**Improvement Metrics:**
+- **Time reduction**: 5 minutes → 0 minutes = **100% automated**
+- **Annual savings**: $100/day × 220 working days = **$22,000/year** per engineer
+- **Agent capability**: 0% → 100% autonomous builds
+- **Setup time**: 15 minutes (one-time configuration)
+- **Payback period**: 15 minutes ÷ 60 minutes/day = **0.25 days (2 hours)**
+
+---
+
+### Use Case 2: Alexis the AI Agent — Adapting to Monorepo with Bazel
+
+**Persona:** Alexis is an autonomous coding agent tasked with refactoring a large monorepo that uses Bazel (Google's build system). Standard detection fails because the project structure doesn't match .NET or Node.js conventions.
+
+**Before (Without Repo Contract Commands):**
+- Alexis receives task: "Refactor authentication module and run tests"
+- Step 1: Attempts `acode detect` → finds BUILD files, but no .sln or package.json
+- Step 2: Attempts `acode build` → tries `dotnet build`, fails
+- Step 3: Attempts `acode test` → tries `dotnet test`, fails
+- Step 4: Falls back to hardcoded guesses: `make`, `./build.sh`, `gradle` - all fail
+- **Outcome**: Task fails, human intervention required
+- **Success rate**: 0% (cannot complete any tasks in Bazel projects)
+- **Time to failure**: 2 minutes (exhausts all default strategies)
+- **Human cost per failure**: 30 minutes (investigate + manually run commands)
+
+**After (With Repo Contract Commands):**
+- Repository has `.agent/config.yml`:
+```yaml
+commands:
+  build: "bazel build //..."
+  test: "bazel test --test_output=errors //auth/..."
+  run: "bazel run //main:app"
+  clean: "bazel clean"
+```
+- Alexis receives same task: "Refactor authentication module and run tests"
+- Step 1: Queries `ICommandResolver` for 'build' command
+- Step 2: Resolver returns: `UseOverride` with command `"bazel build //..."`
+- Step 3: Executes build successfully via `ICommandExecutor`
+- Step 4: Queries for 'test' command, gets `"bazel test --test_output=errors //auth/..."`
+- Step 5: Runs tests, receives structured results
+- Step 6: Completes refactoring, tests pass, commits changes
+- **Outcome**: Task completes autonomously
+- **Success rate**: 100% (works seamlessly with Bazel)
+- **Time to completion**: 8 minutes (refactoring + testing)
+- **Human cost**: $0 (no intervention needed)
+
+**Improvement Metrics:**
+- **Success rate**: 0% → 100% = **∞% improvement**
+- **Agent autonomy**: Cannot complete → Fully autonomous
+- **Time saved per task**: 30 minutes human time
+- **Tasks enabled**: 40 tasks/month previously requiring human intervention
+- **Monthly savings**: 40 tasks × 30 min × $100/hour ÷ 60 min/hour = **$2,000/month** ($24,000/year)
+- **ROI**: $24,000/year ÷ 15 min setup = **96,000%**
+
+---
+
+### Use Case 3: Priya the Platform Engineer — Enforcing Consistent CI/CD Commands
+
+**Persona:** Priya is a platform engineer managing CI/CD for 20 microservices across 5 teams. Each team uses different build tools (Gradle, Make, npm, poetry). She needs to ensure local development matches CI exactly.
+
+**Before (Without Repo Contract Commands):**
+- Each microservice has different build instructions in README.md:
+  - Service A: `./mvnw clean install`
+  - Service B: `make build && make test`
+  - Service C: `npm run build:prod && npm test`
+- Developers run commands inconsistently:
+  - Developer 1 runs `npm run build` (dev build, not prod)
+  - Developer 2 runs `make` (missing test step)
+  - Developer 3 runs `mvn package` (wrong Maven command)
+- **Result**: "Works on my machine" syndrome
+- CI pipelines fail 30% of the time due to build differences
+- **Time debugging**: 20 failures/month × 45 minutes/failure = 900 minutes/month = **$1,500/month**
+- **Developer frustration**: High (inconsistent tooling)
+
+**After (With Repo Contract Commands):**
+- Priya standardizes all 20 microservices with `.agent/config.yml`:
+```yaml
+# Service A (Java/Maven)
+commands:
+  build: "./mvnw clean install -DskipTests"
+  test: "./mvnw test"
+  package: "./mvnw package"
+
+# Service B (Make)
+commands:
+  build: "make build"
+  test: "make test"
+  package: "make dist"
+
+# Service C (Node.js)
+commands:
+  build: "npm run build:prod"
+  test: "npm test"
+  package: "npm pack"
+```
+- All developers use: `acode build`, `acode test`, `acode package`
+- Agent reads contract, executes correct commands for each service
+- CI/CD uses identical contract commands: no drift between local and CI
+- **Result**: 100% parity between local development and CI
+- CI failures due to build differences drop to 0%
+- **Time debugging**: 0 minutes/month = **$0/month**
+- **Developer experience**: Consistent across all services
+
+**Improvement Metrics:**
+- **CI failure rate**: 30% → 0% = **100% reduction**
+- **Monthly savings**: $1,500/month = **$18,000/year**
+- **Developer onboarding**: 4 hours → 30 minutes (single `acode` command instead of learning 5 tools)
+- **Setup cost**: 15 min/service × 20 services = 5 hours = **$500**
+- **Payback period**: $500 ÷ $1,500/month = **0.33 months (10 days)**
+- **Team velocity**: +15% (less time fighting tools, more time coding)
+
+---
+
 ## Glossary / Terms
 
 | Term | Definition |
 |------|------------|
-| Repo Contract | .agent/config.yml specification |
-| Command Override | Custom command replacing default |
-| Template Variable | Placeholder like ${var} |
-| Fallback | Default when no override exists |
+| **Repo Contract** | The `.agent/config.yml` file that specifies repository-specific configuration, including custom command definitions |
+| **Command Override** | A custom command defined in the contract that replaces the language runner's default command for a specific operation |
+| **Template Variable** | A placeholder in command strings using `${name}` syntax that gets resolved to actual values at execution time |
+| **Fallback** | The default command used by a language runner when no override is defined in the contract |
+| **Command Resolution** | The process of determining which command to execute: contract override, default, or disabled |
+| **Variable Context** | The collection of values (project_root, configuration, etc.) available for resolving template variables |
+| **Resolution Status** | The outcome of command resolution: UseOverride, UseDefault, or Disabled |
+| **Disabled Operation** | An operation explicitly set to `null` in the contract, preventing its execution |
+| **Working Directory** | The directory from which a command is executed, optionally specified in the contract |
+| **Command Validator** | Component that validates command templates at config load time to detect unknown variables and syntax errors |
+| **Variable Resolver** | Component that substitutes template variables with their actual values from the variable context |
+| **Command Executor** | The Task 018 component responsible for actually running the resolved command string |
+| **Escaped Variable** | A literal `${name}` string in output, written as `$${name}` in the template to prevent resolution |
+| **Custom Command** | A user-defined command beyond the standard set (build/test/run/restore), such as `lint` or `docs` |
+| **Canonical Path** | An absolute, normalized file path with no `..` or `.` segments, used to prevent path traversal attacks |
+| **Hot Reload** | The ability to detect and apply changes to the contract file without restarting the application |
+| **Deterministic Resolution** | Property that guarantees the same inputs always produce the same resolved command output |
+| **Variable Injection** | Security threat where malicious input could introduce unintended variables into command execution |
+| **Command Namespace** | The flat structure of command names (build, test, lint) without hierarchical organization |
+| **Reserved Command** | Standard operations (build, test, run, restore, clean) with special semantics that cannot be overridden for custom purposes |
 
 ---
 
 ## Out of Scope
 
-- **Contract schema definition** - See Task 002
-- **Command execution mechanics** - See Task 018
-- **Environment variables** - See Task 018.b
+The following items are explicitly **NOT included** in this task:
+
+1. **Contract YAML Schema Definition** - The structure of `.agent/config.yml` is defined in Task 002 (Config Contract). This task only consumes the parsed contract.
+
+2. **Command Execution Mechanics** - Actually running processes, capturing output, handling timeouts is Task 018 (Structured Command Runner). This task only resolves which command to run.
+
+3. **Environment Variable Management** - Setting, merging, and isolating environment variables is Task 018.b. This task only passes environment overrides to the executor.
+
+4. **Shell Quoting and Escaping** - Properly quoting command arguments for shell execution is handled by CommandExecutor in Task 018, not by the resolver.
+
+5. **Process Sandboxing** - Restricting what commands can do (filesystem access, network access) is Task 020 (Docker Sandbox Mode). Contract commands execute with same permissions as defaults.
+
+6. **Command Output Parsing** - Parsing build errors, test results, or other structured output is handled by language runners (Task 019, 019b), not by the resolver.
+
+7. **Multi-Stage Commands** - Chaining multiple commands (e.g., `build && test && deploy`) is not directly supported. Users should create a script and reference it, or use separate command definitions.
+
+8. **Conditional Command Execution** - Logic like "run command A if on Windows, command B if on Linux" is NOT supported. Platform-specific logic should be in shell scripts or build tool configs.
+
+9. **Command Aliasing** - Defining one command as an alias of another (e.g., `ci: ${build}`) is NOT supported. Each command must be independently defined.
+
+10. **Dynamic Command Generation** - Commands cannot be generated or modified at runtime based on repository state. They are static definitions from the config file.
+
+11. **Command History or Caching** - Tracking which commands were run previously or caching command results is NOT included. Each invocation resolves and executes fresh.
+
+12. **User Prompts in Commands** - Commands requiring user input (e.g., "Do you want to continue? [y/n]") are NOT supported. All commands must be non-interactive.
+
+13. **Command Performance Profiling** - Detailed timing breakdowns, resource usage tracking, or performance analysis of commands is out of scope. Only total execution time is tracked.
+
+14. **Legacy .agent.yml Support** - Only `.agent/config.yml` is supported. Alternative filenames or legacy formats are NOT included.
+
+15. **Remote Contract Fetching** - Loading contracts from URLs, Git repositories, or remote servers is NOT supported. Contract must exist locally in repository.
 
 ---
 
