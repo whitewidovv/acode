@@ -123,10 +123,10 @@ Work through this list sequentially. Only mark complete when all quality require
 - ⏳[VS1] task-018a-stdout-stderr-capture-exit-code-timeout -- **CLAIMED** - Suite 018 
 - ⏳[VS1] task-018b-working-dir-env-enforcement -- **CLAIMED** - Suite 018 
 - ⏳[VS1] task-018c-artifact-logging-truncation -- **CLAIMED** - Suite 018 
-- [ ] task-019-language-runners-net-js -- Read instructions at top of this file and follow them, including reading the mentioned files, before starting expansion 
-- [ ] task-019a-detect-solution-package-layouts -- Read instructions at top of this file and follow them, including reading the mentioned files, before starting expansion 
-- [ ] task-019b-implement-runtests-wrapper -- Read instructions at top of this file and follow them, including reading the mentioned files, before starting expansion 
-- [ ] task-019c-integrate-repo-contract-commands -- Read instructions at top of this file and follow them, including reading the mentioned files, before starting expansion 
+- ⏳[VS1] task-019-language-runners-net-js -- **IN PROGRESS (2,707 lines, 13/16 sections complete)** - Completed: Header, Description (372L ROI+diagram+trade-offs), Use Cases (3 scenarios), Glossary (20 terms), Out of Scope (15 items), Assumptions (20 items), FRs (110), NFRs (48), User Manual (321L), Security (5 threats with 680L complete C# code), AC (80), User Verification (152L, 10 scenarios), Implementation Prompt (410L). **Remaining:** Best Practices verification, Troubleshooting section addition, Testing complete code expansion. Suite 019 parent task
+- ⏳[VS1] task-019a-detect-solution-package-layouts -- **CLAIMED** - Suite 019 subtask
+- ⏳[VS1] task-019b-implement-runtests-wrapper -- **CLAIMED** - Suite 019 subtask
+- ⏳[VS1] task-019c-integrate-repo-contract-commands -- **CLAIMED** - Suite 019 subtask 
 - [ ] task-020-docker-sandbox-mode -- Read instructions at top of this file and follow them, including reading the mentioned files, before starting expansion 
 - [ ] task-020a-per-task-container-strategy -- Read instructions at top of this file and follow them, including reading the mentioned files, before starting expansion 
 - [ ] task-020b-cache-volumes-nuget-npm -- Read instructions at top of this file and follow them, including reading the mentioned files, before starting expansion 
