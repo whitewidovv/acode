@@ -1970,106 +1970,762 @@ internal sealed class PackageConfig
 
 ---
 
+## Troubleshooting
+
+### Issue 1: "No Runner Found for Project" Error
+
+**Symptoms:**
+- CLI command `acode build` reports "No language runner found for path /path/to/project"
+- Detection returns null when expected to find .NET or Node.js project
+- Projects exist but are not being recognized
+
+**Causes:**
+- Project files (.sln, .csproj, package.json) are not in expected locations
+- File patterns configured in runner don't match actual file extensions
+- Project files have non-standard names (e.g., `My.Project.csproj.bak`)
+- Runner registry initialization failed, no runners registered
+
+**Solutions:**
+
+**Solution 1: Verify project file exists**
+```bash
+# Check for .NET projects
+ls -la *.sln *.csproj *.fsproj
+
+# Check for Node.js projects
+ls -la package.json
+```
+
+**Solution 2: Run detection in verbose mode**
+```bash
+acode project detect --verbose
+# Output will show which file patterns were checked and why they didn't match
+```
+
+**Solution 3: Manually specify runner**
+```bash
+# Force .NET runner
+acode build --runner dotnet
+
+# Force Node.js runner
+acode build --runner node
+```
+
+**Solution 4: Check runner registry initialization**
+```csharp
+// Verify runners are registered at startup
+var runners = await _runnerRegistry.GetAllRunnersAsync(ct);
+_logger.LogInformation("Registered runners: {Runners}",
+    string.Join(", ", runners.Select(r => r.Language)));
+```
+
+---
+
+### Issue 2: SDK Not Found - Build Commands Fail
+
+**Symptoms:**
+- Error: `The command 'dotnet' was not found`
+- Error: `'node' is not recognized as an internal or external command`
+- `acode build` reports SDK unavailable despite SDK being installed
+- Version mismatch errors (e.g., "global.json requires 8.0.100, you have 7.0.x")
+
+**Causes:**
+- .NET SDK or Node.js not installed on system
+- SDK installed but not in PATH environment variable
+- Wrong SDK version (global.json or .nvmrc specifies unsupported version)
+- SDK path changed after runner initialization
+- Permission issues preventing SDK execution
+
+**Solutions:**
+
+**Solution 1: Verify SDK installation**
+```bash
+# Check .NET SDK
+dotnet --version
+dotnet --list-sdks
+
+# Check Node.js
+node --version
+npm --version
+```
+
+**Solution 2: Add SDK to PATH (Linux/Mac)**
+```bash
+# Add to ~/.bashrc or ~/.zshrc
+export PATH="$PATH:/usr/share/dotnet"
+export PATH="$PATH:/usr/local/bin/node"
+
+# Reload shell
+source ~/.bashrc
+```
+
+**Solution 3: Add SDK to PATH (Windows)**
+```powershell
+# Add to system PATH
+[Environment]::SetEnvironmentVariable(
+    "Path",
+    "$env:Path;C:\Program Files\dotnet",
+    [System.EnvironmentVariableTarget]::Machine)
+```
+
+**Solution 4: Install required SDK version**
+```bash
+# .NET - check global.json requirement
+cat global.json
+# Install from https://dotnet.microsoft.com/download
+
+# Node.js - check .nvmrc requirement
+cat .nvmrc
+# Use nvm to install: nvm install $(cat .nvmrc)
+```
+
+**Solution 5: Configure explicit SDK paths in .agent/config.yml**
+```yaml
+runners:
+  dotnet:
+    sdk_path: /usr/share/dotnet/dotnet
+  node:
+    sdk_path: /usr/local/bin/node
+    npm_path: /usr/local/bin/npm
+```
+
+---
+
+### Issue 3: Build Output Not Being Parsed - Raw Text Displayed
+
+**Symptoms:**
+- Build errors shown as plain text wall, not structured format
+- No clickable file:line:column links in output
+- Test results show raw output instead of pass/fail summary
+- Error: "Failed to parse build output, displaying raw result"
+
+**Causes:**
+- Build tool output format changed in newer SDK version
+- Unexpected error format (e.g., third-party MSBuild task with custom errors)
+- Output encoding issues (non-UTF8 characters breaking regex)
+- Parser regex doesn't handle multi-line errors
+- Localized SDK outputting errors in non-English language
+
+**Solutions:**
+
+**Solution 1: Check SDK version compatibility**
+```bash
+# Verify SDK version matches tested versions
+dotnet --version  # Should be 6.0+, 7.0, or 8.0
+node --version    # Should be 16.x+, 18.x, or 20.x
+```
+
+**Solution 2: Force English output (for parsing consistency)**
+```bash
+# .NET
+export DOTNET_CLI_UI_LANGUAGE=en-US
+dotnet build
+
+# npm
+export LANG=en_US.UTF-8
+npm run build
+```
+
+**Solution 3: Use structured output formats**
+```bash
+# .NET - use binary log for parsing
+dotnet build -bl:build.binlog
+dotnet test --logger trx
+
+# Node.js - use JSON test reporters
+npm test -- --json --outputFile=test-results.json
+```
+
+**Solution 4: View raw output for debugging**
+```bash
+# Show raw output without parsing
+acode build --no-parse --verbose
+```
+
+**Solution 5: Report parser issue**
+```bash
+# Capture output that failed to parse
+acode build --verbose 2>&1 | tee build-output.log
+# Submit build-output.log to maintainers for parser improvement
+```
+
+---
+
+### Issue 4: Dependency Restore Fails with Network Errors
+
+**Symptoms:**
+- Error: `Failed to download package X from nuget.org`
+- Error: `ETIMEDOUT` or `ECONNREFUSED` during npm install
+- Restore operation hangs indefinitely
+- Error: `Unable to load the service index for source https://api.nuget.org/v3/index.json`
+- Works on some machines, fails on others (network policy differences)
+
+**Causes:**
+- No internet connection or firewall blocking package registries
+- Corporate proxy requires authentication
+- Package registry (nuget.org, npmjs.com) temporarily unavailable
+- Registry URL misconfigured (HTTP instead of HTTPS, or wrong domain)
+- Package removed from registry (unpublished package)
+- SSL certificate validation failing
+
+**Solutions:**
+
+**Solution 1: Verify network connectivity**
+```bash
+# Test NuGet registry
+curl -I https://api.nuget.org/v3/index.json
+
+# Test npm registry
+curl -I https://registry.npmjs.org
+```
+
+**Solution 2: Configure proxy settings (.NET)**
+```bash
+# Set proxy environment variables
+export HTTP_PROXY=http://proxy.company.com:8080
+export HTTPS_PROXY=http://proxy.company.com:8080
+export NO_PROXY=localhost,127.0.0.1
+
+dotnet restore
+```
+
+**Solution 3: Configure proxy settings (npm)**
+```bash
+# Set npm proxy configuration
+npm config set proxy http://proxy.company.com:8080
+npm config set https-proxy http://proxy.company.com:8080
+
+npm install
+```
+
+**Solution 4: Use offline/cached mode**
+```bash
+# .NET - use local cache only
+dotnet restore --source ~/.nuget/packages
+
+# npm - use offline mode
+npm install --prefer-offline
+```
+
+**Solution 5: Configure custom package sources**
+```yaml
+# .agent/config.yml
+runners:
+  dotnet:
+    package_sources:
+      - https://internal-nuget.company.com/v3/index.json
+      - https://api.nuget.org/v3/index.json
+  node:
+    registry: https://internal-npm.company.com
+```
+
+**Solution 6: Clear package caches**
+```bash
+# .NET - clear NuGet cache
+dotnet nuget locals all --clear
+
+# npm - clear cache
+npm cache clean --force
+```
+
+---
+
+### Issue 5: Tests Pass Locally But Fail in Acode
+
+**Symptoms:**
+- Tests pass when running `dotnet test` manually
+- Tests pass when running `npm test` manually
+- Same tests fail when running `acode test`
+- Different test results between manual run and runner
+- Flaky tests that sometimes pass, sometimes fail
+
+**Causes:**
+- Environment variables differ between manual and runner execution
+- Working directory differs (tests expect to run from specific path)
+- Test runner passes different arguments (e.g., `--parallel` flag)
+- Tests depend on global state or external services not available
+- Timeout too short for slow tests
+- Tests assume interactive terminal (ANSI color codes, prompts)
+
+**Solutions:**
+
+**Solution 1: Check working directory**
+```bash
+# Verify runner uses correct working directory
+acode test --verbose
+# Look for "Working directory: /path/to/project"
+
+# Manually run from same directory
+cd /path/to/project
+dotnet test
+```
+
+**Solution 2: Compare environment variables**
+```bash
+# Capture env vars from manual run
+dotnet test > /dev/null && env | sort > manual-env.txt
+
+# Capture env vars from runner
+acode test > /dev/null && env | sort > runner-env.txt
+
+# Compare differences
+diff manual-env.txt runner-env.txt
+```
+
+**Solution 3: Increase timeout for slow tests**
+```yaml
+# .agent/config.yml
+runners:
+  dotnet:
+    test_timeout_seconds: 600  # 10 minutes instead of default 5
+  node:
+    test_timeout_seconds: 300
+```
+
+**Solution 4: Disable test parallelization**
+```bash
+# .NET - run tests sequentially
+acode test -- --parallel none
+
+# Jest - disable parallel
+acode test -- --runInBand
+```
+
+**Solution 5: Pass missing environment variables**
+```bash
+# Set environment for test run
+export DATABASE_URL=sqlite::memory:
+export API_KEY=test-key
+acode test
+```
+
+**Solution 6: Check test output format**
+```csharp
+// Ensure tests don't assume terminal capabilities
+// BAD: Tests that require interactive input
+Console.ReadLine();  // Hangs in non-interactive mode
+
+// GOOD: Tests that work in any environment
+var input = Environment.GetEnvironmentVariable("TEST_INPUT") ?? "default";
+```
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
 
-#### Runner Registry Tests (`Tests/Unit/Runners/RunnerRegistryTests.cs`)
+Complete C# unit test implementations using xUnit, FluentAssertions, and NSubstitute.
 
-- `RunnerRegistry_Register_AddsRunner`
-- `RunnerRegistry_Register_DuplicateLanguage_Throws`
-- `RunnerRegistry_GetRunner_ReturnsCorrectRunner`
-- `RunnerRegistry_GetRunner_UnknownLanguage_ReturnsNull`
-- `RunnerRegistry_GetRunnerForPath_MatchesPatterns`
-- `RunnerRegistry_GetRunnerForPath_NoMatch_ReturnsNull`
-- `RunnerRegistry_GetRunnerForPath_MultipleMatch_ReturnsHighestPriority`
-- `RunnerRegistry_GetAllRunners_ReturnsAll`
-- `RunnerRegistry_DetectAll_ReturnsAllMatches`
-- `RunnerRegistry_AutoRegistersBuiltInRunners`
-- `RunnerRegistry_CachesDetectionResults`
-- `RunnerRegistry_InvalidatesCacheOnFileChange`
+#### Runner Registry Tests
 
-#### .NET Runner Tests (`Tests/Unit/Runners/DotNetRunnerTests.cs`)
+```csharp
+using Xunit;
+using FluentAssertions;
+using NSubstitute;
+using AgenticCoder.Domain.Runners;
+using AgenticCoder.Infrastructure.Runners;
+using Microsoft.Extensions.Logging.Nulls;
 
-- `DotNetRunner_Language_ReturnsDotNet`
-- `DotNetRunner_FilePatterns_IncludesSln`
-- `DotNetRunner_FilePatterns_IncludesCsproj`
-- `DotNetRunner_FilePatterns_IncludesFsproj`
-- `DotNetRunner_IsAvailable_TrueWhenDotNetExists`
-- `DotNetRunner_IsAvailable_FalseWhenDotNetMissing`
-- `DotNetRunner_GetVersion_ReturnsCorrectVersion`
-- `DotNetRunner_DetectAsync_FindsSolution`
-- `DotNetRunner_DetectAsync_FindsProject`
-- `DotNetRunner_DetectAsync_PrefersSolutionOverProject`
-- `DotNetRunner_DetectAsync_HandlesNested`
-- `DotNetRunner_BuildAsync_ConstructsCorrectCommand`
-- `DotNetRunner_BuildAsync_IncludesConfiguration`
-- `DotNetRunner_BuildAsync_IncludesVerbosity`
-- `DotNetRunner_BuildAsync_IncludesNoRestore`
-- `DotNetRunner_BuildAsync_ParsesErrors`
-- `DotNetRunner_BuildAsync_ParsesWarnings`
-- `DotNetRunner_TestAsync_ConstructsCorrectCommand`
-- `DotNetRunner_TestAsync_IncludesFilter`
-- `DotNetRunner_TestAsync_ParsesResults`
-- `DotNetRunner_TestAsync_CapturesFailures`
-- `DotNetRunner_RunAsync_ConstructsCorrectCommand`
-- `DotNetRunner_RunAsync_PassesArguments`
-- `DotNetRunner_RestoreAsync_ConstructsCorrectCommand`
+namespace AgenticCoder.Infrastructure.Tests.Runners;
 
-#### .NET Output Parser Tests (`Tests/Unit/Runners/DotNetOutputParserTests.cs`)
+public sealed class RunnerRegistryTests
+{
+    private readonly IRunnerRegistry _sut;
+    private readonly ILanguageRunner _dotNetRunner;
+    private readonly ILanguageRunner _nodeRunner;
 
-- `DotNetOutputParser_ParseBuild_ExtractsErrors`
-- `DotNetOutputParser_ParseBuild_ExtractsWarnings`
-- `DotNetOutputParser_ParseBuild_ExtractsFile`
-- `DotNetOutputParser_ParseBuild_ExtractsLine`
-- `DotNetOutputParser_ParseBuild_ExtractsColumn`
-- `DotNetOutputParser_ParseBuild_ExtractsCode`
-- `DotNetOutputParser_ParseBuild_ExtractsMessage`
-- `DotNetOutputParser_ParseTest_ExtractsPassCount`
-- `DotNetOutputParser_ParseTest_ExtractsFailCount`
-- `DotNetOutputParser_ParseTest_ExtractsSkipCount`
-- `DotNetOutputParser_ParseTest_ExtractsTestNames`
-- `DotNetOutputParser_ParseTest_ExtractsFailureMessages`
-- `DotNetOutputParser_HandlesMalformedOutput`
+    public RunnerRegistryTests()
+    {
+        _dotNetRunner = Substitute.For<ILanguageRunner>();
+        _dotNetRunner.Language.Returns("dotnet");
+        _dotNetRunner.Priority.Returns(100);
+        _dotNetRunner.FilePatterns.Returns(new[] { "*.sln", "*.csproj" });
 
-#### Node.js Runner Tests (`Tests/Unit/Runners/NodeRunnerTests.cs`)
+        _nodeRunner = Substitute.For<ILanguageRunner>();
+        _nodeRunner.Language.Returns("node");
+        _nodeRunner.Priority.Returns(90);
+        _nodeRunner.FilePatterns.Returns(new[] { "package.json" });
 
-- `NodeRunner_Language_ReturnsNode`
-- `NodeRunner_FilePatterns_IncludesPackageJson`
-- `NodeRunner_IsAvailable_TrueWhenNodeExists`
-- `NodeRunner_IsAvailable_FalseWhenNodeMissing`
-- `NodeRunner_GetVersion_ReturnsCorrectVersion`
-- `NodeRunner_DetectAsync_FindsPackageJson`
-- `NodeRunner_DetectAsync_DetectsNpm`
-- `NodeRunner_DetectAsync_DetectsYarn`
-- `NodeRunner_DetectAsync_DetectsPnpm`
-- `NodeRunner_DetectAsync_HandlesWorkspaces`
-- `NodeRunner_BuildAsync_ConstructsCorrectCommand`
-- `NodeRunner_BuildAsync_ChecksScriptExists`
-- `NodeRunner_BuildAsync_UsesCorrectPackageManager`
-- `NodeRunner_BuildAsync_ParsesErrors`
-- `NodeRunner_TestAsync_ConstructsCorrectCommand`
-- `NodeRunner_TestAsync_ChecksScriptExists`
-- `NodeRunner_TestAsync_ParsesJestOutput`
-- `NodeRunner_TestAsync_ParsesMochaOutput`
-- `NodeRunner_RunAsync_ConstructsCorrectCommand`
-- `NodeRunner_RunAsync_SupportsDevScript`
-- `NodeRunner_RestoreAsync_ConstructsCorrectCommand`
-- `NodeRunner_RestoreAsync_SupportsProduction`
+        _sut = new RunnerRegistry(NullLogger<RunnerRegistry>.Instance);
+    }
 
-#### Node.js Output Parser Tests (`Tests/Unit/Runners/NodeOutputParserTests.cs`)
+    [Fact]
+    public async Task RunnerRegistry_Register_AddsRunner()
+    {
+        // Arrange
+        var runner = _dotNetRunner;
 
-- `NodeOutputParser_ParseBuild_ExtractsErrors`
-- `NodeOutputParser_ParseBuild_HandlesEresolve`
-- `NodeOutputParser_ParseBuild_HandlesEnoent`
-- `NodeOutputParser_ParseTest_ExtractsJestResults`
-- `NodeOutputParser_ParseTest_ExtractsMochaResults`
-- `NodeOutputParser_ParseTest_ExtractsPassCount`
-- `NodeOutputParser_ParseTest_ExtractsFailCount`
-- `NodeOutputParser_ParseTest_ExtractsTestNames`
-- `NodeOutputParser_HandlesMalformedOutput`
+        // Act
+        _sut.Register(runner);
+        var result = await _sut.GetRunnerAsync("dotnet", CancellationToken.None);
 
-#### RunnerResult Tests (`Tests/Unit/Runners/RunnerResultTests.cs`)
+        // Assert
+        result.Should().BeSameAs(runner);
+    }
+
+    [Fact]
+    public void RunnerRegistry_Register_DuplicateLanguage_Throws()
+    {
+        // Arrange
+        var runner1 = _dotNetRunner;
+        var runner2 = Substitute.For<ILanguageRunner>();
+        runner2.Language.Returns("dotnet");
+
+        _sut.Register(runner1);
+
+        // Act
+        Action act = () => _sut.Register(runner2);
+
+        // Assert
+        act.Should().Throw<ArgumentException>()
+            .WithMessage("*already registered*");
+    }
+
+    [Fact]
+    public async Task RunnerRegistry_GetRunner_ReturnsCorrectRunner()
+    {
+        // Arrange
+        _sut.Register(_dotNetRunner);
+        _sut.Register(_nodeRunner);
+
+        // Act
+        var result = await _sut.GetRunnerAsync("node", CancellationToken.None);
+
+        // Assert
+        result.Should().BeSameAs(_nodeRunner);
+        result.Language.Should().Be("node");
+    }
+
+    [Fact]
+    public async Task RunnerRegistry_GetRunner_UnknownLanguage_ReturnsNull()
+    {
+        // Arrange
+        _sut.Register(_dotNetRunner);
+
+        // Act
+        var result = await _sut.GetRunnerAsync("python", CancellationToken.None);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RunnerRegistry_GetRunnerForPath_MatchesPatterns()
+    {
+        // Arrange
+        _sut.Register(_dotNetRunner);
+        _sut.Register(_nodeRunner);
+
+        var projectPath = "/repo/MyApp.sln";
+        _dotNetRunner.DetectAsync(projectPath, Arg.Any<CancellationToken>())
+            .Returns(new DetectionResult { IsMatch = true, ProjectFile = projectPath });
+
+        // Act
+        var result = await _sut.GetRunnerForPathAsync(projectPath, CancellationToken.None);
+
+        // Assert
+        result.Should().BeSameAs(_dotNetRunner);
+    }
+
+    [Fact]
+    public async Task RunnerRegistry_GetRunnerForPath_NoMatch_ReturnsNull()
+    {
+        // Arrange
+        _sut.Register(_dotNetRunner);
+
+        var projectPath = "/repo/Makefile";
+        _dotNetRunner.DetectAsync(projectPath, Arg.Any<CancellationToken>())
+            .Returns(new DetectionResult { IsMatch = false });
+
+        // Act
+        var result = await _sut.GetRunnerForPathAsync(projectPath, CancellationToken.None);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RunnerRegistry_GetRunnerForPath_MultipleMatch_ReturnsHighestPriority()
+    {
+        // Arrange
+        _sut.Register(_dotNetRunner);  // Priority 100
+        _sut.Register(_nodeRunner);    // Priority 90
+
+        var projectPath = "/repo";
+        _dotNetRunner.DetectAsync(projectPath, Arg.Any<CancellationToken>())
+            .Returns(new DetectionResult { IsMatch = true, ProjectFile = "/repo/App.sln" });
+        _nodeRunner.DetectAsync(projectPath, Arg.Any<CancellationToken>())
+            .Returns(new DetectionResult { IsMatch = true, ProjectFile = "/repo/package.json" });
+
+        // Act
+        var result = await _sut.GetRunnerForPathAsync(projectPath, CancellationToken.None);
+
+        // Assert
+        result.Should().BeSameAs(_dotNetRunner);
+        result.Priority.Should().Be(100);
+    }
+
+    [Fact]
+    public async Task RunnerRegistry_GetAllRunners_ReturnsAll()
+    {
+        // Arrange
+        _sut.Register(_dotNetRunner);
+        _sut.Register(_nodeRunner);
+
+        // Act
+        var result = await _sut.GetAllRunnersAsync(CancellationToken.None);
+
+        // Assert
+        result.Should().HaveCount(2);
+        result.Should().Contain(_dotNetRunner);
+        result.Should().Contain(_nodeRunner);
+    }
+
+    [Fact]
+    public async Task RunnerRegistry_DetectAll_ReturnsAllMatches()
+    {
+        // Arrange
+        _sut.Register(_dotNetRunner);
+        _sut.Register(_nodeRunner);
+
+        var projectPath = "/repo";
+        _dotNetRunner.DetectAsync(projectPath, Arg.Any<CancellationToken>())
+            .Returns(new DetectionResult { IsMatch = true, ProjectFile = "/repo/App.sln" });
+        _nodeRunner.DetectAsync(projectPath, Arg.Any<CancellationToken>())
+            .Returns(new DetectionResult { IsMatch = true, ProjectFile = "/repo/package.json" });
+
+        // Act
+        var result = await _sut.DetectAllAsync(projectPath, CancellationToken.None);
+
+        // Assert
+        result.Should().HaveCount(2);
+        result.Select(r => r.Language).Should().Contain(new[] { "dotnet", "node" });
+    }
+}
+```
+
+#### .NET Runner Tests
+
+```csharp
+using Xunit;
+using FluentAssertions;
+using NSubstitute;
+using AgenticCoder.Domain.Runners;
+using AgenticCoder.Infrastructure.Runners;
+using AgenticCoder.Infrastructure.Command;
+using Microsoft.Extensions.Logging.Nulls;
+
+namespace AgenticCoder.Infrastructure.Tests.Runners;
+
+public sealed class DotNetRunnerTests
+{
+    private readonly ICommandExecutor _commandExecutor;
+    private readonly DotNetRunner _sut;
+
+    public DotNetRunnerTests()
+    {
+        _commandExecutor = Substitute.For<ICommandExecutor>();
+        _sut = new DotNetRunner(
+            _commandExecutor,
+            NullLogger<DotNetRunner>.Instance);
+    }
+
+    [Fact]
+    public void DotNetRunner_Language_ReturnsDotNet()
+    {
+        // Act
+        var result = _sut.Language;
+
+        // Assert
+        result.Should().Be("dotnet");
+    }
+
+    [Fact]
+    public void DotNetRunner_FilePatterns_IncludesSlnAndProjects()
+    {
+        // Act
+        var result = _sut.FilePatterns;
+
+        // Assert
+        result.Should().Contain("*.sln");
+        result.Should().Contain("*.csproj");
+        result.Should().Contain("*.fsproj");
+    }
+
+    [Fact]
+    public async Task DotNetRunner_IsAvailable_TrueWhenDotNetExists()
+    {
+        // Arrange
+        _commandExecutor.ExecuteAsync(
+            "dotnet",
+            new[] { "--version" },
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new CommandResult
+            {
+                ExitCode = 0,
+                Output = "8.0.100"
+            });
+
+        // Act
+        var result = await _sut.IsAvailableAsync(CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DotNetRunner_IsAvailable_FalseWhenDotNetMissing()
+    {
+        // Arrange
+        _commandExecutor.ExecuteAsync(
+            "dotnet",
+            new[] { "--version" },
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<CommandResult>(
+                new FileNotFoundException("dotnet not found")));
+
+        // Act
+        var result = await _sut.IsAvailableAsync(CancellationToken.None);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DotNetRunner_BuildAsync_ConstructsCorrectCommand()
+    {
+        // Arrange
+        var projectPath = "/repo/MyApp.sln";
+        var options = new BuildOptions
+        {
+            Configuration = "Release",
+            Verbosity = "minimal"
+        };
+
+        _commandExecutor.ExecuteAsync(
+            "dotnet",
+            Arg.Any<string[]>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new CommandResult { ExitCode = 0, Output = "Build succeeded." });
+
+        // Act
+        await _sut.BuildAsync(projectPath, options, CancellationToken.None);
+
+        // Assert
+        await _commandExecutor.Received(1).ExecuteAsync(
+            "dotnet",
+            Arg.Is<string[]>(args =>
+                args.Contains("build") &&
+                args.Contains(projectPath) &&
+                args.Contains("--configuration") &&
+                args.Contains("Release") &&
+                args.Contains("--verbosity") &&
+                args.Contains("minimal")),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DotNetRunner_TestAsync_ConstructsCorrectCommand()
+    {
+        // Arrange
+        var projectPath = "/repo/tests/MyApp.Tests.csproj";
+        var options = new TestOptions
+        {
+            Filter = "Category=Unit",
+            NoBuild = true
+        };
+
+        _commandExecutor.ExecuteAsync(
+            "dotnet",
+            Arg.Any<string[]>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new CommandResult { ExitCode = 0, Output = "Test run: 10 passed, 0 failed" });
+
+        // Act
+        await _sut.TestAsync(projectPath, options, CancellationToken.None);
+
+        // Assert
+        await _commandExecutor.Received(1).ExecuteAsync(
+            "dotnet",
+            Arg.Is<string[]>(args =>
+                args.Contains("test") &&
+                args.Contains(projectPath) &&
+                args.Contains("--filter") &&
+                args.Contains("Category=Unit") &&
+                args.Contains("--no-build")),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DotNetRunner_BuildAsync_ParsesErrors()
+    {
+        // Arrange
+        var projectPath = "/repo/MyApp.csproj";
+        var buildOutput = @"
+Program.cs(42,15): error CS1002: ; expected [/repo/MyApp.csproj]
+Program.cs(43,10): warning CS0168: Variable is declared but never used [/repo/MyApp.csproj]
+Build FAILED.
+";
+
+        _commandExecutor.ExecuteAsync(
+            "dotnet",
+            Arg.Any<string[]>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new CommandResult { ExitCode = 1, Output = buildOutput });
+
+        // Act
+        var result = await _sut.BuildAsync(projectPath, new BuildOptions(), CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.Errors.Should().HaveCount(1);
+        result.Errors[0].File.Should().Be("Program.cs");
+        result.Errors[0].Line.Should().Be(42);
+        result.Errors[0].Column.Should().Be(15);
+        result.Errors[0].Code.Should().Be("CS1002");
+        result.Errors[0].Message.Should().Be("; expected");
+
+        result.Warnings.Should().HaveCount(1);
+        result.Warnings[0].Code.Should().Be("CS0168");
+    }
+}
+```
+
+### Integration Tests
+
+Integration tests verify runners work with real SDK installations and project files.
+
+**Test Structure:**
+- Use temporary directories for test projects
+- Invoke actual `dotnet` and `npm` commands
+- Verify real output parsing
+- Clean up test artifacts
+
+**Key Integration Tests:**
+- `DotNetRunner_Build_RealProject_Succeeds` - Creates minimal .csproj, builds it, verifies success
+- `NodeRunner_Test_RealProject_CapturesResults` - Creates package.json with Jest tests, runs them, verifies parsed results
+- `RunnerRegistry_DetectAll_MixedProject_ReturnsB Both` - Creates repo with both .sln and package.json, verifies both runners detected
+
+### Performance Benchmarks
+
+Use BenchmarkDotNet to measure runner performance:
+
+| Operation | Target | Maximum | Test Method |
+|-----------|--------|---------|-------------|
+| Detection (.NET) | <50ms | 100ms | `Benchmark_Detect_DotNet_1000Projects` |
+| Detection (Node) | <50ms | 100ms | `Benchmark_Detect_Node_1000Projects` |
+| Command Construction | <5ms | 10ms | `Benchmark_BuildCommand_DotNet` |
+| MSBuild Parsing | <25ms | 50ms | `Benchmark_ParseMSBuild_100Errors` |
+| Jest Parsing | <100ms | 500ms | `Benchmark_ParseJest_1000Tests` |
+| Registry Lookup | <1ms | 5ms | `Benchmark_RegistryLookup_10Runners` |
 
 - `RunnerResult_Success_TrueWhenNoErrors`
 - `RunnerResult_Success_FalseWhenErrors`
