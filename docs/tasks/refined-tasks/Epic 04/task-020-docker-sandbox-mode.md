@@ -111,6 +111,360 @@ Docker sandboxing is the primary security boundary for untrusted code execution:
 
 8. **Network Isolation:** Default to no network. When enabled, restrict to necessary egress only.
 
+### ROI Calculation
+
+**Aggregate Value Across Three Representative Use Cases:**
+
+| Use Case | Annual Cost (Before) | Annual Cost (After) | Annual Savings | Payback Period |
+|----------|---------------------|---------------------|----------------|----------------|
+| Security Testing (Teresa) | $33,280 | $2,600 | $30,680 | 1.5 days |
+| Build Reproducibility (Marcus) | $120,000 | $10,000 | $110,000 | 2 days |
+| Air-Gapped Compliance (Dr. Priya) | $126,400 | $6,400 | $120,000 | 1 day |
+| **Total** | **$279,680** | **$19,000** | **$260,680** | **1.6 days avg** |
+
+**ROI Metrics:**
+- **Total Annual Savings:** $260,680 (93% cost reduction)
+- **Implementation Cost:** $150/hour × 80 hours (2 weeks) = $12,000
+- **ROI:** 2,172% first year
+- **Payback Period:** 1.6 days average (0.6 weeks)
+- **Break-even:** After 17 days of operation
+
+**Qualitative Benefits (Not Monetized):**
+- **Zero security incidents** from code execution (prev. 24/year across use cases)
+- **100% environment reproducibility** between CI and local
+- **Perfect compliance** for air-gapped requirements (provable at kernel level)
+- **90x faster** security testing workflows (45min → 30sec per test)
+- **96% faster** developer onboarding (2 days → 30 minutes)
+
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          Docker Sandbox Architecture                             │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  Host System                                                                     │
+│                                                                                  │
+│  ┌─────────────────┐                                                            │
+│  │  Acode CLI      │                                                            │
+│  │  Command Entry  │                                                            │
+│  └────────┬────────┘                                                            │
+│           │                                                                      │
+│           │ 1. Execute Command                                                  │
+│           ▼                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐           │
+│  │  Command Executor (Task 018)                                     │           │
+│  │  ┌─────────────────────────────────────────────────────────┐   │           │
+│  │  │  If Sandbox Enabled:                                     │   │           │
+│  │  │    Delegate to ISandbox.RunAsync()                       │   │           │
+│  │  │  Else:                                                   │   │           │
+│  │  │    Execute directly on host                              │   │           │
+│  │  └─────────────────────────────────────────────────────────┘   │           │
+│  └──────────────────────────┬──────────────────────────────────────┘           │
+│                             │                                                   │
+│                             │ 2. RunAsync(command, policy)                      │
+│                             ▼                                                   │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │  DockerSandbox (ISandbox Implementation)                                 │  │
+│  │                                                                           │  │
+│  │  ┌──────────────┐  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐ │  │
+│  │  │  Mount       │  │  Resource   │  │  Network     │  │  Image      │ │  │
+│  │  │  Manager     │  │  Limiter    │  │  Policy      │  │  Manager    │ │  │
+│  │  └──────┬───────┘  └──────┬──────┘  └──────┬───────┘  └──────┬──────┘ │  │
+│  │         │                 │                 │                 │         │  │
+│  │         │ Validate Paths  │ Set CPU/Mem    │ Network Mode   │ Pull    │  │
+│  │         └─────────────────┴─────────────────┴─────────────────┘ Image  │  │
+│  │                             │                                            │  │
+│  │                             │ 3. CreateContainerAsync                    │  │
+│  │                             ▼                                            │  │
+│  │  ┌────────────────────────────────────────────────────────────────┐    │  │
+│  │  │  ContainerLifecycle                                             │    │  │
+│  │  │                                                                 │    │  │
+│  │  │  • CreateContainerAsync(CreateContainerParameters)             │    │  │
+│  │  │  • StartContainerAsync(containerId)                            │    │  │
+│  │  │  • WaitForCompletionAsync(containerId, timeout)                │    │  │
+│  │  │  • GetLogsAsync(containerId) → stdout/stderr                   │    │  │
+│  │  │  • RemoveContainerAsync(containerId, force: true)              │    │  │
+│  │  └────────────────────────┬───────────────────────────────────────┘    │  │
+│  └───────────────────────────┼────────────────────────────────────────────┘  │
+│                              │                                                │
+│                              │ 4. Docker API Calls (Docker.DotNet)            │
+│                              ▼                                                │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │  Docker Daemon (dockerd)                                                │  │
+│  │  • Listens on /var/run/docker.sock (Linux) or npipe (Windows)          │  │
+│  │  • Creates container from image                                         │  │
+│  │  • Enforces resource limits via cgroups                                 │  │
+│  │  • Enforces network isolation via namespaces                            │  │
+│  │  • Enforces security constraints (capabilities, seccomp)                │  │
+│  └────────────────────────────┬───────────────────────────────────────────┘  │
+└─────────────────────────────────┼──────────────────────────────────────────────┘
+                                  │ 5. Container Lifecycle
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  Docker Container (Isolated Namespace)                                          │
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐   │
+│  │  Container Filesystem (Overlay2)                                        │   │
+│  │  ┌──────────────────────────────────────────────────────────────────┐ │   │
+│  │  │  /                                  (Read-Only, from image)       │ │   │
+│  │  │  ├── bin/, lib/, usr/               Security: non-root (uid 1000) │ │   │
+│  │  │  ├── etc/                           Capabilities: NONE             │ │   │
+│  │  │  └── tmp/  (tmpfs, writable)        Seccomp: default profile      │ │   │
+│  │  └──────────────────────────────────────────────────────────────────┘ │   │
+│  │  ┌──────────────────────────────────────────────────────────────────┐ │   │
+│  │  │  /workspace                         (Bind Mount from Host)        │ │   │
+│  │  │  └── Repository files (rw or ro)    Source: /path/to/repo        │ │   │
+│  │  └──────────────────────────────────────────────────────────────────┘ │   │
+│  │  ┌──────────────────────────────────────────────────────────────────┐ │   │
+│  │  │  /root/.nuget/packages              (Volume Mount, cache)        │ │   │
+│  │  │  /root/.npm/_cache                  Persistent across containers │ │   │
+│  │  └──────────────────────────────────────────────────────────────────┘ │   │
+│  └────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐   │
+│  │  Resource Limits (cgroups)                                             │   │
+│  │  • CPU: 1.0 core (100% of single core)                                 │   │
+│  │  • Memory: 512MB hard limit (OOM kill at 512MB)                        │   │
+│  │  • PIDs: 256 max processes (fork bomb prevention)                      │   │
+│  │  • Disk I/O: Best-effort (no hard limit)                               │   │
+│  └────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐   │
+│  │  Network Namespace                                                      │   │
+│  │  • Default: network=none (no interfaces except lo)                      │   │
+│  │  • Enabled: network=bridge (veth pair to docker0)                       │   │
+│  │  • DNS: Disabled if network=none                                        │   │
+│  └────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐   │
+│  │  Command Execution                                                      │   │
+│  │  ┌─────────────────────────────────────────────────────────────────┐  │   │
+│  │  │  $ dotnet build                     (or npm test, python run.py) │  │   │
+│  │  │  └──> stdout: Build succeeded.                                   │  │   │
+│  │  │  └──> stderr: (warnings)                                         │  │   │
+│  │  │  └──> exit code: 0                                               │  │   │
+│  │  └─────────────────────────────────────────────────────────────────┘  │   │
+│  └────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│  6. Container Completes → Logs Captured → Container Removed                     │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  │ 7. Return SandboxResult
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  SandboxResult                                                                   │
+│  {                                                                               │
+│    Stdout: "Build succeeded. 0 Warning(s). 0 Error(s).",                       │
+│    Stderr: "",                                                                   │
+│    ExitCode: 0,                                                                  │
+│    ContainerId: "abc123def456",                                                  │
+│    Duration: TimeSpan(00:00:05.234),                                             │
+│    ResourceStats: { PeakMemoryMB: 387, CpuPercent: 72 }                         │
+│  }                                                                               │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Architectural Decisions and Trade-offs
+
+#### 1. Docker Containers vs. Virtual Machines
+
+**Decision:** Use Docker containers (namespaces + cgroups) instead of full VMs (QEMU/VirtualBox).
+
+**Trade-offs:**
+- **Pro:** 10-50x faster startup (1s vs. 30-60s for VM boot)
+- **Pro:** 10x less memory overhead per instance (50MB vs. 512MB+ for VM)
+- **Pro:** Native performance (no virtualization overhead)
+- **Pro:** Simpler API (Docker.DotNet vs. libvirt/VBoxManage)
+- **Con:** Weaker isolation boundary (shared kernel, not separate OS)
+- **Con:** Windows-only code requires Windows containers (less common, larger images)
+- **Con:** Privilege escalation vulnerabilities can affect host (e.g., CVE-2019-5736)
+
+**Justification:** For agentic coding workloads, the performance and ergonomics benefits outweigh the slightly weaker isolation. Containers provide "good enough" isolation for most threat models (buggy code, accidental damage), while extreme threats (APT, targeted malware) are out of scope. Organizations with high-security requirements can layer containers inside VMs.
+
+---
+
+#### 2. Persistent Containers vs. Per-Execution Containers
+
+**Decision:** Create a new container for each command execution, then destroy it.
+
+**Trade-offs:**
+- **Pro:** Perfect state isolation between tasks (no state leakage)
+- **Pro:** Automatic cleanup (no manual garbage collection)
+- **Pro:** Simplified debugging (container ID maps 1:1 to execution)
+- **Con:** 500ms-1s overhead per execution (create + destroy)
+- **Con:** Cache volumes required for acceptable performance (NuGet, npm)
+- **Con:** Cannot reuse running services (e.g., database container for tests)
+
+**Justification:** Clean state per execution aligns with agentic workflow goals (reproducibility, predictability). The 1s overhead is acceptable for typical commands (builds: 10s-5min, tests: 5s-5min). Future optimization: implement container pooling for hot-path commands if profiling shows overhead dominates.
+
+---
+
+#### 3. Bind Mounts vs. Copy-In/Copy-Out
+
+**Decision:** Bind mount the repository from host into container at `/workspace`.
+
+**Trade-offs:**
+- **Pro:** Zero-copy (instant availability of repo files)
+- **Pro:** Changes visible on host immediately (build artifacts, generated code)
+- **Pro:** Supports large repositories (100GB+ monorepos)
+- **Con:** Host filesystem performance (especially on macOS/Windows Docker Desktop)
+- **Con:** File permission mismatches (container uid 1000 vs. host uid)
+- **Con:** Path translation complexity (Windows paths → Linux paths)
+
+**Justification:** Copy-in would require copying entire repository (10s-60s for large repos), making sandbox unusable. Bind mount is the only practical option. Permission mismatches are handled by configuring container user to match host user (configurable uid:gid). macOS/Windows filesystem performance limitations are inherent to Docker Desktop and cannot be avoided without alternative architectures (VM-based Docker Engine on Linux host).
+
+---
+
+#### 4. Docker.DotNet SDK vs. Docker CLI Wrapper
+
+**Decision:** Use Docker.DotNet library (native API client) instead of wrapping `docker` CLI commands.
+
+**Trade-offs:**
+- **Pro:** Type-safe API (compile-time checking)
+- **Pro:** Structured responses (no parsing stdout)
+- **Pro:** Better error handling (exceptions vs. exit codes)
+- **Pro:** 2-3x faster (no process spawn overhead)
+- **Con:** Dependency on third-party library (Docker.DotNet)
+- **Con:** Slightly lagging Docker feature parity (API client updated after CLI)
+
+**Justification:** Docker.DotNet is the official library from Docker, well-maintained, and battle-tested. Type safety and performance benefits outweigh the minor dependency risk. For unsupported features, can fall back to CLI wrapper.
+
+---
+
+#### 5. Default Network Disabled vs. Default Network Enabled
+
+**Decision:** Network disabled by default (`network: none`), opt-in to enable.
+
+**Trade-offs:**
+- **Pro:** Security by default (prevents accidental data exfiltration)
+- **Pro:** Compliance-friendly (air-gapped provable at config level)
+- **Pro:** Fails loudly (npm install fails immediately, not silently)
+- **Con:** Breaks common workflows (npm install, NuGet restore)
+- **Con:** User must explicitly enable network for legitimate needs
+- **Con:** Documentation burden (explain why network disabled)
+
+**Justification:** Aligns with security-first philosophy and operating mode design (LocalOnly, Burst, Airgapped). Network-enabled mode is trivial to configure (`network: true` in config or `--network` CLI flag), making this a low-friction default. Errors are actionable: "Network disabled by policy. Enable with --network flag."
+
+---
+
+## Use Cases
+
+### Use Case 1: Security Researcher Tests Exploit Detection (Teresa)
+
+**Persona:** Teresa is a security engineer at FinanceCorp implementing agentic code analysis for vulnerability detection. The bot needs to execute potentially malicious code samples to test detection rules without compromising the developer workstation.
+
+**Before (No Sandbox):**
+- Manual VM setup for each test run: 45 minutes per test cycle
+- Risk of accidental execution on host system: 2 incidents per month requiring clean reinstalls
+- Limited test coverage due to setup overhead: Only 20% of vulnerability database tested
+- Manual cleanup of test artifacts: 15 minutes per run
+- **Cost:** 8 hours/week for manual testing + 2 workstation rebuilds/month = $640/week ($33,280/year at $80/hr)
+
+**After (Docker Sandbox):**
+- Automated sandbox execution: 30 seconds per test (90x faster)
+- Zero host contamination incidents: Perfect isolation
+- Full vulnerability database coverage: 100% of 5,000 test cases
+- Automatic cleanup: 0 manual intervention required
+- Parallel test execution: 10 simultaneous containers, 10 test suites/hour vs. 0.13/hour
+- **Savings:** $30,680/year (92% reduction), payback period: 1.5 days
+- **Metrics:** 90x faster execution, 0 security incidents (down from 24/year), 5x test coverage
+
+**Workflow Difference:**
+```
+Before (45 min):
+1. Launch VirtualBox VM (5 min)
+2. Snapshot clean state (2 min)
+3. Copy test code to VM (1 min)
+4. Run exploit sample manually (10 min)
+5. Observe behavior, take notes (15 min)
+6. Revert to snapshot (2 min)
+7. Shutdown VM (1 min)
+8. Repeat for next test case (9 min setup)
+
+After (30 sec):
+1. Run: acode sandbox exec --image security-tools:latest "python exploit.py" (30 sec)
+2. Container auto-creates, runs, captures output, auto-destroys
+3. Immediately start next test (no setup)
+```
+
+---
+
+### Use Case 2: DevOps Lead Ensures Build Reproducibility (Marcus)
+
+**Persona:** Marcus leads DevOps for a 50-person engineering team building a multi-language SaaS platform (.NET backend, React frontend). CI builds succeed but local builds fail due to environment differences. The agentic bot needs to execute builds in the exact CI environment.
+
+**Before (No Sandbox):**
+- "Works in CI, fails locally" debugging: 3 hours per incident, 8 incidents/week
+- Developer environment drift: 25% of team has mismatched SDK versions
+- Onboarding new developers: 2 days to configure local environment
+- CI config changes break local workflows: 2 times/month, 6 hours each to fix
+- **Cost:** 24 hours/week troubleshooting + 16 hours/month CI breakage = 1.5 FTE = $120,000/year (at $80k/year average)
+
+**After (Docker Sandbox):**
+- Identical CI and local environments: 0 "works in CI" incidents
+- Instant environment replication: Pull `ci-build:latest` image
+- Onboarding time reduced: 30 minutes (pull image, run sandbox)
+- CI changes tested locally first: 0 workflow breakages
+- **Savings:** $110,000/year (92% reduction), payback period: 2 days
+- **Metrics:** 0 environment-related incidents (down from 32/month), 96% faster onboarding (30min vs 16hr), 100% CI/local parity
+
+**Workflow Difference:**
+```
+Before (3 hour debugging session):
+1. CI build succeeds, local build fails (30 min to discover)
+2. Compare CI logs vs local output (45 min)
+3. Identify SDK version mismatch (.NET 8.0.2 vs 8.0.1)
+4. Download and install matching SDK (20 min)
+5. Discover NuGet cache corruption (30 min)
+6. Clear NuGet cache, rebuild (15 min)
+7. New error: missing system library (30 min research)
+8. Install library, rebuild, finally succeeds (10 min)
+
+After (5 min):
+1. Run: acode sandbox exec --image ghcr.io/company/ci-build:latest "dotnet build"
+2. Build runs in exact CI image, succeeds immediately
+3. If fails, failure is real bug (not environment drift)
+```
+
+---
+
+### Use Case 3: AI Safety Team Tests Agent in Air-Gapped Mode (Dr. Priya)
+
+**Persona:** Dr. Priya leads AI safety at a defense contractor building an agentic coding system for classified networks. The agent must execute code with zero possibility of network exfiltration, even from compromised dependencies.
+
+**Before (No Sandbox):**
+- Manual network monitoring: 40 hours/week, 1 dedicated security engineer
+- Firewall rule management: 10 hours/week updating allow/deny lists
+- Incident investigation: 6 hours/month for suspicious connections (false positives)
+- Compliance audit overhead: 80 hours/quarter proving network isolation
+- **Cost:** 1 FTE security engineer ($120k/year) + 80 hours/quarter audits ($6,400/year) = $126,400/year
+
+**After (Docker Sandbox with Network Disabled):**
+- Enforced at kernel level: 0 network access, 0 monitoring needed
+- No firewall rule management: Network mode "none" blocks everything
+- Zero false positive investigations: Impossible for container to connect
+- Compliance trivial: "Docker network=none" proves isolation
+- **Savings:** $120,000/year (95% reduction), payback period: 1 day
+- **Metrics:** 0 network connections (down from 150 allowed/week), 0 investigation hours (down from 6/month), 95% faster compliance audits
+
+**Workflow Difference:**
+```
+Before (40 hours/week monitoring):
+1. Agent executes code
+2. Network monitor captures all packets (tcpdump running 24/7)
+3. Analyze 50GB/day of traffic logs for anomalies (8 hours/day)
+4. Investigate 5-10 suspicious connections/day (4 hours/day)
+5. Update firewall allow list when false positive found (2 hours/day)
+6. Weekly report to compliance team (6 hours/week)
+
+After (0 hours monitoring):
+1. Agent executes code in sandbox with network=none
+2. Kernel enforces network isolation (impossible to bypass)
+3. Compliance report: "All executions used network=none" (5 min/week)
+```
+
 ---
 
 ## Glossary / Terms
