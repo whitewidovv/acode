@@ -4,7 +4,6 @@ using System.Text.Json;
 using Acode.Application.Tools;
 using Acode.Domain.Models.Inference;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for IToolSchemaRegistry interface contract.

@@ -3,7 +3,6 @@ using Acode.Application.DependencyInjection;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
-using Xunit;
 
 namespace Acode.Application.Tests.DependencyInjection;
 
