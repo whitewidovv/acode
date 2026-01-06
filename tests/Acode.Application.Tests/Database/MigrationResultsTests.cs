@@ -137,13 +137,16 @@ public sealed class MigrationResultsTests
         // Arrange & Act
         var result = new ValidationResult
         {
-            IsValid = true,
-            Mismatches = new List<ChecksumMismatch>()
+            PendingMigrations = new List<MigrationFile>(),
+            ChecksumMismatches = new List<ChecksumMismatch>(),
+            VersionGaps = new List<VersionGap>()
         };
 
         // Assert
         result.IsValid.Should().BeTrue();
-        result.Mismatches.Should().BeEmpty();
+        result.ChecksumMismatches.Should().BeEmpty();
+        result.PendingMigrations.Should().BeEmpty();
+        result.VersionGaps.Should().BeEmpty();
     }
 
     [Fact]
@@ -155,20 +158,28 @@ public sealed class MigrationResultsTests
             "abc123",
             "def456",
             DateTime.UtcNow);
+        var versionGap = new VersionGap
+        {
+            MissingVersion = "002",
+            BeforeVersion = "001",
+            AfterVersion = "003"
+        };
 
         // Act
         var result = new ValidationResult
         {
-            IsValid = false,
-            Mismatches = new List<ChecksumMismatch> { mismatch }
+            PendingMigrations = new List<MigrationFile>(),
+            ChecksumMismatches = new List<ChecksumMismatch> { mismatch },
+            VersionGaps = new List<VersionGap> { versionGap }
         };
 
         // Assert
-        result.IsValid.Should().BeFalse();
-        result.Mismatches.Should().HaveCount(1);
-        result.Mismatches[0].Version.Should().Be("003");
-        result.Mismatches[0].ExpectedChecksum.Should().Be("abc123");
-        result.Mismatches[0].ActualChecksum.Should().Be("def456");
+        result.IsValid.Should().BeFalse(); // VersionGaps present
+        result.ChecksumMismatches.Should().HaveCount(1);
+        result.ChecksumMismatches[0].Version.Should().Be("003");
+        result.ChecksumMismatches[0].ExpectedChecksum.Should().Be("abc123");
+        result.ChecksumMismatches[0].ActualChecksum.Should().Be("def456");
+        result.VersionGaps.Should().HaveCount(1);
     }
 
     [Fact]
