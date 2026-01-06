@@ -29,37 +29,14 @@ public static class Program
         // Initialize command router
         var router = new CommandRouter();
 
-        // Register commands that implement ICommand
+        // Register commands
         router.RegisterCommand(new HelpCommand(router));
         router.RegisterCommand(new VersionCommand());
 
-        // Handle config command (legacy implementation from Task 002)
-        if (args.Length >= 1 && args[0] == "config")
-        {
-            var loader = serviceProvider.GetRequiredService<IConfigLoader>();
-            var validator = serviceProvider.GetRequiredService<IConfigValidator>();
-            var configCommand = new ConfigCommand(loader, validator);
-            var repositoryRoot = Directory.GetCurrentDirectory();
-
-            if (args.Length >= 2 && args[1] == "validate")
-            {
-                return configCommand.ValidateAsync(repositoryRoot).GetAwaiter().GetResult();
-            }
-
-            if (args.Length >= 2 && args[1] == "show")
-            {
-                var format = "yaml";
-                if (args.Length >= 4 && args[2] == "--format")
-                {
-                    format = args[3];
-                }
-
-                return configCommand.ShowAsync(repositoryRoot, format).GetAwaiter().GetResult();
-            }
-
-            Console.WriteLine("Unknown config subcommand. Use 'acode config validate' or 'acode config show'.");
-            return (int)ExitCode.InvalidArguments;
-        }
+        // Register config command
+        var loader = serviceProvider.GetRequiredService<IConfigLoader>();
+        var validator = serviceProvider.GetRequiredService<IConfigValidator>();
+        router.RegisterCommand(new ConfigCommand(loader, validator));
 
         // If no arguments, show help
         if (args.Length == 0)
