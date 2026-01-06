@@ -3,14 +3,16 @@ your next task is to review docs\TDD_INSTRUCTIONS.md and claude.md, then read ev
 {
 docs\tasks\refined-tasks\Epic 02\epic-02-cli-agent-orchestration-core.md
 
-docs\tasks\refined-tasks\Epic 02\task-011-run-session-state-machine-persistence.md
-docs\tasks\refined-tasks\Epic 02\task-011a-run-entities-session-task-step-tool-call-artifacts.md
-docs\tasks\refined-tasks\Epic 02\task-011b-persistence-model-sqlite-postgres.md
-docs\tasks\refined-tasks\Epic 02\task-011c-resume-behavior-invariants.md
+docs\tasks\refined-tasks\Epic 02\task-050-workspace-database-foundation.md
+docs\tasks\refined-tasks\Epic 02\task-050a-workspace-db-layout-migration-strategy.md
+docs\tasks\refined-tasks\Epic 02\task-050b-db-access-layer-connection-management.md
+docs\tasks\refined-tasks\Epic 02\task-050c-migration-runner-startup-bootstrapping.md
+docs\tasks\refined-tasks\Epic 02\task-050d-health-checks-diagnostics.md
+docs\tasks\refined-tasks\Epic 02\task-050e-backup-export-hooks.md
 }. keep in mind that You MUST follow strict Test-Driven Development with no exceptions. when you have a comprehensive, complete understanding of the task suite, come up with a strategic, phase-based implementation plan to implement the entirety of task suite
 
 {
-011
+050
 },
 
 the whole task, including ALL PARTS of the parent task and EACH ONE OF ITS subtasks. the task is not done if any of the subtasks are not done, as per CLAUDE.md. in the implementation plan, include auditing and ensuring that the ENTIRE SUITE is implemented as per the critical guidelines in claude.md regarding definition of done.
@@ -143,6 +145,26 @@ put the implementation plan in writing as instructed in claude.md, create a new 
 - Push frequently to enable collaboration
 - Create PR only when audit passes
 
+### From Task 011 Planning (Dependency Discovery)
+
+**21. Identify Dependencies Early**
+- Read full task specifications BEFORE starting implementation
+- Check for explicit dependencies in task header (Dependencies: Task XXX)
+- Verify dependencies are implemented: `grep -r "IInterfaceName" src/`
+- Raise blockers immediately, don't assume you can work around them
+
+**22. Implementation Order Matters**
+- Foundation tasks (database, config) must come before orchestration tasks
+- Domain entities can often be implemented independently
+- Persistence/infrastructure requires abstractions to exist first
+- When blocked, escalate to user - don't stub fake interfaces
+
+**23. Task Suite Size Awareness**
+- Large task suites (10,000+ lines) require multi-session work
+- Break into phases explicitly in implementation plan
+- Update plan frequently to enable seamless resume
+- Don't attempt to complete massive suites in one session
+
 ---
 
 ## Key Reminders for All Implementations
@@ -172,6 +194,7 @@ put the implementation plan in writing as instructed in claude.md, create a new 
 - ❌ Creating PR before running audit (delivers incomplete work)
 - ❌ Implementing "just the essentials" (EVERYTHING in spec is essential)
 - ❌ Assuming specs have optional sections (they don't - it's ALL required)
+- ❌ Ignoring dependency blockers (check dependencies before starting)
 
 ---
 
@@ -191,4 +214,3 @@ Before creating PR, verify:
 - [ ] PR description comprehensive with examples
 
 When ALL boxes checked → Create PR. Not before.
-
