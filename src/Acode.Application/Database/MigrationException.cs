@@ -7,7 +7,7 @@ namespace Acode.Application.Database;
 /// <remarks>
 /// Contains structured error codes (ACODE-MIG-XXX) for different migration failure scenarios.
 /// </remarks>
-public sealed class MigrationException : Exception
+public class MigrationException : Exception
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="MigrationException"/> class.
