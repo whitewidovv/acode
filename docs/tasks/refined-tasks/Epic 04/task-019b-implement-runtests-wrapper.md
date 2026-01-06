@@ -1699,6 +1699,493 @@ namespace Acode.Infrastructure.Testing
 
 ---
 
+## Troubleshooting
+
+### Issue 1: No Tests Discovered in Test Project
+
+**Symptoms:**
+- `acode test` returns "0 tests found"
+- Output shows "Test run complete: 0 passed, 0 failed"
+- Project clearly contains test classes/methods
+- Manual `dotnet test` or `npm test` finds and runs tests successfully
+
+**Causes:**
+- Test project not built (missing compiled assemblies for .NET)
+- Test framework package not installed or not restored
+- Test class/method attributes missing or incorrect (e.g., missing `[Fact]` attribute)
+- Test discovery filters excluding all tests
+- Test project metadata indicates `IsTestProject=false` incorrectly
+- For Node.js: `test` script missing from `package.json`
+
+**Solutions:**
+
+**Solution 1: Verify Project is Built**
+```bash
+# For .NET projects
+dotnet build /path/to/MyApp.Tests.csproj --configuration Release
+
+# Verify DLL exists
+ls -la /path/to/MyApp.Tests/bin/Release/net8.0/MyApp.Tests.dll
+
+# Try test run without --no-build flag
+acode test --project MyApp.Tests --no-build false
+```
+
+**Solution 2: Check Test Framework Packages**
+```bash
+# For .NET projects - verify test framework is installed
+grep -A5 "<ItemGroup>" MyApp.Tests.csproj | grep -E "xunit|NUnit|MSTest"
+
+# Expected output (xUnit example):
+# <PackageReference Include="xunit" Version="2.6.2" />
+# <PackageReference Include="xunit.runner.visualstudio" Version="2.5.4" />
+# <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+
+# If missing, add packages
+dotnet add package xunit --version 2.6.2
+dotnet add package xunit.runner.visualstudio --version 2.5.4
+dotnet add package Microsoft.NET.Test.Sdk --version 17.8.0
+dotnet restore
+```
+
+**Solution 3: Verify Test Attributes**
+```csharp
+// WRONG - test will NOT be discovered:
+public class UserServiceTests
+{
+    public void GetUser_ValidId_ReturnsUser()  // Missing [Fact] attribute!
+    {
+        // Test code
+    }
+}
+
+// CORRECT - test WILL be discovered:
+using Xunit;
+
+public class UserServiceTests
+{
+    [Fact]  // Required attribute for xUnit
+    public void GetUser_ValidId_ReturnsUser()
+    {
+        // Test code
+    }
+}
+
+// For NUnit:
+using NUnit.Framework;
+
+[TestFixture]
+public class UserServiceTests
+{
+    [Test]  // NUnit uses [Test] instead of [Fact]
+    public void GetUser_ValidId_ReturnsUser()
+    {
+        // Test code
+    }
+}
+```
+
+**Solution 4: Run with Verbose Logging**
+```bash
+# Enable detailed discovery output
+acode test --project MyApp.Tests --verbose --log-level Debug
+
+# Output will show:
+# [DEBUG] Discovering tests in /repo/MyApp.Tests.csproj
+# [DEBUG] Test framework detected: xUnit 2.6.2
+# [DEBUG] Running: dotnet test MyApp.Tests.csproj --list-tests
+# [DEBUG] Discovered tests:
+#   - MyApp.Tests.UserServiceTests.GetUser_ValidId_ReturnsUser
+#   - MyApp.Tests.UserServiceTests.GetUser_InvalidId_ThrowsException
+# [INFO] Test discovery complete: 2 tests found
+```
+
+**Solution 5: Check Node.js Test Script**
+```bash
+# For Node.js projects - verify test script exists
+jq '.scripts.test' package.json
+
+# If null or missing, add test script:
+npm pkg set scripts.test="jest"
+
+# Or manually edit package.json:
+{
+  "scripts": {
+    "test": "jest",  // Add this line
+    "build": "tsc"
+  }
+}
+```
+
+---
+
+### Issue 2: TRX Parse Failure (Results Not Structured)
+
+**Symptoms:**
+- Test run completes but results show raw TRX XML instead of structured JSON
+- Error: "XmlException: The 'Results' start tag does not match"
+- Results object has `totalTests: 0` despite tests running
+- Log shows "TRX parser warning: invalid format"
+
+**Causes:**
+- TRX file corrupted or incomplete (test process crashed mid-write)
+- TRX format version mismatch (older/newer than expected schema)
+- Encoding issues (UTF-16 BOM causing parse failure)
+- Concurrent writes to same TRX file (race condition)
+- Disk full during TRX write (truncated file)
+
+**Solutions:**
+
+**Solution 1: Verify TRX File Integrity**
+```bash
+# Locate TRX file
+TRX_FILE=$(find ~/.acode/test-results -name "*.trx" | head -1)
+
+# Check file size (should be >1KB)
+ls -lh "$TRX_FILE"
+
+# Validate XML structure
+xmllint --noout "$TRX_FILE"
+# If valid: no output
+# If invalid: shows line/column of error
+
+# Check for truncation (last line should be </TestRun>)
+tail -1 "$TRX_FILE"
+```
+
+**Solution 2: Use JSON Reporter for Node.js**
+```bash
+# For Jest tests - use JSON reporter instead of default
+acode test --project frontend --output-format json
+
+# Or configure Jest to always output JSON:
+cat >> jest.config.js << 'EOF'
+module.exports = {
+  reporters: [
+    'default',
+    ['jest-json-reporter', {
+      outputPath: './test-results.json'
+    }]
+  ]
+};
+EOF
+
+npm install --save-dev jest-json-reporter
+```
+
+**Solution 3: Handle Encoding Issues**
+```csharp
+// In TrxParser.cs - auto-detect encoding
+public TestRunResult ParseTrx(string trxFilePath)
+{
+    // Read raw bytes to detect BOM
+    var bytes = File.ReadAllBytes(trxFilePath);
+    var encoding = DetectEncoding(bytes);
+
+    var xmlContent = encoding.GetString(bytes);
+
+    // Remove BOM if present
+    if (xmlContent.StartsWith("\uFEFF"))
+    {
+        xmlContent = xmlContent.Substring(1);
+    }
+
+    using var stringReader = new StringReader(xmlContent);
+    using var xmlReader = XmlReader.Create(stringReader, _xmlSettings);
+    var doc = XDocument.Load(xmlReader);
+
+    // Parse TestRun element
+    return ParseTestRunElement(doc.Root);
+}
+```
+
+**Solution 4: Enable Fallback to Raw Output**
+```bash
+# Configure test runner to return raw output on parse failure
+acode config set test.fallback-to-raw-output true
+
+# Now if TRX parse fails, you still get results:
+acode test --project MyApp.Tests
+# Output (on parse failure):
+# {
+#   "totalTests": -1,
+#   "rawOutput": "Test Run Successful.\nTotal tests: 47\nPassed: 46\nFailed: 1",
+#   "parseError": "TRX parse failed: invalid XML at line 42"
+# }
+```
+
+**Solution 5: Clear Stale TRX Files**
+```bash
+# Remove old TRX files that may conflict
+rm -rf ~/.acode/test-results/*.trx
+
+# Run test with fresh output
+acode test --project MyApp.Tests --force-refresh
+```
+
+---
+
+### Issue 3: Test Run Exceeds Timeout
+
+**Symptoms:**
+- Test execution stops after exactly 300 seconds (5 minutes)
+- Output shows "Test execution timed out after 300 seconds"
+- Some tests pass, but run is incomplete
+- Process killed before all tests complete
+
+**Causes:**
+- Tests legitimately slow (e.g., integration tests with database operations)
+- Infinite loop in test code
+- Test waiting for external resource that never responds (HTTP timeout, database deadlock)
+- Insufficient timeout for large test suite (1000+ tests)
+- Tests running sequentially instead of parallel (slower than expected)
+
+**Solutions:**
+
+**Solution 1: Increase Timeout**
+```bash
+# Set timeout to 10 minutes (600 seconds)
+acode test --project MyApp.Tests --timeout 600
+
+# For very large test suites, increase further
+acode test --project MyApp.Tests --timeout 1800  # 30 minutes
+
+# Set default timeout in config
+acode config set test.default-timeout-seconds 600
+```
+
+**Solution 2: Run Tests in Parallel**
+```bash
+# For .NET tests - enable parallel execution
+acode test --project MyApp.Tests -- --parallel
+
+# Or configure in .csproj:
+<PropertyGroup>
+  <ParallelizeTestCollections>true</ParallelizeTestCollections>
+  <MaxParallelThreads>4</MaxParallelThreads>
+</PropertyGroup>
+
+# For Jest - parallel is default, but can configure:
+npm test -- --maxWorkers=4
+```
+
+**Solution 3: Identify Slow Tests**
+```bash
+# Run with verbose timing to find culprits
+acode test --project MyApp.Tests --verbose
+
+# Output shows per-test durations:
+# [PASS] GetUser_ValidId_ReturnsUser (12ms)
+# [PASS] GetUser_InvalidId_ThrowsException (8ms)
+# [FAIL] GetUser_WithDatabase_IntegrationTest (45,230ms)  # SLOW!
+# [PASS] DeleteUser_ValidId_DeletesUser (15ms)
+
+# Run only slow test to diagnose:
+acode test --project MyApp.Tests --filter "GetUser_WithDatabase_IntegrationTest" --timeout 120
+```
+
+**Solution 4: Break Up Large Test Suites**
+```bash
+# Instead of running all 1000 tests at once, split by category
+acode test --project MyApp.Tests --filter "Category=Unit" --timeout 300
+acode test --project MyApp.Tests --filter "Category=Integration" --timeout 600
+acode test --project MyApp.Tests --filter "Category=E2E" --timeout 1800
+
+# Or run per-class:
+acode test --project MyApp.Tests --filter "FullyQualifiedName~UserServiceTests" --timeout 60
+acode test --project MyApp.Tests --filter "FullyQualifiedName~OrderServiceTests" --timeout 60
+```
+
+**Solution 5: Debug Infinite Loop**
+```bash
+# Run single test with debugger to identify infinite loop
+dotnet test MyApp.Tests.csproj --filter "FullyQualifiedName~SuspectedHangingTest" --logger "console;verbosity=detailed"
+
+# If test hangs, check for:
+# - while(true) with no exit condition
+# - await Task.Delay() with CancellationToken.None (never cancels)
+# - HTTP client calls without timeout configured
+```
+
+---
+
+### Issue 4: Test Framework Not Detected
+
+**Symptoms:**
+- Error: "No test framework detected for project /path/to/MyApp.Tests"
+- `acode detect` shows project but `isTestProject: false`
+- Manual `dotnet test` works but `acode test` fails
+- Tests run in IDE but not via CLI
+
+**Causes:**
+- Test framework package missing from project references
+- Package reference uses unexpected naming (e.g., `xunit.core` instead of `xunit`)
+- Test project is .NET Framework (not .NET Core/5+)
+- Custom test framework not in Acode's detection list
+- `IsTestProject` MSBuild property explicitly set to `false`
+
+**Solutions:**
+
+**Solution 1: Verify Test Framework Package**
+```bash
+# Check for standard test framework packages
+dotnet list package | grep -E "xunit|NUnit|MSTest"
+
+# Expected output (xUnit):
+# > xunit                   2.6.2
+# > xunit.runner.visualstudio  2.5.4
+# > Microsoft.NET.Test.Sdk  17.8.0
+
+# If missing Microsoft.NET.Test.Sdk, add it:
+dotnet add package Microsoft.NET.Test.Sdk --version 17.8.0
+```
+
+**Solution 2: Check IsTestProject Property**
+```xml
+<!-- In MyApp.Tests.csproj -->
+<PropertyGroup>
+  <TargetFramework>net8.0</TargetFramework>
+  <IsPackable>false</IsPackable>
+  <!-- Ensure IsTestProject is true or omitted (defaults to true for test projects) -->
+  <IsTestProject>true</IsTestProject>
+</PropertyGroup>
+```
+
+**Solution 3: Explicitly Specify Framework**
+```bash
+# Override auto-detection by specifying framework explicitly
+acode test --project MyApp.Tests --framework xunit
+
+# Supported frameworks: xunit, nunit, mstest, jest, mocha, vitest
+```
+
+**Solution 4: Check Framework Detection Logic**
+```csharp
+// Acode's detection heuristics (for reference):
+
+// xUnit detection:
+bool IsXUnit(ProjectMetadata project) =>
+    project.PackageReferences.ContainsKey("xunit") ||
+    project.PackageReferences.ContainsKey("xunit.core");
+
+// NUnit detection:
+bool IsNUnit(ProjectMetadata project) =>
+    project.PackageReferences.ContainsKey("NUnit") ||
+    project.PackageReferences.ContainsKey("nunit.framework");
+
+// MSTest detection:
+bool IsMSTest(ProjectMetadata project) =>
+    project.PackageReferences.ContainsKey("MSTest.TestFramework") ||
+    project.PackageReferences.ContainsKey("Microsoft.VisualStudio.TestPlatform.TestFramework");
+```
+
+**Solution 5: Use Repo Contract Hint**
+```yaml
+# In .acode/config.yml - provide explicit test framework hint
+test:
+  framework-overrides:
+    "tests/MyApp.Tests": xunit
+    "tests/MyApp.IntegrationTests": xunit
+    "frontend/src/__tests__": jest
+```
+
+---
+
+### Issue 5: Filter Syntax Error (No Tests Match Filter)
+
+**Symptoms:**
+- `acode test --filter "..."` returns "0 tests found"
+- Filter syntax appears correct but no matches
+- Removing filter runs all tests successfully
+- Error: "Filter expression is invalid"
+
+**Causes:**
+- Filter syntax varies between frameworks (.NET uses `~` for contains, Jest uses regex)
+- Typo in test name or namespace
+- Case sensitivity mismatch
+- Incorrect property name (e.g., `TestCategory` vs `Category`)
+- Special characters not escaped (e.g., parentheses in test names)
+
+**Solutions:**
+
+**Solution 1: Verify Filter Syntax for Framework**
+```bash
+# .NET filter syntax (uses property expressions)
+acode test --project MyApp.Tests --filter "FullyQualifiedName~UserService"      # Contains
+acode test --project MyApp.Tests --filter "Category=Unit"                       # Exact match
+acode test --project MyApp.Tests --filter "Name~GetUser"                        # Test name contains
+acode test --project MyApp.Tests --filter "Category=Unit&Priority=1"           # AND condition
+acode test --project MyApp.Tests --filter "Category=Unit|Category=Integration" # OR condition
+
+# Jest filter syntax (uses regex)
+acode test --project frontend --filter "UserService"       # Regex match (no quotes)
+acode test --project frontend --filter "^UserService"      # Starts with
+acode test --project frontend --filter "GetUser.*ValidId"  # Regex pattern
+
+# Mocha filter syntax (uses --grep)
+acode test --project backend-tests --filter "UserService"  # Substring match
+acode test --project backend-tests --filter "/^UserService/"  # Regex (wrapped in /)
+```
+
+**Solution 2: List All Tests to Find Correct Names**
+```bash
+# For .NET - list all test names
+dotnet test MyApp.Tests.csproj --list-tests
+
+# Output:
+# MyApp.Tests.UserServiceTests.GetUser_ValidId_ReturnsUser
+# MyApp.Tests.UserServiceTests.GetUser_InvalidId_ThrowsException
+# MyApp.Tests.OrderServiceTests.CreateOrder_ValidInput_CreatesOrder
+
+# Now use exact name in filter:
+acode test --project MyApp.Tests --filter "FullyQualifiedName~MyApp.Tests.UserServiceTests"
+```
+
+**Solution 3: Escape Special Characters**
+```bash
+# If test name contains parentheses, escape them:
+# Test name: "GetUser(ValidId)_ReturnsUser"
+
+# WRONG (will fail):
+acode test --filter "GetUser(ValidId)"
+
+# CORRECT (escaped):
+acode test --filter "GetUser\\(ValidId\\)"
+
+# Or use FullyQualifiedName with ~ (contains):
+acode test --filter "FullyQualifiedName~GetUser"
+```
+
+**Solution 4: Check Case Sensitivity**
+```bash
+# .NET filters are case-sensitive!
+
+# WRONG (won't match "UserServiceTests"):
+acode test --filter "FullyQualifiedName~userservicetests"
+
+# CORRECT:
+acode test --filter "FullyQualifiedName~UserServiceTests"
+
+# For case-insensitive matching, use wildcards:
+acode test --filter "Name~User"  # Matches "UserTests", "userTests", "USER_TESTS"
+```
+
+**Solution 5: Validate Filter Before Test Run**
+```bash
+# Use dry-run mode to validate filter (list tests that would run)
+acode test --project MyApp.Tests --filter "Category=Unit" --dry-run
+
+# Output shows matched tests:
+# [DRY-RUN] Would execute 47 tests:
+#   1. MyApp.Tests.UserServiceTests.GetUser_ValidId_ReturnsUser
+#   2. MyApp.Tests.UserServiceTests.GetUser_InvalidId_ThrowsException
+#   ... (45 more)
+
+# If output shows "Would execute 0 tests", filter is wrong
+```
+
+---
+
 ## Best Practices
 
 ### Test Execution
