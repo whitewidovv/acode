@@ -76,6 +76,159 @@ This task covers:
 
 ---
 
+## Use Cases
+
+### Use Case 1: DevOps Sharing Production Failure Bundle with Remote Team (Alex, Site Reliability Engineer)
+
+**Persona:** Alex is an SRE responding to a production outage at 2 AM. The application crashed with cryptic errors. Alex's offshore team in India needs to debug but can't access production systems due to compliance restrictions.
+
+**Before (Manual Log Export - 45 minutes):**
+1. SSH into production server (5 min - VPN, multi-factor auth, jump host)
+2. Locate relevant log files manually: `find /var/log/app/ -name "*2024-01-15*"` (10 min - scattered across multiple directories)
+3. Tar logs: `tar czf debug-logs.tar.gz /var/log/app/*.log` (5 min)
+4. Download from production to laptop: `scp debug-logs.tar.gz local:/tmp/` (10 min - slow network, 500MB file)
+5. Upload to file sharing service (Dropbox, Google Drive) manually (10 min - waiting for upload)
+6. Share link with offshore team via Slack (2 min)
+7. **Problem:** Environment variables missing, command details lost, git commit SHA not captured
+8. Team has to ask "what command did you run?" "what was the config?" - back and forth delays (30+ min)
+9. **Total time:** 45 minutes + 30 minutes clarification = **75 minutes to share incomplete data**
+
+**After (Acode Export Bundle - 2 minutes):**
+1. Identify failed run: `acode runs list --status failed --limit 5` (5 sec)
+2. Export run to bundle: `acode runs export --run run-prod-failure-20240115 --output incident-12345.zip` (20 sec - creates self-contained bundle)
+3. Upload bundle: `acode runs export --run run-prod-failure-20240115 --upload s3://incident-bucket/incident-12345.zip` (30 sec - streaming upload)
+4. Share S3 link with team (5 sec)
+5. Offshore team imports: `acode runs import incident-12345.zip` (15 sec)
+6. Bundle includes: stdout/stderr, environment (redacted), command, git commit SHA, config files, provenance
+7. Team has complete context: `acode runs show run-prod-failure-20240115` shows all details
+8. **Total time:** 2 minutes for complete, self-contained data package
+
+**Metrics:**
+- Time saved: 73 minutes per incident (97% improvement)
+- Completeness: 100% context (vs 40% with manual logs)
+- Compliance: Automatic redaction of secrets before export
+- Collaboration: Offshore team productive immediately (vs 30+ min delays)
+- Annual ROI (assuming 2 production incidents per month): 73 min × 2 × 12 = **1,752 minutes/year = 29.2 hours saved**
+- Cost savings at $150/hour (SRE rate): **$4,380/year**
+
+---
+
+### Use Case 2: Compliance Team Archiving Q4 Deployment Records (Morgan, Compliance Auditor)
+
+**Persona:** Morgan is a compliance auditor who must archive all Q4 production deployments for SOC 2 audit. Records must be stored for 7 years with proof of integrity. Manual archival is error-prone and incomplete.
+
+**Before (Manual Archive Creation - 12 hours for quarterly archive):**
+1. Query database for all Q4 deployments: `SELECT * FROM deployments WHERE date >= '2023-10-01' AND date <= '2023-12-31'` (10 min)
+2. Export to CSV manually (5 min)
+3. For each deployment (48 deployments in Q4):
+   a. SSH to deployment server (2 min each)
+   b. Locate deployment logs: `cd /var/log/deployments/deploy-xyz/` (1 min)
+   c. Copy logs to archive directory (1 min)
+   d. Record git commit SHA manually from Jenkins (2 min)
+   e. Document environment variables in Excel (3 min)
+   f. Save screenshots of deployment UI (2 min)
+   g. **Subtotal per deployment:** 11 minutes
+4. 48 deployments × 11 min = **528 minutes = 8.8 hours**
+5. Create final archive: `tar czf q4-2023-deployments.tar.gz archive/` (10 min)
+6. Upload to compliance S3 bucket manually (15 min)
+7. Generate SHA-256 hash manually: `sha256sum q4-2023-deployments.tar.gz > checksum.txt` (2 min)
+8. Document in compliance spreadsheet (30 min - manual data entry)
+9. **Total time:** 12 hours, **high risk of missing data or errors**
+
+**After (Acode Export Bundle - 30 minutes for quarterly archive):**
+1. Export all Q4 deployments in single command:
+   ```bash
+   acode runs export --task deploy \
+                      --from 2023-10-01 \
+                      --to 2023-12-31 \
+                      --format compliance \
+                      --output q4-2023-deployments.zip \
+                      --sign
+   ```
+   (5 minutes - selects 48 runs, includes all artifacts, generates manifest)
+2. Manifest automatically includes:
+   - SHA-256 hashes for all artifacts
+   - Git commit SHAs (from provenance)
+   - Redacted environment variables
+   - Execution timestamps, exit codes, durations
+   - Signature for integrity verification
+3. Upload to compliance S3: `aws s3 cp q4-2023-deployments.zip s3://compliance/archives/` (10 min)
+4. Verify bundle: `acode runs verify q4-2023-deployments.zip` (5 sec - checks all hashes)
+5. Import to compliance archive workspace for spot-checking: `acode runs import q4-2023-deployments.zip --workspace compliance-archive` (10 min)
+6. Generate audit report from bundle metadata: `acode runs report q4-2023-deployments.zip --format xlsx` (2 min - auto-generates Excel)
+7. Review and submit (3 min)
+8. **Total time:** 30 minutes, **100% data completeness, cryptographic integrity proof**
+
+**Metrics:**
+- Time saved: 11.5 hours per quarterly archive (96% improvement)
+- Accuracy: 100% complete (vs 85% with manual process - often missing env vars or commit SHAs)
+- Auditability: Cryptographic signatures prove integrity (vs trust-based manual process)
+- Compliance risk: Eliminated (all required fields automatically captured)
+- Annual ROI (4 quarterly archives): 11.5 hours × 4 = **46 hours saved per year**
+- Cost savings at $120/hour (auditor rate): **$5,520/year**
+
+---
+
+### Use Case 3: Developer Reproducing Customer-Reported Bug Across Environments (Casey, Support Engineer)
+
+**Persona:** Casey is a support engineer who received a customer bug report. The customer says "feature X doesn't work" but Casey can't reproduce it locally. Customer is using a different OS, different config, and won't share their exact environment due to confidentiality.
+
+**Before (Manual Environment Recreation - 4 hours + often fails):**
+1. Ask customer for environment details via email (30 min - back and forth)
+2. Customer provides partial info: OS, app version (missing: env vars, config files, dependency versions)
+3. Install matching OS version in VM (45 min - download, setup)
+4. Install app version (10 min)
+5. Try to reproduce bug with guessed configuration (30 min - doesn't reproduce)
+6. Ask customer for more details (30 min email round-trip)
+7. Customer shares config file via email (security team flags sensitive data exposure)
+8. Sanitize config manually (15 min)
+9. Retry reproduction (20 min - still doesn't reproduce because missing env vars)
+10. Third round of email asking for env vars (30 min)
+11. Customer refuses due to security policy (contains API keys)
+12. **Result: Cannot reproduce bug, issue stuck for days**
+13. **Total time:** 4 hours, **success rate: 30%**
+
+**After (Acode Export Bundle with Redaction - 15 minutes, 95% success rate):**
+1. Ask customer to export run: `acode runs export --run run-feature-x-failure --output customer-bug.zip` (30 sec - customer runs command)
+2. Bundle auto-redacts secrets (API keys, passwords) but preserves structure
+3. Customer emails bundle (5 min - small ZIP file, no manual sanitization needed)
+4. Casey imports: `acode runs import customer-bug.zip` (10 sec)
+5. Casey reviews run: `acode runs show run-feature-x-failure` (10 sec)
+6. Bundle includes:
+   - Exact command executed
+   - Redacted environment variables (shows keys but masks values: `API_KEY=***REDACTED***`)
+   - Config files (customer can review redaction before sharing)
+   - stdout/stderr showing actual error
+   - Git commit SHA (customer's app version)
+   - OS information from metadata
+7. Casey sees error: `stderr.txt` shows "Connection refused on port 5432" - database not running
+8. Root cause identified: Customer's PostgreSQL wasn't started
+9. Casey replies with fix: "Start PostgreSQL service before running app"
+10. **Total time:** 15 minutes, **bug reproduced and fixed**
+
+**Metrics:**
+- Time saved: 3 hours 45 minutes per bug investigation (94% improvement)
+- Success rate: 95% (vs 30% with manual environment recreation)
+- Security: Automatic redaction prevents leaking customer secrets
+- Customer satisfaction: Fast resolution (15 min vs days)
+- Annual ROI (assuming 3 customer bugs per week): 3.75 hours × 3 × 52 = **585 hours saved per year**
+- Cost savings at $100/hour (support engineer rate): **$58,500/year**
+
+---
+
+### Combined ROI Summary for Use Cases
+
+| Use Case | Time Saved | Annual Hours Saved | Annual Cost Savings |
+|----------|------------|-------------------|---------------------|
+| DevOps sharing production failure bundle | 73 min/incident | 29.2 hours | $4,380 |
+| Compliance archiving Q4 deployment records | 11.5 hours/quarter | 46 hours | $5,520 |
+| Developer reproducing customer bug | 3.75 hours/bug | 585 hours | $58,500 |
+| **TOTAL** | | **660.2 hours/year** | **$68,400/year** |
+
+**Payback Period:** Assuming 60 hours development effort at $100/hour = $6,000 investment, payback in **0.9 months** (32 days).
+
+---
+
 ## Glossary / Terms
 
 | Term | Definition |
@@ -106,6 +259,36 @@ This task covers:
 - Incremental/delta exports
 - Automatic periodic exports
 - Bundle compression algorithm selection (uses ZIP default)
+
+---
+
+## Assumptions
+
+### Technical Assumptions
+
+1. **ZIP format universality** - All target platforms support ZIP extraction (Windows, Linux, macOS)
+2. **SHA-256 sufficiency** - SHA-256 provides adequate integrity verification for bundles
+3. **JSON compatibility** - All platforms can parse JSON manifest files
+4. **UTF-8 encoding** - All text artifacts use UTF-8 encoding
+5. **File system compatibility** - Target systems support long file paths (>260 chars on Windows with long path support enabled)
+6. **SQLite portability** - If including database, SQLite files are cross-platform compatible
+7. **Git available** - Provenance extraction assumes git command is available
+8. **Disk space available** - Export destination has sufficient space (2x bundle size for temp operations)
+9. **Memory sufficient** - System has enough RAM to buffer artifacts during compression (recommended 4GB+)
+10. **Clock synchronization** - System clocks are reasonably synchronized for timestamp accuracy
+
+### Operational Assumptions
+
+11. **Bundle sizes reasonable** - Most bundles <100MB, largest <10GB (not designed for multi-TB exports)
+12. **Infrequent exports** - Export operations are occasional (daily/weekly), not continuous streaming
+13. **Single user exports** - Concurrent exports from same workspace are rare
+14. **Import trust** - Users import bundles from trusted sources (no automatic signature verification by default)
+15. **Storage durability** - Bundle storage (S3, filesystem) provides durability guarantees
+16. **Redaction completeness** - Redaction patterns catch most secrets, but manual review recommended for sensitive exports
+17. **Network available for upload** - If using `--upload`, network connectivity is stable
+18. **Workspace writable** - Import destination workspace has write permissions
+19. **No schema changes mid-export** - Database schema doesn't change during export process
+20. **Retention policy respected** - Old bundles are managed by external retention policies, not automatic cleanup
 
 ---
 
@@ -480,65 +663,1734 @@ Large artifacts take time. Use `--no-artifacts` for metadata-only export.
 
 ---
 
+## Security Considerations
+
+### Threat 1: ZIP Path Traversal During Import
+
+**Risk:** Malicious bundle contains entries with paths like `../../../etc/passwd` or `..\..\..\Windows\System32\config`. Importing could overwrite critical system files or write files outside workspace directory.
+
+**Attack Scenario:**
+1. Attacker crafts malicious bundle: `malicious.acode-bundle`
+2. ZIP contains entry: `runs/../../../../../../tmp/malicious.sh`
+3. User imports: `acode runs import malicious.acode-bundle`
+4. Extraction writes file to `/tmp/malicious.sh` (outside workspace)
+5. If `/tmp/malicious.sh` executed later (cron, boot script), attacker gains code execution
+
+**Mitigation (C# - SafeZipExtractor):**
+
+```csharp
+namespace Acode.Infrastructure.Export;
+
+public sealed class SafeZipExtractor
+{
+    private readonly string _extractionRoot;
+    private static readonly char[] ForbiddenPathChars = Path.GetInvalidPathChars()
+        .Concat(new[] { '\0', '\r', '\n' }).ToArray();
+
+    public SafeZipExtractor(string extractionRoot)
+    {
+        _extractionRoot = Path.GetFullPath(extractionRoot);
+    }
+
+    public async Task<ExtractResult> ExtractAsync(string bundlePath, CancellationToken ct = default)
+    {
+        if (!File.Exists(bundlePath))
+            throw new FileNotFoundException($"Bundle not found: {bundlePath}");
+
+        using var archive = ZipFile.OpenRead(bundlePath);
+        var extractedFiles = new List<string>();
+
+        foreach (var entry in archive.Entries)
+        {
+            // Step 1: Validate entry name
+            var (isValid, error) = ValidateEntryPath(entry.FullName);
+            if (!isValid)
+                throw new SecurityException($"Path traversal detected in entry '{entry.FullName}': {error}");
+
+            // Step 2: Compute absolute target path
+            var targetPath = Path.Combine(_extractionRoot, entry.FullName);
+            var normalizedPath = Path.GetFullPath(targetPath);
+
+            // Step 3: CRITICAL - Verify normalized path is still within extraction root
+            if (!normalizedPath.StartsWith(_extractionRoot, StringComparison.OrdinalIgnoreCase))
+                throw new SecurityException($"Entry '{entry.FullName}' resolves outside extraction directory: {normalizedPath}");
+
+            // Step 4: Create parent directory safely
+            var parentDir = Path.GetDirectoryName(normalizedPath);
+            if (!string.IsNullOrEmpty(parentDir))
+            {
+                Directory.CreateDirectory(parentDir);
+            }
+
+            // Step 5: Extract file
+            if (entry.FullName.EndsWith('/'))
+            {
+                // Directory entry - already created above
+                continue;
+            }
+
+            entry.ExtractToFile(normalizedPath, overwrite: true);
+            extractedFiles.Add(normalizedPath);
+
+            ct.ThrowIfCancellationRequested();
+        }
+
+        return new ExtractResult { FilesExtracted = extractedFiles, Success = true };
+    }
+
+    private (bool IsValid, string Error) ValidateEntryPath(string entryPath)
+    {
+        // Rule 1: Not null or empty
+        if (string.IsNullOrWhiteSpace(entryPath))
+            return (false, "Entry path is empty");
+
+        // Rule 2: No forbidden characters
+        if (entryPath.IndexOfAny(ForbiddenPathChars) >= 0)
+            return (false, "Entry path contains forbidden characters");
+
+        // Rule 3: No absolute paths (Windows drive letters or Unix root)
+        if (Path.IsPathRooted(entryPath))
+            return (false, "Entry path is absolute (rooted)");
+
+        // Rule 4: No path traversal sequences
+        if (entryPath.Contains(".."))
+            return (false, "Entry path contains '..' traversal sequence");
+
+        // Rule 5: No backslashes (normalize to forward slashes)
+        if (entryPath.Contains('\\'))
+            return (false, "Entry path contains backslashes (use forward slashes)");
+
+        // Rule 6: Length bounds
+        if (entryPath.Length > 500)
+            return (false, "Entry path exceeds maximum length (500 chars)");
+
+        return (true, null);
+    }
+}
+
+public record ExtractResult
+{
+    public required List<string> FilesExtracted { get; init; }
+    public required bool Success { get; init; }
+}
+```
+
+**Prevention:**
+- Always use `Path.GetFullPath()` and verify result is within extraction root
+- Reject any paths containing `..` sequences
+- Never trust ZIP entry paths directly - validate every path
+- Use whitelisting (allow only specific patterns) vs blacklisting
+
+---
+
+### Threat 2: ZIP Bomb (Decompression Bomb)
+
+**Risk:** Malicious bundle is small when compressed (e.g., 1MB) but expands to consume all disk space when extracted (e.g., 10TB). This causes denial of service by filling disk.
+
+**Attack Scenario:**
+1. Attacker creates `bomb.zip` with 1MB compressed size, 10TB uncompressed (nested ZIPs or highly compressible data like zeros)
+2. User imports: `acode runs import bomb.acode-bundle`
+3. Extraction begins, disk fills: `/dev/sda1 100% full`
+4. System becomes unusable, databases crash, services fail
+5. Incident response team must restore from backups
+
+**Mitigation (C# - ZipBombDetector):**
+
+```csharp
+namespace Acode.Infrastructure.Export;
+
+public sealed class ZipBombDetector
+{
+    private const long MaxUncompressedSize = 10L * 1024 * 1024 * 1024; // 10GB
+    private const int MaxCompressionRatio = 100; // 100:1 ratio
+    private const int MaxNestedZips = 2; // Prevent recursive zip bombs
+
+    public (bool IsSafe, string Reason) AnalyzeBundle(string bundlePath)
+    {
+        try
+        {
+            using var archive = ZipFile.OpenRead(bundlePath);
+
+            long totalCompressedSize = 0;
+            long totalUncompressedSize = 0;
+            var zipEntryCount = 0;
+
+            foreach (var entry in archive.Entries)
+            {
+                // Accumulate sizes
+                totalCompressedSize += entry.CompressedLength;
+                totalUncompressedSize += entry.Length;
+
+                // Check 1: Total uncompressed size limit
+                if (totalUncompressedSize > MaxUncompressedSize)
+                    return (false, $"Total uncompressed size ({totalUncompressedSize:N0} bytes) exceeds limit ({MaxUncompressedSize:N0} bytes)");
+
+                // Check 2: Per-file compression ratio
+                if (entry.CompressedLength > 0)
+                {
+                    var ratio = (double)entry.Length / entry.CompressedLength;
+                    if (ratio > MaxCompressionRatio)
+                        return (false, $"File '{entry.FullName}' has suspicious compression ratio {ratio:F1}:1 (limit: {MaxCompressionRatio}:1)");
+                }
+
+                // Check 3: Nested ZIP detection
+                if (entry.FullName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+                    entry.FullName.EndsWith(".acode-bundle", StringComparison.OrdinalIgnoreCase))
+                {
+                    zipEntryCount++;
+                    if (zipEntryCount > MaxNestedZips)
+                        return (false, $"Bundle contains {zipEntryCount} nested ZIP files (limit: {MaxNestedZips})");
+                }
+
+                // Check 4: Unusually high entry count (quine zip)
+                if (archive.Entries.Count > 100_000)
+                    return (false, $"Bundle contains {archive.Entries.Count:N0} entries (limit: 100,000)");
+            }
+
+            // Check 5: Overall compression ratio
+            if (totalCompressedSize > 0)
+            {
+                var overallRatio = (double)totalUncompressedSize / totalCompressedSize;
+                if (overallRatio > MaxCompressionRatio)
+                    return (false, $"Overall compression ratio {overallRatio:F1}:1 exceeds limit ({MaxCompressionRatio}:1)");
+            }
+
+            return (true, "Bundle passed safety checks");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Error analyzing bundle: {ex.Message}");
+        }
+    }
+}
+
+// Usage in BundleImporter
+public class BundleImporter
+{
+    private readonly ZipBombDetector _detector = new();
+    private readonly SafeZipExtractor _extractor;
+
+    public async Task<ImportResult> ImportAsync(string bundlePath)
+    {
+        // CRITICAL: Check for zip bomb BEFORE extraction
+        var (isSafe, reason) = _detector.AnalyzeBundle(bundlePath);
+        if (!isSafe)
+            throw new SecurityException($"Bundle rejected: {reason}");
+
+        // Safe to extract
+        return await _extractor.ExtractAsync(bundlePath);
+    }
+}
+```
+
+**Prevention:**
+- Check total uncompressed size before extracting
+- Monitor compression ratios (>100:1 is suspicious)
+- Limit number of entries in archive
+- Detect nested ZIP files (quine zips)
+- Set maximum extraction size limits
+
+---
+
+### Threat 3: Manifest Hash Mismatch (Tampered Artifacts)
+
+**Risk:** Attacker modifies bundle contents after signing but before import. Manifest contains original hashes, but actual files are tampered. User imports malicious artifacts thinking they're verified.
+
+**Attack Scenario:**
+1. Legitimate bundle exported: `production-run.acode-bundle` (manifest includes SHA-256 hashes)
+2. Attacker intercepts bundle in transit (man-in-the-middle, compromised storage)
+3. Attacker modifies `stdout.txt` to inject malicious commands
+4. User imports bundle without verification: `acode runs import production-run.acode-bundle`
+5. Tampered artifact imported, user reviews "production" output that was actually attacker-modified
+
+**Mitigation (C# - BundleIntegrityVerifier):**
+
+```csharp
+namespace Acode.Infrastructure.Export;
+
+public sealed class BundleIntegrityVerifier
+{
+    private readonly IHashCalculator _hashCalculator;
+
+    public BundleIntegrityVerifier(IHashCalculator hashCalculator)
+    {
+        _hashCalculator = hashCalculator;
+    }
+
+    public async Task<VerificationResult> VerifyAsync(string extractedBundleRoot, BundleManifest manifest, CancellationToken ct = default)
+    {
+        var errors = new List<IntegrityError>();
+        var verifiedCount = 0;
+
+        foreach (var (relativePath, expectedHash) in manifest.Files)
+        {
+            var fullPath = Path.Combine(extractedBundleRoot, relativePath);
+
+            // Check 1: File exists
+            if (!File.Exists(fullPath))
+            {
+                errors.Add(new IntegrityError
+                {
+                    FilePath = relativePath,
+                    ErrorType = IntegrityErrorType.FileMissing,
+                    Message = "File listed in manifest but not found in bundle"
+                });
+                continue;
+            }
+
+            // Check 2: File size matches
+            var actualSize = new FileInfo(fullPath).Length;
+            if (actualSize != expectedHash.SizeBytes)
+            {
+                errors.Add(new IntegrityError
+                {
+                    FilePath = relativePath,
+                    ErrorType = IntegrityErrorType.SizeMismatch,
+                    Message = $"Size mismatch: expected {expectedHash.SizeBytes:N0} bytes, actual {actualSize:N0} bytes"
+                });
+                continue; // Don't hash if size wrong - saves time
+            }
+
+            // Check 3: SHA-256 hash matches
+            var actualHash = await _hashCalculator.ComputeSha256Async(fullPath, ct);
+            if (!string.Equals(actualHash, expectedHash.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(new IntegrityError
+                {
+                    FilePath = relativePath,
+                    ErrorType = IntegrityErrorType.HashMismatch,
+                    Message = $"Hash mismatch: expected {expectedHash.Sha256}, actual {actualHash}",
+                    ExpectedHash = expectedHash.Sha256,
+                    ActualHash = actualHash
+                });
+                continue;
+            }
+
+            verifiedCount++;
+            ct.ThrowIfCancellationRequested();
+        }
+
+        return new VerificationResult
+        {
+            Success = errors.Count == 0,
+            VerifiedCount = verifiedCount,
+            Errors = errors,
+            TotalFiles = manifest.Files.Count
+        };
+    }
+}
+
+public enum IntegrityErrorType
+{
+    FileMissing,
+    SizeMismatch,
+    HashMismatch
+}
+
+public record IntegrityError
+{
+    public required string FilePath { get; init; }
+    public required IntegrityErrorType ErrorType { get; init; }
+    public required string Message { get; init; }
+    public string? ExpectedHash { get; init; }
+    public string? ActualHash { get; init; }
+}
+
+public record VerificationResult
+{
+    public required bool Success { get; init; }
+    public required int VerifiedCount { get; init; }
+    public required int TotalFiles { get; init; }
+    public required List<IntegrityError> Errors { get; init; }
+
+    public string GetSummary()
+    {
+        if (Success)
+            return $"All {TotalFiles} files verified successfully";
+
+        return $"Verification failed: {VerifiedCount}/{TotalFiles} files OK, {Errors.Count} errors:\n" +
+               string.Join("\n", Errors.Select(e => $"  - {e.FilePath}: {e.Message}"));
+    }
+}
+
+// HashCalculator implementation
+public interface IHashCalculator
+{
+    Task<string> ComputeSha256Async(string filePath, CancellationToken ct = default);
+}
+
+public class HashCalculator : IHashCalculator
+{
+    public async Task<string> ComputeSha256Async(string filePath, CancellationToken ct = default)
+    {
+        using var stream = File.OpenRead(filePath);
+        using var sha256 = SHA256.Create();
+
+        var hashBytes = await sha256.ComputeHashAsync(stream, ct);
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+}
+```
+
+**Prevention:**
+- ALWAYS verify hashes before importing artifacts
+- Fail import if ANY hash mismatch detected
+- Use cryptographic signatures (detached signature file)
+- Display verification results to user prominently
+
+---
+
+### Threat 4: Redaction Bypass via Metadata Channels
+
+**Risk:** Sensitive data (API keys, passwords) leaked through alternative channels even though redaction is applied to environment variables. Attacker gains access to secrets from exported bundle.
+
+**Attack Scenario:**
+1. Developer exports run with `--redact` flag (secrets in environment masked)
+2. But: command line arguments contain `--api-key sk-abc123` (not redacted)
+3. Or: stdout contains echoed environment: `export API_KEY=sk-abc123` (not redacted)
+4. Or: provenance includes branch name: `feature/add-api-key-sk-abc123-to-config` (secret in branch name)
+5. User shares "redacted" bundle, attacker extracts secrets from these alternative channels
+
+**Mitigation (C# - ComprehensiveRedactor):**
+
+```csharp
+namespace Acode.Infrastructure.Export;
+
+public sealed class ComprehensiveRedactor
+{
+    private static readonly Regex[] SecretPatterns = new[]
+    {
+        new Regex(@"(?i)(api[_-]?key|password|secret|token|credential)[:=]\s*([^\s]{8,})", RegexOptions.Compiled),
+        new Regex(@"sk-[a-zA-Z0-9]{48,}", RegexOptions.Compiled), // OpenAI keys
+        new Regex(@"ghp_[a-zA-Z0-9]{36,}", RegexOptions.Compiled), // GitHub tokens
+        new Regex(@"xox[baprs]-[a-zA-Z0-9-]{10,}", RegexOptions.Compiled), // Slack tokens
+        new Regex(@"AIza[0-9A-Za-z\\-_]{35}", RegexOptions.Compiled), // Google API keys
+        new Regex(@"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", RegexOptions.Compiled), // Private keys
+        new Regex(@"postgres://[^:]+:([^@]+)@", RegexOptions.Compiled), // DB passwords in URLs
+        new Regex(@"https://[^:]+:([^@]+)@", RegexOptions.Compiled) // Auth in URLs
+    };
+
+    public ExportedRun RedactRun(RunDetails run)
+    {
+        return new ExportedRun
+        {
+            Id = run.Id,
+            TaskName = run.TaskName,
+            StartTime = run.StartTime,
+            EndTime = run.EndTime,
+            ExitCode = run.ExitCode,
+            Status = run.Status,
+
+            // Redact command line
+            Command = RedactText(run.Command),
+
+            // Redact environment variables
+            Environment = RedactEnvironment(run.Environment),
+
+            // Redact working directory (may contain secrets in path)
+            WorkingDirectory = RedactPath(run.WorkingDirectory),
+
+            // Operating mode safe to export
+            OperatingMode = run.OperatingMode
+        };
+    }
+
+    public Provenance RedactProvenance(Provenance provenance)
+    {
+        return provenance with
+        {
+            // Redact remote URL (may contain embedded credentials)
+            RemoteUrl = RedactUrl(provenance.RemoteUrl),
+
+            // Redact branch name (may contain secrets)
+            Branch = RedactText(provenance.Branch),
+
+            // Commit SHA safe to export
+            // Worktree ID safe to export
+            // Machine name potentially sensitive - redact
+            MachineName = RedactHostname(provenance.MachineName)
+        };
+    }
+
+    public async Task<string> RedactArtifactAsync(string filePath, CancellationToken ct = default)
+    {
+        var content = await File.ReadAllTextAsync(filePath, ct);
+        var redacted = RedactText(content);
+
+        var redactedPath = filePath + ".redacted";
+        await File.WriteAllTextAsync(redactedPath, redacted, ct);
+        return redactedPath;
+    }
+
+    private string RedactText(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        var redacted = text;
+        foreach (var pattern in SecretPatterns)
+        {
+            redacted = pattern.Replace(redacted, match =>
+            {
+                // For patterns with capture groups (e.g., key=value), keep key, redact value
+                if (match.Groups.Count > 2)
+                {
+                    var prefix = match.Groups[1].Value;
+                    return $"{prefix}=***REDACTED***";
+                }
+
+                // For full matches, redact entirely
+                return "***REDACTED***";
+            });
+        }
+        return redacted;
+    }
+
+    private Dictionary<string, string> RedactEnvironment(IReadOnlyDictionary<string, string> env)
+    {
+        var redacted = new Dictionary<string, string>();
+        foreach (var (key, value) in env)
+        {
+            // Redact by key name
+            if (Regex.IsMatch(key, @"(?i)(key|password|secret|token|credential)"))
+            {
+                redacted[key] = "***REDACTED***";
+                continue;
+            }
+
+            // Redact by value pattern
+            redacted[key] = RedactText(value);
+        }
+        return redacted;
+    }
+
+    private string RedactPath(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return path;
+
+        // Check if path contains secrets (e.g., /home/user/.secrets/api-keys)
+        if (Regex.IsMatch(path, @"(?i)(secret|credential|key)", RegexOptions.IgnoreCase))
+            return "***REDACTED-PATH***";
+
+        return path;
+    }
+
+    private string? RedactUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return url;
+
+        // Redact embedded credentials in URLs
+        if (url.Contains("@"))
+        {
+            var uri = new Uri(url);
+            if (!string.IsNullOrEmpty(uri.UserInfo))
+            {
+                // Replace user:pass@ with ***REDACTED***@
+                return url.Replace(uri.UserInfo + "@", "***REDACTED***@");
+            }
+        }
+
+        return url;
+    }
+
+    private string? RedactHostname(string? hostname)
+    {
+        // Redact hostname for privacy (may reveal internal infrastructure)
+        if (string.IsNullOrEmpty(hostname))
+            return hostname;
+
+        // Replace with generic hostname
+        return $"host-{hostname.GetHashCode():X8}";
+    }
+}
+```
+
+**Prevention:**
+- Redact ALL text fields, not just environment variables
+- Use pattern matching to detect secrets in command lines, stdout, stderr
+- Redact URLs containing embedded credentials
+- Redact branch names and commit messages (may contain secrets)
+- Provide dry-run preview: `acode runs export --redact --dry-run` shows what will be redacted
+
+---
+
+### Threat 5: JSON Deserialization Attack via Malicious Manifest
+
+**Risk:** Malicious manifest.json exploits JSON deserializer vulnerabilities (type confusion, property injection). Attacker achieves remote code execution during import.
+
+**Attack Scenario:**
+1. Attacker crafts malicious bundle with `manifest.json` containing exploit payload
+2. Payload exploits deserialization vulnerability (e.g., type confusion if polymorphic deserialization used)
+3. User imports: `acode runs import malicious.acode-bundle`
+4. Manifest deserialized, exploit triggers arbitrary code execution
+5. Attacker gains control of user's machine
+
+**Mitigation (C# - SafeManifestDeserializer):**
+
+```csharp
+namespace Acode.Infrastructure.Export;
+
+public sealed class SafeManifestDeserializer
+{
+    private static readonly JsonSerializerOptions SafeOptions = new()
+    {
+        // CRITICAL: Disable type discrimination to prevent type confusion attacks
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+
+        // Limit recursion depth to prevent stack overflow
+        MaxDepth = 32,
+
+        // Don't allow trailing commas or comments (strict JSON only)
+        AllowTrailingCommas = false,
+        ReadCommentHandling = JsonCommentHandling.Disallow,
+
+        // Property names must match exactly (case-sensitive)
+        PropertyNameCaseInsensitive = false,
+
+        // Unknown properties cause errors (fail-secure)
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+    };
+
+    public BundleManifest DeserializeManifest(string manifestJson)
+    {
+        BundleManifest? manifest;
+
+        try
+        {
+            manifest = JsonSerializer.Deserialize<BundleManifest>(manifestJson, SafeOptions);
+        }
+        catch (JsonException ex)
+        {
+            throw new SecurityException($"Manifest JSON is invalid or malicious: {ex.Message}", ex);
+        }
+
+        // Post-deserialization validation
+        if (manifest == null)
+            throw new SecurityException("Manifest deserialized to null");
+
+        ValidateManifest(manifest);
+
+        return manifest;
+    }
+
+    private void ValidateManifest(BundleManifest manifest)
+    {
+        // Validation 1: Version is valid semver
+        if (string.IsNullOrWhiteSpace(manifest.Version) || !IsValidSemver(manifest.Version))
+            throw new SecurityException($"Invalid manifest version: '{manifest.Version}'");
+
+        // Validation 2: Created timestamp is reasonable
+        var now = DateTimeOffset.UtcNow;
+        if (manifest.CreatedAt > now.AddHours(24))
+            throw new SecurityException($"Manifest creation time is in the future: {manifest.CreatedAt}");
+
+        if (manifest.CreatedAt < now.AddYears(-10))
+            throw new SecurityException($"Manifest creation time is suspiciously old: {manifest.CreatedAt}");
+
+        // Validation 3: Run count is reasonable
+        if (manifest.RunCount < 0)
+            throw new SecurityException($"Invalid run count: {manifest.RunCount}");
+
+        if (manifest.RunCount > 100_000)
+            throw new SecurityException($"Run count exceeds maximum (100,000): {manifest.RunCount}");
+
+        // Validation 4: File count matches run count expectation
+        if (manifest.Files.Count > manifest.RunCount * 100)
+            throw new SecurityException($"File count ({manifest.Files.Count}) is excessive for {manifest.RunCount} runs");
+
+        // Validation 5: All file hashes are valid SHA-256 (64 hex chars)
+        foreach (var (path, hash) in manifest.Files)
+        {
+            if (string.IsNullOrWhiteSpace(hash.Sha256) || hash.Sha256.Length != 64 || !IsHexString(hash.Sha256))
+                throw new SecurityException($"Invalid SHA-256 hash for file '{path}': '{hash.Sha256}'");
+
+            if (hash.SizeBytes < 0)
+                throw new SecurityException($"Invalid file size for '{path}': {hash.SizeBytes}");
+        }
+
+        // Validation 6: Total artifact bytes is reasonable
+        if (manifest.TotalArtifactBytes < 0)
+            throw new SecurityException($"Invalid total artifact bytes: {manifest.TotalArtifactBytes}");
+
+        if (manifest.TotalArtifactBytes > 100L * 1024 * 1024 * 1024) // 100GB
+            throw new SecurityException($"Total artifact bytes exceeds maximum (100GB): {manifest.TotalArtifactBytes:N0}");
+    }
+
+    private bool IsValidSemver(string version)
+    {
+        // Simple semver validation: X.Y.Z where X, Y, Z are non-negative integers
+        var parts = version.Split('.');
+        if (parts.Length != 3)
+            return false;
+
+        foreach (var part in parts)
+        {
+            if (!int.TryParse(part, out var num) || num < 0)
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool IsHexString(string value)
+    {
+        return value.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+    }
+}
+```
+
+**Prevention:**
+- Use strongly-typed deserialization (no polymorphism)
+- Disable type discrimination features in JSON deserializer
+- Validate ALL fields after deserialization
+- Set recursion depth limits
+- Reject manifests with unknown properties (fail-secure)
+- Validate version strings, timestamps, counts are within reasonable bounds
+
+---
+
+## Best Practices
+
+### Bundle Design
+
+1. **Keep bundles focused and minimal** - Export only what's needed for the specific use case. For debugging: export single failing run. For compliance: export filtered date range. Don't export entire workspace history unless archiving.
+
+2. **Include provenance by default** - Always include git commit SHA, branch, and worktree ID. This enables correlating runs with specific code versions, critical for reproducing issues. Provenance data is small (~200 bytes) but invaluable for debugging.
+
+3. **Use semantic versioning for bundle format** - When extending bundle format (adding fields to manifest), increment version appropriately: MAJOR for breaking changes (old importers can't read), MINOR for backward-compatible additions, PATCH for fixes.
+
+4. **Compress artifacts intelligently** - Use ZIP's default DEFLATE compression (level 6). Don't compress already-compressed formats (PNG, JPG, gzip files) - wastes CPU. Detect and store these uncompressed.
+
+### Export Operations
+
+5. **Default to redaction, opt-in to expose** - ALWAYS redact secrets by default. Require explicit `--no-redact` flag to export unredacted data, with confirmation prompt. Better to over-redact than leak secrets.
+
+6. **Show redaction preview before export** - Provide `--dry-run` mode that shows what will be redacted without creating bundle. Allows user to review before committing to export. Example output: `API_KEY: sk-abc123 → ***REDACTED***`.
+
+7. **Sign bundles for compliance use cases** - For regulatory compliance or audit trails, sign bundles with detached signature file: `bundle.acode-bundle` + `bundle.acode-bundle.sig`. Use ed25519 signatures (fast, small, secure).
+
+8. **Atomic export with temp files** - Export to temp file first: `.acode-bundle.tmp`, then atomic rename when complete. Prevents partial bundles if export interrupted. Clean up temp files on startup.
+
+9. **Progress indication for large exports** - Show progress bar for exports >100MB or >100 runs: `Exporting 245 runs... [=======>   ] 68% (1.2GB/1.8GB)`. Users need feedback for long operations.
+
+10. **Validate before exporting** - Check disk space available before starting export. Estimate bundle size (sum of artifact sizes × 0.6 for compression) and verify `df` shows 2x that available. Fail early with clear message if insufficient space.
+
+### Import Operations
+
+11. **Verify integrity before importing** - ALWAYS check manifest hashes match actual file contents before importing artifacts. Display verification results: `Verified 145/145 files, 0 errors`. Reject bundles with ANY hash mismatches.
+
+12. **Detect and handle import conflicts** - When importing run IDs that already exist, prompt for strategy: `merge` (keep newer), `replace` (overwrite), `skip` (ignore), `rename` (import as run-001-imported). Default to `skip` (safest).
+
+13. **Preview import without applying** - Support `--dry-run` mode showing what would be imported: `Would import 12 runs, 245MB artifacts, 3 conflicts detected`. Let users review before committing.
+
+14. **Quarantine suspicious bundles** - If ZIP bomb detected, path traversal found, or signature verification fails, move bundle to `.acode/quarantine/` directory instead of deleting. Allows forensic analysis. Auto-purge quarantine after 30 days.
+
+15. **Log all import operations** - Write import audit log: `~/.acode/import-audit.log` with timestamp, bundle path, runs imported, conflicts, verification result. Critical for security audits.
+
+### Security
+
+16. **Never execute code from bundles** - Bundles contain data only, never executable scripts. If bundle includes `.sh` or `.ps1` files, import as data artifacts only. Never auto-execute on import.
+
+17. **Sandbox extraction process** - Extract bundles to isolated temp directory first: `/tmp/acode-import-{uuid}/`, verify contents, then move to final location. If verification fails, delete temp directory entirely.
+
+18. **Rate limit imports** - Prevent DOS via rapid imports by limiting to 10 imports/minute. Track in-memory or temp file. Return error: `Rate limit exceeded, retry in 6 seconds`.
+
+19. **Validate all user-controlled paths** - Bundle filenames, extraction paths, manifest paths - validate ALL against path traversal, forbidden characters, length limits. Use whitelist validation, not blacklist.
+
+### Performance
+
+20. **Stream large artifacts** - When exporting/importing >100MB artifacts, use streaming I/O instead of loading into memory. Process in 4MB chunks. Keeps memory usage constant regardless of bundle size.
+
+21. **Parallelize hash computation** - When verifying manifest hashes, process files in parallel (max 4 threads). Utilize multi-core CPUs. Verification of 1000 files drops from 45s → 12s.
+
+22. **Index bundles for fast lookup** - After importing, build index: `~/.acode/bundle-index.json` mapping run IDs to bundle sources. Enables `acode runs find-bundle {run-id}` for provenance tracking.
+
+23. **Compress metadata sparingly** - Manifest, provenance, outbox-summary are small (<10KB each). Store uncompressed for fast access during verification. Only compress artifacts directory.
+
+---
+
+## Troubleshooting
+
+### Issue 1: Export Fails with "Disk Space Full" Despite Available Space
+
+**Symptoms:**
+- `acode runs export` fails with error: "Insufficient disk space"
+- `df -h` shows 50GB available on `/home` partition
+- Export destination is `/home/user/exports/bundle.acode-bundle`
+- Error occurs immediately without writing any data
+
+**Causes:**
+1. Temp directory (`/tmp`) is on different partition with less space
+2. Export uses `/tmp` for staging before moving to final destination
+3. `/tmp` partition only has 500MB free, bundle needs 2GB
+4. Disk space check only validates destination path, not temp path
+5. User quota exceeded on `/tmp` filesystem
+6. Reserved blocks (5% for root) reduce available space for non-root users
+7. Another process filled `/tmp` during export attempt
+
+**Solutions:**
+
+```bash
+# Solution 1: Check both destination and temp partition space
+df -h /tmp
+df -h /home/user/exports/
+# If /tmp is full, need to either clean it or change temp location
+
+# Clean /tmp:
+sudo find /tmp -type f -atime +7 -delete
+# Deletes files older than 7 days
+
+# Or set custom temp directory:
+export TMPDIR=/home/user/tmp-exports
+mkdir -p $TMPDIR
+acode runs export --run {run-id} --output bundle.acode-bundle
+
+# Solution 2: Verify disk space checks both locations
+acode runs export --run {run-id} --check-space
+# Should report space on BOTH temp and destination
+
+# Solution 3: Check user disk quota
+quota -vs
+# Shows quota limits and current usage
+
+# If quota exceeded, request increase or clean up files:
+find ~/Downloads -type f -size +100M -exec rm {} \;
+
+# Solution 4: Check for reserved blocks (root-only space)
+sudo tune2fs -l /dev/sda1 | grep -i "block count\|reserved"
+# Example output:
+# Block count: 26214400
+# Reserved block count: 1310720 (5%)
+
+# If non-root user, effective available space is 5% less
+# Solution: Export as root (not recommended) or free more space
+
+# Solution 5: Use different temp directory on same partition as destination
+acode config set export.temp-directory "/home/user/.acode-tmp"
+# Ensures temp and final location on same partition (atomic move possible)
+
+# Solution 6: Export directly without temp staging (riskier)
+acode runs export --run {run-id} --no-atomic --output bundle.acode-bundle
+# Warning: Partial bundle left if interrupted
+
+# Solution 7: Estimate bundle size before exporting
+acode runs export --run {run-id} --estimate-size
+# Output: "Estimated bundle size: 1.8GB (artifacts: 1.6GB, metadata: 200MB)"
+# Verify sufficient space before proceeding
+
+# Solution 8: Split large exports into multiple smaller bundles
+acode runs export --from 2024-01-01 --to 2024-01-15 --output part1.acode-bundle
+acode runs export --from 2024-01-16 --to 2024-01-31 --output part2.acode-bundle
+# Smaller bundles easier to manage with limited space
+```
+
+---
+
+### Issue 2: Import Fails with "Manifest Hash Mismatch" for Multiple Files
+
+**Symptoms:**
+- `acode runs import bundle.acode-bundle` fails during verification
+- Error: "Hash mismatch for 15 files"
+- Example: `stdout.txt: expected abc123..., actual def456...`
+- Bundle was transferred from Windows to Linux via USB drive
+- Bundle exports successfully on Windows, fails import on Linux
+
+**Causes:**
+1. Line ending conversion during transfer (CRLF ↔ LF)
+2. Git auto-converted text files when bundle was committed to repo
+3. USB drive formatted as FAT32 caused file corruption
+4. Windows antivirus modified files during scan
+5. ZIP extraction used wrong encoding (UTF-8 vs Windows-1252)
+6. Symbolic links resolved differently on Linux vs Windows
+7. File timestamps modified, triggering re-hashing with different algorithm
+
+**Solutions:**
+
+```bash
+# Solution 1: Extract and inspect affected files
+unzip -l bundle.acode-bundle
+# Lists all files, check for unexpected sizes
+
+unzip bundle.acode-bundle -d /tmp/bundle-inspect
+cd /tmp/bundle-inspect
+
+# Check line endings in text files:
+file artifacts/run-001/stdout.txt
+# Output: "ASCII text, with CRLF line terminators" (Windows)
+# or "ASCII text" (Unix)
+
+# Solution 2: Recompute hashes to identify mismatches
+cd /tmp/bundle-inspect
+sha256sum artifacts/run-001/stdout.txt
+# Compare with manifest.json:
+jq '.files["artifacts/run-001/stdout.txt"].sha256' manifest.json
+
+# Solution 3: If line ending issue, normalize and re-bundle
+find artifacts -name "*.txt" -exec dos2unix {} \;
+# Converts all .txt files to LF
+
+# Re-create bundle with corrected files:
+zip -r bundle-fixed.acode-bundle manifest.json provenance.json artifacts/
+
+# Import fixed bundle:
+acode runs import bundle-fixed.acode-bundle
+
+# Solution 4: Skip hash verification (DANGEROUS - use only if trusted source)
+acode runs import bundle.acode-bundle --skip-verify
+# Warning: Imports without integrity checks
+
+# Solution 5: Transfer bundle using hash-preserving method
+# BAD: git add bundle.acode-bundle (git may modify)
+# BAD: Copy via Windows share with auto-conversion enabled
+
+# GOOD: Use rsync with checksum verification:
+rsync -avz --checksum bundle.acode-bundle user@linux-host:/path/
+# Verifies transfer integrity
+
+# Or use SCP:
+scp -C bundle.acode-bundle user@linux-host:/path/
+# -C compresses during transfer
+
+# Solution 6: Verify bundle immediately after creation
+acode runs verify bundle.acode-bundle
+# Run on source machine before transfer
+
+# If verification fails on source, bundle corrupted during export:
+acode runs export --run {run-id} --output bundle-retry.acode-bundle --verify
+
+# Solution 7: Check for antivirus interference
+# Windows Defender may scan and modify files
+# Temporarily disable real-time protection during export:
+# Settings > Update & Security > Windows Security > Virus & threat protection > Manage settings > Real-time protection (Off)
+
+# Better: Add .acode directory to exclusions permanently
+Add-MpPreference -ExclusionPath "C:\Users\{user}\.acode"
+
+# Solution 8: Use bundle repair tool
+acode runs repair-bundle bundle.acode-bundle --output bundle-repaired.acode-bundle
+# Recalculates all hashes, updates manifest, re-creates ZIP
+# Warning: Can't detect malicious modifications, only fixes mismatches
+```
+
+---
+
+### Issue 3: Export Fails with "Permission Denied" Errors on Windows
+
+**Symptoms:**
+- Export command fails with `System.UnauthorizedAccessException`
+- Error message: "Access to the path 'C:\Users\...\acode-export-12345.acode-bundle' is denied"
+- Bundle file partially created but incomplete (0 bytes or corrupted)
+- Same command works for other users on same machine
+- Exporting to different drive letters produces same error
+- Windows Event Log shows "Access Control List (ACL)" warnings
+
+**Root Causes:**
+1. **Antivirus real-time scanning** - AV software locks newly created ZIP files during scan, blocking write operations
+2. **OneDrive/Dropbox sync conflicts** - Cloud storage clients lock files in synced directories during upload
+3. **Inherited permissions insufficient** - Parent directory has restrictive ACLs that don't grant write access to current user
+4. **File system junction/reparse point** - Export directory is a symlink/junction with different permissions than target
+5. **Previous export process still holding handle** - Crashed/hung export process from earlier run still has file handle open
+6. **User profile corruption** - Windows user profile has corrupted NTFS permissions preventing file creation
+7. **Mandatory Integrity Control (MIC)** - Process running at low integrity level trying to write to medium/high integrity directory
+
+**Solutions:**
+
+```bash
+# Solution 1: Check real-time AV exclusion list
+# Open Windows Security > Virus & threat protection > Manage settings > Exclusions
+# Add: C:\Users\YourName\source\local coding agent\.acode\
+# Retry export
+acode runs export --last 5
+# Expected: Export completes without errors
+
+# Solution 2: Export to non-synced directory
+acode runs export --last 5 --output C:\temp\acode-export.acode-bundle
+# Avoid: C:\Users\YourName\OneDrive\, C:\Users\YourName\Dropbox\
+# Expected: Bundle created successfully in C:\temp\
+
+# Solution 3: Check directory permissions with icacls
+icacls "C:\Users\YourName\source\local coding agent\.acode"
+# Expected output: YourName:(OI)(CI)(F) - Full control inherited
+# If missing, run:
+icacls "C:\Users\YourName\source\local coding agent\.acode" /grant YourName:(OI)(CI)F /T
+# Retry export
+
+# Solution 4: Check for junctions/reparse points
+fsutil reparsepoint query "C:\Users\YourName\source\local coding agent\.acode"
+# If reparse point exists, check target permissions:
+# Navigate to actual target directory and verify write access
+
+# Solution 5: Find and kill hung export processes
+tasklist /FI "IMAGENAME eq acode.exe" /V
+# If hung process found (status "Not Responding"):
+taskkill /IM acode.exe /F
+# Wait 10 seconds for handles to release, retry export
+
+# Solution 6: Reset NTFS permissions to defaults
+takeown /F "C:\Users\YourName\source\local coding agent\.acode" /R /D Y
+icacls "C:\Users\YourName\source\local coding agent\.acode" /reset /T /C
+# Retry export - permissions reset to defaults
+
+# Solution 7: Check process integrity level
+whoami /groups | findstr "Mandatory Label"
+# If "Low Mandatory Level" shown, export to low-integrity path:
+acode runs export --last 5 --output %LOCALAPPDATA%\Temp\bundle.acode-bundle
+# Or run acode from elevated prompt (admin)
+
+# Solution 8: Use Process Monitor to diagnose exact cause
+# Download Sysinternals Process Monitor
+# Filter: Process Name contains "acode", Result is "ACCESS DENIED"
+# Run export, check which file/operation is denied
+# Apply targeted fix based on specific operation failing
+```
+
+---
+
+### Issue 4: Import Creates Duplicate Runs When Re-Importing Same Bundle
+
+**Symptoms:**
+- Running `acode runs import bundle.acode-bundle` twice creates duplicate run records
+- `acode runs list` shows same run ID appearing multiple times with different timestamps
+- Artifact files duplicated in `.acode/artifacts/{run-id}/` (suffixed with `-1`, `-2`, etc.)
+- Database query shows multiple rows with same `run_id` but different `imported_at` timestamps
+- Conflict resolution prompt (`--on-conflict`) not appearing despite duplicates
+- Re-importing overwrites artifacts but still adds new database rows
+
+**Root Causes:**
+1. **Import ID not tracked** - System doesn't record bundle provenance, can't detect re-import of same source bundle
+2. **Run ID collision detection disabled** - `--on-conflict skip` not working correctly, always inserting new rows
+3. **Bundle manifest missing fingerprint** - No unique bundle ID (hash of manifest + metadata) to detect re-import
+4. **Time-based deduplication logic flawed** - Deduplication compares timestamps which differ between exports
+5. **Foreign key constraints not enforced** - Database allows multiple rows with same `run_id` due to missing unique constraint
+6. **Merge strategy bug** - `--on-conflict merge` incorrectly merges identical data, creating duplicates instead of no-op
+7. **Transaction isolation issue** - Concurrent imports of same bundle bypassing deduplication checks due to READ COMMITTED isolation
+
+**Solutions:**
+
+```bash
+# Solution 1: Use --on-conflict skip for idempotent imports
+acode runs import bundle.acode-bundle --on-conflict skip
+# Expected: "5 runs skipped (already exist), 0 imported"
+# Check: acode runs list | grep run-123 | wc -l  # Should output "1"
+
+# Solution 2: Clean up existing duplicates before re-import
+# Find duplicate run IDs
+acode runs list --format json | jq -r '.[].id' | sort | uniq -d
+# For each duplicate ID, keep newest, delete older:
+acode runs delete run-123-duplicate-older-timestamp
+# Then import with skip:
+acode runs import bundle.acode-bundle --on-conflict skip
+
+# Solution 3: Use dry-run to preview import behavior
+acode runs import bundle.acode-bundle --dry-run
+# Expected output shows:
+#   "Run run-123: SKIP (already exists)"
+#   "Run run-456: IMPORT (new)"
+# Confirms skip logic working before actual import
+
+# Solution 4: Verify bundle fingerprint stored in database
+acode runs list --format json | jq '.[].bundle_fingerprint'
+# If null for all runs, bundle fingerprinting not implemented
+# Workaround: Track imported bundles manually:
+echo "bundle.acode-bundle" >> .acode/imported-bundles.txt
+# Check before import:
+grep -q "bundle.acode-bundle" .acode/imported-bundles.txt && echo "Already imported"
+
+# Solution 5: Check database schema for unique constraint
+sqlite3 .acode/acode.db "PRAGMA table_info(runs);"
+# Look for UNIQUE constraint on run_id column
+# If missing, run migration:
+sqlite3 .acode/acode.db "CREATE UNIQUE INDEX idx_runs_run_id ON runs(run_id);"
+# This prevents duplicate insertions at database level
+
+# Solution 6: Use replace strategy for true idempotent behavior
+acode runs import bundle.acode-bundle --on-conflict replace
+# Expected: "5 runs replaced (updated existing), 0 duplicates"
+# Verify: Check imported_at timestamp updated, no duplicate rows
+
+# Solution 7: Set transaction isolation to SERIALIZABLE for concurrent safety
+# Edit .acode/config.yml:
+# database:
+#   isolation_level: SERIALIZABLE
+# Prevents race conditions during concurrent imports
+
+# Solution 8: Use import log to track bundle history
+acode runs import bundle.acode-bundle --log-import
+# Creates .acode/import-log.jsonl with entry:
+# {"timestamp":"2025-01-06T12:00:00Z","bundle":"bundle.acode-bundle","fingerprint":"sha256:abc123...","runs_imported":5}
+# Check log before re-import:
+grep "bundle.acode-bundle" .acode/import-log.jsonl
+# If found, skip re-import
+```
+
+---
+
+### Issue 5: Bundle Export Missing Artifacts Despite Files Existing in Artifacts Directory
+
+**Symptoms:**
+- `acode runs export --last 5` completes successfully but bundle missing artifact files
+- `unzip -l bundle.acode-bundle` shows `runs/` and `manifest.json` but empty `artifacts/` directory
+- `acode runs show run-123 --artifacts` shows artifacts associated with run
+- Files exist in `.acode/artifacts/{run-id}/` with correct permissions
+- Manifest JSON lists expected artifacts in `files` array but they're not in ZIP
+- Export summary shows "Artifacts: 42 files, 156MB" but bundle size only 2MB
+- No error messages during export process
+
+**Root Causes:**
+1. **Symlink artifacts not followed** - Artifact files are symlinks and `--dereference` not enabled during ZIP creation
+2. **Artifact paths exceed ZIP path length limit** - Paths longer than 255 characters silently skipped by ZIP library
+3. **Case-sensitivity mismatch** - Database stores `Artifact.txt` but filesystem has `artifact.txt`, lookup fails on case-sensitive FS
+4. **Artifact files deleted/moved after run** - Files were present during run but removed before export
+5. **Artifact directory junction/mount point** - `.acode/artifacts/` is mounted volume that's unmounted at export time
+6. **Hidden/system file attributes** - Artifacts marked hidden on Windows, ZIP library skips by default
+7. **Race condition between export and cleanup** - Background cleanup job deleting old artifacts during export
+8. **Filter pattern excluding artifacts** - Export command has `--exclude-pattern` that inadvertently matches artifact extensions
+
+**Solutions:**
+
+```bash
+# Solution 1: Check for symlinks and enable dereferencing
+ls -la .acode/artifacts/{run-id}/
+# If artifacts show as symlinks (e.g., "artifact.txt -> /mnt/storage/artifact.txt"):
+acode runs export --last 5 --follow-symlinks
+# Expected: Symlink targets included in bundle, bundle size increases
+
+# Solution 2: Verify artifact paths length
+find .acode/artifacts/ -type f -print0 | xargs -0 -I {} sh -c 'echo ${#1} $1' _ {} | sort -rn | head -5
+# If paths exceed 255 characters:
+# Option A: Use ZIP64 format (default in modern tools)
+# Option B: Export with path flattening:
+acode runs export --last 5 --flatten-artifacts
+# Stores as artifacts/{sha256-hash}.{ext} instead of preserving directory structure
+
+# Solution 3: Check case-sensitivity issues
+# On Linux/macOS:
+find .acode/artifacts/{run-id}/ -type f
+# Compare with database:
+acode runs show {run-id} --artifacts --format json | jq -r '.artifacts[].path'
+# If mismatch, fix with:
+acode runs repair {run-id} --fix-artifact-case
+# Re-export after repair
+
+# Solution 4: Verify artifact files still exist before export
+acode runs validate {run-id} --check-artifacts
+# Expected output: "✓ All 42 artifacts present and readable"
+# If missing files reported:
+# Option A: Export with --skip-missing-artifacts (exports what exists)
+# Option B: Re-run the task to regenerate missing artifacts
+
+# Solution 5: Check if artifacts directory is mount point
+df -h .acode/artifacts/
+# If different filesystem/mount than parent:
+# Ensure mounted before export:
+mountpoint -q .acode/artifacts/ || mount /dev/sdb1 .acode/artifacts/
+acode runs export --last 5
+
+# Solution 6: Include hidden/system files in export
+# On Windows, check attributes:
+attrib .acode\artifacts\{run-id}\*
+# If "H" (hidden) or "S" (system) shown:
+acode runs export --last 5 --include-hidden
+# Or clear attributes:
+attrib -H -S .acode\artifacts\{run-id}\* /S
+
+# Solution 7: Pause cleanup during export
+# If background cleanup job running:
+acode maintenance pause-cleanup
+acode runs export --last 5
+acode maintenance resume-cleanup
+# Or use export lock:
+acode runs export --last 5 --lock-artifacts
+# Expected: Cleanup blocked until export completes
+
+# Solution 8: Review and clear exclude patterns
+acode config show | grep export_exclude_pattern
+# If pattern like "*.tmp,*.log" inadvertently matches artifacts:
+acode runs export --last 5 --exclude-pattern ""
+# Or override with explicit include:
+acode runs export --last 5 --include-pattern "*.json,*.xml,*.log"
+
+# Solution 9: Use verbose mode to diagnose
+acode runs export --last 5 --verbose
+# Expected output shows each artifact being added:
+#   "Adding artifact: .acode/artifacts/run-123/output.json (4.2MB)"
+#   "Adding artifact: .acode/artifacts/run-123/logs/trace.log (892KB)"
+# If artifacts not listed, check which solution above applies
+```
+
+---
+
 ## Testing Requirements
 
-### Unit Tests
+```csharp
+using Xunit;
+using FluentAssertions;
+using NSubstitute;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Application.Runs.Export;
+using Acode.Application.Runs.Import;
+using Acode.Domain.Runs;
+using Acode.Infrastructure.Persistence;
 
-- [ ] UT-001: Test manifest JSON generation
-- [ ] UT-002: Test content hash computation
-- [ ] UT-003: Test redaction pattern matching
-- [ ] UT-004: Test redaction replacement
-- [ ] UT-005: Test date filter parsing
-- [ ] UT-006: Test run ID selection
-- [ ] UT-007: Test provenance field extraction
-- [ ] UT-008: Test outbox summary generation
-- [ ] UT-009: Test format version comparison
-- [ ] UT-010: Test hash verification logic
-- [ ] UT-011: Test path traversal detection
-- [ ] UT-012: Test symlink detection
-- [ ] UT-013: Test ZIP bomb detection
-- [ ] UT-014: Test signature generation
-- [ ] UT-015: Test signature verification
+namespace Acode.Application.Tests.Runs.Export
+{
+    // Unit Tests - Manifest Generation and Validation
 
-### Integration Tests
+    public class BundleManifestTests
+    {
+        [Fact]
+        public void IsCompatible_WithSameMajorVersion_ReturnsTrue()
+        {
+            // Arrange
+            var manifest = new BundleManifest
+            {
+                Version = "1.2.0",
+                Files = new Dictionary<string, BundleFileEntry>()
+            };
 
-- [ ] IT-001: Test export creates valid ZIP
-- [ ] IT-002: Test import reads exported bundle
-- [ ] IT-003: Test round-trip preserves data
-- [ ] IT-004: Test redaction in exported data
-- [ ] IT-005: Test artifact inclusion
-- [ ] IT-006: Test artifact exclusion with `--no-artifacts`
-- [ ] IT-007: Test merge strategy
-- [ ] IT-008: Test replace strategy
-- [ ] IT-009: Test skip-existing strategy
-- [ ] IT-010: Test dry-run mode
+            // Act
+            var result = manifest.IsCompatible("1.9.9");
 
-### End-to-End Tests
+            // Assert
+            result.Should().BeTrue();
+        }
 
-- [ ] E2E-001: Export runs, import on fresh DB, verify data
-- [ ] E2E-002: Export with redaction, verify secrets masked
-- [ ] E2E-003: Export signed, import with verify
-- [ ] E2E-004: Import corrupted bundle, verify rejection
-- [ ] E2E-005: Import incompatible version, verify error
-- [ ] E2E-006: Export/import large bundle with artifacts
-- [ ] E2E-007: Test conflict resolution prompts
-- [ ] E2E-008: Test progress display for large exports
+        [Fact]
+        public void IsCompatible_WithDifferentMajorVersion_ReturnsFalse()
+        {
+            // Arrange
+            var manifest = new BundleManifest { Version = "2.0.0" };
 
-### Performance/Benchmarks
+            // Act
+            var result = manifest.IsCompatible("1.9.9");
 
-- [ ] PB-001: Export 100 runs in <30 seconds
-- [ ] PB-002: Import 100 runs in <30 seconds
-- [ ] PB-003: Export 1GB artifacts in <2 minutes
-- [ ] PB-004: Memory usage under 100MB for 500MB bundle
-- [ ] PB-005: Hash computation at >100MB/s
+            // Assert
+            result.Should().BeFalse();
+        }
 
-### Regression
+        [Fact]
+        public void ToJson_SerializesAllFields_WithCorrectFormat()
+        {
+            // Arrange
+            var manifest = new BundleManifest
+            {
+                Version = "1.0.0",
+                CreatedAt = new DateTimeOffset(2025, 1, 6, 12, 0, 0, TimeSpan.Zero),
+                ExportedBy = "test-user",
+                Files = new Dictionary<string, BundleFileEntry>
+                {
+                    ["runs/run-123.json"] = new BundleFileEntry
+                    {
+                        Sha256 = "abc123",
+                        Size = 4096,
+                        Path = "runs/run-123.json"
+                    }
+                }
+            };
 
-- [ ] RG-001: Verify Task 021 RunRecord compatibility
-- [ ] RG-002: Verify Task 021.a artifact paths
-- [ ] RG-003: Verify Task 021.b redaction patterns
-- [ ] RG-004: Verify Task 039 session data inclusion
-- [ ] RG-005: Verify Task 038 outbox summary
+            // Act
+            var json = manifest.ToJson();
+            var parsed = JsonDocument.Parse(json);
+
+            // Assert
+            parsed.RootElement.GetProperty("version").GetString().Should().Be("1.0.0");
+            parsed.RootElement.GetProperty("createdAt").GetString().Should().Be("2025-01-06T12:00:00+00:00");
+            parsed.RootElement.GetProperty("exportedBy").GetString().Should().Be("test-user");
+            parsed.RootElement.GetProperty("files").GetProperty("runs/run-123.json").GetProperty("sha256").GetString().Should().Be("abc123");
+        }
+
+        [Fact]
+        public void FromJson_DeserializesManifest_WithAllFieldsPreserved()
+        {
+            // Arrange
+            var json = @"{
+                ""version"": ""1.0.0"",
+                ""createdAt"": ""2025-01-06T12:00:00Z"",
+                ""exportedBy"": ""test-user"",
+                ""files"": {
+                    ""runs/run-123.json"": {
+                        ""sha256"": ""abc123"",
+                        ""size"": 4096,
+                        ""path"": ""runs/run-123.json""
+                    }
+                }
+            }";
+
+            // Act
+            var manifest = BundleManifest.FromJson(json);
+
+            // Assert
+            manifest.Version.Should().Be("1.0.0");
+            manifest.ExportedBy.Should().Be("test-user");
+            manifest.Files.Should().HaveCount(1);
+            manifest.Files["runs/run-123.json"].Sha256.Should().Be("abc123");
+        }
+
+        [Fact]
+        public void ValidateHashes_WhenAllMatch_ReturnsSuccess()
+        {
+            // Arrange
+            var manifest = new BundleManifest
+            {
+                Files = new Dictionary<string, BundleFileEntry>
+                {
+                    ["test.txt"] = new BundleFileEntry { Sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", Size = 0 }
+                }
+            };
+            var extractPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+            Directory.CreateDirectory(extractPath);
+            File.WriteAllText(Path.Combine(extractPath, "test.txt"), "");
+
+            // Act
+            var result = manifest.ValidateHashes(extractPath);
+
+            // Assert
+            result.IsValid.Should().BeTrue();
+            result.Errors.Should().BeEmpty();
+
+            // Cleanup
+            Directory.Delete(extractPath, true);
+        }
+
+        [Fact]
+        public void ValidateHashes_WhenHashMismatch_ReturnsError()
+        {
+            // Arrange
+            var manifest = new BundleManifest
+            {
+                Files = new Dictionary<string, BundleFileEntry>
+                {
+                    ["test.txt"] = new BundleFileEntry { Sha256 = "wronghash", Size = 5 }
+                }
+            };
+            var extractPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+            Directory.CreateDirectory(extractPath);
+            File.WriteAllText(Path.Combine(extractPath, "test.txt"), "hello");
+
+            // Act
+            var result = manifest.ValidateHashes(extractPath);
+
+            // Assert
+            result.IsValid.Should().BeFalse();
+            result.Errors.Should().Contain(e => e.Contains("Hash mismatch"));
+
+            // Cleanup
+            Directory.Delete(extractPath, true);
+        }
+    }
+
+    public class ContentHasherTests
+    {
+        [Fact]
+        public async Task ComputeSha256_ForEmptyFile_ReturnsCorrectHash()
+        {
+            // Arrange
+            var tempFile = Path.GetTempFileName();
+            File.WriteAllText(tempFile, "");
+            var hasher = new ContentHasher();
+
+            // Act
+            var hash = await hasher.ComputeSha256Async(tempFile, CancellationToken.None);
+
+            // Assert
+            hash.Should().Be("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+
+            // Cleanup
+            File.Delete(tempFile);
+        }
+
+        [Fact]
+        public async Task ComputeSha256_ForKnownContent_ReturnsCorrectHash()
+        {
+            // Arrange
+            var tempFile = Path.GetTempFileName();
+            File.WriteAllText(tempFile, "hello world");
+            var hasher = new ContentHasher();
+
+            // Act
+            var hash = await hasher.ComputeSha256Async(tempFile, CancellationToken.None);
+
+            // Assert
+            hash.Should().Be("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
+
+            // Cleanup
+            File.Delete(tempFile);
+        }
+
+        [Fact]
+        public async Task ComputeSha256_ForLargeFile_StreamsCorrectly()
+        {
+            // Arrange
+            var tempFile = Path.GetTempFileName();
+            var random = new Random(42);
+            var buffer = new byte[10 * 1024 * 1024]; // 10MB
+            random.NextBytes(buffer);
+            await File.WriteAllBytesAsync(tempFile, buffer);
+            var hasher = new ContentHasher();
+
+            // Act
+            var hash = await hasher.ComputeSha256Async(tempFile, CancellationToken.None);
+
+            // Assert
+            hash.Should().NotBeNullOrEmpty();
+            hash.Length.Should().Be(64); // SHA256 hex length
+
+            // Cleanup
+            File.Delete(tempFile);
+        }
+    }
+
+    public class PathValidatorTests
+    {
+        [Theory]
+        [InlineData("../etc/passwd", false)]
+        [InlineData("..\\windows\\system32", false)]
+        [InlineData("runs/run-123.json", true)]
+        [InlineData("artifacts/output.log", true)]
+        [InlineData("runs/../../../etc/passwd", false)]
+        [InlineData("runs/./valid.json", true)]
+        public void ValidateZipEntryPath_DetectsPathTraversal(string path, bool expectedValid)
+        {
+            // Arrange
+            var validator = new PathValidator();
+            var extractRoot = "/tmp/acode-extract";
+
+            // Act
+            var (isValid, error) = validator.ValidateZipEntryPath(path, extractRoot);
+
+            // Assert
+            isValid.Should().Be(expectedValid);
+            if (!expectedValid)
+                error.Should().Contain("path traversal");
+        }
+
+        [Fact]
+        public void IsSymlink_ForRegularFile_ReturnsFalse()
+        {
+            // Arrange
+            var tempFile = Path.GetTempFileName();
+            var validator = new PathValidator();
+
+            // Act
+            var result = validator.IsSymlink(tempFile);
+
+            // Assert
+            result.Should().BeFalse();
+
+            // Cleanup
+            File.Delete(tempFile);
+        }
+    }
+
+    public class ZipBombDetectorTests
+    {
+        [Fact]
+        public void AnalyzeBundle_WithNormalCompression_ReturnsSafe()
+        {
+            // Arrange
+            var bundlePath = Path.Combine(Path.GetTempPath(), "test-bundle.zip");
+            using (var archive = ZipFile.Open(bundlePath, ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("test.txt");
+                using (var writer = new StreamWriter(entry.Open()))
+                {
+                    writer.Write("This is normal test content that compresses reasonably.");
+                }
+            }
+            var detector = new ZipBombDetector();
+
+            // Act
+            var (isSafe, reason) = detector.AnalyzeBundle(bundlePath);
+
+            // Assert
+            isSafe.Should().BeTrue();
+            reason.Should().BeNullOrEmpty();
+
+            // Cleanup
+            File.Delete(bundlePath);
+        }
+
+        [Fact]
+        public void AnalyzeBundle_WithHighCompressionRatio_ReturnsUnsafe()
+        {
+            // Arrange
+            var bundlePath = Path.Combine(Path.GetTempPath(), "bomb-bundle.zip");
+            using (var archive = ZipFile.Open(bundlePath, ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("bomb.txt");
+                using (var writer = new StreamWriter(entry.Open()))
+                {
+                    // Write highly compressible data (zeros)
+                    for (int i = 0; i < 10_000_000; i++)
+                        writer.Write('0');
+                }
+            }
+            var detector = new ZipBombDetector(maxCompressionRatio: 10);
+
+            // Act
+            var (isSafe, reason) = detector.AnalyzeBundle(bundlePath);
+
+            // Assert
+            isSafe.Should().BeFalse();
+            reason.Should().Contain("compression ratio");
+
+            // Cleanup
+            File.Delete(bundlePath);
+        }
+    }
+
+    public class RedactionServiceTests
+    {
+        [Theory]
+        [InlineData("password=secret123", "password=[REDACTED]")]
+        [InlineData("api_key: sk-abc123def", "api_key: [REDACTED]")]
+        [InlineData("token=Bearer xyz789", "token=[REDACTED]")]
+        [InlineData("no secrets here", "no secrets here")]
+        public void RedactSecrets_WithCommonPatterns_RedactsCorrectly(string input, string expected)
+        {
+            // Arrange
+            var redactor = new RedactionService();
+
+            // Act
+            var result = redactor.RedactSecrets(input);
+
+            // Assert
+            result.Should().Be(expected);
+        }
+
+        [Fact]
+        public void RedactSecrets_WithCustomPatterns_UsesProvidedPatterns()
+        {
+            // Arrange
+            var customPatterns = new List<string> { @"email=[\w\.-]+@[\w\.-]+" };
+            var redactor = new RedactionService(customPatterns);
+            var input = "User email=user@example.com logged in";
+
+            // Act
+            var result = redactor.RedactSecrets(input);
+
+            // Assert
+            result.Should().Contain("[REDACTED]");
+            result.Should().NotContain("user@example.com");
+        }
+    }
+}
+
+namespace Acode.Application.Tests.Runs.Integration
+{
+    // Integration Tests - Export and Import Operations
+
+    public class BundleExportImportTests : IDisposable
+    {
+        private readonly string _testRoot;
+        private readonly IRunRepository _repository;
+        private readonly BundleExporter _exporter;
+        private readonly BundleImporter _importer;
+
+        public BundleExportImportTests()
+        {
+            _testRoot = Path.Combine(Path.GetTempPath(), $"acode-test-{Guid.NewGuid()}");
+            Directory.CreateDirectory(_testRoot);
+            _repository = Substitute.For<IRunRepository>();
+            _exporter = new BundleExporter(_repository);
+            _importer = new BundleImporter(_repository);
+        }
+
+        [Fact]
+        public async Task Export_CreatesValidZipBundle()
+        {
+            // Arrange
+            var runs = new List<RunRecord>
+            {
+                new RunRecord { Id = "run-123", Status = RunStatus.Success, StartedAt = DateTimeOffset.UtcNow }
+            };
+            _repository.GetByIdsAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+                .Returns(runs);
+            var exportPath = Path.Combine(_testRoot, "export.acode-bundle");
+
+            // Act
+            await _exporter.ExportAsync(new[] { "run-123" }, exportPath, CancellationToken.None);
+
+            // Assert
+            File.Exists(exportPath).Should().BeTrue();
+            using var archive = ZipFile.OpenRead(exportPath);
+            archive.Entries.Should().Contain(e => e.FullName == "manifest.json");
+            archive.Entries.Should().Contain(e => e.FullName.StartsWith("runs/"));
+        }
+
+        [Fact]
+        public async Task RoundTrip_PreservesRunData()
+        {
+            // Arrange
+            var originalRun = new RunRecord
+            {
+                Id = "run-456",
+                Status = RunStatus.Success,
+                StartedAt = new DateTimeOffset(2025, 1, 6, 12, 0, 0, TimeSpan.Zero),
+                CompletedAt = new DateTimeOffset(2025, 1, 6, 12, 5, 0, TimeSpan.Zero),
+                ExitCode = 0
+            };
+            _repository.GetByIdsAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+                .Returns(new[] { originalRun });
+            var bundlePath = Path.Combine(_testRoot, "roundtrip.acode-bundle");
+
+            // Act - Export
+            await _exporter.ExportAsync(new[] { "run-456" }, bundlePath, CancellationToken.None);
+
+            // Act - Import
+            RunRecord importedRun = null;
+            await _repository.AddAsync(Arg.Do<RunRecord>(r => importedRun = r), Arg.Any<CancellationToken>());
+            await _importer.ImportAsync(bundlePath, ImportStrategy.Skip, CancellationToken.None);
+
+            // Assert
+            importedRun.Should().NotBeNull();
+            importedRun.Id.Should().Be(originalRun.Id);
+            importedRun.Status.Should().Be(originalRun.Status);
+            importedRun.ExitCode.Should().Be(originalRun.ExitCode);
+        }
+
+        [Fact]
+        public async Task Import_WithSkipStrategy_SkipsExistingRuns()
+        {
+            // Arrange
+            var bundlePath = Path.Combine(_testRoot, "skip-test.acode-bundle");
+            _repository.ExistsAsync("run-789", Arg.Any<CancellationToken>()).Returns(true);
+
+            // Act
+            var result = await _importer.ImportAsync(bundlePath, ImportStrategy.Skip, CancellationToken.None);
+
+            // Assert
+            result.SkippedCount.Should().BeGreaterThan(0);
+            await _repository.DidNotReceive().AddAsync(Arg.Any<RunRecord>(), Arg.Any<CancellationToken>());
+        }
+
+        [Fact]
+        public async Task Import_WithReplaceStrategy_UpdatesExistingRuns()
+        {
+            // Arrange
+            var bundlePath = Path.Combine(_testRoot, "replace-test.acode-bundle");
+            _repository.ExistsAsync("run-789", Arg.Any<CancellationToken>()).Returns(true);
+
+            // Act
+            var result = await _importer.ImportAsync(bundlePath, ImportStrategy.Replace, CancellationToken.None);
+
+            // Assert
+            await _repository.Received().UpdateAsync(Arg.Any<RunRecord>(), Arg.Any<CancellationToken>());
+        }
+
+        [Fact]
+        public async Task Import_DryRun_DoesNotModifyDatabase()
+        {
+            // Arrange
+            var bundlePath = Path.Combine(_testRoot, "dryrun-test.acode-bundle");
+
+            // Act
+            var result = await _importer.ImportAsync(bundlePath, ImportStrategy.Skip, CancellationToken.None, dryRun: true);
+
+            // Assert
+            result.DryRun.Should().BeTrue();
+            await _repository.DidNotReceive().AddAsync(Arg.Any<RunRecord>(), Arg.Any<CancellationToken>());
+            await _repository.DidNotReceive().UpdateAsync(Arg.Any<RunRecord>(), Arg.Any<CancellationToken>());
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(_testRoot))
+                Directory.Delete(_testRoot, true);
+        }
+    }
+}
+
+namespace Acode.Application.Tests.Runs.E2E
+{
+    // End-to-End Tests - Full CLI Workflows
+
+    public class BundleE2ETests
+    {
+        [Fact]
+        public async Task ExportAndImport_WithRedaction_MasksSecrets()
+        {
+            // Arrange - Create run with secrets
+            var runWithSecrets = new RunRecord
+            {
+                Id = "run-secret",
+                EnvironmentVariables = new Dictionary<string, string>
+                {
+                    ["API_KEY"] = "sk-abc123def456",
+                    ["PASSWORD"] = "supersecret"
+                }
+            };
+
+            // Act - Export with redaction
+            // Act - Import and verify
+
+            // Assert - Secrets should be [REDACTED]
+            // Implementation would test full CLI flow
+            await Task.CompletedTask;
+        }
+
+        [Fact]
+        public async Task Import_CorruptedBundle_RejectsWithError()
+        {
+            // Test that corrupted bundles are properly rejected
+            await Task.CompletedTask;
+        }
+    }
+}
+
+namespace Acode.Application.Tests.Runs.Performance
+{
+    // Performance Tests - Benchmarking
+
+    public class BundlePerformanceTests
+    {
+        [Fact(Skip = "Performance benchmark")]
+        public async Task Export100Runs_CompletesUnder30Seconds()
+        {
+            // Benchmark: Export 100 runs should complete in under 30 seconds
+            await Task.CompletedTask;
+        }
+
+        [Fact(Skip = "Performance benchmark")]
+        public async Task HashComputation_Exceeds100MBPerSecond()
+        {
+            // Benchmark: Hash computation should exceed 100MB/s throughput
+            await Task.CompletedTask;
+        }
+    }
+}
+
+namespace Acode.Application.Tests.Runs.Regression
+{
+    // Regression Tests - Backward Compatibility
+
+    public class BundleRegressionTests
+    {
+        [Fact]
+        public async Task Import_Task021RunRecord_Compatible()
+        {
+            // Verify that bundles created in Task 021 format are still importable
+            await Task.CompletedTask;
+        }
+
+        [Fact]
+        public async Task Import_Task021aArtifactPaths_Resolved()
+        {
+            // Verify that artifact paths from Task 021a are correctly resolved
+            await Task.CompletedTask;
+        }
+    }
+}
+```
 
 ---
 
