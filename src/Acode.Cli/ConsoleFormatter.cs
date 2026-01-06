@@ -39,7 +39,27 @@ public sealed class ConsoleFormatter : IOutputFormatter
             _ => string.Empty,
         };
 
-        _output.WriteLine($"{prefix}{message}");
+        var line = $"{prefix}{message}";
+
+        if (_enableColors)
+        {
+            // ANSI color codes: 32 = green, 33 = yellow, 31 = red, 90 = bright black (gray)
+            string? colorCode = type switch
+            {
+                MessageType.Success => "32",
+                MessageType.Warning => "33",
+                MessageType.Error => "31",
+                MessageType.Debug => "90",
+                _ => null,
+            };
+
+            if (colorCode is not null)
+            {
+                line = $"\u001b[{colorCode}m{line}\u001b[0m";
+            }
+        }
+
+        _output.WriteLine(line);
     }
 
     /// <inheritdoc/>
