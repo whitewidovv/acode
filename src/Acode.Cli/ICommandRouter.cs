@@ -1,6 +1,4 @@
-namespace Acode.Application.Cli;
-
-using Acode.Cli;
+namespace Acode.Cli;
 
 /// <summary>
 /// Defines the contract for routing command-line input to command handlers.

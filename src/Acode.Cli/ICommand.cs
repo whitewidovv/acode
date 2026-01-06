@@ -1,6 +1,4 @@
-namespace Acode.Application.Cli;
-
-using Acode.Cli;
+namespace Acode.Cli;
 
 /// <summary>
 /// Defines the contract for CLI commands.
