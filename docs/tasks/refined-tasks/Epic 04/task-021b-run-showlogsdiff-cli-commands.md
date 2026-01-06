@@ -1850,62 +1850,476 @@ cat .acode/artifacts/<run-id>/stdout.txt
 
 ## Testing Requirements
 
-### Unit Tests
+### Unit Tests (Complete C# Implementation)
 
-- [ ] UT-001: Test RunListQuery with various filters
-- [ ] UT-002: Test date parsing for ISO 8601
-- [ ] UT-003: Test date parsing for relative formats
-- [ ] UT-004: Test status filter mapping
-- [ ] UT-005: Test command pattern matching
-- [ ] UT-006: Test output truncation logic
-- [ ] UT-007: Test partial ID matching
-- [ ] UT-008: Test ambiguous ID detection
-- [ ] UT-009: Test environment redaction patterns
-- [ ] UT-010: Test stream prefix formatting
-- [ ] UT-011: Test tail line extraction
-- [ ] UT-012: Test head line extraction
-- [ ] UT-013: Test binary content detection
-- [ ] UT-014: Test unified diff generation
-- [ ] UT-015: Test diff exit code logic
+```csharp
+using Xunit;
+using FluentAssertions;
+using NSubstitute;
+using Acode.Application.Runs.Queries;
+using Acode.Domain.Runs;
 
-### Integration Tests
+namespace Acode.Application.Tests.Runs;
 
-- [ ] IT-001: Test list query against populated DB
-- [ ] IT-002: Test show query with real run data
-- [ ] IT-003: Test logs reading from artifact files
-- [ ] IT-004: Test diff with real artifact comparison
-- [ ] IT-005: Test partial ID resolution
-- [ ] IT-006: Test missing artifact handling
-- [ ] IT-007: Test concurrent read access
-- [ ] IT-008: Test large log file streaming
-- [ ] IT-009: Test DB index usage
-- [ ] IT-010: Test JSON output parsing
+public class ListRunsQueryTests
+{
+    private readonly IRunRepository _repository;
+    private readonly ListRunsQueryHandler _handler;
 
-### End-to-End Tests
+    public ListRunsQueryTests()
+    {
+        _repository = Substitute.For<IRunRepository>();
+        _handler = new ListRunsQueryHandler(_repository);
+    }
 
-- [ ] E2E-001: Execute command, then list shows it
-- [ ] E2E-002: Execute command, then show displays details
-- [ ] E2E-003: Execute command, then logs displays output
-- [ ] E2E-004: Execute two commands, then diff compares them
-- [ ] E2E-005: Test full workflow with filtering
-- [ ] E2E-006: Test scripting with JSON output
-- [ ] E2E-007: Test error scenarios with clear messages
-- [ ] E2E-008: Test with 1000+ runs in DB
+    [Fact]
+    public async Task Handle_WithNoFilters_ReturnsAllRuns()
+    {
+        // Arrange
+        var expectedRuns = new List<RunSummary>
+        {
+            new() { Id = new RunId("run-001"), StartTime = DateTimeOffset.Now, ExitCode = 0, CommandPreview = "build", Status = RunStatus.Success },
+            new() { Id = new RunId("run-002"), StartTime = DateTimeOffset.Now, ExitCode = 1, CommandPreview = "test", Status = RunStatus.Failed }
+        };
+        _repository.ListAsync(Arg.Any<RunListFilters>()).Returns(expectedRuns);
 
-### Performance/Benchmarks
+        var query = new ListRunsQuery { Limit = 50, Offset = 0 };
 
-- [ ] PB-001: `runs list` with 10000 runs in <100ms
-- [ ] PB-002: `runs show` single lookup in <50ms
-- [ ] PB-003: `runs logs` 100MB file streams in <5s
-- [ ] PB-004: `runs diff` 10MB files completes in <3s
-- [ ] PB-005: Memory stays under 50MB for all operations
+        // Act
+        var result = await _handler.Handle(query, CancellationToken.None);
 
-### Regression
+        // Assert
+        result.Should().HaveCount(2);
+        result.Should().BeEquivalentTo(expectedRuns);
+        await _repository.Received(1).ListAsync(Arg.Is<RunListFilters>(f => f.Limit == 50 && f.Offset == 0));
+    }
 
-- [ ] RG-001: Verify Task 021 run storage compatibility
-- [ ] RG-002: Verify Task 021.a path conventions
-- [ ] RG-003: Verify Task 011 DB schema compatibility
-- [ ] RG-004: Verify existing runs remain accessible
+    [Fact]
+    public async Task Handle_WithStatusFilter_ReturnsFilteredRuns()
+    {
+        // Arrange
+        var failedRun = new RunSummary { Id = new RunId("run-002"), StartTime = DateTimeOffset.Now, ExitCode = 1, CommandPreview = "test", Status = RunStatus.Failed };
+        _repository.ListAsync(Arg.Any<RunListFilters>()).Returns(new List<RunSummary> { failedRun });
+
+        var query = new ListRunsQuery { Status = RunStatus.Failed, Limit = 50 };
+
+        // Act
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        // Assert
+        result.Should().ContainSingle();
+        result.First().Status.Should().Be(RunStatus.Failed);
+        await _repository.Received(1).ListAsync(Arg.Is<RunListFilters>(f => f.Status == RunStatus.Failed));
+    }
+
+    [Fact]
+    public async Task Handle_WithTaskFilter_ReturnsMatchingRuns()
+    {
+        // Arrange
+        var buildRuns = new List<RunSummary>
+        {
+            new() { Id = new RunId("run-001"), StartTime = DateTimeOffset.Now, ExitCode = 0, CommandPreview = "build --release", Status = RunStatus.Success, Task = "build" },
+            new() { Id = new RunId("run-003"), StartTime = DateTimeOffset.Now, ExitCode = 0, CommandPreview = "build --debug", Status = RunStatus.Success, Task = "build" }
+        };
+        _repository.ListAsync(Arg.Any<RunListFilters>()).Returns(buildRuns);
+
+        var query = new ListRunsQuery { Task = "build", Limit = 50 };
+
+        // Act
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        // Assert
+        result.Should().HaveCount(2);
+        result.Should().AllSatisfy(r => r.Task.Should().Be("build"));
+    }
+
+    [Theory]
+    [InlineData("2024-01-15T10:00:00Z", true)]
+    [InlineData("2024-01-14T10:00:00Z", false)]
+    public async Task Handle_WithDateRangeFilter_ReturnsRunsInRange(string startedAfterStr, bool shouldIncludeRun)
+    {
+        // Arrange
+        var startedAfter = DateTimeOffset.Parse(startedAfterStr);
+        var testRun = new RunSummary
+        {
+            Id = new RunId("run-001"),
+            StartTime = DateTimeOffset.Parse("2024-01-15T12:00:00Z"),
+            ExitCode = 0,
+            CommandPreview = "build",
+            Status = RunStatus.Success
+        };
+
+        _repository.ListAsync(Arg.Any<RunListFilters>()).Returns(shouldIncludeRun ? new List<RunSummary> { testRun } : new List<RunSummary>());
+
+        var query = new ListRunsQuery { StartedAfter = startedAfter, Limit = 50 };
+
+        // Act
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        // Assert
+        if (shouldIncludeRun)
+            result.Should().ContainSingle().Which.Id.Value.Should().Be("run-001");
+        else
+            result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_WithPagination_ReturnsCorrectPage()
+    {
+        // Arrange
+        var page2Runs = new List<RunSummary>
+        {
+            new() { Id = new RunId("run-051"), StartTime = DateTimeOffset.Now, ExitCode = 0, CommandPreview = "test", Status = RunStatus.Success },
+            new() { Id = new RunId("run-052"), StartTime = DateTimeOffset.Now, ExitCode = 0, CommandPreview = "test", Status = RunStatus.Success }
+        };
+        _repository.ListAsync(Arg.Any<RunListFilters>()).Returns(page2Runs);
+
+        var query = new ListRunsQuery { Limit = 50, Offset = 50 }; // Page 2
+
+        // Act
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        // Assert
+        result.Should().HaveCount(2);
+        await _repository.Received(1).ListAsync(Arg.Is<RunListFilters>(f => f.Offset == 50));
+    }
+}
+
+public class GetRunQueryTests
+{
+    private readonly IRunRepository _repository;
+    private readonly GetRunQueryHandler _handler;
+
+    public GetRunQueryTests()
+    {
+        _repository = Substitute.For<IRunRepository>();
+        _handler = new GetRunQueryHandler(_repository);
+    }
+
+    [Fact]
+    public async Task Handle_WithFullRunId_ReturnsRunDetails()
+    {
+        // Arrange
+        var runId = new RunId("run-abc123-build-20240115");
+        var expectedRun = new RunDetails
+        {
+            Id = runId,
+            TaskName = "build",
+            StartTime = DateTimeOffset.Parse("2024-01-15T10:00:00Z"),
+            EndTime = DateTimeOffset.Parse("2024-01-15T10:05:00Z"),
+            Duration = TimeSpan.FromMinutes(5),
+            ExitCode = 0,
+            Status = RunStatus.Success,
+            Command = "dotnet build --configuration Release",
+            WorkingDirectory = "/workspace",
+            OperatingMode = "LocalOnly",
+            Environment = new Dictionary<string, string> { ["PATH"] = "/usr/bin" }
+        };
+
+        _repository.GetByIdAsync(runId).Returns(expectedRun);
+
+        var query = new GetRunQuery { RunId = "run-abc123-build-20240115" };
+
+        // Act
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Id.Value.Should().Be("run-abc123-build-20240115");
+        result.ExitCode.Should().Be(0);
+        result.Duration.Should().Be(TimeSpan.FromMinutes(5));
+    }
+
+    [Fact]
+    public async Task Handle_WithPartialRunId_ResolvesAndReturnsRun()
+    {
+        // Arrange
+        var fullRunId = "run-abc123-build-20240115";
+        var partialRunId = "abc123";
+
+        _repository.FindByPartialIdAsync(partialRunId).Returns(new List<RunId> { new RunId(fullRunId) });
+        _repository.GetByIdAsync(new RunId(fullRunId)).Returns(new RunDetails
+        {
+            Id = new RunId(fullRunId),
+            TaskName = "build",
+            StartTime = DateTimeOffset.Now,
+            EndTime = DateTimeOffset.Now,
+            Duration = TimeSpan.FromMinutes(5),
+            ExitCode = 0,
+            Status = RunStatus.Success,
+            Command = "build",
+            WorkingDirectory = "/workspace",
+            OperatingMode = "LocalOnly"
+        });
+
+        var query = new GetRunQuery { RunId = partialRunId };
+
+        // Act
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Id.Value.Should().Be(fullRunId);
+    }
+
+    [Fact]
+    public async Task Handle_WithAmbiguousPartialId_ThrowsException()
+    {
+        // Arrange
+        var partialRunId = "abc";
+        var matches = new List<RunId>
+        {
+            new RunId("run-abc123-build-20240115"),
+            new RunId("run-abc456-test-20240115")
+        };
+
+        _repository.FindByPartialIdAsync(partialRunId).Returns(matches);
+
+        var query = new GetRunQuery { RunId = partialRunId };
+
+        // Act
+        Func<Task> act = async () => await _handler.Handle(query, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<AmbiguousRunIdException>()
+            .WithMessage("*Multiple runs match 'abc'*");
+    }
+
+    [Fact]
+    public async Task Handle_WithNonExistentRunId_ReturnsNull()
+    {
+        // Arrange
+        var runId = new RunId("run-nonexistent");
+        _repository.GetByIdAsync(runId).Returns((RunDetails)null);
+        _repository.FindByPartialIdAsync("run-nonexistent").Returns(new List<RunId>());
+
+        var query = new GetRunQuery { RunId = "run-nonexistent" };
+
+        // Act
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        // Assert
+        result.Should().BeNull();
+    }
+}
+
+public class EnvironmentRedactorTests
+{
+    private readonly EnvironmentRedactor _redactor = new();
+
+    [Theory]
+    [InlineData("API_KEY", "sk-abc123def456", "***REDACTED***")]
+    [InlineData("PASSWORD", "secret123", "***REDACTED***")]
+    [InlineData("SECRET_TOKEN", "token-xyz", "***REDACTED***")]
+    [InlineData("DATABASE_URL", "postgres://user:pass@host/db", "postgres://user:***REDACTED***@host/db")]
+    [InlineData("PATH", "/usr/bin:/usr/local/bin", "/usr/bin:/usr/local/bin")] // Not redacted
+    public void RedactValue_WithVariousKeys_RedactsSecrets(string key, string value, string expected)
+    {
+        // Act
+        var result = _redactor.RedactValue(key, value);
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    [Fact]
+    public void RedactEnvironment_WithMultipleSecrets_RedactsAll()
+    {
+        // Arrange
+        var environment = new Dictionary<string, string>
+        {
+            ["PATH"] = "/usr/bin",
+            ["API_KEY"] = "sk-abc123",
+            ["PASSWORD"] = "secret",
+            ["USER"] = "developer"
+        };
+
+        // Act
+        var redacted = _redactor.RedactEnvironment(environment);
+
+        // Assert
+        redacted["PATH"].Should().Be("/usr/bin");
+        redacted["API_KEY"].Should().Be("***REDACTED***");
+        redacted["PASSWORD"].Should().Be("***REDACTED***");
+        redacted["USER"].Should().Be("developer");
+    }
+}
+
+public class UnifiedDiffGeneratorTests
+{
+    private readonly UnifiedDiffGenerator _generator = new();
+
+    [Fact]
+    public async Task GenerateAsync_WithIdenticalContent_ReturnsNoDifferences()
+    {
+        // Arrange
+        var lines1 = new[] { "line1", "line2", "line3" }.ToAsyncEnumerable();
+        var lines2 = new[] { "line1", "line2", "line3" }.ToAsyncEnumerable();
+
+        // Act
+        var diff = await _generator.GenerateAsync(lines1, lines2, context: 3).ToListAsync();
+
+        // Assert
+        diff.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WithAddedLines_ReturnsAddedDiffLines()
+    {
+        // Arrange
+        var lines1 = new[] { "line1", "line2" }.ToAsyncEnumerable();
+        var lines2 = new[] { "line1", "line2", "line3" }.ToAsyncEnumerable();
+
+        // Act
+        var diff = await _generator.GenerateAsync(lines1, lines2, context: 3).ToListAsync();
+
+        // Assert
+        diff.Should().Contain(d => d.Type == DiffLineType.Added && d.Content == "line3");
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WithRemovedLines_ReturnsRemovedDiffLines()
+    {
+        // Arrange
+        var lines1 = new[] { "line1", "line2", "line3" }.ToAsyncEnumerable();
+        var lines2 = new[] { "line1", "line2" }.ToAsyncEnumerable();
+
+        // Act
+        var diff = await _generator.GenerateAsync(lines1, lines2, context: 3).ToListAsync();
+
+        // Assert
+        diff.Should().Contain(d => d.Type == DiffLineType.Removed && d.Content == "line3");
+    }
+
+    [Fact]
+    public async Task GenerateAsync_WithChangedLines_ReturnsBothRemovedAndAdded()
+    {
+        // Arrange
+        var lines1 = new[] { "line1", "oldline", "line3" }.ToAsyncEnumerable();
+        var lines2 = new[] { "line1", "newline", "line3" }.ToAsyncEnumerable();
+
+        // Act
+        var diff = await _generator.GenerateAsync(lines1, lines2, context: 3).ToListAsync();
+
+        // Assert
+        diff.Should().Contain(d => d.Type == DiffLineType.Removed && d.Content == "oldline");
+        diff.Should().Contain(d => d.Type == DiffLineType.Added && d.Content == "newline");
+    }
+}
+```
+
+### Integration Tests (Key Test Cases)
+
+```csharp
+using Xunit;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Acode.Infrastructure.Tests.Runs;
+
+[Collection("Database")]
+public class RunRepositoryIntegrationTests : IAsyncLifetime
+{
+    private readonly ServiceProvider _services;
+    private readonly IRunRepository _repository;
+    private readonly string _testDbPath;
+
+    public RunRepositoryIntegrationTests()
+    {
+        _testDbPath = Path.Combine(Path.GetTempPath(), $"test-{Guid.NewGuid()}.db");
+        _services = new ServiceCollection()
+            .AddSingleton<IDbConnection>(new SqliteConnection($"Data Source={_testDbPath}"))
+            .AddScoped<IRunRepository, RunRepository>()
+            .BuildServiceProvider();
+
+        _repository = _services.GetRequiredService<IRunRepository>();
+    }
+
+    [Fact]
+    public async Task ListAsync_WithPopulatedDatabase_ReturnsRunsOrderedByStartTime()
+    {
+        // Arrange
+        await SeedTestRunsAsync();
+
+        var filters = new RunListFilters { Limit = 10, SortBy = "started_at", SortOrder = SortOrder.Descending };
+
+        // Act
+        var runs = await _repository.ListAsync(filters);
+
+        // Assert
+        runs.Should().HaveCount(3);
+        runs.Should().BeInDescendingOrder(r => r.StartTime);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_WithExistingRun_ReturnsCompleteDetails()
+    {
+        // Arrange
+        var runId = await SeedTestRunAsync("run-integration-test");
+
+        // Act
+        var run = await _repository.GetByIdAsync(runId);
+
+        // Assert
+        run.Should().NotBeNull();
+        run.Id.Should().Be(runId);
+        run.Environment.Should().ContainKey("PATH");
+        run.Artifacts.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task FindByPartialIdAsync_WithPrefix_ReturnsMatchingRuns()
+    {
+        // Arrange
+        await SeedTestRunAsync("run-abc123-build");
+        await SeedTestRunAsync("run-abc456-build");
+        await SeedTestRunAsync("run-xyz789-test");
+
+        // Act
+        var matches = await _repository.FindByPartialIdAsync("abc");
+
+        // Assert
+        matches.Should().HaveCount(2);
+        matches.Should().AllSatisfy(id => id.Value.Should().StartWith("run-abc"));
+    }
+
+    private async Task SeedTestRunsAsync()
+    {
+        await SeedTestRunAsync("run-001-build");
+        await SeedTestRunAsync("run-002-test");
+        await SeedTestRunAsync("run-003-deploy");
+    }
+
+    private async Task<RunId> SeedTestRunAsync(string runId)
+    {
+        var run = new RunRecord
+        {
+            Id = runId,
+            TaskName = "test-task",
+            StartTime = DateTimeOffset.Now,
+            EndTime = DateTimeOffset.Now.AddMinutes(5),
+            ExitCode = 0,
+            Status = RunStatus.Success,
+            Command = "test command",
+            WorkingDirectory = "/workspace",
+            OperatingMode = "LocalOnly",
+            Environment = new Dictionary<string, string> { ["PATH"] = "/usr/bin" }
+        };
+
+        await _repository.CreateAsync(run);
+        return new RunId(runId);
+    }
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        await _services.DisposeAsync();
+        if (File.Exists(_testDbPath))
+            File.Delete(_testDbPath);
+    }
+}
+```
 
 ---
 
