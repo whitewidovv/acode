@@ -30,33 +30,34 @@ public sealed class IConnectionFactoryTests
     }
 
     [Fact]
-    public void IConnectionFactory_MustHaveProviderType_Property()
+    public void IConnectionFactory_MustHaveCheckHealthAsync_Method()
     {
         // Arrange
         var factoryType = typeof(IConnectionFactory);
 
         // Act
-        var providerProperty = factoryType.GetProperty("ProviderType");
+        var healthCheckMethod = factoryType.GetMethod(
+            "CheckHealthAsync",
+            new[] { typeof(CancellationToken) });
 
         // Assert
-        providerProperty.Should().NotBeNull("IConnectionFactory must have ProviderType property");
-        providerProperty!.PropertyType.Should().Be(typeof(DbProviderType), "ProviderType must be DbProviderType enum");
-        providerProperty.CanRead.Should().BeTrue("ProviderType must be readable");
-        providerProperty.CanWrite.Should().BeFalse("ProviderType must be get-only");
+        healthCheckMethod.Should().NotBeNull("IConnectionFactory must have CheckHealthAsync(CancellationToken) method");
+        healthCheckMethod!.ReturnType.Should().Be(typeof(Task<HealthCheckResult>), "CheckHealthAsync must return Task<HealthCheckResult>");
     }
 
     [Fact]
-    public void IConnectionFactory_MustHaveConnectionString_Property()
+    public void IConnectionFactory_MustHaveProvider_Property()
     {
         // Arrange
         var factoryType = typeof(IConnectionFactory);
 
         // Act
-        var connStringProperty = factoryType.GetProperty("ConnectionString");
+        var providerProperty = factoryType.GetProperty("Provider");
 
         // Assert
-        connStringProperty.Should().NotBeNull("IConnectionFactory must have ConnectionString property");
-        connStringProperty!.PropertyType.Should().Be(typeof(string), "ConnectionString must be string");
-        connStringProperty.CanRead.Should().BeTrue("ConnectionString must be readable");
+        providerProperty.Should().NotBeNull("IConnectionFactory must have Provider property");
+        providerProperty!.PropertyType.Should().Be(typeof(DatabaseProvider), "Provider must be DatabaseProvider enum");
+        providerProperty.CanRead.Should().BeTrue("Provider must be readable");
+        providerProperty.CanWrite.Should().BeFalse("Provider must be get-only");
     }
 }

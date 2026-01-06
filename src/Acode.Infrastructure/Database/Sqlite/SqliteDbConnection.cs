@@ -12,18 +12,18 @@ namespace Acode.Infrastructure.Database.Sqlite;
 /// Provides async query/execute methods using Dapper for efficient object mapping.
 /// Manages transaction lifecycle and proper resource cleanup.
 /// </remarks>
-public sealed class SqliteConnection : Application.Database.IDbConnection
+public sealed class SqliteDbConnection : Application.Database.IDbConnection
 {
     private readonly Microsoft.Data.Sqlite.SqliteConnection _connection;
     private readonly ILogger _logger;
     private bool _disposed;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SqliteConnection"/> class.
+    /// Initializes a new instance of the <see cref="SqliteDbConnection"/> class.
     /// </summary>
     /// <param name="connection">The underlying ADO.NET SqliteConnection.</param>
     /// <param name="logger">Logger for diagnostics.</param>
-    public SqliteConnection(Microsoft.Data.Sqlite.SqliteConnection connection, ILogger logger)
+    public SqliteDbConnection(Microsoft.Data.Sqlite.SqliteConnection connection, ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(logger);
@@ -36,7 +36,7 @@ public sealed class SqliteConnection : Application.Database.IDbConnection
     public ConnectionState State => _connection.State;
 
     /// <inheritdoc/>
-    public DbProviderType ProviderType => DbProviderType.SQLite;
+    public DatabaseProvider ProviderType => DatabaseProvider.SQLite;
 
     /// <inheritdoc/>
     public async Task<int> ExecuteAsync(
@@ -107,7 +107,7 @@ public sealed class SqliteConnection : Application.Database.IDbConnection
     {
         if (_disposed)
         {
-            throw new ObjectDisposedException(nameof(SqliteConnection));
+            throw new ObjectDisposedException(nameof(SqliteDbConnection));
         }
     }
 }
