@@ -35,14 +35,12 @@ public sealed class HelpCommand : ICommand
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var formatter = new ConsoleFormatter(context.Output, enableColors: true);
+        context.Formatter.WriteHeading("Acode - Agentic Coding Bot");
 
-        formatter.WriteHeading("Acode - Agentic Coding Bot");
-
-        formatter.WriteMessage("Usage: acode <command> [options]");
-        formatter.WriteBlankLine();
-        formatter.WriteMessage("Available commands:");
-        formatter.WriteBlankLine();
+        context.Formatter.WriteMessage("Usage: acode <command> [options]");
+        context.Formatter.WriteBlankLine();
+        context.Formatter.WriteMessage("Available commands:");
+        context.Formatter.WriteBlankLine();
 
         var commands = _router.ListCommands();
 
@@ -53,15 +51,15 @@ public sealed class HelpCommand : ICommand
 
         if (rows.Count > 0)
         {
-            formatter.WriteTable(new[] { "Command", "Description" }, rows);
+            context.Formatter.WriteTable(new[] { "Command", "Description" }, rows);
         }
         else
         {
-            formatter.WriteMessage("No commands registered.", MessageType.Warning);
+            context.Formatter.WriteMessage("No commands registered.", MessageType.Warning);
         }
 
-        formatter.WriteBlankLine();
-        formatter.WriteMessage("Use 'acode <command> --help' for detailed help on a specific command.");
+        context.Formatter.WriteBlankLine();
+        context.Formatter.WriteMessage("Use 'acode <command> --help' for detailed help on a specific command.");
 
         await Task.CompletedTask.ConfigureAwait(false);
         return ExitCode.Success;

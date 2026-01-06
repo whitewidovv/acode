@@ -38,10 +38,29 @@ public static class Program
         var validator = serviceProvider.GetRequiredService<IConfigValidator>();
         router.RegisterCommand(new ConfigCommand(loader, validator));
 
+        // Parse global flags
+        var useJson = args.Contains("--json");
+        var noColor = args.Contains("--no-color");
+
+        // Remove global flags from args
+        args = args.Where(a => a != "--json" && a != "--no-color").ToArray();
+
         // If no arguments, show help
         if (args.Length == 0)
         {
             args = new[] { "help" };
+        }
+
+        // Select formatter based on flags and TTY detection
+        IOutputFormatter formatter;
+        if (useJson)
+        {
+            formatter = new JsonLinesFormatter(Console.Out);
+        }
+        else
+        {
+            var enableColors = !noColor && Console.IsOutputRedirected == false;
+            formatter = new ConsoleFormatter(Console.Out, enableColors);
         }
 
         // Create command context
@@ -49,6 +68,7 @@ public static class Program
         {
             Configuration = new Dictionary<string, object>(),
             Args = Array.Empty<string>(), // Will be populated by router
+            Formatter = formatter,
             Output = Console.Out,
             CancellationToken = CancellationToken.None,
         };

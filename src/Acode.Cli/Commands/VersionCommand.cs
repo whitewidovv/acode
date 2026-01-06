@@ -25,10 +25,8 @@ public sealed class VersionCommand : ICommand
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var formatter = new ConsoleFormatter(context.Output, enableColors: true);
-
         var version = GetVersion();
-        formatter.WriteMessage($"Acode version {version}");
+        context.Formatter.WriteMessage($"Acode version {version}");
 
         await Task.CompletedTask.ConfigureAwait(false);
         return ExitCode.Success;

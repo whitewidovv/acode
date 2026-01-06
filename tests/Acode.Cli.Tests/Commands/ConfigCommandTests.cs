@@ -39,6 +39,7 @@ public class ConfigCommandTests
         {
             Configuration = new Dictionary<string, object>(),
             Args = new[] { "validate" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -83,6 +84,7 @@ public class ConfigCommandTests
         {
             Configuration = new Dictionary<string, object>(),
             Args = new[] { "validate" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -109,6 +111,7 @@ public class ConfigCommandTests
         {
             Configuration = new Dictionary<string, object>(),
             Args = new[] { "validate" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -140,6 +143,7 @@ public class ConfigCommandTests
         {
             Configuration = new Dictionary<string, object>(),
             Args = new[] { "show" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -173,6 +177,7 @@ public class ConfigCommandTests
         {
             Configuration = new Dictionary<string, object>(),
             Args = new[] { "show", "--format", "json" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -202,6 +207,7 @@ public class ConfigCommandTests
         {
             Configuration = new Dictionary<string, object>(),
             Args = new[] { "show" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -225,6 +231,7 @@ public class ConfigCommandTests
         {
             Configuration = new Dictionary<string, object>(),
             Args = Array.Empty<string>(),
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -248,6 +255,7 @@ public class ConfigCommandTests
         {
             Configuration = new Dictionary<string, object>(),
             Args = new[] { "unknown" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };

@@ -29,6 +29,18 @@ public sealed record CommandContext
     public required string[] Args { get; init; }
 
     /// <summary>
+    /// Gets the output formatter for command output.
+    /// </summary>
+    /// <remarks>
+    /// Commands use this formatter to write output. The formatter is selected
+    /// based on --json flag and TTY detection in Program.cs.
+    /// - --json → JsonLinesFormatter.
+    /// - TTY detected → ConsoleFormatter with colors.
+    /// - No TTY → ConsoleFormatter without colors.
+    /// </remarks>
+    public required IOutputFormatter Formatter { get; init; }
+
+    /// <summary>
     /// Gets the output writer for command output.
     /// </summary>
     /// <remarks>

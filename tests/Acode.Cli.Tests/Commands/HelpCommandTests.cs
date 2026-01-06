@@ -88,6 +88,7 @@ public class HelpCommandTests
         {
             Configuration = new Dictionary<string, object>(),
             Args = Array.Empty<string>(),
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -123,6 +124,7 @@ public class HelpCommandTests
         {
             Configuration = new Dictionary<string, object>(),
             Args = Array.Empty<string>(),
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -167,11 +169,13 @@ public class HelpCommandTests
 
     private static CommandContext CreateMockContext()
     {
+        var output = new StringWriter();
         return new CommandContext
         {
             Configuration = new Dictionary<string, object>(),
             Args = Array.Empty<string>(),
-            Output = new StringWriter(),
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
             CancellationToken = CancellationToken.None,
         };
     }

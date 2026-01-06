@@ -25,6 +25,7 @@ public class CommandContextTests
         {
             Configuration = config,
             Args = args,
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = cancellationToken,
         };
@@ -32,6 +33,7 @@ public class CommandContextTests
         // Assert
         context.Configuration.Should().BeSameAs(config);
         context.Args.Should().BeSameAs(args);
+        context.Formatter.Should().NotBeNull();
         context.Output.Should().BeSameAs(output);
         context.CancellationToken.Should().Be(cancellationToken);
     }
@@ -48,6 +50,7 @@ public class CommandContextTests
         {
             Configuration = config,
             Args = Array.Empty<string>(),
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -62,12 +65,14 @@ public class CommandContextTests
         // Arrange
         var config = new Dictionary<string, object> { ["key"] = "value" };
         var output = new StringWriter();
+        var formatter = new ConsoleFormatter(output, enableColors: false);
         var token = default(CancellationToken);
 
         var context1 = new CommandContext
         {
             Configuration = config,
             Args = Array.Empty<string>(),
+            Formatter = formatter,
             Output = output,
             CancellationToken = token,
         };
@@ -76,6 +81,7 @@ public class CommandContextTests
         {
             Configuration = config,
             Args = Array.Empty<string>(),
+            Formatter = formatter,
             Output = output,
             CancellationToken = token,
         };
@@ -96,6 +102,7 @@ public class CommandContextTests
         {
             Configuration = config1,
             Args = Array.Empty<string>(),
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -104,6 +111,7 @@ public class CommandContextTests
         {
             Configuration = config2,
             Args = Array.Empty<string>(),
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
@@ -127,6 +135,7 @@ public class CommandContextTests
         {
             Configuration = config,
             Args = Array.Empty<string>(),
+            Formatter = new ConsoleFormatter(output, enableColors: false),
             Output = output,
             CancellationToken = CancellationToken.None,
         };
