@@ -633,48 +633,327 @@ git checkout main  # Switch to main branch
 
 ## Testing Requirements
 
-### Unit Tests
+```csharp
+using Xunit;
+using FluentAssertions;
+using NSubstitute;
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Application.Git;
+using Acode.Domain.Git;
+using Acode.Infrastructure.Git;
 
-- [ ] UT-001: Test GitStatus parsing from porcelain output
-- [ ] UT-002: Test file state enum mapping
-- [ ] UT-003: Test detached HEAD detection
-- [ ] UT-004: Test rename parsing
-- [ ] UT-005: Test diff output parsing
-- [ ] UT-006: Test stat parsing
-- [ ] UT-007: Test commit parsing from log
-- [ ] UT-008: Test date parsing
-- [ ] UT-009: Test author parsing
-- [ ] UT-010: Test merge commit detection
+namespace Acode.Infrastructure.Tests.Git
+{
+    public class GitStatusParserTests
+    {
+        private readonly GitOutputParser _parser = new();
 
-### Integration Tests
+        [Fact]
+        public void ParseStatus_WithCleanBranch_ReturnsCorrectStatus()
+        {
+            // Arrange
+            var output = @"# branch.oid abc123
+# branch.head main
+# branch.upstream origin/main
+# branch.ab +0 -0";
 
-- [ ] IT-001: Status on real repository
-- [ ] IT-002: Status with various file states
-- [ ] IT-003: Diff on real changes
-- [ ] IT-004: Diff with path filter
-- [ ] IT-005: Log on real history
-- [ ] IT-006: Log with filters
-- [ ] IT-007: Empty repository handling
-- [ ] IT-008: Large repository handling
+            // Act
+            var status = _parser.ParseStatus(output);
 
-### End-to-End Tests
+            // Assert
+            status.Branch.Should().Be("main");
+            status.IsClean.Should().BeTrue();
+            status.AheadBy.Should().Be(0);
+            status.BehindBy.Should().Be(0);
+        }
 
-- [ ] E2E-001: CLI status command
-- [ ] E2E-002: CLI diff command
-- [ ] E2E-003: CLI log command
-- [ ] E2E-004: JSON output format
-- [ ] E2E-005: Error handling
+        [Fact]
+        public void ParseStatus_WithModifiedFile_ParsesCorrectly()
+        {
+            // Arrange
+            var output = @"# branch.head feature
+1 .M N... 100644 100644 100644 abc def file.cs";
 
-### Performance/Benchmarks
+            // Act
+            var status = _parser.ParseStatus(output);
 
-- [ ] PB-001: Status 10000 files in <500ms
-- [ ] PB-002: Log 1000 commits in <2s
-- [ ] PB-003: Diff 10MB in <3s
+            // Assert
+            status.UnstagedFiles.Should().HaveCount(1);
+            status.UnstagedFiles[0].Path.Should().Be("file.cs");
+            status.UnstagedFiles[0].State.Should().Be(GitFileState.Modified);
+        }
 
-### Regression
+        [Fact]
+        public void ParseStatus_WithDetachedHead_DetectsCorrectly()
+        {
+            // Arrange
+            var output = @"# branch.oid abc123
+# branch.head (detached)";
 
-- [ ] RG-001: Task 022 interface compatibility
-- [ ] RG-002: Task 018 command execution
+            // Act
+            var status = _parser.ParseStatus(output);
+
+            // Assert
+            status.IsDetachedHead.Should().BeTrue();
+            status.Branch.Should().Be("(detached)");
+        }
+
+        [Fact]
+        public void ParseStatus_WithRenamedFile_ParsesOldAndNewPaths()
+        {
+            // Arrange
+            var output = @"# branch.head main
+2 R. N... 100644 100644 100644 abc def R100 old.cs	new.cs";
+
+            // Act
+            var status = _parser.ParseStatus(output);
+
+            // Assert
+            status.StagedFiles.Should().HaveCount(1);
+            status.StagedFiles[0].State.Should().Be(GitFileState.Renamed);
+            status.StagedFiles[0].Path.Should().Be("new.cs");
+            status.StagedFiles[0].OriginalPath.Should().Be("old.cs");
+        }
+    }
+
+    public class GitLogParserTests
+    {
+        private readonly GitOutputParser _parser = new();
+
+        [Fact]
+        public void ParseLog_WithSingleCommit_ParsesAllFields()
+        {
+            // Arrange
+            var output = "abc123|John Doe|john@example.com|2025-01-06T12:00:00Z|feat: add feature";
+
+            // Act
+            var commits = _parser.ParseLog(output, "%H|%an|%ae|%aI|%s");
+
+            // Assert
+            commits.Should().HaveCount(1);
+            commits[0].Sha.Should().Be("abc123");
+            commits[0].Author.Should().Be("John Doe");
+            commits[0].AuthorEmail.Should().Be("john@example.com");
+            commits[0].Subject.Should().Be("feat: add feature");
+        }
+
+        [Fact]
+        public void ParseLog_WithMergeCommit_ParsesParents()
+        {
+            // Arrange
+            var output = "merge123|User|user@example.com|2025-01-06T12:00:00Z|Merge branch 'feature'|parent1 parent2";
+
+            // Act
+            var commits = _parser.ParseLog(output, "%H|%an|%ae|%aI|%s|%P");
+
+            // Assert
+            commits[0].ParentShas.Should().HaveCount(2);
+            commits[0].ParentShas.Should().Contain("parent1");
+            commits[0].ParentShas.Should().Contain("parent2");
+        }
+    }
+}
+
+namespace Acode.Infrastructure.Tests.Git.Integration
+{
+    public class StatusDiffLogIntegrationTests : IDisposable
+    {
+        private readonly string _testRepo;
+        private readonly GitService _git;
+
+        public StatusDiffLogIntegrationTests()
+        {
+            _testRepo = Path.Combine(Path.GetTempPath(), $"git-test-{Guid.NewGuid()}");
+            Directory.CreateDirectory(_testRepo);
+
+            // Initialize repo
+            RunGit("init");
+            RunGit("config user.email 'test@example.com'");
+            RunGit("config user.name 'Test User'");
+
+            File.WriteAllText(Path.Combine(_testRepo, "README.md"), "# Test");
+            RunGit("add README.md");
+            RunGit("commit -m 'Initial commit'");
+
+            _git = CreateGitService();
+        }
+
+        [Fact]
+        public async Task GetStatusAsync_OnCleanRepo_ReturnsClean()
+        {
+            // Act
+            var status = await _git.GetStatusAsync(_testRepo, CancellationToken.None);
+
+            // Assert
+            status.IsClean.Should().BeTrue();
+            status.Branch.Should().NotBeNullOrEmpty();
+        }
+
+        [Fact]
+        public async Task GetStatusAsync_WithModifiedFile_DetectsChange()
+        {
+            // Arrange
+            File.WriteAllText(Path.Combine(_testRepo, "README.md"), "# Modified");
+
+            // Act
+            var status = await _git.GetStatusAsync(_testRepo, CancellationToken.None);
+
+            // Assert
+            status.IsClean.Should().BeFalse();
+            status.UnstagedFiles.Should().HaveCount(1);
+            status.UnstagedFiles[0].Path.Should().Be("README.md");
+        }
+
+        [Fact]
+        public async Task GetDiffAsync_BetweenWorkingAndHead_ReturnsChanges()
+        {
+            // Arrange
+            File.WriteAllText(Path.Combine(_testRepo, "README.md"), "# Modified\nNew line");
+
+            // Act
+            var diff = await _git.GetDiffAsync(_testRepo, new DiffOptions(), CancellationToken.None);
+
+            // Assert
+            diff.Should().Contain("Modified");
+            diff.Should().Contain("New line");
+            diff.Should().Contain("@@");  // Diff hunk marker
+        }
+
+        [Fact]
+        public async Task GetLogAsync_ReturnsCommitHistory()
+        {
+            // Act
+            var log = await _git.GetLogAsync(_testRepo, new LogOptions { Limit = 10 }, CancellationToken.None);
+
+            // Assert
+            log.Should().HaveCountGreaterOrEqualTo(1);
+            log.First().Subject.Should().Be("Initial commit");
+            log.First().Author.Should().Be("Test User");
+        }
+
+        private void RunGit(string args)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = args,
+                WorkingDirectory = _testRepo,
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            };
+            Process.Start(psi)?.WaitForExit();
+        }
+
+        private GitService CreateGitService()
+        {
+            return new GitService(
+                Substitute.For<ICommandExecutor>(),
+                new GitOutputParser(),
+                Substitute.For<ICredentialRedactor>(),
+                Substitute.For<IModeResolver>(),
+                Options.Create(new GitConfiguration()),
+                Substitute.For<ILogger<GitService>>());
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(_testRepo))
+                Directory.Delete(_testRepo, true);
+        }
+    }
+}
+
+namespace Acode.Cli.Tests.Commands.Git
+{
+    public class StatusDiffLogE2ETests
+    {
+        [Fact]
+        public async Task GitStatusCommand_DisplaysCorrectOutput()
+        {
+            // Arrange
+            var git = Substitute.For<IGitService>();
+            git.GetStatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(new GitStatus
+                {
+                    Branch = "main",
+                    IsClean = false,
+                    IsDetachedHead = false,
+                    StagedFiles = new[] { new FileStatus { Path = "file.cs", State = GitFileState.Modified } },
+                    UnstagedFiles = Array.Empty<FileStatus>(),
+                    UntrackedFiles = Array.Empty<string>()
+                });
+
+            var console = Substitute.For<IConsole>();
+            var command = new GitStatusCommand();
+
+            // Act
+            var exitCode = await command.ExecuteAsync(git, console, CancellationToken.None);
+
+            // Assert
+            exitCode.Should().Be(0);
+            console.Received().WriteLine(Arg.Is<string>(s => s.Contains("main")));
+            console.Received().WriteLine(Arg.Is<string>(s => s.Contains("file.cs")));
+        }
+
+        [Fact]
+        public async Task GitDiffCommand_DisplaysDiff()
+        {
+            // Arrange
+            var git = Substitute.For<IGitService>();
+            git.GetDiffAsync(Arg.Any<string>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+                .Returns("diff --git a/file.cs b/file.cs\n+new line");
+
+            var console = Substitute.For<IConsole>();
+            var command = new GitDiffCommand();
+
+            // Act
+            var exitCode = await command.ExecuteAsync(git, console, CancellationToken.None);
+
+            // Assert
+            exitCode.Should().Be(0);
+            console.Received().WriteLine(Arg.Is<string>(s => s.Contains("+new line")));
+        }
+
+        [Fact]
+        public async Task GitLogCommand_DisplaysCommits()
+        {
+            // Arrange
+            var git = Substitute.For<IGitService>();
+            git.GetLogAsync(Arg.Any<string>(), Arg.Any<LogOptions>(), Arg.Any<CancellationToken>())
+                .Returns(new[]
+                {
+                    new GitCommit
+                    {
+                        Sha = "abc123",
+                        ShortSha = "abc123",
+                        Author = "John Doe",
+                        AuthorEmail = "john@example.com",
+                        AuthorDate = DateTimeOffset.UtcNow,
+                        Committer = "John Doe",
+                        CommitterEmail = "john@example.com",
+                        CommitDate = DateTimeOffset.UtcNow,
+                        Subject = "feat: add feature",
+                        ParentShas = Array.Empty<string>()
+                    }
+                });
+
+            var console = Substitute.For<IConsole>();
+            var command = new GitLogCommand();
+
+            // Act
+            var exitCode = await command.ExecuteAsync(git, console, CancellationToken.None);
+
+            // Assert
+            exitCode.Should().Be(0);
+            console.Received().WriteLine(Arg.Is<string>(s => s.Contains("abc123")));
+            console.Received().WriteLine(Arg.Is<string>(s => s.Contains("feat: add feature")));
+        }
+    }
+}
+```
 
 ---
 
