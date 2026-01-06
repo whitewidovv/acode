@@ -1,6 +1,5 @@
 using Acode.Infrastructure.Vllm.Exceptions;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Vllm.Exceptions;
 

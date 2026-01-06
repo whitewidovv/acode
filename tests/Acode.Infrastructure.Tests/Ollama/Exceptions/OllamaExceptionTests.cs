@@ -3,7 +3,6 @@ namespace Acode.Infrastructure.Tests.Ollama.Exceptions;
 using System;
 using Acode.Infrastructure.Ollama.Exceptions;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for Ollama exception hierarchy.

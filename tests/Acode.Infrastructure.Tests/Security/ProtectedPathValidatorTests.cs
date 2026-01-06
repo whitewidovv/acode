@@ -1,7 +1,6 @@
 using Acode.Application.Security;
 using Acode.Infrastructure.Security;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Security;
 

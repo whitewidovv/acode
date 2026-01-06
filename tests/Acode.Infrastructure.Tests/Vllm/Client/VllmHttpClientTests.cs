@@ -2,7 +2,6 @@ using Acode.Infrastructure.Vllm.Client;
 using Acode.Infrastructure.Vllm.Exceptions;
 using Acode.Infrastructure.Vllm.Models;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Vllm.Client;
 
