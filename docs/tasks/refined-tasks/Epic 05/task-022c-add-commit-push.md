@@ -2045,6 +2045,379 @@ public class PushRetryPolicyTests
 
 ---
 
+## User Verification Steps
+
+### Scenario 1: Stage Files and Verify with Git Status
+
+**Objective:** Verify staging operation adds files correctly to index.
+
+```bash
+# Step 1: Create test repository
+mkdir test-stage-ops && cd test-stage-ops
+git init
+git config user.email "test@example.com"
+git config user.name "Test User"
+
+# Step 2: Create initial commit
+echo "# Project" > README.md
+git add README.md
+git commit -m "Initial commit"
+
+# Expected: Repository initialized with main branch
+
+# Step 3: Create new files
+echo "feature code" > feature.cs
+echo "test code" > feature.test.cs
+mkdir src
+echo "util code" > src/utils.cs
+
+# Step 4: Stage single file
+acode git add feature.cs
+
+# Expected Output:
+# ✓ Staged 1 files
+
+# Step 5: Verify staging
+git status --porcelain
+
+# Expected Output:
+# A  feature.cs
+# ?? feature.test.cs
+# ?? src/
+
+# Step 6: Stage directory
+acode git add src/
+
+# Expected Output:
+# ✓ Staged 2 files (feature.cs already staged + src/utils.cs)
+
+# Step 7: Verify all staged
+git status --porcelain
+
+# Expected Output:
+# A  feature.cs
+# A  src/utils.cs
+# ?? feature.test.cs
+```
+
+### Scenario 2: Commit with Message Validation (Security Test)
+
+**Objective:** Verify commit message validation blocks dangerous characters.
+
+```bash
+# Step 1: Stage files
+echo "content" > test.txt
+acode git add test.txt
+
+# Step 2: Try commit with shell metacharacter
+acode git commit "feat: feature \$(rm -rf /)"
+
+# Expected Output:
+# ❌ ERROR: Commit message validation failed
+# - Commit message contains dangerous character: '\$' (possible injection attempt)
+
+# Step 3: Try commit with backtick
+acode git commit "fix: bug \`whoami\`"
+
+# Expected Output:
+# ❌ ERROR: Commit message validation failed
+# - Commit message contains dangerous character: '\`' (possible injection attempt)
+
+# Step 4: Verify no commit was created
+git log -1 --pretty=format:"%s"
+
+# Expected Output: Initial commit (not the dangerous message)
+
+# Step 5: Commit with valid message
+acode git commit "feat: add test file with proper format"
+
+# Expected Output:
+# ✓ [abc123] feat: add test file with proper format
+
+# Step 6: Verify commit created
+git log -1 --pretty=format:"%s"
+
+# Expected Output: feat: add test file with proper format
+```
+
+### Scenario 3: Push with Operating Mode Enforcement
+
+**Objective:** Verify push blocked in LocalOnly mode, allowed in Burst mode.
+
+```bash
+# Step 1: Check current mode
+acode config get mode
+
+# Expected Output: LocalOnly (or current mode)
+
+# Step 2: Create commit to push
+echo "new feature" > feature.txt
+acode git add feature.txt
+acode git commit "feat: implement feature X"
+
+# Step 3: Try push in LocalOnly mode
+acode git push
+
+# Expected Output:
+# ❌ Push blocked by local-only mode
+# Hint: Switch to burst mode to enable push
+
+# Step 4: Switch to Burst mode
+acode config set mode burst
+
+# Expected Output:
+# Operating mode set to Burst
+
+# Step 5: Setup remote (local bare repo for testing)
+cd ..
+git init --bare test-remote.git
+cd test-stage-ops
+git remote add origin ../test-remote.git
+
+# Step 6: Push in Burst mode
+acode git push --set-upstream origin main
+
+# Expected Output:
+# ✓ Pushed to origin/main
+# Branch 'main' set up to track remote branch 'main' from 'origin'.
+
+# Step 7: Verify push succeeded
+git log origin/main -1 --pretty=format:"%s"
+
+# Expected Output: feat: implement feature X
+```
+
+### Scenario 4: Commit Message Format Enforcement
+
+**Objective:** Verify conventional commit format validation.
+
+```bash
+# Step 1: Stage files
+echo "update" > docs.md
+acode git add docs.md
+
+# Step 2: Try commit without conventional format
+acode git commit "just a regular message"
+
+# Expected Output:
+# ❌ ERROR: Commit message validation failed
+# - Commit message does not follow conventional format: type(scope): description
+# Expected format: feat|fix|docs|style|refactor|test|chore(scope): description
+
+# Step 3: Try commit too short
+acode git commit "fix bug"
+
+# Expected Output:
+# ❌ ERROR: Commit message validation failed
+# - Commit message too short (minimum 10 characters)
+
+# Step 4: Commit with valid format
+acode git commit "docs: update README with installation instructions"
+
+# Expected Output:
+# ✓ [def456] docs: update README with installation instructions
+
+# Step 5: Verify format enforced
+git log -1 --pretty=format:"%s"
+
+# Expected Output: docs: update README with installation instructions
+```
+
+### Scenario 5: Stage Path Traversal Protection (Security Test)
+
+**Objective:** Verify path validation prevents staging files outside repository.
+
+```bash
+# Step 1: Try to stage file outside repo boundary
+acode git add ../../etc/passwd
+
+# Expected Output:
+# ❌ ERROR: Path validation failed
+# - Path escapes repository boundary: ../../etc/passwd
+
+# Step 2: Verify no files staged
+git status --porcelain
+
+# Expected Output: (empty - no files staged)
+
+# Step 3: Try to stage absolute path
+acode git add /etc/shadow
+
+# Expected Output:
+# ❌ ERROR: Path validation failed
+# - Path escapes repository boundary: /etc/shadow
+
+# Step 4: Verify repository unchanged
+git log -1 --pretty=format:"%H"
+
+# Expected: Shows last commit SHA (unchanged)
+```
+
+### Scenario 6: Credential Redaction in Push Errors
+
+**Objective:** Verify credentials redacted from error messages and logs.
+
+```bash
+# Step 1: Add remote with embedded credentials (TESTING ONLY)
+git remote add test-remote https://user:password123@github.com/test/repo.git
+
+# Step 2: Try to push (will fail - fake credentials)
+acode git push test-remote main 2>&1 | tee push-output.log
+
+# Expected Output (credentials REDACTED):
+# ✗ Push failed
+# error: Failed to push to https://[REDACTED]@github.com/test/repo.git
+# (NOT showing: password123)
+
+# Step 3: Verify logs don't contain credentials
+grep "password123" push-output.log
+
+# Expected: (empty - password not in logs)
+
+# Step 4: Verify URL is redacted
+grep "\\[REDACTED\\]" push-output.log
+
+# Expected Output: Lines containing [REDACTED] instead of credentials
+```
+
+### Scenario 7: Push Retry on Network Failure
+
+**Objective:** Verify push retries with exponential backoff on transient failures.
+
+```bash
+# Step 1: Simulate network failure (block GitHub IPs with iptables - requires sudo)
+# (In real test, would use network simulation tool)
+
+# Step 2: Try push (will fail and retry)
+time acode git push origin main
+
+# Expected Output (after retries):
+# ⚠ Push attempt 1 failed, retrying in 100ms: Connection refused
+# ⚠ Push attempt 2 failed, retrying in 200ms: Connection refused
+# ⚠ Push attempt 3 failed, retrying in 400ms: Connection refused
+# ❌ ERROR: Push failed after 3 retries
+# (Total time: > 700ms due to backoff delays)
+
+# Step 3: Restore network connectivity
+# (Remove iptables rules)
+
+# Step 4: Retry push successfully
+acode git push origin main
+
+# Expected Output:
+# ✓ Pushed to origin/main
+```
+
+### Scenario 8: Empty Commit Prevention
+
+**Objective:** Verify commit fails when nothing staged unless --allow-empty.
+
+```bash
+# Step 1: Ensure working tree clean
+git status
+
+# Expected Output: nothing to commit, working tree clean
+
+# Step 2: Try to commit with nothing staged
+acode git commit "feat: empty commit"
+
+# Expected Output:
+# ❌ ERROR: Nothing to commit
+# No staged changes found. Stage files with 'acode git add' first.
+
+# Step 3: Use --allow-empty for checkpoint commit
+acode git commit "chore: checkpoint before major refactor" --allow-empty
+
+# Expected Output:
+# ✓ [ghi789] chore: checkpoint before major refactor
+
+# Step 4: Verify empty commit created
+git log -1 --pretty=format:"%s"
+git show HEAD --stat
+
+# Expected Output:
+# chore: checkpoint before major refactor
+# (no files changed)
+```
+
+### Scenario 9: Amend Last Commit
+
+**Objective:** Verify --amend modifies most recent commit.
+
+```bash
+# Step 1: Create initial commit
+echo "v1" > file.txt
+acode git add file.txt
+acode git commit "feat: add feature"
+
+# Step 2: Get initial commit SHA
+initial_sha=\$(git rev-parse HEAD)
+echo "Initial SHA: \$initial_sha"
+
+# Step 3: Make additional changes
+echo "v2" >> file.txt
+acode git add file.txt
+
+# Step 4: Amend commit
+acode git commit "feat: add feature with enhancements" --amend
+
+# Expected Output:
+# ✓ [jkl012] feat: add feature with enhancements
+
+# Step 5: Verify SHA changed (new commit)
+new_sha=\$(git rev-parse HEAD)
+echo "New SHA: \$new_sha"
+
+# Expected: \$initial_sha != \$new_sha
+
+# Step 6: Verify file contains both changes
+cat file.txt
+
+# Expected Output:
+# v1
+# v2
+
+# Step 7: Verify only one commit (not two)
+git log --oneline -2
+
+# Expected: Shows amended commit + Initial commit (not 3 commits)
+```
+
+### Scenario 10: Force Push Protection (Destructive Operation Test)
+
+**Objective:** Verify force push requires explicit authorization and warns user.
+
+```bash
+# Step 1: Create diverged history (simulate)
+git reset --hard HEAD~1  # Move local back one commit
+echo "conflicting change" > conflict.txt
+acode git add conflict.txt
+acode git commit "feat: conflicting commit"
+
+# Step 2: Try normal push (will fail - non-fast-forward)
+acode git push origin main
+
+# Expected Output:
+# ❌ ERROR: Push rejected (non-fast-forward)
+# Remote contains commits not in local branch.
+# Suggestion: Pull and rebase, or use --force-with-lease if intentional.
+
+# Step 3: Use force-with-lease (safer than --force)
+acode git push origin main --force-with-lease
+
+# Expected Output:
+# ⚠ WARNING: Force push will overwrite remote history
+# Type 'yes' to confirm: yes
+# ✓ Pushed to origin/main (forced update)
+
+# Step 4: Verify force push succeeded
+git log origin/main -1 --pretty=format:"%s"
+
+# Expected Output: feat: conflicting commit (local commit now on remote)
+```
+
+---
+
 ## Implementation Prompt
 
 ### File Structure
