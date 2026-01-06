@@ -3271,124 +3271,1011 @@ public sealed class SqliteConnectionIntegrationTests : IAsyncLifetime
 
 ## Implementation Prompt
 
+### Overview
+
+Implement a database access layer providing connection factory, unit of work, and retry patterns for SQLite (local) and PostgreSQL (remote) databases. Follow Clean Architecture with interfaces in Application layer and implementations in Infrastructure layer.
+
 ### File Structure
 
 ```
-src/AgenticCoder.Application/
-├── Persistence/
-│   ├── IConnectionFactory.cs
-│   ├── IUnitOfWork.cs
-│   └── IUnitOfWorkFactory.cs
+src/Acode.Application/
+├── Interfaces/
+│   ├── Persistence/
+│   │   ├── IConnectionFactory.cs
+│   │   ├── IUnitOfWork.cs
+│   │   ├── IUnitOfWorkFactory.cs
+│   │   ├── IDatabaseRetryPolicy.cs
+│   │   └── IConnectionPoolMetrics.cs
 │
-src/AgenticCoder.Infrastructure/
+src/Acode.Infrastructure/
 ├── Persistence/
 │   ├── Connections/
 │   │   ├── SqliteConnectionFactory.cs
-│   │   └── PostgresConnectionFactory.cs
+│   │   ├── PostgresConnectionFactory.cs
+│   │   └── ConnectionFactorySelector.cs
 │   ├── Transactions/
 │   │   ├── UnitOfWork.cs
 │   │   └── UnitOfWorkFactory.cs
-│   └── Retry/
-│       └── DatabaseRetryPolicy.cs
+│   ├── Retry/
+│   │   ├── DatabaseRetryPolicy.cs
+│   │   └── TransientErrorClassifier.cs
+│   └── DependencyInjection/
+│       └── DatabaseServiceCollectionExtensions.cs
+│
+src/Acode.Domain/
+├── Exceptions/
+│   └── DatabaseException.cs
+├── Enums/
+│   └── DatabaseType.cs
+│
+tests/Acode.Infrastructure.Tests/
+├── Persistence/
+│   ├── SqliteConnectionFactoryTests.cs
+│   ├── PostgresConnectionFactoryTests.cs
+│   ├── UnitOfWorkTests.cs
+│   └── DatabaseRetryPolicyTests.cs
 ```
 
-### IConnectionFactory Interface
+### Step 1: Domain Enums and Exceptions
+
+#### DatabaseType.cs
 
 ```csharp
-namespace AgenticCoder.Application.Persistence;
+// src/Acode.Domain/Enums/DatabaseType.cs
+namespace Acode.Domain.Enums;
 
+/// <summary>
+/// Supported database types for the connection factory.
+/// </summary>
+public enum DatabaseType
+{
+    /// <summary>SQLite embedded database for local workspace storage.</summary>
+    Sqlite,
+    
+    /// <summary>PostgreSQL server for remote/shared storage.</summary>
+    Postgres
+}
+```
+
+#### DatabaseException.cs
+
+```csharp
+// src/Acode.Domain/Exceptions/DatabaseException.cs
+namespace Acode.Domain.Exceptions;
+
+/// <summary>
+/// Exception thrown for database access errors with structured error codes.
+/// </summary>
+public sealed class DatabaseException : Exception
+{
+    /// <summary>Structured error code in format ACODE-DB-ACC-XXX.</summary>
+    public string ErrorCode { get; }
+    
+    /// <summary>Whether this error is transient and can be retried.</summary>
+    public bool IsTransient { get; }
+    
+    /// <summary>Correlation ID for tracing across logs.</summary>
+    public string CorrelationId { get; }
+    
+    public DatabaseException(
+        string errorCode, 
+        string message,
+        bool isTransient = false,
+        Exception? innerException = null,
+        string? correlationId = null)
+        : base(message, innerException)
+    {
+        ErrorCode = errorCode;
+        IsTransient = isTransient;
+        CorrelationId = correlationId ?? Guid.NewGuid().ToString("N")[..12];
+    }
+    
+    /// <summary>Connection failed - network, auth, or configuration error.</summary>
+    public static DatabaseException ConnectionFailed(string details, Exception? inner = null) =>
+        new("ACODE-DB-ACC-001", $"Database connection failed: {details}", isTransient: true, inner);
+    
+    /// <summary>Connection pool exhausted.</summary>
+    public static DatabaseException PoolExhausted(TimeSpan timeout) =>
+        new("ACODE-DB-ACC-002", $"Connection pool exhausted after {timeout.TotalSeconds}s wait", isTransient: true);
+    
+    /// <summary>Transaction failed to commit or rollback.</summary>
+    public static DatabaseException TransactionFailed(string operation, Exception? inner = null) =>
+        new("ACODE-DB-ACC-003", $"Transaction {operation} failed", isTransient: false, inner);
+    
+    /// <summary>Command execution timed out.</summary>
+    public static DatabaseException CommandTimeout(TimeSpan timeout, string command) =>
+        new("ACODE-DB-ACC-004", $"Command timed out after {timeout.TotalSeconds}s", isTransient: true);
+    
+    /// <summary>Constraint violation (unique, foreign key, check).</summary>
+    public static DatabaseException ConstraintViolation(string constraint, Exception? inner = null) =>
+        new("ACODE-DB-ACC-005", $"Constraint violation: {constraint}", isTransient: false, inner);
+    
+    /// <summary>SQL syntax error.</summary>
+    public static DatabaseException SyntaxError(string details, Exception? inner = null) =>
+        new("ACODE-DB-ACC-006", $"SQL syntax error: {details}", isTransient: false, inner);
+    
+    /// <summary>Permission denied.</summary>
+    public static DatabaseException PermissionDenied(string operation, Exception? inner = null) =>
+        new("ACODE-DB-ACC-007", $"Permission denied for: {operation}", isTransient: false, inner);
+    
+    /// <summary>Database does not exist.</summary>
+    public static DatabaseException DatabaseNotFound(string database, Exception? inner = null) =>
+        new("ACODE-DB-ACC-008", $"Database not found: {database}", isTransient: false, inner);
+}
+```
+
+### Step 2: Application Layer Interfaces
+
+#### IConnectionFactory.cs
+
+```csharp
+// src/Acode.Application/Interfaces/Persistence/IConnectionFactory.cs
+namespace Acode.Application.Interfaces.Persistence;
+
+using Acode.Domain.Enums;
+using System.Data;
+
+/// <summary>
+/// Factory for creating database connections.
+/// Implementations are responsible for connection configuration,
+/// pooling (PostgreSQL), and PRAGMA settings (SQLite).
+/// </summary>
 public interface IConnectionFactory
 {
+    /// <summary>
+    /// Creates and opens a new database connection.
+    /// The returned connection is in Open state and ready for use.
+    /// Caller is responsible for disposing the connection.
+    /// </summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>An open database connection.</returns>
+    /// <exception cref="DatabaseException">When connection cannot be established.</exception>
+    /// <exception cref="OperationCanceledException">When cancelled.</exception>
     Task<IDbConnection> CreateAsync(CancellationToken ct);
+    
+    /// <summary>
+    /// The type of database this factory creates connections for.
+    /// </summary>
     DatabaseType DatabaseType { get; }
 }
 ```
 
-### IUnitOfWork Interface
+#### IUnitOfWork.cs
 
 ```csharp
-namespace AgenticCoder.Application.Persistence;
+// src/Acode.Application/Interfaces/Persistence/IUnitOfWork.cs
+namespace Acode.Application.Interfaces.Persistence;
 
+using System.Data;
+
+/// <summary>
+/// Represents a unit of work with a shared transaction.
+/// All operations using this UoW share the same transaction and connection.
+/// </summary>
 public interface IUnitOfWork : IAsyncDisposable
 {
+    /// <summary>The shared database connection for this unit of work.</summary>
     IDbConnection Connection { get; }
+    
+    /// <summary>The active transaction for this unit of work.</summary>
     IDbTransaction Transaction { get; }
+    
+    /// <summary>
+    /// Commits all changes within this unit of work.
+    /// After commit, this UoW should not be reused.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">If already committed or rolled back.</exception>
     Task CommitAsync(CancellationToken ct);
+    
+    /// <summary>
+    /// Rolls back all changes within this unit of work.
+    /// After rollback, this UoW should not be reused.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">If already committed or rolled back.</exception>
     Task RollbackAsync(CancellationToken ct);
 }
 ```
 
-### SqliteConnectionFactory
+#### IUnitOfWorkFactory.cs
 
 ```csharp
-namespace AgenticCoder.Infrastructure.Persistence.Connections;
+// src/Acode.Application/Interfaces/Persistence/IUnitOfWorkFactory.cs
+namespace Acode.Application.Interfaces.Persistence;
+
+using System.Data;
+
+/// <summary>
+/// Factory for creating Unit of Work instances with transactions.
+/// </summary>
+public interface IUnitOfWorkFactory
+{
+    /// <summary>
+    /// Creates a new unit of work with default isolation level (ReadCommitted).
+    /// </summary>
+    Task<IUnitOfWork> CreateAsync(CancellationToken ct);
+    
+    /// <summary>
+    /// Creates a new unit of work with specified isolation level.
+    /// </summary>
+    /// <param name="isolationLevel">Transaction isolation level.</param>
+    Task<IUnitOfWork> CreateAsync(IsolationLevel isolationLevel, CancellationToken ct);
+}
+```
+
+#### IDatabaseRetryPolicy.cs
+
+```csharp
+// src/Acode.Application/Interfaces/Persistence/IDatabaseRetryPolicy.cs
+namespace Acode.Application.Interfaces.Persistence;
+
+/// <summary>
+/// Retry policy for transient database errors.
+/// </summary>
+public interface IDatabaseRetryPolicy
+{
+    /// <summary>
+    /// Executes an async operation with retry logic for transient failures.
+    /// </summary>
+    /// <typeparam name="T">Return type of the operation.</typeparam>
+    /// <param name="operation">The operation to execute.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Result of the operation.</returns>
+    Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken ct);
+    
+    /// <summary>
+    /// Executes an async operation with retry logic for transient failures.
+    /// </summary>
+    Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken ct);
+}
+```
+
+### Step 3: Configuration Options
+
+#### DatabaseOptions.cs
+
+```csharp
+// src/Acode.Infrastructure/Configuration/DatabaseOptions.cs
+namespace Acode.Infrastructure.Configuration;
+
+/// <summary>
+/// Configuration options for database connections.
+/// Bound from agent-config.yml database section.
+/// </summary>
+public sealed class DatabaseOptions
+{
+    public const string SectionName = "database";
+    
+    /// <summary>Database provider: sqlite or postgresql.</summary>
+    public string Provider { get; set; } = "sqlite";
+    
+    /// <summary>SQLite local database options.</summary>
+    public LocalDatabaseOptions Local { get; set; } = new();
+    
+    /// <summary>PostgreSQL remote database options.</summary>
+    public RemoteDatabaseOptions Remote { get; set; } = new();
+    
+    /// <summary>Retry policy options.</summary>
+    public RetryOptions Retry { get; set; } = new();
+    
+    /// <summary>Transaction timeout in seconds.</summary>
+    public int TransactionTimeoutSeconds { get; set; } = 30;
+}
+
+public sealed class LocalDatabaseOptions
+{
+    /// <summary>Path to SQLite database file.</summary>
+    public string Path { get; set; } = ".agent/data/workspace.db";
+    
+    /// <summary>Enable WAL mode for concurrent readers.</summary>
+    public bool WalMode { get; set; } = true;
+    
+    /// <summary>Busy timeout in milliseconds.</summary>
+    public int BusyTimeoutMs { get; set; } = 5000;
+}
+
+public sealed class RemoteDatabaseOptions
+{
+    /// <summary>Full connection string (takes precedence over components).</summary>
+    public string? ConnectionString { get; set; }
+    
+    /// <summary>Database host.</summary>
+    public string Host { get; set; } = "localhost";
+    
+    /// <summary>Database port.</summary>
+    public int Port { get; set; } = 5432;
+    
+    /// <summary>Database name.</summary>
+    public string Database { get; set; } = "acode";
+    
+    /// <summary>Username for authentication.</summary>
+    public string? Username { get; set; }
+    
+    /// <summary>Password for authentication.</summary>
+    public string? Password { get; set; }
+    
+    /// <summary>SSL mode: disable, prefer, require, verify-ca, verify-full.</summary>
+    public string SslMode { get; set; } = "prefer";
+    
+    /// <summary>Trust server certificate (development only).</summary>
+    public bool TrustServerCertificate { get; set; } = false;
+    
+    /// <summary>Command timeout in seconds.</summary>
+    public int CommandTimeoutSeconds { get; set; } = 30;
+    
+    /// <summary>Connection pool options.</summary>
+    public PoolOptions Pool { get; set; } = new();
+}
+
+public sealed class PoolOptions
+{
+    /// <summary>Minimum pool size.</summary>
+    public int MinSize { get; set; } = 2;
+    
+    /// <summary>Maximum pool size.</summary>
+    public int MaxSize { get; set; } = 10;
+    
+    /// <summary>Connection lifetime in seconds before recycling.</summary>
+    public int ConnectionLifetimeSeconds { get; set; } = 300;
+    
+    /// <summary>Time to wait for pool connection before timeout.</summary>
+    public int AcquisitionTimeoutSeconds { get; set; } = 15;
+}
+
+public sealed class RetryOptions
+{
+    /// <summary>Enable retry policy.</summary>
+    public bool Enabled { get; set; } = true;
+    
+    /// <summary>Maximum retry attempts.</summary>
+    public int MaxAttempts { get; set; } = 3;
+    
+    /// <summary>Base delay between retries in milliseconds.</summary>
+    public int BaseDelayMs { get; set; } = 100;
+    
+    /// <summary>Maximum delay between retries in milliseconds.</summary>
+    public int MaxDelayMs { get; set; } = 5000;
+}
+```
+
+### Step 4: Infrastructure Implementations
+
+#### SqliteConnectionFactory.cs
+
+```csharp
+// src/Acode.Infrastructure/Persistence/Connections/SqliteConnectionFactory.cs
+namespace Acode.Infrastructure.Persistence.Connections;
+
+using Acode.Application.Interfaces.Persistence;
+using Acode.Domain.Enums;
+using Acode.Domain.Exceptions;
+using Acode.Infrastructure.Configuration;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System.Data;
+using System.Diagnostics;
 
 public sealed class SqliteConnectionFactory : IConnectionFactory
 {
-    private readonly DatabaseOptions _options;
+    private readonly LocalDatabaseOptions _options;
+    private readonly ILogger<SqliteConnectionFactory> _logger;
     
     public DatabaseType DatabaseType => DatabaseType.Sqlite;
     
+    public SqliteConnectionFactory(
+        IOptions<DatabaseOptions> options,
+        ILogger<SqliteConnectionFactory> logger)
+    {
+        _options = options.Value.Local;
+        _logger = logger;
+        
+        // Ensure directory exists
+        var directory = Path.GetDirectoryName(_options.Path);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+            _logger.LogDebug("Created database directory: {Directory}", directory);
+        }
+    }
+    
     public async Task<IDbConnection> CreateAsync(CancellationToken ct)
     {
-        var path = _options.Local.Path;
-        var connectionString = $"Data Source={path}";
+        ct.ThrowIfCancellationRequested();
         
-        var connection = new SqliteConnection(connectionString);
-        await connection.OpenAsync(ct);
+        var sw = Stopwatch.StartNew();
         
-        // Configure SQLite
-        await ExecutePragmaAsync(connection, "journal_mode", "WAL", ct);
-        await ExecutePragmaAsync(connection, "busy_timeout", 
-            _options.Local.BusyTimeoutMs.ToString(), ct);
+        try
+        {
+            var connectionString = new SqliteConnectionStringBuilder
+            {
+                DataSource = _options.Path,
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Cache = SqliteCacheMode.Shared
+            }.ToString();
             
-        return connection;
+            var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(ct);
+            
+            // Configure SQLite pragmas
+            await ExecutePragmaAsync(connection, "journal_mode", 
+                _options.WalMode ? "WAL" : "DELETE", ct);
+            await ExecutePragmaAsync(connection, "busy_timeout", 
+                _options.BusyTimeoutMs.ToString(), ct);
+            await ExecutePragmaAsync(connection, "foreign_keys", "ON", ct);
+            await ExecutePragmaAsync(connection, "synchronous", "NORMAL", ct);
+            
+            sw.Stop();
+            
+            _logger.LogDebug(
+                "SQLite connection opened. Path={Path}, WAL={WalMode}, Duration={Duration}ms",
+                _options.Path, _options.WalMode, sw.ElapsedMilliseconds);
+            
+            return connection;
+        }
+        catch (SqliteException ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex, 
+                "Failed to open SQLite connection. Path={Path}, Duration={Duration}ms",
+                _options.Path, sw.ElapsedMilliseconds);
+            
+            throw DatabaseException.ConnectionFailed(
+                $"SQLite connection failed: {ex.Message}", ex);
+        }
+    }
+    
+    private static async Task ExecutePragmaAsync(
+        SqliteConnection connection, 
+        string pragma, 
+        string value,
+        CancellationToken ct)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"PRAGMA {pragma} = {value};";
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 }
 ```
 
-### Error Codes
+#### PostgresConnectionFactory.cs
 
-| Code | Meaning |
-|------|---------|
-| ACODE-DB-ACC-001 | Connection failed |
-| ACODE-DB-ACC-002 | Pool exhausted |
-| ACODE-DB-ACC-003 | Transaction failed |
-| ACODE-DB-ACC-004 | Command timeout |
-| ACODE-DB-ACC-005 | Constraint violation |
+```csharp
+// src/Acode.Infrastructure/Persistence/Connections/PostgresConnectionFactory.cs
+namespace Acode.Infrastructure.Persistence.Connections;
 
-### Logging Fields
+using Acode.Application.Interfaces.Persistence;
+using Acode.Domain.Enums;
+using Acode.Domain.Exceptions;
+using Acode.Infrastructure.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Npgsql;
+using System.Data;
+using System.Diagnostics;
+
+public sealed class PostgresConnectionFactory : IConnectionFactory
+{
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly ILogger<PostgresConnectionFactory> _logger;
+    private readonly string _maskedConnectionString;
+    
+    public DatabaseType DatabaseType => DatabaseType.Postgres;
+    
+    public PostgresConnectionFactory(
+        IOptions<DatabaseOptions> options,
+        ILogger<PostgresConnectionFactory> logger)
+    {
+        _logger = logger;
+        
+        var remoteOptions = options.Value.Remote;
+        var connectionString = BuildConnectionString(remoteOptions);
+        _maskedConnectionString = MaskPassword(connectionString);
+        
+        var builder = new NpgsqlDataSourceBuilder(connectionString);
+        builder.EnableDynamicJsonMappings();
+        
+        _dataSource = builder.Build();
+        
+        _logger.LogInformation(
+            "PostgreSQL data source initialized. Host={Host}, Database={Database}, Pool=[{Min}-{Max}]",
+            remoteOptions.Host, remoteOptions.Database,
+            remoteOptions.Pool.MinSize, remoteOptions.Pool.MaxSize);
+    }
+    
+    public async Task<IDbConnection> CreateAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        
+        var sw = Stopwatch.StartNew();
+        
+        try
+        {
+            var connection = await _dataSource.OpenConnectionAsync(ct);
+            
+            sw.Stop();
+            
+            if (sw.ElapsedMilliseconds > 100)
+            {
+                _logger.LogWarning(
+                    "Slow PostgreSQL pool acquisition. Duration={Duration}ms, Threshold=100ms",
+                    sw.ElapsedMilliseconds);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "PostgreSQL connection acquired from pool. Duration={Duration}ms",
+                    sw.ElapsedMilliseconds);
+            }
+            
+            return connection;
+        }
+        catch (NpgsqlException ex) when (IsPoolExhausted(ex))
+        {
+            sw.Stop();
+            _logger.LogError(ex, 
+                "PostgreSQL pool exhausted. Duration={Duration}ms",
+                sw.ElapsedMilliseconds);
+            
+            throw DatabaseException.PoolExhausted(sw.Elapsed);
+        }
+        catch (NpgsqlException ex)
+        {
+            sw.Stop();
+            _logger.LogError(ex,
+                "PostgreSQL connection failed. ConnectionString={ConnectionString}, Duration={Duration}ms",
+                _maskedConnectionString, sw.ElapsedMilliseconds);
+            
+            throw DatabaseException.ConnectionFailed(ex.Message, ex);
+        }
+    }
+    
+    private static string BuildConnectionString(RemoteDatabaseOptions options)
+    {
+        if (!string.IsNullOrEmpty(options.ConnectionString))
+            return options.ConnectionString;
+        
+        // Check environment variables
+        var envConnectionString = Environment.GetEnvironmentVariable("ACODE_PG_CONNECTION");
+        if (!string.IsNullOrEmpty(envConnectionString))
+            return envConnectionString;
+        
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = Environment.GetEnvironmentVariable("ACODE_PG_HOST") ?? options.Host,
+            Port = int.TryParse(Environment.GetEnvironmentVariable("ACODE_PG_PORT"), out var port) 
+                ? port : options.Port,
+            Database = Environment.GetEnvironmentVariable("ACODE_PG_DATABASE") ?? options.Database,
+            Username = Environment.GetEnvironmentVariable("ACODE_PG_USER") ?? options.Username,
+            Password = Environment.GetEnvironmentVariable("ACODE_PG_PASSWORD") ?? options.Password,
+            SslMode = ParseSslMode(options.SslMode),
+            TrustServerCertificate = options.TrustServerCertificate,
+            CommandTimeout = options.CommandTimeoutSeconds,
+            MinPoolSize = options.Pool.MinSize,
+            MaxPoolSize = options.Pool.MaxSize,
+            ConnectionLifetime = options.Pool.ConnectionLifetimeSeconds,
+            Timeout = options.Pool.AcquisitionTimeoutSeconds,
+            ApplicationName = "Acode"
+        };
+        
+        return builder.ToString();
+    }
+    
+    private static SslMode ParseSslMode(string mode) => mode.ToLowerInvariant() switch
+    {
+        "disable" => SslMode.Disable,
+        "prefer" => SslMode.Prefer,
+        "require" => SslMode.Require,
+        "verify-ca" => SslMode.VerifyCA,
+        "verify-full" => SslMode.VerifyFull,
+        _ => SslMode.Prefer
+    };
+    
+    private static bool IsPoolExhausted(NpgsqlException ex) =>
+        ex.Message.Contains("pool", StringComparison.OrdinalIgnoreCase) &&
+        ex.Message.Contains("exhaust", StringComparison.OrdinalIgnoreCase);
+    
+    private static string MaskPassword(string connectionString)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        if (!string.IsNullOrEmpty(builder.Password))
+            builder.Password = "***MASKED***";
+        return builder.ToString();
+    }
+}
+```
+
+#### UnitOfWork.cs
+
+```csharp
+// src/Acode.Infrastructure/Persistence/Transactions/UnitOfWork.cs
+namespace Acode.Infrastructure.Persistence.Transactions;
+
+using Acode.Application.Interfaces.Persistence;
+using Acode.Domain.Exceptions;
+using Microsoft.Extensions.Logging;
+using System.Data;
+using System.Diagnostics;
+
+public sealed class UnitOfWork : IUnitOfWork
+{
+    private readonly ILogger<UnitOfWork> _logger;
+    private readonly Stopwatch _stopwatch;
+    private bool _isCompleted;
+    private bool _isDisposed;
+    
+    public IDbConnection Connection { get; }
+    public IDbTransaction Transaction { get; }
+    
+    public UnitOfWork(
+        IDbConnection connection,
+        IsolationLevel isolationLevel,
+        ILogger<UnitOfWork> logger)
+    {
+        Connection = connection;
+        _logger = logger;
+        _stopwatch = Stopwatch.StartNew();
+        
+        Transaction = connection.BeginTransaction(isolationLevel);
+        
+        _logger.LogDebug(
+            "Transaction started. IsolationLevel={IsolationLevel}",
+            isolationLevel);
+    }
+    
+    public Task CommitAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        EnsureNotCompleted();
+        
+        try
+        {
+            Transaction.Commit();
+            _isCompleted = true;
+            
+            _stopwatch.Stop();
+            _logger.LogDebug(
+                "Transaction committed. Duration={Duration}ms",
+                _stopwatch.ElapsedMilliseconds);
+            
+            return Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Transaction commit failed");
+            throw DatabaseException.TransactionFailed("commit", ex);
+        }
+    }
+    
+    public Task RollbackAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        EnsureNotCompleted();
+        
+        try
+        {
+            Transaction.Rollback();
+            _isCompleted = true;
+            
+            _stopwatch.Stop();
+            _logger.LogInformation(
+                "Transaction rolled back. Duration={Duration}ms",
+                _stopwatch.ElapsedMilliseconds);
+            
+            return Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Transaction rollback failed");
+            throw DatabaseException.TransactionFailed("rollback", ex);
+        }
+    }
+    
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+        
+        if (!_isCompleted)
+        {
+            try
+            {
+                Transaction.Rollback();
+                _logger.LogWarning(
+                    "Transaction auto-rolled back on dispose. Duration={Duration}ms",
+                    _stopwatch.ElapsedMilliseconds);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to rollback transaction on dispose");
+            }
+        }
+        
+        Transaction.Dispose();
+        
+        if (Connection is IAsyncDisposable asyncDisposable)
+            await asyncDisposable.DisposeAsync();
+        else
+            Connection.Dispose();
+    }
+    
+    private void EnsureNotCompleted()
+    {
+        if (_isCompleted)
+            throw new InvalidOperationException(
+                "Transaction has already been committed or rolled back");
+    }
+}
+```
+
+#### DatabaseRetryPolicy.cs
+
+```csharp
+// src/Acode.Infrastructure/Persistence/Retry/DatabaseRetryPolicy.cs
+namespace Acode.Infrastructure.Persistence.Retry;
+
+using Acode.Application.Interfaces.Persistence;
+using Acode.Domain.Exceptions;
+using Acode.Infrastructure.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+public sealed class DatabaseRetryPolicy : IDatabaseRetryPolicy
+{
+    private readonly RetryOptions _options;
+    private readonly ILogger<DatabaseRetryPolicy> _logger;
+    private readonly Random _jitterRandom = new();
+    
+    public DatabaseRetryPolicy(
+        IOptions<RetryOptions> options,
+        ILogger<DatabaseRetryPolicy> logger)
+    {
+        _options = options.Value;
+        _logger = logger;
+    }
+    
+    public async Task<T> ExecuteAsync<T>(
+        Func<CancellationToken, Task<T>> operation, 
+        CancellationToken ct)
+    {
+        if (!_options.Enabled)
+            return await operation(ct);
+        
+        var attempt = 0;
+        var exceptions = new List<Exception>();
+        
+        while (true)
+        {
+            attempt++;
+            ct.ThrowIfCancellationRequested();
+            
+            try
+            {
+                return await operation(ct);
+            }
+            catch (DatabaseException ex) when (ex.IsTransient && attempt < _options.MaxAttempts)
+            {
+                exceptions.Add(ex);
+                var delay = CalculateDelay(attempt);
+                
+                _logger.LogWarning(
+                    "Transient database error, retrying. Attempt={Attempt}/{Max}, Delay={Delay}ms, Error={Error}",
+                    attempt, _options.MaxAttempts, delay.TotalMilliseconds, ex.ErrorCode);
+                
+                await Task.Delay(delay, ct);
+            }
+            catch (DatabaseException ex) when (!ex.IsTransient)
+            {
+                // Permanent error - don't retry
+                _logger.LogError(
+                    "Permanent database error, not retrying. Attempt={Attempt}, Error={Error}",
+                    attempt, ex.ErrorCode);
+                throw;
+            }
+            catch (DatabaseException ex)
+            {
+                // Exhausted retries
+                exceptions.Add(ex);
+                _logger.LogError(
+                    "Database error after all retries exhausted. Attempts={Attempts}, Errors={Errors}",
+                    attempt, string.Join(", ", exceptions.Select(e => e.Message)));
+                throw;
+            }
+        }
+    }
+    
+    public async Task ExecuteAsync(
+        Func<CancellationToken, Task> operation, 
+        CancellationToken ct)
+    {
+        await ExecuteAsync(async ct2 =>
+        {
+            await operation(ct2);
+            return true;
+        }, ct);
+    }
+    
+    private TimeSpan CalculateDelay(int attempt)
+    {
+        // Exponential backoff with jitter
+        var exponentialMs = _options.BaseDelayMs * Math.Pow(2, attempt - 1);
+        var cappedMs = Math.Min(exponentialMs, _options.MaxDelayMs);
+        
+        // Add jitter (10-30% of delay)
+        var jitterFactor = 0.1 + (_jitterRandom.NextDouble() * 0.2);
+        var jitterMs = cappedMs * jitterFactor;
+        
+        return TimeSpan.FromMilliseconds(cappedMs + jitterMs);
+    }
+}
+```
+
+### Step 5: Dependency Injection Registration
+
+```csharp
+// src/Acode.Infrastructure/DependencyInjection/DatabaseServiceCollectionExtensions.cs
+namespace Acode.Infrastructure.DependencyInjection;
+
+using Acode.Application.Interfaces.Persistence;
+using Acode.Infrastructure.Configuration;
+using Acode.Infrastructure.Persistence.Connections;
+using Acode.Infrastructure.Persistence.Retry;
+using Acode.Infrastructure.Persistence.Transactions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+public static class DatabaseServiceCollectionExtensions
+{
+    public static IServiceCollection AddDatabaseServices(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        // Bind configuration
+        services.Configure<DatabaseOptions>(
+            configuration.GetSection(DatabaseOptions.SectionName));
+        services.Configure<RetryOptions>(
+            configuration.GetSection($"{DatabaseOptions.SectionName}:retry"));
+        
+        // Validate configuration at startup
+        services.AddSingleton<IValidateOptions<DatabaseOptions>, DatabaseOptionsValidator>();
+        
+        // Register factories based on provider
+        var options = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>()
+            ?? new DatabaseOptions();
+        
+        if (options.Provider.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddSingleton<IConnectionFactory, PostgresConnectionFactory>();
+        }
+        else
+        {
+            services.AddSingleton<IConnectionFactory, SqliteConnectionFactory>();
+        }
+        
+        // Register transactional components
+        services.AddScoped<IUnitOfWorkFactory, UnitOfWorkFactory>();
+        services.AddSingleton<IDatabaseRetryPolicy, DatabaseRetryPolicy>();
+        
+        return services;
+    }
+}
+```
+
+### Error Codes Reference
+
+| Code | Meaning | Transient | Retry |
+|------|---------|-----------|-------|
+| ACODE-DB-ACC-001 | Connection failed | Yes | Yes |
+| ACODE-DB-ACC-002 | Pool exhausted | Yes | Yes |
+| ACODE-DB-ACC-003 | Transaction failed | No | No |
+| ACODE-DB-ACC-004 | Command timeout | Yes | Yes |
+| ACODE-DB-ACC-005 | Constraint violation | No | No |
+| ACODE-DB-ACC-006 | SQL syntax error | No | No |
+| ACODE-DB-ACC-007 | Permission denied | No | No |
+| ACODE-DB-ACC-008 | Database not found | No | No |
+
+### Logging Events
 
 ```json
+// Connection opened
 {
   "event": "database_connection_opened",
   "database_type": "sqlite",
   "path": ".agent/data/workspace.db",
+  "wal_mode": true,
   "duration_ms": 12
+}
+
+// Transaction committed
+{
+  "event": "transaction_committed",
+  "isolation_level": "ReadCommitted",
+  "duration_ms": 45
+}
+
+// Retry attempt
+{
+  "event": "database_retry",
+  "attempt": 2,
+  "max_attempts": 3,
+  "error_code": "ACODE-DB-ACC-001",
+  "delay_ms": 200
+}
+
+// Pool exhaustion
+{
+  "event": "pool_exhausted",
+  "wait_time_ms": 15000,
+  "pool_size": 10
 }
 ```
 
 ### Implementation Checklist
 
-1. [ ] Create IConnectionFactory
-2. [ ] Create IUnitOfWork
-3. [ ] Implement SQLite factory
-4. [ ] Implement PostgreSQL factory
-5. [ ] Implement unit of work
-6. [ ] Add retry policy
-7. [ ] Add logging
-8. [ ] Add configuration
-9. [ ] Write unit tests
-10. [ ] Write integration tests
+1. [ ] **Domain Layer**
+   - [ ] Create `DatabaseType` enum
+   - [ ] Create `DatabaseException` with factory methods
+   
+2. [ ] **Application Layer Interfaces**
+   - [ ] Create `IConnectionFactory` interface
+   - [ ] Create `IUnitOfWork` interface
+   - [ ] Create `IUnitOfWorkFactory` interface
+   - [ ] Create `IDatabaseRetryPolicy` interface
+   
+3. [ ] **Configuration**
+   - [ ] Create `DatabaseOptions` and related option classes
+   - [ ] Create `DatabaseOptionsValidator` for startup validation
+   
+4. [ ] **SQLite Implementation**
+   - [ ] Create `SqliteConnectionFactory`
+   - [ ] Test WAL mode configuration
+   - [ ] Test busy timeout
+   - [ ] Test foreign key enforcement
+   
+5. [ ] **PostgreSQL Implementation**
+   - [ ] Create `PostgresConnectionFactory`
+   - [ ] Test connection string building
+   - [ ] Test environment variable fallback
+   - [ ] Test pool configuration
+   - [ ] Test SSL mode handling
+   
+6. [ ] **Transaction Management**
+   - [ ] Create `UnitOfWork` with commit/rollback
+   - [ ] Create `UnitOfWorkFactory`
+   - [ ] Test auto-rollback on dispose
+   - [ ] Test double-commit prevention
+   
+7. [ ] **Retry Policy**
+   - [ ] Create `DatabaseRetryPolicy`
+   - [ ] Implement exponential backoff with jitter
+   - [ ] Test transient vs permanent error classification
+   - [ ] Test cancellation token respect
+   
+8. [ ] **DI Registration**
+   - [ ] Create `AddDatabaseServices` extension method
+   - [ ] Test provider-based factory selection
+   
+9. [ ] **Testing**
+   - [ ] Write unit tests for all factories
+   - [ ] Write unit tests for UnitOfWork
+   - [ ] Write unit tests for retry policy
+   - [ ] Write integration tests for SQLite
+   - [ ] Write integration tests for PostgreSQL (if available)
 
 ### Rollout Plan
 
-1. **Phase 1:** Interfaces
-2. **Phase 2:** SQLite factory
-3. **Phase 3:** PostgreSQL factory
-4. **Phase 4:** Unit of work
-5. **Phase 5:** Retry policy
-6. **Phase 6:** Configuration
+| Phase | Components | Duration | Risk |
+|-------|------------|----------|------|
+| 1 | Domain types (enum, exception) | 0.5 day | Low |
+| 2 | Application interfaces | 0.5 day | Low |
+| 3 | Configuration options | 0.5 day | Low |
+| 4 | SQLite factory + tests | 1 day | Medium |
+| 5 | PostgreSQL factory + tests | 1 day | Medium |
+| 6 | UnitOfWork + factory | 1 day | Medium |
+| 7 | Retry policy | 0.5 day | Low |
+| 8 | DI registration | 0.5 day | Low |
+| 9 | Integration testing | 1 day | Medium |
+
+**Total Estimated Duration:** 6-7 days
 
 ---
 

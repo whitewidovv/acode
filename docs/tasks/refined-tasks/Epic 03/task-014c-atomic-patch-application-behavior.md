@@ -18,6 +18,152 @@ The agent's primary value comes from its ability to make code changes. Without r
 
 Beyond safety, this subsystem enables powerful development workflows: dry-run previews let developers review changes before applying them, rollback capabilities provide an undo mechanism for recent changes, and transactional multi-file patches ensure related changes across files stay synchronized. These capabilities transform the agent from a code suggestion tool into a reliable code modification system.
 
+### Return on Investment (ROI)
+
+**Development Velocity Gains:**
+- **Automated Code Modification:** Without atomic patches, developers must manually apply AI-generated code changes by copying/pasting suggestions. For an agent making 20 code modifications per session, manual application takes ~2 minutes per change = 40 minutes per session. With atomic patches, the agent applies all changes in <1 second total.
+- **At 4 sessions/day × 20 workdays/month:** 3,200 minutes/month (53.3 hours) saved per developer
+- **At $100/hour developer rate:** $5,330/month per developer or **$63,960/year per developer**
+- **For 10-developer team:** **$639,600 annual productivity savings**
+
+**Error Prevention:**
+- **Eliminated Manual Transcription Errors:** Manual copy/paste introduces typos, incorrect indentation, or partial changes in ~5-10% of operations. For a project with 1,000 agent-assisted changes per month, this prevents 50-100 manual error bugs.
+- **At 45 min average debug time per transcription bug:** 2,250-4,500 minutes/month saved = 37.5-75 hours = **$3,750-$7,500 monthly debugging savings** = **$45,000-$90,000 annually**
+
+**Confidence and Rollback:**
+- **Dry-Run Preview:** Developers can review AI-proposed changes before applying, catching logic errors pre-commit. Prevents ~30% of "bad AI suggestion" commits that require immediate revert.
+- **Atomic Rollback:** Enables instant undo of recent agent changes. Saves ~15 minutes per "oops, revert that" scenario × 10 scenarios/month = 150 minutes/month = **$250/month** = **$3,000/year** per developer
+
+**ROI Calculation:**
+- Development cost: 120 hours (3 weeks) × $100/hour = $12,000
+- Annual savings: $639,600 (velocity) + $67,500 (avg debugging) + $30,000 (10-dev rollback) = **$737,100**
+- **Payback period: 5 days**
+- **Annual ROI: 6,043%**
+
+### Technical Architecture
+
+The atomic patch system follows a pipeline architecture with validation gates at each stage:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                          Patch Application Pipeline                   │
+└──────────────────────────────────────────────────────────────────────┘
+
+Input: Unified Diff String
+         │
+         ▼
+┌─────────────────────────┐
+│   1. Patch Parser       │  ← Parses unified diff format
+│   ────────────────      │  ← Extracts files, hunks, line ranges
+│   UnifiedDiffParser     │  ← Validates patch syntax
+└───────────┬─────────────┘
+            │ Parsed Patch Object
+            ▼
+┌─────────────────────────┐
+│   2. Path Validator     │  ← Checks for directory traversal
+│   ────────────────      │  ← Verifies paths within repo boundary
+│   PatchPathValidator    │  ← Rejects system path targets
+└───────────┬─────────────┘
+            │ Validated Paths
+            ▼
+┌─────────────────────────┐
+│   3. Resource Limiter   │  ← Enforces max files/hunks/size
+│   ────────────────      │  ← Prevents DoS via oversized patches
+│   PatchResourceLimiter  │  ← Checks concurrency limits
+└───────────┬─────────────┘
+            │ Resource-Limited Patch
+            ▼
+┌─────────────────────────┐
+│   4. Context Validator  │  ← Reads current file content
+│   ────────────────      │  ← Matches context lines from patch
+│   PatchContextMatcher   │  ← Detects conflicts, reports mismatches
+└───────────┬─────────────┘
+            │ Validated Context
+            ├──────────────────────┐
+            │                      │ (if dry-run)
+            ▼                      ▼
+┌─────────────────────────┐  ┌────────────────────┐
+│ 5a. Backup Manager      │  │ 5b. Preview Mode   │
+│   ────────────────      │  │   ──────────────   │
+│   Creates .backup files │  │   Shows changes    │
+│   Tracks backup IDs     │  │   No file writes   │
+└───────────┬─────────────┘  │   Returns preview  │
+            │                └────────────────────┘
+            ▼ Backups Created
+┌─────────────────────────┐
+│   6. Atomic Applicator  │  ← Applies hunks in order
+│   ────────────────      │  ← Uses temp-file-then-rename
+│   PatchApplicator       │  ← Rolls back on ANY failure
+└───────────┬─────────────┘
+            │ All-or-Nothing
+            ├──Success────────┐
+            │                 │
+            ▼                 ▼ (on failure)
+┌─────────────────────┐  ┌──────────────────────┐
+│ 7a. Commit Changes  │  │ 7b. Rollback Manager │
+│   ──────────────    │  │   ────────────────   │
+│   Finalize writes   │  │   Restore from .backup│
+│   Log success       │  │   Report failure     │
+│   Clean old backups │  │   Keep backups       │
+└─────────────────────┘  └──────────────────────┘
+
+Output: PatchApplicationResult {Success, FilesModified, RollbackID}
+```
+
+**Key Design Principles:**
+
+1. **Fail-Fast Validation:** Detect all error conditions BEFORE modifying any files. Once backup phase starts, we're committed to rollback-on-failure.
+
+2. **Backup-First Strategy:** Create backups of ALL files before applying ANY changes. Ensures we can always roll back to previous state even on crash.
+
+3. **Hunk Ordering:** Apply hunks in reverse line-number order (bottom-to-top) so earlier hunks don't invalidate line numbers for later hunks.
+
+4. **Atomic File Writes:** Each file modification uses temp-file-then-rename pattern from LocalFS/DockerFS to guarantee atomicity at the file level.
+
+5. **Transaction Semantics:** Multi-file patches are transactional - either all files succeed or all are rolled back.
+
+### Architectural Decisions & Trade-offs
+
+**Decision 1: Unified Diff Format vs Custom Format**
+
+We use standard unified diff format (as produced by `git diff`) rather than a custom JSON or structured format.
+
+- **Rationale:** LLMs are trained on millions of unified diffs from GitHub/StackOverflow and generate them naturally. Using a custom format would require the LLM to learn a new syntax, increasing token usage and error rates.
+- **Trade-off:** Unified diff parsing is complex (regex-heavy, error-prone) vs JSON parsing (trivial). We accept this complexity for better LLM compatibility.
+- **Alternative Rejected:** JSON-based change format like `{"file": "x.cs", "changes": [{line: 10, old: "...", new: "..."}]}` would be easier to parse but require prompt engineering to teach LLMs.
+
+**Decision 2: Fuzz Matching vs Strict Context**
+
+We support configurable fuzz factor (0-3) to handle minor line number drift when files change after patch generation.
+
+- **Rationale:** During interactive sessions, a user might manually edit a file while the agent is generating a patch for it. Strict context matching (fuzz=0) would reject the patch, requiring full regeneration. Fuzz matching searches nearby lines for context, applying patches despite minor drift.
+- **Trade-off:** Fuzz matching increases risk of applying patches to wrong locations if context is similar (e.g., repeated boilerplate). Default fuzz=1 is conservative - requires exact context match within ±1 line.
+- **Alternative Rejected:** Always regenerate patches on context mismatch. This wastes LLM tokens and increases latency (3-5 seconds per regeneration).
+
+**Decision 3: Backup Retention vs Immediate Cleanup**
+
+We retain backup files for configurable duration (default: 24 hours) rather than deleting them immediately after successful patch application.
+
+- **Rationale:** Users often discover they want to undo a change minutes or hours later. Immediate cleanup would make undo impossible. 24-hour retention provides a reasonable "oh no, go back!" window while preventing indefinite disk usage growth.
+- **Trade-off:** Backup files consume disk space (typically ~1MB per modified file). For a project with 100 agent sessions/day modifying 10 files each, this is 1GB/day. We mitigate with automatic cleanup of backups older than retention period.
+- **Alternative Rejected:** Git-based undo (rely on `git checkout` or `git reset`). This only works if users commit after each patch, which breaks iterative workflows where users want to test changes before committing.
+
+**Decision 4: Fail-on-First-Error vs Best-Effort Multi-File**
+
+When applying patches to multiple files, we abort the entire transaction on first error rather than applying "what we can."
+
+- **Rationale:** Multi-file patches often represent logically related changes (e.g., refactor a class and update its call sites). Partial application leaves the codebase in an inconsistent state where the build is broken or tests fail. Atomic all-or-nothing semantics ensure the codebase is either fully updated or unchanged.
+- **Trade-off:** One bad file in a 10-file patch means 0 files get updated, not 9. Users must fix the failing file and retry the entire patch.
+- **Alternative Rejected:** Apply successfully validated files, skip failed ones, report partial success. This is what some patch tools do, but it creates subtle bugs where "it compiled before, why is it broken now?"
+
+**Decision 5: Diff Library vs Regex Parsing**
+
+We implement unified diff parsing from scratch using regex patterns rather than using existing diff libraries (e.g., DiffPlex, DiffMatchPatch).
+
+- **Rationale:** Existing .NET diff libraries focus on *generating* diffs or *displaying* diffs visually, not *parsing* unified diff strings into structured objects. DiffPlex parses inline diffs, not the full unified diff headers with file paths and line ranges. Implementing parsing gives us full control over error messages and validation.
+- **Trade-off:** More code to maintain (~300 lines of parser logic) vs a NuGet dependency. Higher initial complexity, but better error diagnostics ("Hunk header malformed at line 45" vs generic library exceptions).
+- **Alternative Rejected:** Adapt DiffPlex by wrapping it with our own parsing layer. This adds an unnecessary layer of indirection and doesn't save much code.
+
 ### Scope
 
 This task delivers the complete atomic patch application subsystem:
@@ -1447,23 +1593,25 @@ $ acode rollback feat-notif-pref-001
 
 ---
 
+## Glossary / Terms
+
 | Term | Definition |
 |------|------------|
-| Patch | File modification description |
-| Unified Diff | Standard patch format |
-| Hunk | Single change block |
-| Context Lines | Surrounding lines for matching |
-| Atomic | All or nothing |
-| Rollback | Undo changes |
-| Dry Run | Preview without change |
-| Conflict | Context mismatch |
-| Fuzz | Line number tolerance |
-| Transaction | Grouped operations |
-| Backup | Pre-change copy |
-| Apply | Execute patch |
-| Reject | Failed hunk |
-| Offset | Line number adjustment |
-| Merge | Combine changes |
+| **Patch** | A description of modifications to one or more files, expressed as differences between the original content and the desired new content. In this implementation, patches use unified diff format (as produced by `git diff`) which includes file paths, line numbers, removed lines (prefixed with `-`), and added lines (prefixed with `+`). Patches are the primary mechanism by which the AI agent communicates intended code changes. |
+| **Unified Diff** | The standard patch format used by version control systems like Git. Format: `--- a/file.cs` (old file), `+++ b/file.cs` (new file), `@@ -10,5 +10,7 @@` (hunk header with line numbers), followed by context lines (no prefix), removed lines (`-` prefix), and added lines (`+` prefix). This format is human-readable and widely supported by diff/patch tools. LLMs are extensively trained on this format from GitHub data. |
+| **Hunk** | A single contiguous block of changes within a file patch. Each hunk has a header like `@@ -10,5 +10,7 @@` meaning "starting at line 10 of the old file, remove 5 lines; starting at line 10 of the new file, add 7 lines." A patch can contain multiple hunks for the same file (e.g., changes at line 10 and also at line 100). Hunks are applied independently with context validation for each. |
+| **Context Lines** | The unchanged lines surrounding the modifications in a hunk. Context lines (usually 3 before and 3 after the change) are used to locate the correct position in the file where the patch should apply. If the actual file content doesn't match the context lines, a conflict is detected. Context lines have no prefix in the unified diff format (unlike `-` for removals and `+` for additions). |
+| **Atomic Operation** | An operation that either fully succeeds or fully fails, with no partial states possible. In patch application, atomicity means either ALL hunks in ALL files are applied successfully, or NO changes are made (complete rollback). This prevents partially-modified files that could break builds or leave the codebase in an inconsistent state. Implemented via backup-first strategy and transaction semantics. |
+| **Rollback** | The process of undoing previously applied changes by restoring files from backup copies. Rollbacks can be automatic (triggered on any failure during patch application) or manual (user-initiated undo of a recent patch). The rollback mechanism maintains backups with unique IDs for a configurable retention period (default 24 hours), enabling recovery even if the agent crashes during application. |
+| **Dry Run / Preview Mode** | Execution of full patch validation and conflict detection WITHOUT actually modifying any files. Dry run shows what changes would be made, which files would be affected, and whether any conflicts exist. This enables users to review AI-proposed changes before committing to apply them. No backups are created and no file writes occur in dry run mode. |
+| **Conflict** | A situation where the context lines in a patch hunk do not match the actual content of the target file at the expected location. Conflicts indicate the file has been modified since the patch was generated, or the patch was generated against a different version of the file. Conflicts are detected during the validation phase (before any files are modified) and cause the entire patch application to abort with detailed conflict reports. |
+| **Fuzz Factor** | A tolerance setting (0-3) that controls how strictly context lines must match during patch application. Fuzz=0 requires exact context match at exact line numbers. Fuzz=1 allows the hunk to match context within ±1 line of the expected location. Higher fuzz values search farther from the expected line number to find matching context. Default is fuzz=1 as a balance between flexibility (handles minor file edits) and safety (avoids incorrect application). |
+| **Transaction** | A grouping of related operations that must all succeed or all fail together. Multi-file patches are treated as a single transaction - if any file fails validation or application, ALL files are rolled back to their original state. Transaction boundaries are managed by the session layer, ensuring consistency across agent-initiated changes. Transactions use the backup-first strategy to enable rollback. |
+| **Backup** | A copy of a file's content before patch application, stored in a temporary location with a unique backup ID. Backups enable rollback in case of failure or user-initiated undo. Backup files are named like `.acode-backup-2024-01-15-143022/<relative-path>` and retained for a configurable period (default 24 hours) before automatic cleanup. Backups include file metadata (permissions, timestamps) to enable full restoration. |
+| **Apply / Patch Application** | The process of reading patch content, validating paths and context, creating backups, and modifying target files by inserting added lines and removing deleted lines according to the patch hunks. Application follows the pipeline: Parse → Validate → Backup → Apply → Commit (or Rollback on failure). Each file is modified atomically using the temp-file-then-rename pattern from the underlying file system provider (LocalFS or DockerFS). |
+| **Reject / Rejected Hunk** | A hunk that cannot be applied because its context lines don't match the target file content. Rejected hunks are reported with detailed diagnostics: expected context, actual content found, line number of mismatch. When ANY hunk is rejected during validation, the entire patch is rejected (not applied) to maintain atomicity. Users must either regenerate the patch against current file content or manually resolve the conflict. |
+| **Offset / Line Number Adjustment** | The difference between the line number where a hunk was expected to apply (from the patch header) and the line number where it actually applied (due to fuzz matching or context search). For example, if a hunk header says `@@ -100,5 +100,7 @@` but the matching context is found at line 102, the offset is +2. Offsets are logged for diagnostics but don't indicate errors if the context matched correctly. |
+| **Merge** | The process of combining changes from a patch with the current content of a file. Unlike `git merge` which reconciles divergent branches, patch merging here refers to applying individual hunks by removing specified lines and inserting new lines at the correct positions. Merge conflicts occur when context doesn't match. Successful merge results in a modified file with the patch changes applied. |
 
 ---
 
@@ -1471,14 +1619,29 @@ $ acode rollback feat-notif-pref-001
 
 The following items are explicitly excluded from Task 014.c:
 
-- **Three-way merge** - Simple patches only
-- **Git integration** - File-level only
-- **Conflict resolution** - Report only
-- **Semantic merge** - Text-based only
-- **Binary patches** - Text files only
-- **Rename detection** - Explicit renames only
-- **Permission changes** - Content only
-- **Interactive editing** - Automatic only
+- **Three-Way Merge / Merge Conflict Resolution**: This implementation handles simple unified diff patches where changes are applied against a known baseline. It does NOT perform three-way merges (reconciling changes from two divergent branches with a common ancestor) like `git merge` does. When a conflict is detected (context doesn't match), the system reports the conflict with diagnostics but does NOT attempt to automatically resolve it by analyzing both sides of the conflict. Future enhancement: Add interactive conflict resolution UI.
+
+- **Deep Git Integration**: Patch application is file-level only and does not interact with Git internals (staging area, commit graph, branches). While patches can be generated from `git diff` output, this system does not create commits, switch branches, or manage Git history. It operates at the file content level, not the version control level. Users must manually commit applied changes using their own Git workflow. Future enhancement: Optional auto-commit with generated commit messages.
+
+- **Automatic Conflict Resolution**: When context mismatches are detected, the system reports the conflict location and expected vs actual content but does NOT attempt to automatically resolve the conflict by guessing the user's intent. Conflict resolution requires human decision-making or patch regeneration. This is intentional to prevent subtle bugs from incorrect automatic resolution. Future enhancement: Suggest resolution strategies based on conflict type (e.g., "context lines changed but semantics equivalent").
+
+- **Semantic Merge / Intelligent Conflict Detection**: Patch matching is purely text-based using exact string comparison of context lines. It does NOT understand code semantics, so renaming a variable or reformatting code will cause context mismatches even if the logic is semantically equivalent. No AST (Abstract Syntax Tree) analysis is performed. Future enhancement: Semantic-aware context matching for programming languages.
+
+- **Binary File Patches**: Only text file patches are supported. Binary diff formats (like Git's binary delta format) are not parsed or applied. Attempting to apply a patch containing binary file changes will result in a clear error message rejecting the patch. Binary files must be handled separately via direct file writes. Rationale: Binary patches are rare in AI-assisted coding workflows and add significant parsing complexity.
+
+- **File Rename Detection / Tracking**: When a patch shows a file being deleted and another file being created with similar content, this system treats them as independent delete + create operations, not as a rename. No similarity analysis is performed to detect renames. Only explicit rename operations (where the patch header indicates a rename) are supported. Rationale: Rename detection requires expensive content similarity algorithms and is not critical for patch application semantics.
+
+- **Permission / Ownership Changes**: Patches can modify file content only, not file permissions (chmod), ownership (chown), or attributes (xattr). If a patch is generated with `git diff --no-index` showing permission changes, those permission modifications will be ignored - only content changes apply. Future enhancement: Support git patch format's `new mode` and `old mode` headers.
+
+- **Interactive Patch Editing**: Users cannot interactively select which hunks to apply from a patch (like `git add -p`). Patches are applied atomically in full - either all hunks succeed or the entire patch is rolled back. Partial hunk application would violate atomicity guarantees. Future enhancement: Add `--interactive` mode for hunk-by-hunk application with manual conflict resolution prompts.
+
+- **Whitespace-Only Change Handling**: Patches that differ only in whitespace (spaces vs tabs, trailing whitespace, blank lines) are treated as real changes, not ignored. No whitespace normalization occurs during context matching. If the patch says to add a line `    foo();` (4 spaces) but the file has `\tfoo();` (1 tab), it's a context mismatch. Rationale: Whitespace can be semantically significant (Python indentation, Makefiles).
+
+- **Line Ending Normalization**: Mixed line endings (LF vs CRLF) within the same file or between patch and file will cause context mismatches. No automatic line ending conversion occurs. Users must ensure consistent line endings before patch application (e.g., using `.gitattributes` or `dos2unix`). Future enhancement: Add `--ignore-whitespace` mode that normalizes line endings during context matching.
+
+- **Patch Preview Rendering**: Dry run mode shows a text summary of changes (files affected, line counts, conflict locations) but does NOT render a visual side-by-side diff like GitHub's PR view. No syntax highlighting or HTML output. Future enhancement: Add `--preview-html` mode that generates a colorized diff view for browser display.
+
+- **Incremental Patch Application**: Patches must be applied as complete units. There is no support for applying "the first 5 hunks" or "changes to these 3 files only" from a multi-file patch. The transactional all-or-nothing semantics apply to the entire patch. Future enhancement: Add patch splitting tools to divide multi-file patches into independent file-level patches that can be applied selectively.
 
 ---
 
@@ -1579,6 +1742,37 @@ The following items are explicitly excluded from Task 014.c:
 | FR-014c-44 | PatchResult MUST include offset information if fuzz applied |
 | FR-014c-45 | PatchResult MUST include conflict details if validation failed |
 
+### Dry Run / Preview Mode (FR-014c-46 to FR-014c-50)
+
+| ID | Requirement |
+|----|-------------|
+| FR-014c-46 | System MUST support dry-run mode that validates patches without modifying files |
+| FR-014c-47 | Dry-run mode MUST report all validation errors as if patch were being applied |
+| FR-014c-48 | Dry-run mode MUST show preview of changes (files affected, line counts, hunks) |
+| FR-014c-49 | Dry-run mode MUST NOT create backup files |
+| FR-014c-50 | Dry-run result MUST include estimated success probability based on validation |
+
+### Rollback / Undo (FR-014c-51 to FR-014c-56)
+
+| ID | Requirement |
+|----|-------------|
+| FR-014c-51 | System MUST support rollback of previously applied patches by backup ID |
+| FR-014c-52 | Rollback MUST restore ALL files modified in the original patch transaction |
+| FR-014c-53 | Rollback MUST restore file content, timestamps, and permissions from backup |
+| FR-014c-54 | System MUST list available rollback points with timestamps and file counts |
+| FR-014c-55 | Rollback MUST be atomic (all files restored or none) |
+| FR-014c-56 | System MUST prevent rollback of patches where backup retention has expired |
+
+### Backup Management (FR-014c-57 to FR-014c-61)
+
+| ID | Requirement |
+|----|-------------|
+| FR-014c-57 | System MUST assign unique backup IDs to each patch application (timestamp-based) |
+| FR-014c-58 | System MUST store backups in configurable backup directory (.acode-backups/ default) |
+| FR-014c-59 | System MUST automatically cleanup backups older than retention period (24h default) |
+| FR-014c-60 | Backup cleanup MUST preserve backups currently in use by active sessions |
+| FR-014c-61 | System MUST report disk space consumed by backups and oldest backup age |
+
 ---
 
 ## Non-Functional Requirements
@@ -1614,6 +1808,31 @@ The following items are explicitly excluded from Task 014.c:
 | NFR-014c-10 | Maintainability | Dry run output MUST clearly show intended changes |
 | NFR-014c-11 | Maintainability | Conflict messages MUST identify specific mismatched content |
 | NFR-014c-12 | Maintainability | All patch operations MUST be logged with sufficient detail |
+
+### Scalability (NFR-014c-13 to NFR-014c-16)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014c-13 | Scalability | System MUST handle patches modifying up to 1000 files without degradation |
+| NFR-014c-14 | Scalability | System MUST handle patches with up to 10,000 total hunks across all files |
+| NFR-014c-15 | Scalability | Memory usage MUST scale linearly with patch size (O(n) complexity) |
+| NFR-014c-16 | Scalability | Backup storage MUST support retention of 100+ patch transactions |
+
+### Compatibility (NFR-014c-17 to NFR-014c-19)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014c-17 | Compatibility | System MUST parse unified diffs from git diff, diff -u, and svn diff |
+| NFR-014c-18 | Compatibility | System MUST work with LocalFS and DockerFS file system providers |
+| NFR-014c-19 | Compatibility | System MUST handle UTF-8, UTF-16, and ASCII text file encodings |
+
+### Usability (NFR-014c-20 to NFR-014c-22)
+
+| ID | Category | Requirement |
+|----|----------|-------------|
+| NFR-014c-20 | Usability | Error messages MUST include actionable remediation steps |
+| NFR-014c-21 | Usability | Dry run output MUST be human-readable and concise |
+| NFR-014c-22 | Usability | Rollback operations MUST complete in < 5 seconds for typical patches |
 
 ---
 
@@ -1827,6 +2046,114 @@ $ acode run "Add error handling to the API controller"
 - [ ] AC-018: Original restored
 - [ ] AC-019: Cleanup works
 
+### Path Security
+
+- [ ] AC-020: System MUST reject patches with path traversal sequences (../)
+- [ ] AC-021: System MUST reject patches targeting absolute system paths (/etc, C:\Windows)
+- [ ] AC-022: System MUST reject patches with null bytes in file paths
+- [ ] AC-023: System MUST reject patches with paths containing shell metacharacters
+- [ ] AC-024: Path validation MUST occur before any file operations
+
+### Hunk Parsing
+
+- [ ] AC-025: System MUST correctly parse hunk headers with line numbers (@@ -10,5 +10,7 @@)
+- [ ] AC-026: System MUST distinguish between context, added, and removed lines
+- [ ] AC-027: System MUST handle hunks with only additions (new file sections)
+- [ ] AC-028: System MUST handle hunks with only removals (deleted sections)
+- [ ] AC-029: System MUST handle empty hunks (no actual changes)
+- [ ] AC-030: System MUST reject malformed hunk headers
+
+### Context Matching
+
+- [ ] AC-031: System MUST match context lines exactly by default (fuzz=0)
+- [ ] AC-032: System MUST support fuzz factor 1 (±1 line tolerance)
+- [ ] AC-033: System MUST support fuzz factor 2 (±2 line tolerance)
+- [ ] AC-034: System MUST support fuzz factor 3 (±3 line tolerance)
+- [ ] AC-035: System MUST report offset when hunk applied with line number drift
+- [ ] AC-036: System MUST reject hunks where context cannot be found within fuzz tolerance
+
+### Multi-File Patches
+
+- [ ] AC-037: System MUST apply patches affecting multiple files atomically
+- [ ] AC-038: Failure in any file MUST rollback all previously applied files in the patch
+- [ ] AC-039: System MUST report which file caused multi-file patch failure
+- [ ] AC-040: System MUST preserve file modification order from patch
+- [ ] AC-041: System MUST handle patches with 100+ files without performance degradation
+
+### Binary File Detection
+
+- [ ] AC-042: System MUST detect binary files via content inspection
+- [ ] AC-043: System MUST reject patches containing binary file modifications
+- [ ] AC-044: System MUST provide clear error message when binary patch detected
+- [ ] AC-045: Detection MUST check first 8KB of file for null bytes
+
+### Encoding Handling
+
+- [ ] AC-046: System MUST detect file encoding before applying patch
+- [ ] AC-047: System MUST preserve original file encoding after patch application
+- [ ] AC-048: System MUST handle UTF-8 files with and without BOM
+- [ ] AC-049: System MUST handle UTF-16 LE and BE encodings
+- [ ] AC-050: System MUST reject patches causing encoding mismatches
+
+### Backup Management
+
+- [ ] AC-051: System MUST create backup before modifying each file
+- [ ] AC-052: Backups MUST be stored with unique timestamp-based IDs
+- [ ] AC-053: Backups MUST preserve file content, timestamps, and permissions
+- [ ] AC-054: System MUST automatically cleanup backups older than retention period
+- [ ] AC-055: Cleanup MUST NOT delete backups for active sessions
+- [ ] AC-056: System MUST provide command to list all available rollback points
+- [ ] AC-057: Rollback MUST fail gracefully if backup has been deleted
+
+### Error Reporting
+
+- [ ] AC-058: Parse errors MUST include line number and character position
+- [ ] AC-059: Context mismatch errors MUST show expected vs actual content
+- [ ] AC-060: Conflict errors MUST include file path and line number
+- [ ] AC-061: Errors MUST include actionable remediation suggestions
+- [ ] AC-062: System MUST distinguish between validation errors and application errors
+
+### Performance
+
+- [ ] AC-063: Parsing MUST complete in < 1ms per hunk
+- [ ] AC-064: Context validation MUST complete in < 5ms per hunk
+- [ ] AC-065: Single-file patch application MUST complete in < 10ms total
+- [ ] AC-066: Backup creation MUST complete in < 100ms per file
+- [ ] AC-067: Rollback MUST complete in < 5 seconds for patches modifying 100 files
+
+### Resource Limits
+
+- [ ] AC-068: System MUST enforce max 1000 files per patch
+- [ ] AC-069: System MUST enforce max 10,000 hunks per patch
+- [ ] AC-070: System MUST enforce max 1MB patch size
+- [ ] AC-071: System MUST enforce max 100 concurrent patch operations
+- [ ] AC-072: Resource limit violations MUST be rejected during validation phase
+
+### Dry Run Mode
+
+- [ ] AC-073: Dry run MUST perform full validation without modifying files
+- [ ] AC-074: Dry run MUST report all conflicts that would occur
+- [ ] AC-075: Dry run MUST NOT create backup files
+- [ ] AC-076: Dry run result MUST include list of files that would be modified
+- [ ] AC-077: Dry run MUST show line counts for additions and removals
+- [ ] AC-078: Dry run MUST execute in < 50% time of actual application
+
+### Logging
+
+- [ ] AC-079: System MUST log all patch applications with timestamp and user
+- [ ] AC-080: System MUST log rollback operations with backup ID
+- [ ] AC-081: System MUST log validation failures with error details
+- [ ] AC-082: Logs MUST include patch size and file count
+- [ ] AC-083: Logs MUST be written before modifying files (audit trail)
+
+### Integration
+
+- [ ] AC-084: System MUST integrate with LocalFS file system provider
+- [ ] AC-085: System MUST integrate with DockerFS file system provider
+- [ ] AC-086: System MUST use RepoFS atomic write operations
+- [ ] AC-087: System MUST respect file system provider's permission model
+- [ ] AC-088: System MUST work with both LocalOnly and Burst operating modes
+
 ---
 
 ## Best Practices
@@ -1851,6 +2178,282 @@ $ acode run "Add error handling to the API controller"
 10. **Check context matches** - Verify context lines match actual file content
 11. **Handle fuzzy matching** - Allow configurable line offset tolerance
 12. **Report conflicts clearly** - Show expected vs actual content when patches fail
+
+---
+
+## Troubleshooting
+
+### Issue 1: Patch Fails with "Context Mismatch" Error
+
+**Symptoms:**
+- Patch application aborts with error message like "Context mismatch at line 45"
+- Error shows "Expected: X, Actual: Y" where X and Y are different
+- Dry run shows conflicts even though the file exists
+
+**Causes:**
+- File was modified after the patch was generated (most common)
+- Patch was generated against a different branch or version of the file
+- Whitespace differences (tabs vs spaces, trailing whitespace)
+- Line ending differences (LF vs CRLF)
+
+**Solutions:**
+
+1. **Regenerate the patch against current file content:**
+   ```bash
+   # Get current file state
+   $ cat src/Program.cs
+
+   # Ask AI to regenerate the patch
+   $ acode run "Regenerate the patch for Program.cs against the current file content"
+   ```
+
+2. **Review recent changes to the file:**
+   ```bash
+   $ git diff src/Program.cs
+   # If file was manually edited, revert and reapply patch
+   $ git checkout src/Program.cs
+   $ acode apply-patch --file previous-patch.diff
+   ```
+
+3. **Increase fuzz factor to tolerate minor drift:**
+   ```bash
+   $ acode apply-patch --fuzz 2 mypatch.diff
+   # WARNING: Higher fuzz increases risk of applying to wrong location
+   ```
+
+4. **Manually inspect the conflict:**
+   ```bash
+   # Show detailed conflict information
+   $ acode apply-patch --dry-run --verbose mypatch.diff
+
+   # Fix the file manually to match expected context, or
+   # edit the patch file to match actual content
+   ```
+
+---
+
+### Issue 2: Rollback Fails with "Backup Not Found" Error
+
+**Symptoms:**
+- Attempting rollback gives error "Backup ID xyz-123 not found"
+- Listing rollback points shows no available backups
+- Rollback command fails even though patch was recently applied
+
+**Causes:**
+- Backup retention period expired (default 24 hours)
+- Backup files manually deleted from `.acode-backups/` directory
+- Disk cleanup tool removed temporary files
+- Different working directory than where patch was applied
+
+**Solutions:**
+
+1. **Check backup retention settings:**
+   ```yaml
+   # In .agent/config.yml
+   patching:
+     backup_retention_hours: 72  # Increase from default 24
+   ```
+
+2. **List available rollback points:**
+   ```bash
+   $ acode rollback --list
+
+   # Example output:
+   # Available rollback points:
+   #   2024-01-15-143022 (2 hours ago) - 5 files modified
+   #   2024-01-15-120133 (5 hours ago) - 12 files modified
+   ```
+
+3. **Restore from Git if backup expired:**
+   ```bash
+   # If the change was committed
+   $ git log --oneline -5
+   $ git revert <commit-hash>
+
+   # If not committed, use git reflog
+   $ git reflog
+   $ git reset --hard HEAD@{2}
+   ```
+
+4. **Prevent future backup loss:**
+   ```yaml
+   patching:
+     backup_retention_hours: 168  # 1 week retention
+     backup_directory: /persistent/backups  # Outside temp directory
+   ```
+
+---
+
+### Issue 3: Patch Applies Successfully But Build Breaks
+
+**Symptoms:**
+- Patch application reports success with no conflicts
+- All files modified as expected
+- Compilation fails or tests break after patch applied
+- Application behavior changed unexpectedly
+
+**Causes:**
+- Patch was semantically incorrect (wrong logic)
+- Patch applied to wrong location due to fuzz matching
+- Multi-file patch missed a dependent change
+- AI hallucinated incorrect code changes
+
+**Solutions:**
+
+1. **Review what actually changed:**
+   ```bash
+   # Show diff of applied changes
+   $ git diff
+
+   # Compare against patch preview
+   $ acode apply-patch --dry-run original-patch.diff
+   ```
+
+2. **Rollback and analyze:**
+   ```bash
+   # Undo the patch
+   $ acode rollback --latest
+
+   # Review build errors
+   $ dotnet build
+
+   # Ask AI to fix the patch
+   $ acode run "The previous patch broke the build with error: <paste error>.
+               Generate a corrected patch."
+   ```
+
+3. **Validate with dry run before applying:**
+   ```bash
+   # ALWAYS preview first
+   $ acode apply-patch --dry-run new-patch.diff
+
+   # Check what will change
+   $ acode apply-patch --dry-run --show-diff new-patch.diff
+
+   # Only apply if preview looks correct
+   $ acode apply-patch new-patch.diff
+   ```
+
+4. **Run tests immediately after patch:**
+   ```bash
+   # Automate validation
+   $ acode apply-patch mypatch.diff && dotnet test || acode rollback --latest
+   ```
+
+---
+
+### Issue 4: Dry Run Shows Conflicts But File Looks Correct
+
+**Symptoms:**
+- Dry run reports context mismatch
+- Manually inspecting the file shows context lines ARE present
+- Context appears to match exactly but patch still rejects
+
+**Causes:**
+- Invisible whitespace differences (tabs, spaces, Unicode whitespace)
+- Line ending mismatches (LF vs CRLF, CR only)
+- Zero-width characters or Unicode normalization differences
+- File encoding mismatch (UTF-8 vs UTF-8-BOM vs UTF-16)
+
+**Solutions:**
+
+1. **Check for whitespace issues:**
+   ```bash
+   # Show all whitespace characters
+   $ cat -A src/Program.cs | grep "^.*line 45.*$"
+
+   # Compare tabs vs spaces
+   $ sed -n '45p' src/Program.cs | xxd
+   ```
+
+2. **Normalize line endings:**
+   ```bash
+   # Convert to LF (Unix)
+   $ dos2unix src/Program.cs
+
+   # Or convert to CRLF (Windows)
+   $ unix2dos src/Program.cs
+
+   # Then regenerate patch
+   ```
+
+3. **Check file encoding:**
+   ```bash
+   $ file src/Program.cs
+   # Should show: UTF-8 Unicode text
+
+   # If wrong encoding, convert:
+   $ iconv -f UTF-16 -t UTF-8 src/Program.cs -o src/Program.cs.new
+   $ mv src/Program.cs.new src/Program.cs
+   ```
+
+4. **Use exact context extraction:**
+   ```bash
+   # Extract the exact context from file
+   $ sed -n '43,47p' src/Program.cs > context.txt
+
+   # Ask AI to generate patch using this exact context
+   $ acode run "Generate patch using this exact context: $(cat context.txt)"
+   ```
+
+---
+
+### Issue 5: Patch Application Very Slow (> 10 Seconds)
+
+**Symptoms:**
+- Simple patches take 10+ seconds to apply
+- Progress appears to hang during application
+- No error messages, just slow performance
+
+**Causes:**
+- Large number of files or hunks in patch
+- Slow file system (network mount, Docker volume)
+- Inefficient context matching algorithm
+- Backup creation on slow storage
+
+**Solutions:**
+
+1. **Check patch size:**
+   ```bash
+   $ wc -l mypatch.diff
+   # If > 10,000 lines, consider splitting
+
+   $ grep -c "^@@" mypatch.diff
+   # Shows number of hunks
+   ```
+
+2. **Split large patches:**
+   ```bash
+   # Extract per-file patches
+   $ acode split-patch mypatch.diff --output-dir ./patches/
+
+   # Apply file by file
+   $ for p in patches/*.diff; do acode apply-patch $p; done
+   ```
+
+3. **Optimize backup location:**
+   ```yaml
+   # Move backups to faster storage
+   patching:
+     backup_directory: /dev/shm/.acode-backups  # RAM disk (Linux)
+     # or
+     backup_directory: C:\Temp\.acode-backups  # Local SSD (Windows)
+   ```
+
+4. **Reduce fuzz factor:**
+   ```bash
+   # Fuzz > 0 requires searching nearby lines
+   $ acode apply-patch --fuzz 0 mypatch.diff
+   # Exact matching is much faster
+   ```
+
+5. **Use incremental patches:**
+   ```bash
+   # Instead of one huge patch, apply changes incrementally
+   $ acode run "Apply changes to auth module only"
+   # Then
+   $ acode run "Now apply changes to user module"
+   ```
 
 ---
 

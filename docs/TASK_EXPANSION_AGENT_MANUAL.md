@@ -1,4 +1,5 @@
 # TASK EXPANSION AGENT MANUAL
+!!! ATTENTION !!! it's **CRITICALLY** important to remember that presence of a section, or linecount, is not an indication of completion. this is because we could have a description with 300 lines of lorem ipsum, but that doesn't mean we skip and move on; that is semantically useless, so should be caught and replaced with adequate relevant semantically complete text according to our standards. the only way to do that will be to actually read task to gain an understanding of it as a whole, and then read the section individually to semantically verify it actually captures the whole essence of the task in question, while maintaining AT A MINIMIUM the quality standards we've outlined. 
 
 **Agent Callsign:** [VS1]  
 **Purpose:** Expand task specification stubs into comprehensive, implementation-ready documentation  

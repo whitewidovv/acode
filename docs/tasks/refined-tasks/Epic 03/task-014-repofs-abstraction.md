@@ -42,6 +42,121 @@ This task defines the complete file system abstraction layer:
 
 7. **Factory Pattern:** Creates appropriate file system instances based on configuration.
 
+### Technical Architecture
+
+RepoFS follows a layered architecture with clear separation of concerns:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   Application Layer                          │
+│  (Tools, Indexer, Context Packer, Git Operations)           │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       │ IRepoFS Interface
+                       │
+┌──────────────────────▼──────────────────────────────────────┐
+│                 RepoFS Core Abstraction                      │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │ Path         │  │ Transaction  │  │ Patch        │     │
+│  │ Validator    │  │ Manager      │  │ Applicator   │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+        ┌──────────────┴──────────────┐
+        │                             │
+┌───────▼────────┐           ┌────────▼────────┐
+│ LocalFileSystem│           │ DockerFileSystem│
+│  Implementation│           │   Implementation│
+└───────┬────────┘           └────────┬────────┘
+        │                             │
+┌───────▼──────────────────────────────▼────────┐
+│         Operating System File System           │
+│    (Windows NTFS, Linux ext4, macOS APFS)     │
+└────────────────────────────────────────────────┘
+```
+
+**Key Architectural Decisions:**
+
+1. **Interface-Based Design:** All consumers depend on `IRepoFS`, not concrete implementations. This enables testing with in-memory implementations and future extensibility.
+
+2. **Path Validation at Boundary:** Security validation happens at the interface boundary BEFORE any OS calls. Multiple validation layers provide defense in depth.
+
+3. **Transaction Isolation:** Transactions use a separate backup directory (`.agent/tx/{transaction-id}/`) with file locking to prevent concurrent modification during commit/rollback.
+
+4. **Factory Pattern for Environment Detection:** `IRepoFSFactory` auto-detects Docker vs local environment and instantiates the appropriate implementation.
+
+5. **Async-First API:** All operations return `Task<T>` to support cooperative multitasking and avoid blocking threads during I/O.
+
+6. **Patch-Based Modifications:** Rather than full file rewrites, RepoFS supports unified diff patches for efficient, auditable changes.
+
+### Trade-Offs and Design Decisions
+
+**Decision 1: Interface Abstraction vs Direct File I/O**
+
+*Chosen:* Interface abstraction (`IRepoFS`)
+*Alternative:* Direct `System.IO.File` calls throughout codebase
+
+*Rationale:*
+- **Pro abstraction:** Testability (in-memory fakes), security (single validation point), extensibility (Docker/cloud implementations)
+- **Con abstraction:** Additional layer of indirection, slight performance overhead
+- **Why chosen:** Security and testability benefits far outweigh minimal performance cost. Path traversal vulnerabilities are critical; centralized validation is essential.
+
+**Decision 2: Transaction Backup Strategy**
+
+*Chosen:* File-based backups with integrity hashing
+*Alternative:* Database transaction log or copy-on-write
+
+*Rationale:*
+- **Pro file-based:** Simple, no external dependencies, works offline, easy debugging
+- **Con file-based:** Disk space requirement (2× modified files), cleanup needed
+- **Why chosen:** Simplicity and zero dependencies. The agent may run in environments without database access. Disk space is cheap; complexity is expensive.
+
+**Decision 3: Sync vs Async File Operations**
+
+*Chosen:* Async-only API (`Task<T>` for all operations)
+*Alternative:* Sync methods or both sync/async variants
+
+*Rationale:*
+- **Pro async-only:** Forces callers to use best practice, avoids sync-over-async anti-pattern, enables cancellation
+- **Con async-only:** Slightly more complex calling code
+- **Why chosen:** File I/O can block for seconds (network shares, slow disks). Forcing async prevents accidental thread starvation.
+
+**Decision 4: Docker File System Implementation**
+
+*Chosen:* Mounted volume access (same as local FS)
+*Alternative:* Docker API with `docker cp` for file transfers
+
+*Rationale:*
+- **Pro mounted volumes:** Same code path as local FS, no Docker API dependency, lower latency
+- **Con mounted volumes:** Requires proper mount configuration
+- **Why chosen:** Performance and simplicity. `docker cp` for every read/write would be 10-100× slower. Mounted volumes are standard practice.
+
+**Decision 5: Encoding Detection**
+
+*Chosen:* UTF-8 default with BOM detection
+*Alternative:* Full charset detection library (e.g., ude)
+
+*Rationale:*
+- **Pro UTF-8 default:** Fast, covers 99% of source code, no dependencies
+- **Con UTF-8 default:** May misinterpret legacy encodings (e.g., Latin-1)
+- **Why chosen:** Modern codebases use UTF-8. Adding a detection library adds 500KB+ dependency for <1% edge cases. Users can configure encoding if needed.
+
+### Constraints and Limitations
+
+1. **Single Repository Root:** RepoFS operates within one repository root. Multi-repository scenarios require multiple `IRepoFS` instances.
+
+2. **Local/Docker Only (v1):** Network file systems and cloud storage are out of scope. These would require different consistency and latency handling.
+
+3. **File Size Limits:** Files >100MB may cause memory pressure. Streaming support is planned but not in v1.
+
+4. **Platform Path Length:** Windows MAX_PATH (260 characters) affects older systems. Long path support requires Windows 10+ with registry enable.
+
+5. **No Symbolic Link Support (v1):** Symlinks are security risks (escape repository boundary). Explicitly not supported in initial version.
+
+6. **Transaction Overhead:** Transactions create backup files, requiring 2× disk space for modified files during transaction lifetime.
+
+7. **No Concurrent Transaction Support:** Only one transaction per repository at a time to avoid deadlocks.
+
 ### Integration Points
 
 | Component | Integration Type | Description |
@@ -69,29 +184,6 @@ This task defines the complete file system abstraction layer:
 | Concurrent modification | Race condition | File locking for writes, optimistic concurrency for reads |
 | Long path (Windows) | Operation fails | Detect and warn, suggest path shortening |
 | Symbolic link escape | Security violation | Resolve symlinks, validate final path |
-
-### Assumptions
-
-1. The repository is stored on a local or Docker-mounted file system
-2. Files are predominantly text (UTF-8) with occasional binary files
-3. The agent has read access to all files in the repository
-4. Write access may be restricted to certain directories
-5. File operations complete in reasonable time (no network latency)
-6. The file system supports atomic rename operations (for transactions)
-7. File paths are valid for the target platform
-8. File sizes are reasonable for in-memory processing (< 10MB typical)
-9. Concurrent agents are not modifying the same repository
-10. Git ignore patterns are respected for enumeration
-11. Docker containers, when used, are already running and accessible
-12. File operations complete without network latency (local or mounted)
-13. The agent process has sufficient memory for file buffering (10MB+ available)
-14. File system supports POSIX-like semantics (or Windows equivalent)
-15. Temp directories are available with write permissions
-16. Clock synchronization is sufficient for timestamp accuracy
-17. File system events (if enabled) are delivered reliably
-18. The repository does not contain circular symbolic links
-19. Binary file detection heuristics are sufficient for common formats
-20. Transaction backup storage has sufficient space (2x modified files)
 
 ### ROI and Business Value Metrics
 
@@ -1809,6 +1901,66 @@ The following items are explicitly excluded from Task 014:
 
 RepoFS (Repository File System) is the abstraction layer that provides safe, consistent file system access for the Agentic Coding Bot. It ensures the agent can read and modify files within a repository while preventing access to files outside the repository boundary.
 
+### Quick Reference Card
+
+**Common Operations:**
+```csharp
+// Read a file
+string content = await repoFS.ReadFileAsync("src/Program.cs");
+
+// Write a file
+await repoFS.WriteFileAsync("output/result.txt", data);
+
+// Delete a file
+await repoFS.DeleteFileAsync("temp/cache.json");
+
+// Check if file exists
+bool exists = await repoFS.ExistsAsync("config.yml");
+
+// List directory contents
+var files = await repoFS.ListFilesAsync("src/", "*.cs");
+
+// Get file metadata
+var metadata = await repoFS.GetMetadataAsync("README.md");
+
+// Transaction (atomic multi-file operation)
+using var tx = await repoFS.BeginTransactionAsync();
+await repoFS.WriteFileAsync("file1.txt", data1);
+await repoFS.WriteFileAsync("file2.txt", data2);
+await tx.CommitAsync(); // Both succeed or both roll back
+
+// Apply unified diff patch
+await repoFS.ApplyPatchAsync("src/Utils.cs", patchContent);
+```
+
+**Configuration Quick Start:**
+```yaml
+# .agent/config.yml
+repo:
+  fs_type: auto                  # auto-detect (local vs docker)
+  root: /workspace/project       # repository root path
+  read_only: false               # allow writes
+  security:
+    audit_all_operations: true   # log all file access
+    protected_paths:             # paths agent cannot access
+      - ".env"
+      - "secrets/"
+```
+
+**Key Concepts:**
+- **Path Validation:** All paths validated against repository root before access
+- **Transactions:** Group multiple file operations; all succeed or all roll back
+- **Patches:** Apply unified diff patches for targeted file modifications
+- **Audit Trail:** Optional logging of all file operations for compliance
+
+**Common Error Codes:**
+| Code | Meaning | Action |
+|------|---------|--------|
+| ACODE-FS-001 | File not found | Check path spelling, case sensitivity |
+| ACODE-FS-002 | Permission denied | Verify file permissions, check read_only mode |
+| ACODE-FS-003 | Path traversal attempt | Path escapes repository - security violation |
+| ACODE-FS-010 | I/O error | Check disk space, file locks, Docker mounts |
+
 ### Architecture
 
 ```
@@ -2217,6 +2369,31 @@ Docker socket: /var/run/docker.sock connected
 2. Check container name in configuration
 3. Verify mount path exists in container
 4. Check Docker socket permissions
+
+---
+
+## Assumptions
+
+1. The repository is stored on a local or Docker-mounted file system
+2. Files are predominantly text (UTF-8) with occasional binary files
+3. The agent has read access to all files in the repository
+4. Write access may be restricted to certain directories
+5. File operations complete in reasonable time (no network latency)
+6. The file system supports atomic rename operations (for transactions)
+7. File paths are valid for the target platform
+8. File sizes are reasonable for in-memory processing (< 10MB typical)
+9. Concurrent agents are not modifying the same repository
+10. Git ignore patterns are respected for enumeration
+11. Docker containers, when used, are already running and accessible
+12. File operations complete without network latency (local or mounted)
+13. The agent process has sufficient memory for file buffering (10MB+ available)
+14. File system supports POSIX-like semantics (or Windows equivalent)
+15. Temp directories are available with write permissions
+16. Clock synchronization is sufficient for timestamp accuracy
+17. File system events (if enabled) are delivered reliably
+18. The repository does not contain circular symbolic links
+19. Binary file detection heuristics are sufficient for common formats
+20. Transaction backup storage has sufficient space (2x modified files)
 
 ---
 

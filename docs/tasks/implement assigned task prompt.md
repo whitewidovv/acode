@@ -7,7 +7,7 @@ docs\tasks\refined-tasks\Epic 01\task-008-prompt-pack-system.md
 docs\tasks\refined-tasks\Epic 01\task-008a-prompt-pack-file-layout-hashing-versioning.md
 docs\tasks\refined-tasks\Epic 01\task-008b-loader-validator-selection-via-config.md
 docs\tasks\refined-tasks\Epic 01\task-008c-starter-packs-dotnet-react-strict-minimal-diff.md
-}. keep in mind that You MUST follow strict Test-Driven Development with no exceptions. when you have a comprehensive, complete understanding of the task suite, come up with a strategic, implementation plan to implement the entirety of task suite
+}. keep in mind that You MUST follow strict Test-Driven Development with no exceptions. when you have a comprehensive, complete understanding of the task suite, come up with a strategic, phase-based implementation plan to implement the entirety of task suite
 
 {
 008
