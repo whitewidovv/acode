@@ -708,6 +708,573 @@ This task makes the following assumptions about the system, environment, depende
 
 ---
 
+## Security Considerations
+
+This section identifies security threats specific to artifact directory standards, with complete C# mitigation implementations.
+
+---
+
+### Security Threat 1: Path Traversal via Malicious Run IDs
+
+**Risk:** Attacker controls run ID value (e.g., via API or CLI), injects path traversal sequences (`../../etc/passwd`) to write artifacts outside designated directory.
+
+**Attack Scenario:**
+1. Attacker crafts malicious run ID: `../../../../../../tmp/malicious`
+2. Agent creates directory: `.acode/artifacts/../../../../../../tmp/malicious/`
+3. Artifacts written to `/tmp/malicious/` instead of workspace artifacts directory
+4. Attacker plants malicious files in system directories
+5. System compromise via planted executable or configuration file
+
+**Mitigation:**
+
+Validate and sanitize run IDs before using them in filesystem operations. Reject invalid characters and path traversal patterns.
+
+```csharp
+// RunIdValidator.cs
+using System;
+using System.Text.RegularExpressions;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class RunIdValidator
+{
+    //  Valid run ID: alphanumeric, hyphens only (ULID/UUID format)
+    private static readonly Regex ValidRunIdPattern = new(@"^[a-zA-Z0-9\-]{20,40}$", RegexOptions.Compiled);
+
+    // Dangerous patterns that must be rejected
+    private static readonly string[] ForbiddenPatterns = new[]
+    {
+        "..",           // Path traversal
+        "/",            // Directory separator
+        "\\",           // Windows separator
+        ":",            // Drive letter (Windows)
+        "*",            // Wildcard
+        "?",            // Wildcard
+        "<", ">",       // Redirection
+        "|",            // Pipe
+        "\"",           // Quote
+        "\0",           // Null byte
+    };
+
+    public (bool IsValid, string Error) Validate(string runId)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+        {
+            return (false, "Run ID cannot be null or empty");
+        }
+
+        // Check for forbidden patterns
+        foreach (var pattern in ForbiddenPatterns)
+        {
+            if (runId.Contains(pattern))
+            {
+                return (false, $"Run ID contains forbidden pattern: '{pattern}'");
+            }
+        }
+
+        // Validate format
+        if (!ValidRunIdPattern.IsMatch(runId))
+        {
+            return (false, "Run ID must contain only alphanumeric characters and hyphens (20-40 chars)");
+        }
+
+        // Ensure it doesn't resolve to parent directories
+        var normalizedPath = Path.GetFullPath(Path.Combine(".acode/artifacts", runId));
+        var expectedPrefix = Path.GetFullPath(".acode/artifacts");
+
+        if (!normalizedPath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, "Run ID resolves outside artifacts directory");
+        }
+
+        return (true, null);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test path traversal prevention
+acode artifact create --run-id "../../tmp/malicious" test.txt
+# Expected: Error - "Run ID contains forbidden pattern: '..'"
+
+acode artifact create --run-id "../escape" test.txt
+# Expected: Error - "Run ID contains forbidden pattern: '..'"
+
+# Test valid run IDs
+acode artifact create --run-id "run-01HQRS7TGKMWXY123" test.txt
+# Expected: Success - directory created at .acode/artifacts/run-01HQRS7TGKMWXY123/
+
+acode artifact create --run-id "a1b2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6" test.txt
+# Expected: Success - UUID format accepted
+```
+
+---
+
+### Security Threat 2: Insufficient Directory Permissions Allowing Unauthorized Access
+
+**Risk:** Artifact directories created with overly permissive permissions (777) allow any user on system to read sensitive artifacts or modify/delete them.
+
+**Attack Scenario:**
+1. Agent creates `.acode/artifacts/` with permissions 777 (read/write/execute for all)
+2. Multi-user system with multiple developers or services
+3. Attacker user reads artifacts from other users' workspaces
+4. Sensitive data exposed: API keys in logs, credentials in test outputs
+5. Attacker modifies artifacts to hide evidence or inject false data
+
+**Mitigation:**
+
+Create artifact directories with restrictive permissions (755 for directories, 644 for files) ensuring only owner can write.
+
+```csharp
+// ArtifactDirectoryInitializer.cs
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class ArtifactDirectoryInitializer
+{
+    private readonly string _artifactsRootPath;
+    private readonly ILogger<ArtifactDirectoryInitializer> _logger;
+
+    public ArtifactDirectoryInitializer(
+        string artifactsRootPath,
+        ILogger<ArtifactDirectoryInitializer> logger)
+    {
+        _artifactsRootPath = artifactsRootPath;
+        _logger = logger;
+    }
+
+    public void EnsureArtifactDirectoryExists(string runId)
+    {
+        var runDirectory = Path.Combine(_artifactsRootPath, runId);
+
+        if (Directory.Exists(runDirectory))
+        {
+            _logger.LogDebug("Artifact directory already exists: {Path}", runDirectory);
+            return;
+        }
+
+        // Create directory
+        Directory.CreateDirectory(runDirectory);
+
+        // Set restrictive permissions (Unix only, Windows uses ACLs)
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            SetUnixPermissions(runDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                                              UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                                              UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            _logger.LogInformation("Created artifact directory with 755 permissions: {Path}", runDirectory);
+        }
+        else
+        {
+            // Windows: Inherit permissions from parent, no world-writable
+            _logger.LogInformation("Created artifact directory with inherited permissions: {Path}", runDirectory);
+        }
+    }
+
+    public void WriteArtifactFile(string runId, string filename, byte[] content)
+    {
+        var filePath = Path.Combine(_artifactsRootPath, runId, filename);
+
+        File.WriteAllBytes(filePath, content);
+
+        // Set restrictive file permissions (644: owner read/write, others read-only)
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            SetUnixPermissions(filePath, UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                                         UnixFileMode.GroupRead |
+                                         UnixFileMode.OtherRead);
+            _logger.LogDebug("Created artifact file with 644 permissions: {Path}", filePath);
+        }
+    }
+
+    private void SetUnixPermissions(string path, UnixFileMode mode)
+    {
+        File.SetUnixFileMode(path, mode);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test directory permissions
+acode artifact create --run-id test-perms test.txt
+
+# Check directory permissions (Unix)
+ls -ld .acode/artifacts/test-perms/
+# Expected: drwxr-xr-x (755)
+
+# Check file permissions
+ls -l .acode/artifacts/test-perms/test.txt
+# Expected: -rw-r--r-- (644)
+
+# Test unauthorized modification (as different user)
+su other-user
+echo "tampered" > .acode/artifacts/test-perms/test.txt
+# Expected: Permission denied
+
+# Test unauthorized deletion
+rm -rf .acode/artifacts/test-perms/
+# Expected: Permission denied
+```
+
+---
+
+### Security Threat 3: Race Condition in Directory Creation
+
+**Risk:** Multiple concurrent processes create same run directory simultaneously, leading to race condition where one process overwrites another's artifacts.
+
+**Attack Scenario:**
+1. Two agent processes execute commands with same run ID simultaneously
+2. Both check `Directory.Exists(runDir)` → returns false
+3. Both call `Directory.CreateDirectory(runDir)` concurrently
+4. Process A writes `stdout.txt`
+5. Process B overwrites `stdout.txt` with different content
+6. Artifact corruption and data loss
+
+**Mitigation:**
+
+Use atomic directory creation with exclusive locking to prevent race conditions.
+
+```csharp
+// AtomicDirectoryCreator.cs
+using System;
+using System.IO;
+using System.Threading;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class AtomicDirectoryCreator
+{
+    private readonly ILogger<AtomicDirectoryCreator> _logger;
+    private static readonly SemaphoreSlim CreationLock = new(1, 1);
+
+    public AtomicDirectoryCreator(ILogger<AtomicDirectoryCreator> logger)
+    {
+        _logger = logger;
+    }
+
+    public async Task<string> CreateRunDirectoryAsync(string artifactsRoot, string runId)
+    {
+        var runDirectory = Path.Combine(artifactsRoot, runId);
+
+        // Fast path: directory already exists
+        if (Directory.Exists(runDirectory))
+        {
+            return runDirectory;
+        }
+
+        // Slow path: acquire lock for creation
+        await CreationLock.WaitAsync();
+        try
+        {
+            // Double-check after acquiring lock (another thread may have created it)
+            if (Directory.Exists(runDirectory))
+            {
+                _logger.LogDebug("Directory created by another thread: {Path}", runDirectory);
+                return runDirectory;
+            }
+
+            // Create with lock file for inter-process synchronization
+            var lockFilePath = Path.Combine(artifactsRoot, $".lock-{runId}");
+
+            using var lockFile = new FileStream(
+                lockFilePath,
+                FileMode.CreateNew,  // Fails if file exists (atomic)
+                FileAccess.Write,
+                FileShare.None,      // Exclusive access
+                bufferSize: 1,
+                FileOptions.DeleteOnClose);
+
+            // Lock acquired, safe to create directory
+            Directory.CreateDirectory(runDirectory);
+
+            _logger.LogInformation("Atomically created directory: {Path}", runDirectory);
+
+            return runDirectory;
+        }
+        catch (IOException ex) when (ex.Message.Contains("already exists"))
+        {
+            // Another process created the directory concurrently
+            _logger.LogWarning("Race condition detected, directory created by another process: {Path}", runDirectory);
+            return runDirectory;
+        }
+        finally
+        {
+            CreationLock.Release();
+        }
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test concurrent directory creation
+acode artifact create --run-id test-race test1.txt &
+acode artifact create --run-id test-race test2.txt &
+wait
+
+# Verify both artifacts exist without corruption
+ls .acode/artifacts/test-race/
+# Expected: test1.txt, test2.txt (both present, no overwrites)
+
+cat .acode/artifacts/test-race/test1.txt
+cat .acode/artifacts/test-race/test2.txt
+# Expected: Both files have correct content, no corruption
+
+# Check logs for race condition warnings
+acode log query --message "Race condition detected" --last 5m
+# Expected: May show warning if race detected, but handled gracefully
+```
+
+---
+
+### Security Threat 4: Gitignore Injection via Malicious Artifact Names
+
+**Risk:** Attacker creates artifact with name designed to manipulate `.gitignore` patterns, causing sensitive files to be committed or legitimate files to be ignored.
+
+**Attack Scenario:**
+1. Attacker triggers artifact creation with malicious name: `!important.txt\n*.env`
+2. Agent appends artifact pattern to `.gitignore`: `artifacts/!important.txt\n*.env`
+3. Gitignore negation (`!`) exposes artifacts that should be hidden
+4. Wildcard (`*.env`) causes all `.env` files in workspace to be ignored
+5. Credentials accidentally committed to version control
+
+**Mitigation:**
+
+Sanitize artifact filenames and validate `.gitignore` patterns before writing. Escape special characters and reject invalid names.
+
+```csharp
+// GitignoreManager.cs
+using System;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class GitignoreManager
+{
+    private readonly string _workspaceRoot;
+    private readonly ILogger<GitignoreManager> _logger;
+
+    // Valid filename: alphanumeric, hyphens, underscores, dots, no path separators or special chars
+    private static readonly Regex ValidFilenamePattern = new(@"^[a-zA-Z0-9\-_\.]+$", RegexOptions.Compiled);
+
+    public GitignoreManager(string workspaceRoot, ILogger<GitignoreManager> logger)
+    {
+        _workspaceRoot = workspaceRoot;
+        _logger = logger;
+    }
+
+    public void EnsureArtifactsIgnored()
+    {
+        var gitignorePath = Path.Combine(_workspaceRoot, ".gitignore");
+
+        const string artifactsPattern = ".acode/artifacts/";
+
+        // Check if .gitignore exists
+        if (!File.Exists(gitignorePath))
+        {
+            File.WriteAllLines(gitignorePath, new[] { artifactsPattern });
+            _logger.LogInformation("Created .gitignore with artifacts pattern: {Pattern}", artifactsPattern);
+            return;
+        }
+
+        // Check if pattern already exists
+        var existingLines = File.ReadAllLines(gitignorePath);
+        if (existingLines.Any(line => line.Trim() == artifactsPattern))
+        {
+            _logger.LogDebug(".gitignore already contains artifacts pattern");
+            return;
+        }
+
+        // Append pattern (safe: no user input, hardcoded pattern)
+        File.AppendAllLines(gitignorePath, new[] { "", "# Acode artifacts (auto-generated)", artifactsPattern });
+        _logger.LogInformation("Appended artifacts pattern to .gitignore");
+    }
+
+    public (bool IsValid, string Error) ValidateArtifactFilename(string filename)
+    {
+        if (string.IsNullOrWhiteSpace(filename))
+        {
+            return (false, "Filename cannot be null or empty");
+        }
+
+        // Reject path separators
+        if (filename.Contains('/') || filename.Contains('\\'))
+        {
+            return (false, "Filename cannot contain path separators");
+        }
+
+        // Reject gitignore special characters
+        var forbiddenChars = new[] { '!', '*', '?', '[', ']', '{', '}', '\n', '\r' };
+        if (forbiddenChars.Any(filename.Contains))
+        {
+            return (false, $"Filename contains forbidden character (gitignore special chars not allowed)");
+        }
+
+        // Validate format
+        if (!ValidFilenamePattern.IsMatch(filename))
+        {
+            return (false, "Filename must contain only alphanumeric, hyphens, underscores, and dots");
+        }
+
+        return (true, null);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test gitignore injection prevention
+acode artifact create --run-id test-inject --name "!important.txt" content.txt
+# Expected: Error - "Filename contains forbidden character"
+
+acode artifact create --run-id test-inject --name "*.env" content.txt
+# Expected: Error - "Filename contains forbidden character"
+
+acode artifact create --run-id test-inject --name "test\nnewline.txt" content.txt
+# Expected: Error - "Filename contains forbidden character"
+
+# Test valid filenames
+acode artifact create --run-id test-valid --name "build-log.txt" content.txt
+# Expected: Success
+
+acode artifact create --run-id test-valid --name "test_results.json" content.txt
+# Expected: Success
+
+# Verify .gitignore integrity
+cat .gitignore
+# Expected: Contains ".acode/artifacts/" with no malicious patterns
+```
+
+---
+
+### Security Threat 5: Symlink Attack for Artifact Exfiltration
+
+**Risk:** Attacker creates symlink in artifact directory pointing to sensitive file outside workspace, causing agent to expose or overwrite sensitive data when reading/writing artifacts.
+
+**Attack Scenario:**
+1. Attacker gains write access to `.acode/artifacts/run-123/` directory
+2. Creates symlink: `ln -s /etc/passwd stdout.txt`
+3. User runs `acode artifact cat run-123 stdout.txt`
+4. Agent follows symlink, displays `/etc/passwd` contents
+5. Sensitive system configuration exposed
+
+**Mitigation:**
+
+Detect and reject symlinks when reading/writing artifacts. Use `FileOptions.None` and check file attributes before operations.
+
+```csharp
+// SymlinkSafeFileReader.cs
+using System;
+using System.IO;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class SymlinkSafeFileReader
+{
+    private readonly ILogger<SymlinkSafeFileReader> _logger;
+
+    public SymlinkSafeFileReader(ILogger<SymlinkSafeFileReader> logger)
+    {
+        _logger = logger;
+    }
+
+    public byte[] ReadArtifactFile(string artifactPath)
+    {
+        // Resolve to absolute path
+        var absolutePath = Path.GetFullPath(artifactPath);
+
+        // Check if file exists
+        if (!File.Exists(absolutePath))
+        {
+            throw new FileNotFoundException($"Artifact not found: {artifactPath}");
+        }
+
+        // Check if path is a symlink (Unix)
+        var fileInfo = new FileInfo(absolutePath);
+        if (fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            _logger.LogError("Symlink detected, refusing to read: {Path}", absolutePath);
+            throw new SecurityException($"Artifact is a symlink (forbidden): {artifactPath}");
+        }
+
+        // Additional check: ensure resolved path is still within artifacts directory
+        var artifactsRoot = Path.GetFullPath(".acode/artifacts");
+        if (!absolutePath.StartsWith(artifactsRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogError("Path escapes artifacts directory: {Path}", absolutePath);
+            throw new SecurityException($"Artifact path escapes artifacts directory: {artifactPath}");
+        }
+
+        // Safe to read
+        return File.ReadAllBytes(absolutePath);
+    }
+
+    public void WriteArtifactFile(string artifactPath, byte[] content)
+    {
+        var absolutePath = Path.GetFullPath(artifactPath);
+
+        // Ensure parent directory exists and is not a symlink
+        var directory = Path.GetDirectoryName(absolutePath);
+        var dirInfo = new DirectoryInfo(directory);
+        if (dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            _logger.LogError("Parent directory is a symlink: {Path}", directory);
+            throw new SecurityException($"Parent directory is a symlink: {directory}");
+        }
+
+        // Write with FileOptions that prevent symlink following
+        using var fileStream = new FileStream(
+            absolutePath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 4096,
+            FileOptions.None);  // No FILE_FLAG_OPEN_REPARSE_POINT
+
+        fileStream.Write(content, 0, content.Length);
+
+        _logger.LogDebug("Wrote artifact file (symlink-safe): {Path}", absolutePath);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test symlink attack prevention
+mkdir -p .acode/artifacts/test-symlink
+
+# Create symlink to sensitive file
+ln -s /etc/passwd .acode/artifacts/test-symlink/passwd-link
+
+# Attempt to read via symlink
+acode artifact cat test-symlink passwd-link
+# Expected: Error - "Artifact is a symlink (forbidden)"
+
+# Attempt to write via symlink directory
+ln -s /tmp/.acode/artifacts/test-symlink-dir
+acode artifact create --run-id test-symlink-dir test.txt
+# Expected: Error - "Parent directory is a symlink"
+
+# Verify legitimate files work
+acode artifact create --run-id test-legitimate test.txt
+acode artifact cat test-legitimate test.txt
+# Expected: Success, content displayed
+```
+
+---
+
 ## Best Practices
 
 ### Directory Structure
