@@ -1351,6 +1351,231 @@ public sealed class SafeManifestDeserializer
 
 ---
 
+## Best Practices
+
+### Bundle Design
+
+1. **Keep bundles focused and minimal** - Export only what's needed for the specific use case. For debugging: export single failing run. For compliance: export filtered date range. Don't export entire workspace history unless archiving.
+
+2. **Include provenance by default** - Always include git commit SHA, branch, and worktree ID. This enables correlating runs with specific code versions, critical for reproducing issues. Provenance data is small (~200 bytes) but invaluable for debugging.
+
+3. **Use semantic versioning for bundle format** - When extending bundle format (adding fields to manifest), increment version appropriately: MAJOR for breaking changes (old importers can't read), MINOR for backward-compatible additions, PATCH for fixes.
+
+4. **Compress artifacts intelligently** - Use ZIP's default DEFLATE compression (level 6). Don't compress already-compressed formats (PNG, JPG, gzip files) - wastes CPU. Detect and store these uncompressed.
+
+### Export Operations
+
+5. **Default to redaction, opt-in to expose** - ALWAYS redact secrets by default. Require explicit `--no-redact` flag to export unredacted data, with confirmation prompt. Better to over-redact than leak secrets.
+
+6. **Show redaction preview before export** - Provide `--dry-run` mode that shows what will be redacted without creating bundle. Allows user to review before committing to export. Example output: `API_KEY: sk-abc123 → ***REDACTED***`.
+
+7. **Sign bundles for compliance use cases** - For regulatory compliance or audit trails, sign bundles with detached signature file: `bundle.acode-bundle` + `bundle.acode-bundle.sig`. Use ed25519 signatures (fast, small, secure).
+
+8. **Atomic export with temp files** - Export to temp file first: `.acode-bundle.tmp`, then atomic rename when complete. Prevents partial bundles if export interrupted. Clean up temp files on startup.
+
+9. **Progress indication for large exports** - Show progress bar for exports >100MB or >100 runs: `Exporting 245 runs... [=======>   ] 68% (1.2GB/1.8GB)`. Users need feedback for long operations.
+
+10. **Validate before exporting** - Check disk space available before starting export. Estimate bundle size (sum of artifact sizes × 0.6 for compression) and verify `df` shows 2x that available. Fail early with clear message if insufficient space.
+
+### Import Operations
+
+11. **Verify integrity before importing** - ALWAYS check manifest hashes match actual file contents before importing artifacts. Display verification results: `Verified 145/145 files, 0 errors`. Reject bundles with ANY hash mismatches.
+
+12. **Detect and handle import conflicts** - When importing run IDs that already exist, prompt for strategy: `merge` (keep newer), `replace` (overwrite), `skip` (ignore), `rename` (import as run-001-imported). Default to `skip` (safest).
+
+13. **Preview import without applying** - Support `--dry-run` mode showing what would be imported: `Would import 12 runs, 245MB artifacts, 3 conflicts detected`. Let users review before committing.
+
+14. **Quarantine suspicious bundles** - If ZIP bomb detected, path traversal found, or signature verification fails, move bundle to `.acode/quarantine/` directory instead of deleting. Allows forensic analysis. Auto-purge quarantine after 30 days.
+
+15. **Log all import operations** - Write import audit log: `~/.acode/import-audit.log` with timestamp, bundle path, runs imported, conflicts, verification result. Critical for security audits.
+
+### Security
+
+16. **Never execute code from bundles** - Bundles contain data only, never executable scripts. If bundle includes `.sh` or `.ps1` files, import as data artifacts only. Never auto-execute on import.
+
+17. **Sandbox extraction process** - Extract bundles to isolated temp directory first: `/tmp/acode-import-{uuid}/`, verify contents, then move to final location. If verification fails, delete temp directory entirely.
+
+18. **Rate limit imports** - Prevent DOS via rapid imports by limiting to 10 imports/minute. Track in-memory or temp file. Return error: `Rate limit exceeded, retry in 6 seconds`.
+
+19. **Validate all user-controlled paths** - Bundle filenames, extraction paths, manifest paths - validate ALL against path traversal, forbidden characters, length limits. Use whitelist validation, not blacklist.
+
+### Performance
+
+20. **Stream large artifacts** - When exporting/importing >100MB artifacts, use streaming I/O instead of loading into memory. Process in 4MB chunks. Keeps memory usage constant regardless of bundle size.
+
+21. **Parallelize hash computation** - When verifying manifest hashes, process files in parallel (max 4 threads). Utilize multi-core CPUs. Verification of 1000 files drops from 45s → 12s.
+
+22. **Index bundles for fast lookup** - After importing, build index: `~/.acode/bundle-index.json` mapping run IDs to bundle sources. Enables `acode runs find-bundle {run-id}` for provenance tracking.
+
+23. **Compress metadata sparingly** - Manifest, provenance, outbox-summary are small (<10KB each). Store uncompressed for fast access during verification. Only compress artifacts directory.
+
+---
+
+## Troubleshooting
+
+### Issue 1: Export Fails with "Disk Space Full" Despite Available Space
+
+**Symptoms:**
+- `acode runs export` fails with error: "Insufficient disk space"
+- `df -h` shows 50GB available on `/home` partition
+- Export destination is `/home/user/exports/bundle.acode-bundle`
+- Error occurs immediately without writing any data
+
+**Causes:**
+1. Temp directory (`/tmp`) is on different partition with less space
+2. Export uses `/tmp` for staging before moving to final destination
+3. `/tmp` partition only has 500MB free, bundle needs 2GB
+4. Disk space check only validates destination path, not temp path
+5. User quota exceeded on `/tmp` filesystem
+6. Reserved blocks (5% for root) reduce available space for non-root users
+7. Another process filled `/tmp` during export attempt
+
+**Solutions:**
+
+```bash
+# Solution 1: Check both destination and temp partition space
+df -h /tmp
+df -h /home/user/exports/
+# If /tmp is full, need to either clean it or change temp location
+
+# Clean /tmp:
+sudo find /tmp -type f -atime +7 -delete
+# Deletes files older than 7 days
+
+# Or set custom temp directory:
+export TMPDIR=/home/user/tmp-exports
+mkdir -p $TMPDIR
+acode runs export --run {run-id} --output bundle.acode-bundle
+
+# Solution 2: Verify disk space checks both locations
+acode runs export --run {run-id} --check-space
+# Should report space on BOTH temp and destination
+
+# Solution 3: Check user disk quota
+quota -vs
+# Shows quota limits and current usage
+
+# If quota exceeded, request increase or clean up files:
+find ~/Downloads -type f -size +100M -exec rm {} \;
+
+# Solution 4: Check for reserved blocks (root-only space)
+sudo tune2fs -l /dev/sda1 | grep -i "block count\|reserved"
+# Example output:
+# Block count: 26214400
+# Reserved block count: 1310720 (5%)
+
+# If non-root user, effective available space is 5% less
+# Solution: Export as root (not recommended) or free more space
+
+# Solution 5: Use different temp directory on same partition as destination
+acode config set export.temp-directory "/home/user/.acode-tmp"
+# Ensures temp and final location on same partition (atomic move possible)
+
+# Solution 6: Export directly without temp staging (riskier)
+acode runs export --run {run-id} --no-atomic --output bundle.acode-bundle
+# Warning: Partial bundle left if interrupted
+
+# Solution 7: Estimate bundle size before exporting
+acode runs export --run {run-id} --estimate-size
+# Output: "Estimated bundle size: 1.8GB (artifacts: 1.6GB, metadata: 200MB)"
+# Verify sufficient space before proceeding
+
+# Solution 8: Split large exports into multiple smaller bundles
+acode runs export --from 2024-01-01 --to 2024-01-15 --output part1.acode-bundle
+acode runs export --from 2024-01-16 --to 2024-01-31 --output part2.acode-bundle
+# Smaller bundles easier to manage with limited space
+```
+
+---
+
+### Issue 2: Import Fails with "Manifest Hash Mismatch" for Multiple Files
+
+**Symptoms:**
+- `acode runs import bundle.acode-bundle` fails during verification
+- Error: "Hash mismatch for 15 files"
+- Example: `stdout.txt: expected abc123..., actual def456...`
+- Bundle was transferred from Windows to Linux via USB drive
+- Bundle exports successfully on Windows, fails import on Linux
+
+**Causes:**
+1. Line ending conversion during transfer (CRLF ↔ LF)
+2. Git auto-converted text files when bundle was committed to repo
+3. USB drive formatted as FAT32 caused file corruption
+4. Windows antivirus modified files during scan
+5. ZIP extraction used wrong encoding (UTF-8 vs Windows-1252)
+6. Symbolic links resolved differently on Linux vs Windows
+7. File timestamps modified, triggering re-hashing with different algorithm
+
+**Solutions:**
+
+```bash
+# Solution 1: Extract and inspect affected files
+unzip -l bundle.acode-bundle
+# Lists all files, check for unexpected sizes
+
+unzip bundle.acode-bundle -d /tmp/bundle-inspect
+cd /tmp/bundle-inspect
+
+# Check line endings in text files:
+file artifacts/run-001/stdout.txt
+# Output: "ASCII text, with CRLF line terminators" (Windows)
+# or "ASCII text" (Unix)
+
+# Solution 2: Recompute hashes to identify mismatches
+cd /tmp/bundle-inspect
+sha256sum artifacts/run-001/stdout.txt
+# Compare with manifest.json:
+jq '.files["artifacts/run-001/stdout.txt"].sha256' manifest.json
+
+# Solution 3: If line ending issue, normalize and re-bundle
+find artifacts -name "*.txt" -exec dos2unix {} \;
+# Converts all .txt files to LF
+
+# Re-create bundle with corrected files:
+zip -r bundle-fixed.acode-bundle manifest.json provenance.json artifacts/
+
+# Import fixed bundle:
+acode runs import bundle-fixed.acode-bundle
+
+# Solution 4: Skip hash verification (DANGEROUS - use only if trusted source)
+acode runs import bundle.acode-bundle --skip-verify
+# Warning: Imports without integrity checks
+
+# Solution 5: Transfer bundle using hash-preserving method
+# BAD: git add bundle.acode-bundle (git may modify)
+# BAD: Copy via Windows share with auto-conversion enabled
+
+# GOOD: Use rsync with checksum verification:
+rsync -avz --checksum bundle.acode-bundle user@linux-host:/path/
+# Verifies transfer integrity
+
+# Or use SCP:
+scp -C bundle.acode-bundle user@linux-host:/path/
+# -C compresses during transfer
+
+# Solution 6: Verify bundle immediately after creation
+acode runs verify bundle.acode-bundle
+# Run on source machine before transfer
+
+# If verification fails on source, bundle corrupted during export:
+acode runs export --run {run-id} --output bundle-retry.acode-bundle --verify
+
+# Solution 7: Check for antivirus interference
+# Windows Defender may scan and modify files
+# Temporarily disable real-time protection during export:
+# Settings > Update & Security > Windows Security > Virus & threat protection > Manage settings > Real-time protection (Off)
+
+# Better: Add .acode directory to exclusions permanently
+Add-MpPreference -ExclusionPath "C:\Users\{user}\.acode"
+
+# Solution 8: Use bundle repair tool
+acode runs repair-bundle bundle.acode-bundle --output bundle-repaired.acode-bundle
+# Recalculates all hashes, updates manifest, re-creates ZIP
+# Warning: Can't detect malicious modifications, only fixes mismatches
+```
+
+---
+
 ## Testing Requirements
 
 ### Unit Tests
