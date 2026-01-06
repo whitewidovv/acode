@@ -59,7 +59,7 @@ public static class Program
         }
         else
         {
-            var enableColors = !noColor && Console.IsOutputRedirected == false;
+            var enableColors = !noColor && !Console.IsOutputRedirected;
             formatter = new ConsoleFormatter(Console.Out, enableColors);
         }
 
