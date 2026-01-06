@@ -247,12 +247,12 @@ Task 009 Parent (Policy orchestration + Configuration)
 ## Progress Tracking
 
 ### Current Status
-- **Phase:** Phase 3 (Task 009c) - Fallback Rules
-- **Next Action:** Phase 3.1 - Implement FallbackHandler
+- **Phase:** Phase 4 (Task 009 Parent) - Policy Orchestration
+- **Next Action:** Phase 4.1 - Implement RoutingPolicy
 
 ### Metrics
-- **Commits:** 15
-- **Tests Written:** 47 total
+- **Commits:** 19
+- **Tests Written:** 88 total
   - AgentRole: 7
   - RoleDefinition: 7
   - RoleRegistry: 12
@@ -260,7 +260,9 @@ Task 009 Parent (Policy orchestration + Configuration)
   - RoutingDecision: 6
   - SingleModelStrategy: 11 (includes override tests)
   - RoleBasedStrategy: 13 (includes override tests)
-- **Tests Passing:** 47/47 ✅
+  - FallbackHandler: 11
+  - ModelAvailabilityChecker: 13
+- **Tests Passing:** 88/88 ✅ (Task 009 specific)
 - **Code Quality:** 0 errors, 0 warnings
 
 ### Components Completed
@@ -278,11 +280,17 @@ Task 009 Parent (Policy orchestration + Configuration)
   - ✅ SingleModelStrategy implementation
   - ✅ RoleBasedStrategy implementation
   - ✅ User override handling in both strategies
+- ✅ Task 009c: Fallback/Escalation Rules (COMPLETE - Phase 3.3 deferred)
+  - ✅ IModelAvailabilityChecker interface
+  - ✅ FallbackHandler implementation
+  - ✅ ModelAvailabilityChecker with 5s TTL cache
+  - ⏸️ Operating Mode Constraints (deferred - requires model metadata)
 
 ### Next Steps
-- Phase 3.1: FallbackHandler (TDD)
-- Phase 3.2: Model Availability Checking
-- Phase 3.3: Operating Mode Constraint Validation
+- Phase 4.1: RoutingPolicy Orchestration (TDD)
+- Phase 4.2: Configuration Integration
+- Phase 4.3: Structured Logging
+- Phase 5: Final Audit and PR
 
 ---
 
