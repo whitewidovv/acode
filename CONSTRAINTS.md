@@ -1,7 +1,7 @@
 # Acode Constraints Reference
 
 **Version:** 1.0.0
-**Last Updated:** 2026-01-03
+**Last Updated:** 2026-01-06
 **Owner:** Acode Security Team
 **Status:** Approved
 
@@ -12,10 +12,11 @@
 1. [Quick Reference](#quick-reference)
 2. [Severity Levels](#severity-levels)
 3. [Hard Constraints](#hard-constraints)
-4. [Enforcement Mechanisms](#enforcement-mechanisms)
-5. [Compliance Mapping](#compliance-mapping)
-6. [FAQ](#faq)
-7. [Change History](#change-history)
+4. [Soft Constraints](#soft-constraints)
+5. [Enforcement Mechanisms](#enforcement-mechanisms)
+6. [Compliance Mapping](#compliance-mapping)
+7. [FAQ](#faq)
+8. [Change History](#change-history)
 
 ---
 
@@ -248,6 +249,27 @@ If mode detection or validation fails for any reason, the system MUST default to
 - Warning logged
 
 **Related:** Task 001.a
+
+---
+
+## Soft Constraints
+
+**Status**: No soft constraints currently defined.
+
+Soft constraints represent best practices and recommendations that SHOULD be followed but MAY be overridden with explicit justification. Unlike hard constraints (which are absolute requirements), soft constraints allow flexibility for specific use cases while maintaining general guidance.
+
+**Future Soft Constraints** may include:
+- Performance recommendations (e.g., "API calls SHOULD complete within 5 seconds")
+- Resource limits (e.g., "Context window SHOULD NOT exceed 100K tokens")
+- Usability guidelines (e.g., "Error messages SHOULD include remediation steps")
+- Code quality standards (e.g., "Complexity SHOULD remain below threshold")
+
+**Process for Adding Soft Constraints**:
+1. Propose soft constraint with rationale
+2. Discuss trade-offs with team
+3. Document in this section with SC-XX identifier
+4. Update PR checklist to include verification
+5. Track violations as warnings (not errors)
 
 ---
 
