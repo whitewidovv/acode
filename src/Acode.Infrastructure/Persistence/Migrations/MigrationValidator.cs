@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 /// <summary>
 /// Validates discovered migrations against applied migration history.
 /// </summary>
-public sealed class MigrationValidator
+public sealed class MigrationValidator : IMigrationValidator
 {
     private readonly ILogger<MigrationValidator> _logger;
 
