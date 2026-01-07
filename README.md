@@ -42,7 +42,7 @@
 ### Installation
 
 ```bash
-git clone https://github.com/your-org/acode.git
+git clone https://github.com/whitewidovv/acode.git
 cd acode
 dotnet restore
 dotnet build
@@ -59,6 +59,7 @@ dotnet run --project src/Acode.Cli
 | Document | Description |
 |----------|-------------|
 | [USER-MANUAL-CONFIG](docs/USER-MANUAL-CONFIG.md) | Configuration guide, CLI commands, troubleshooting |
+| [CONFIG](docs/CONFIG.md) | Configuration reference |
 | [OPERATING_MODES](docs/OPERATING_MODES.md) | Operating mode definitions and constraints |
 | [REPO_STRUCTURE](docs/REPO_STRUCTURE.md) | Project folder layout and architecture |
 | [Task Specifications](docs/tasks/refined-tasks/) | Detailed task specifications by epic |
