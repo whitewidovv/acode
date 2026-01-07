@@ -35,4 +35,9 @@ public sealed record RollbackResult
     /// Gets the error message if the operation failed (optional).
     /// </summary>
     public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// Gets the exception if the operation failed (optional).
+    /// </summary>
+    public Exception? Exception { get; init; }
 }
