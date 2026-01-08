@@ -65,7 +65,7 @@ mode:
         var (exitCode, output, _) = RunAcodeCli(_testDir, "config", "validate");
 
         // Assert
-        exitCode.Should().Be(1, "invalid config should fail");
+        exitCode.Should().Be(3, "invalid config should fail with error exit code");
         output.Should().Contain("invalid", "output should show validation failure");
     }
 
@@ -76,7 +76,7 @@ mode:
         var (exitCode, output, _) = RunAcodeCli(_testDir, "config", "validate");
 
         // Assert
-        exitCode.Should().Be(1, "missing file should fail");
+        exitCode.Should().Be(3, "missing file should fail with error exit code");
         output.Should().Contain("not found", "output should explain file not found");
     }
 
