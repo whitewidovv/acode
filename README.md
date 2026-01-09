@@ -61,6 +61,8 @@ dotnet run --project src/Acode.Cli
 | [USER-MANUAL-CONFIG](docs/USER-MANUAL-CONFIG.md) | Configuration guide, CLI commands, troubleshooting |
 | [CONFIG](docs/CONFIG.md) | Configuration reference |
 | [OPERATING_MODES](docs/OPERATING_MODES.md) | Operating mode definitions and constraints |
+| [CONSTRAINTS](CONSTRAINTS.md) | Hard constraints, security guarantees, enforcement mechanisms |
+| [Architecture Decisions](docs/adr/) | ADRs documenting key architectural decisions |
 | [REPO_STRUCTURE](docs/REPO_STRUCTURE.md) | Project folder layout and architecture |
 | [Task Specifications](docs/tasks/refined-tasks/) | Detailed task specifications by epic |
 | [CONTRIBUTING](CONTRIBUTING.md) | How to contribute to the project |
@@ -129,7 +131,10 @@ Security is a top priority for Acode. If you discover a security vulnerability, 
 - See [SECURITY.md](SECURITY.md) for our security policy
 
 For general security information, see:
+- [CONSTRAINTS.md](CONSTRAINTS.md) - Hard constraints and security guarantees
 - [Operating Modes](docs/OPERATING_MODES.md) - Mode-based security constraints
+- [Security Audit Checklist](docs/security-audit-checklist.md) - Verification procedures for security audits
+- [Architecture Decisions](docs/adr/) - ADRs explaining security design choices
 - [Threat Model](docs/tasks/refined-tasks/Epic 00/task-003-threat-model.md) - Risk analysis (coming in Task 003)
 
 ---

@@ -2,11 +2,11 @@
 
 ## Description
 
-Please provide a brief description of the changes in this PR.
+<!-- Provide a brief description of what this PR does -->
 
 ## Related Issues
 
-Fixes #(issue number)
+<!-- Link to related issues: Fixes #123, Relates to #456 -->
 
 ## Type of Change
 
@@ -18,46 +18,113 @@ Fixes #(issue number)
 - [ ] Performance improvement
 - [ ] Test coverage improvement
 
-## Changes Made
+---
 
-- Change 1
-- Change 2
-- Change 3
+## Constraint Compliance Checklist
 
-## Testing
+> Complete all applicable items. Mark N/A if not applicable.
 
-### How Has This Been Tested?
+### Mode Constraints
 
-Please describe the tests that you ran to verify your changes.
+- [ ] **HC-01:** No external LLM calls added in LocalOnly mode
+- [ ] **HC-02:** Airgapped network restrictions respected
+- [ ] **HC-03:** Burst mode consent implemented if applicable
+- [ ] N/A - Changes do not affect operating modes
 
-- [ ] Unit tests
-- [ ] Integration tests
-- [ ] Manual testing
+### Data Constraints
 
-### Test Configuration
+- [ ] **HC-04:** Secrets redacted before any external transmission
+- [ ] **HC-05:** Mode changes properly logged
+- [ ] **HC-06:** Constraint violations logged and aborted
+- [ ] **HC-07:** Fail-safe to LocalOnly on error implemented
+- [ ] N/A - Changes do not handle data transmission
 
-- **Operating Mode:** [LocalOnly / Burst / Airgapped]
-- **.NET SDK Version:** [e.g., 8.0.100]
-- **OS:** [e.g., Ubuntu 22.04]
+### Network Constraints
+
+- [ ] All network calls use appropriate validation
+- [ ] No direct HttpClient instantiation without validation
+- [ ] Redirect handling validates destinations
+- [ ] DNS resolution validated where applicable
+- [ ] N/A - Changes do not involve network operations
+
+### Clean Architecture
+
+- [ ] Domain layer has no dependencies on outer layers
+- [ ] Application layer depends only on Domain
+- [ ] Infrastructure implements interfaces from Domain/Application
+- [ ] CLI layer is entry point only
+- [ ] No circular dependencies introduced
+- [ ] N/A - Changes are documentation only
+
+### Code Quality
+
+- [ ] Code follows .editorconfig settings
+- [ ] No compiler warnings introduced
+- [ ] StyleCop/analyzer violations resolved
+- [ ] XML documentation added for public APIs
+- [ ] Complex logic has inline comments explaining "why"
+- [ ] N/A - No code changes
+
+### Documentation
+
+- [ ] Constraint IDs referenced in relevant code comments
+- [ ] New/modified constraints updated in CONSTRAINTS.md
+- [ ] Tests reference constraint IDs in names/comments
+- [ ] README updated if user-facing changes
+- [ ] ADR created for significant architectural decisions
+- [ ] N/A - No documentation updates needed
+
+### Testing
+
+- [ ] Unit tests cover new/modified functionality
+- [ ] Integration tests verify constraint enforcement
+- [ ] All existing tests still pass
+- [ ] Test coverage maintained or increased
+- [ ] Tests follow TDD principles (written first)
+- [ ] Tests use meaningful assertions (not just NotImplementedException)
+- [ ] N/A - No testable code changes
+
+### Verification
+
+- [ ] `dotnet build` completes with 0 errors, 0 warnings
+- [ ] `dotnet test` all tests passing
+- [ ] `dotnet format` applied (if SDK available)
+- [ ] Changes reviewed for security implications
+- [ ] Changes reviewed for performance implications
+- [ ] Breaking changes documented in commit message
+
+---
+
+## Test Plan
+
+<!-- Describe how you tested these changes -->
+
+---
 
 ## Checklist
 
-- [ ] My code follows the style guidelines of this project (Clean Architecture)
-- [ ] I have performed a self-review of my own code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
-- [ ] Any dependent changes have been merged and published
-- [ ] I have checked layer dependencies (Domain → Application → Infrastructure → CLI)
-- [ ] I have verified operating mode constraints are respected
-- [ ] I have updated CHANGELOG.md (if applicable)
+- [ ] PR title follows [Conventional Commits](https://www.conventionalcommits.org/) format
+- [ ] Commits are atomic and have descriptive messages
+- [ ] All TODO comments have issue numbers
+- [ ] Sensitive data (keys, passwords, secrets) not committed
+- [ ] .gitignore updated if new generated files added
+- [ ] No commented-out code committed (unless explicitly needed)
 
-## Screenshots (if applicable)
+---
 
-Add screenshots to demonstrate visual changes.
+## Screenshots / Examples
 
-## Additional Notes
+<!-- If applicable, add screenshots or code examples -->
 
-Any additional information that reviewers should know.
+---
+
+## Reviewer Notes
+
+<!-- Any special instructions for reviewers -->
+
+---
+
+## Post-Merge Tasks
+
+<!-- Any follow-up tasks needed after merge -->
+- [ ] None
