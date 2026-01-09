@@ -269,11 +269,53 @@ Created all three enums with XML documentation:
 
 ---
 
-### Phase 7: Repository Interfaces (NEXT)
-**Status**: PENDING after Phase 5
+### Gap #7: Repository Interfaces - Complete Implementation
+**Found**: 2026-01-09 during Phase 7 analysis
+**Status**: ✅ FIXED
 
-**Expected from Spec** (lines 2750-2900):
-- `Message : Entity<MessageId>`
+**Evidence of Gap**:
+- Spec requires repository abstractions (lines 3144-3187)
+- Application layer missing persistence interfaces
+- Files missing:
+  - `src/Acode.Application/Conversation/Persistence/IChatRepository.cs`
+  - `src/Acode.Application/Conversation/Persistence/ChatFilter.cs`
+  - `src/Acode.Application/Conversation/Persistence/PagedResult.cs`
+  - `src/Acode.Application/Conversation/Persistence/ConcurrencyException.cs`
+
+**Implementation** (No tests needed for interfaces):
+1. **IChatRepository interface** with 7 methods:
+   - CreateAsync(Chat, CancellationToken)
+   - GetByIdAsync(ChatId, bool includeRuns, CancellationToken)
+   - UpdateAsync(Chat, CancellationToken) - throws ConcurrencyException
+   - SoftDeleteAsync(ChatId, CancellationToken)
+   - ListAsync(ChatFilter, CancellationToken) - returns PagedResult<Chat>
+   - GetByWorktreeAsync(WorktreeId, CancellationToken)
+   - PurgeDeletedAsync(DateTimeOffset before, CancellationToken) - returns count
+
+2. **ChatFilter record** for query filtering:
+   - WorktreeId?, CreatedAfter?, CreatedBefore?
+   - IncludeDeleted (default false)
+   - Page (default 0), PageSize (default 50)
+
+3. **PagedResult<T> record** for pagination:
+   - Items, TotalCount, Page, PageSize
+   - Computed: TotalPages, HasNextPage, HasPreviousPage
+
+4. **ConcurrencyException** for optimistic concurrency conflicts:
+   - Inherits from Exception
+   - 3 constructors (default, message, message + inner)
+
+5. **VERIFY**:
+   - Build successful (0 errors, 0 warnings)
+   - Fixed SA1623 (boolean property documentation)
+   - Clean Architecture: Application layer depends on Domain, not Infrastructure
+
+**Commit**: (pending) - feat(task-049a): implement repository interfaces
+**Tests Passing**: 122/~150 (no new tests for interfaces)
+
+---
+
+### Phase 8: SQLite Repositories (NEXT)
 - Properties: RunId (parent), Role, Content (100KB max), ToolCalls, Timestamp
 - Methods: Create, AddToolCall
 - `ToolCall` value object with ToolCallStatus
@@ -331,19 +373,23 @@ Created all three enums with XML documentation:
 ## Summary Statistics
 
 ### Task 049a Progress
-- **Phases Complete**: 4 / 8
-- **Files Created**: 16
-  - Production: 11 (WorktreeId, Entity, AggregateRoot, Ulid, ChatId, RunId, MessageId, SyncStatus, RunStatus, ToolCallStatus, Chat)
-  - Tests: 5 (WorktreeIdTests, EntityTests, AggregateRootTests, ChatIdTests, RunIdTests, MessageIdTests, ChatTests)
-- **Tests Passing**: 76 / ~150 expected (50.7% complete)
-- **Lines of Code**: ~1,200 (production + tests)
-- **Commits**: 4
+- **Phases Complete**: 7 / 8 (87.5%)
+- **Files Created**: 24
+  - Domain: 14 (WorktreeId, Entity, AggregateRoot, Ulid, ChatId, RunId, MessageId, SyncStatus, RunStatus, ToolCallStatus, Chat, Run, Message, ToolCall)
+  - Application: 4 (IChatRepository, ChatFilter, PagedResult, ConcurrencyException)
+  - Tests: 6 (WorktreeIdTests, EntityTests, AggregateRootTests, ChatIdTests, RunIdTests, MessageIdTests, ChatTests, RunTests, MessageTests, ToolCallTests)
+- **Tests Passing**: 122 / ~150 expected (81.3% complete)
+- **Lines of Code**: ~3,800 (production + tests)
+- **Commits**: 6
 
 ### Gaps Fixed Today
 1. ✅ Base types (WorktreeId, Entity, AggregateRoot) - 19 tests
-2. ✅ Value objects (ChatId, RunId, MessageId, Ulid) - 35 tests
+2. ✅ Value objects (ChatId, RunId, MessageId, Ulid) - 35 tests (18 each ID type)
 3. ✅ Enums (SyncStatus, RunStatus, ToolCallStatus) - 0 tests (enums)
 4. ✅ Chat entity - 22 tests
+5. ✅ Run entity - 23 tests (+ Message stub to unblock)
+6. ✅ Message entity + ToolCall - 29 tests (17 Message + 12 ToolCall)
+7. ✅ Repository interfaces - 0 tests (interfaces + supporting types)
 
 ### Remaining Work (Task 049a)
 - Phase 5: Run entity (~18-24 tests)

@@ -7,6 +7,10 @@
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+
+    <!-- Suppress CA2007 for test projects - xUnit handles synchronization context correctly -->
+    <!-- Suppress CS1591 (XML comments) and CA1707 (underscores in names) for test methods -->
+    <NoWarn>CA2007;CS1591;CA1707</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,6 +25,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Acode.Infrastructure\Acode.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\src\Acode.Infrastructure\Persistence\Conversation\Migrations\*.sql">
+      <Link>Migrations\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
