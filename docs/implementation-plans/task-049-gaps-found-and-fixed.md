@@ -434,10 +434,71 @@ Created all three enums with XML documentation:
 
 ---
 
+---
+
+### Gap #13: Missing IRunRepository, IMessageRepository, SqliteRunRepository, SqliteMessageRepository
+**Found**: 2026-01-09 during Task 049b analysis - discovered Task 049a is incomplete
+**Status**: 🔄 IN PROGRESS
+
+**Evidence of Gap**:
+- Task 049a spec requires 3 repository interfaces (AC-042, AC-043, AC-044):
+  - ✅ AC-042: IChatRepository - IMPLEMENTED
+  - ❌ AC-043: IRunRepository - **MISSING**
+  - ❌ AC-044: IMessageRepository - **MISSING**
+- Task 049a spec requires 3 SQLite implementations:
+  - ✅ SqliteChatRepository - IMPLEMENTED (21/21 tests passing)
+  - ❌ SqliteRunRepository - **MISSING**
+  - ❌ SqliteMessageRepository - **MISSING**
+- Files found:
+  - `src/Acode.Application/Conversation/Persistence/IChatRepository.cs` ✅
+  - `src/Acode.Infrastructure/Persistence/Conversation/SqliteChatRepository.cs` ✅
+- Files missing:
+  - `src/Acode.Application/Conversation/Persistence/IRunRepository.cs` ❌
+  - `src/Acode.Application/Conversation/Persistence/IMessageRepository.cs` ❌
+  - `src/Acode.Infrastructure/Persistence/Conversation/SqliteRunRepository.cs` ❌
+  - `src/Acode.Infrastructure/Persistence/Conversation/SqliteMessageRepository.cs` ❌
+
+**Why This Is Critical**:
+- Task 049a Phase 7 was marked "complete" but only delivered 1 of 3 repository interfaces
+- Task 049a Phase 8 was marked "complete" but only delivered 1 of 3 repository implementations
+- This violates the Gap Analysis Methodology: "File existing ≠ feature implemented"
+- Tests for Run and Message repositories were never written or executed
+- **Completion Percentage**: Only 33% complete (1/3 repositories)
+
+**Root Cause**: Misread spec - assumed only Chat repository was needed, didn't verify full scope
+
+**Implementation Plan** (TDD):
+1. **RED**: Write IRunRepository interface (7 methods expected similar to IChatRepository)
+2. **RED**: Write IMessageRepository interface (7 methods expected)
+3. **GREEN**: Interface definitions (no implementation needed)
+4. **VERIFY**: Build GREEN, no compilation errors
+5. **COMMIT**: feat(task-049a): implement IRunRepository and IMessageRepository interfaces
+6. **RED**: Write SqliteRunRepository integration tests (20-25 tests expected)
+7. **GREEN**: Implement SqliteRunRepository with Dapper
+8. **REFACTOR**: Fix any build warnings
+9. **VERIFY**: All tests passing
+10. **COMMIT**: feat(task-049a): implement SqliteRunRepository with integration tests
+11. **RED**: Write SqliteMessageRepository integration tests (20-25 tests expected)
+12. **GREEN**: Implement SqliteMessageRepository with Dapper
+13. **REFACTOR**: Fix any build warnings
+14. **VERIFY**: All tests passing
+15. **COMMIT**: feat(task-049a): implement SqliteMessageRepository with integration tests
+
+**Expected Scope**:
+- **Interfaces**: 2 files (~150 lines each)
+- **Implementations**: 2 files (~300-350 lines each, similar to SqliteChatRepository)
+- **Tests**: 2 test files (~400-500 lines each, 20-25 tests per repository)
+- **Total**: ~1,700-2,000 lines of code
+- **Estimated Time**: 3-4 hours
+
+**Starting Implementation Now** (following methodology: fix gaps immediately while context is fresh)
+
+---
+
 ## Summary of All Gaps Fixed (Task 049a Phase 8)
 
-**Total Gaps**: 5 unique issues (Gaps #8-12)
-**Total Tests Fixed**: 8 failing tests → 21/21 passing ✅
+**Total Gaps**: 5 unique issues (Gaps #8-12) + 1 major scope gap (Gap #13)
+**Total Tests Fixed**: 8 failing tests → 21/21 passing ✅ (Chat repository only)
 
 **Root Causes Identified**:
 1. **Dapper Column Mapping** (Gaps #8, #12): snake_case columns not auto-mapping to PascalCase properties → Fixed with explicit AS aliases
