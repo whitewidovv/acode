@@ -218,17 +218,58 @@ Created all three enums with XML documentation:
 
 ## Task 049a: Remaining Phases (In Progress)
 
-### Phase 6: Message + ToolCall (NEXT - PARTIAL STUB EXISTS)
-**Status**: 🔄 IN PROGRESS
+### Gap #6: Message Entity + ToolCall Value Object - Complete Implementation
+**Found**: 2026-01-09 during Phase 6 analysis
+**Status**: ✅ FIXED
 
-**Current State**:
-- Message stub created (minimal) to unblock Run entity
-- Message stub only has RunId property
-- Full implementation needed per spec
+**Evidence of Gap**:
+- Spec requires Message entity (lines 2881-3003)
+- Spec requires ToolCall value object (lines 3006-3074)
+- Message stub existed (minimal) from Phase 5 dependency
+- Files incomplete:
+  - `src/Acode.Domain/Conversation/Message.cs` (stub only)
+  - `src/Acode.Domain/Conversation/ToolCall.cs` (missing)
+
+**Implementation** (TDD):
+1. **RED**: Wrote 29 comprehensive tests
+   - ToolCallTests.cs: 12 tests (construction, WithResult/WithError, ParseArguments, serialization, equality)
+   - MessageTests.cs: 17 tests (creation, role validation, content limits 100KB, tool calls management, reconstitution)
+
+2. **GREEN**: Implemented both types
+   - **ToolCall** (immutable record):
+     - Constructor with null validation for Id, Function, Arguments
+     - WithResult/WithError returning new instances (record immutability)
+     - ParseArguments<T> with case-insensitive JSON deserialization
+     - JSON serialization support with JsonPropertyName attributes
+     - Properties: Id, Function, Arguments, Result, Status
+   - **Message** (entity):
+     - Create factory with RunId, role (user/assistant/system/tool), content validation
+     - MaxContentLength = 100KB (102400 bytes)
+     - Role normalization to lowercase
+     - Reconstitute for ORM loading
+     - AddToolCalls (assistant messages only)
+     - GetToolCallsJson for serialization
+     - MarkSynced/MarkConflict for sync management
+
+3. **REFACTOR**: Fixed issues
+   - SA1201: Constructor ordering in ToolCall
+   - SA1516, SA1025, SA1407: Test code formatting
+   - IDE0005: Removed unused System.Linq
+   - CA1062: Added pragma for test parameters
+   - JSON deserialization: Changed `private set` to `init` for Result/Status in ToolCall
+   - Test assertion: Fixed 100KB content test to match actual error message
+
+4. **VERIFY**:
+   - Semantic completeness: All 6 Message methods, all 4 ToolCall methods present
+   - All validations implemented (RunId.Empty check, role validation, content size limit, assistant-only tool calls)
+   - All 29 tests passing
+
+**Commit**: a0acab5 - feat(task-049a): implement Message entity and ToolCall value object
+**Tests Passing**: 122/~150 (previous 93 + new 29)
 
 ---
 
-### Phase 6: Message + ToolCall (PENDING)
+### Phase 7: Repository Interfaces (NEXT)
 **Status**: PENDING after Phase 5
 
 **Expected from Spec** (lines 2750-2900):
