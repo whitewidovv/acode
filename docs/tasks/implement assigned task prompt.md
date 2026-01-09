@@ -1,4 +1,39 @@
-your next task is to review docs\TDD_INSTRUCTIONS.md and claude.md, then read every part of every one of these files
+## 🚨 CRITICAL: READ THIS FIRST 🚨
+
+**BEFORE WRITING ANY CODE, YOU MUST:**
+
+1. **Read the FULL "Implementation Prompt" section** at the end of EACH task file
+   - This section contains complete, working code examples for ALL classes and methods
+   - It shows the EXACT file structure, interfaces, and implementations expected
+   - It includes error codes, exception hierarchies, and result types
+   - **Skipping this wastes massive amounts of time and context**
+
+2. **Read the FULL "Testing Requirements" section** in EACH task file
+   - This section contains complete test code for ALL scenarios
+   - It shows which testing framework to use (MSTest vs xUnit)
+   - It defines all test cases you need to implement
+   - **Use this to guide your TDD - write these tests FIRST**
+
+3. **Follow the code examples EXACTLY unless you have a demonstrably better approach**
+   - The Implementation Prompt was written to guide you
+   - Don't reinvent patterns when they're already specified
+   - If you deviate, you MUST have a technical justification
+
+**WHY THIS MATTERS:**
+- Previous agents skipped Implementation Prompts and built 30% of what was specified
+- This created massive rework and wasted ~50k tokens
+- The Implementation Prompt exists SOLELY FOR YOU - it's the blueprint
+- Reading it takes 10 minutes; NOT reading it wastes hours
+
+**ENFORCEMENT:**
+- If you find yourself implementing without having read these sections, STOP immediately
+- Go back and read them
+- Verify your approach matches the specification
+- Only then continue
+
+---
+
+Your next task is to review docs\TDD_INSTRUCTIONS.md and claude.md, then read every part of every one of these files
 
 {
 docs\tasks\refined-tasks\Epic 02\epic-02-cli-agent-orchestration-core.md
