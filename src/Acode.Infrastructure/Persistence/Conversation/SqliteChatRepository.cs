@@ -39,31 +39,30 @@ public sealed class SqliteChatRepository : IChatRepository
         const string sql = @"
             INSERT INTO chats (id, title, tags, worktree_id, is_deleted, deleted_at,
                               sync_status, version, created_at, updated_at)
-            VALUES (@Id, @Title, @Tags, @WorktreeId, @IsDeleted, @DeletedAt,
+            VALUES (@Id, @Title, @Tags, @worktree_id, @IsDeleted, @DeletedAt,
                    @SyncStatus, @Version, @CreatedAt, @UpdatedAt)";
 
-        var conn = new SqliteConnection(_connectionString);
-        await using (conn.ConfigureAwait(false))
-        {
-            await conn.OpenAsync(ct).ConfigureAwait(false);
+#pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
+        await using var conn = new SqliteConnection(_connectionString);
+#pragma warning restore CA2007
+        await conn.OpenAsync(ct).ConfigureAwait(false);
 
-            await conn.ExecuteAsync(new CommandDefinition(
-                sql,
-                new
-                {
-                    Id = chat.Id.Value,
-                    Title = chat.Title,
-                    Tags = JsonSerializer.Serialize(chat.Tags),
-                    WorktreeId = chat.WorktreeBinding?.Value,
-                    IsDeleted = chat.IsDeleted ? 1 : 0,
-                    DeletedAt = chat.DeletedAt?.ToString("O"),
-                    SyncStatus = chat.SyncStatus.ToString(),
-                    Version = chat.Version,
-                    CreatedAt = chat.CreatedAt.ToString("O"),
-                    UpdatedAt = chat.UpdatedAt.ToString("O"),
-                },
-                cancellationToken: ct)).ConfigureAwait(false);
-        }
+        await conn.ExecuteAsync(new CommandDefinition(
+            sql,
+            new
+            {
+                Id = chat.Id.Value,
+                Title = chat.Title,
+                Tags = JsonSerializer.Serialize(chat.Tags),
+                worktree_id = chat.WorktreeBinding?.Value,
+                IsDeleted = chat.IsDeleted ? 1 : 0,
+                DeletedAt = chat.DeletedAt?.ToString("O"),
+                SyncStatus = chat.SyncStatus.ToString(),
+                Version = chat.Version,
+                CreatedAt = chat.CreatedAt.ToString("O"),
+                UpdatedAt = chat.UpdatedAt.ToString("O"),
+            },
+            cancellationToken: ct)).ConfigureAwait(false);
 
         return chat.Id;
     }
@@ -71,23 +70,28 @@ public sealed class SqliteChatRepository : IChatRepository
     /// <inheritdoc/>
     public async Task<Chat?> GetByIdAsync(ChatId id, bool includeRuns = false, CancellationToken ct = default)
     {
-        const string sql = "SELECT * FROM chats WHERE id = @Id";
+        const string sql = @"
+            SELECT id, title, tags, worktree_id AS WorktreeId,
+                   is_deleted AS IsDeleted, deleted_at AS DeletedAt,
+                   sync_status AS SyncStatus, version,
+                   created_at AS CreatedAt, updated_at AS UpdatedAt
+            FROM chats
+            WHERE id = @Id";
 
-        var conn = new SqliteConnection(_connectionString);
-        await using (conn.ConfigureAwait(false))
+#pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
+        await using var conn = new SqliteConnection(_connectionString);
+#pragma warning restore CA2007
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+
+        var row = await conn.QueryFirstOrDefaultAsync<ChatRow>(
+            new CommandDefinition(sql, new { Id = id.Value }, cancellationToken: ct)).ConfigureAwait(false);
+
+        if (row == null)
         {
-            await conn.OpenAsync(ct).ConfigureAwait(false);
-
-            var row = await conn.QueryFirstOrDefaultAsync<ChatRow>(
-                new CommandDefinition(sql, new { Id = id.Value }, cancellationToken: ct)).ConfigureAwait(false);
-
-            if (row == null)
-            {
-                return null;
-            }
-
-            return MapToChat(row);
+            return null;
         }
+
+        return MapToChat(row);
 
         // Note: includeRuns functionality would require IRunRepository - out of scope for Chat repository
     }
@@ -101,7 +105,7 @@ public sealed class SqliteChatRepository : IChatRepository
             UPDATE chats
             SET title = @Title,
                 tags = @Tags,
-                worktree_id = @WorktreeId,
+                worktree_id = @worktree_id,
                 is_deleted = @IsDeleted,
                 deleted_at = @DeletedAt,
                 sync_status = @SyncStatus,
@@ -109,33 +113,32 @@ public sealed class SqliteChatRepository : IChatRepository
                 updated_at = @UpdatedAt
             WHERE id = @Id AND version = @ExpectedVersion";
 
-        var conn = new SqliteConnection(_connectionString);
-        await using (conn.ConfigureAwait(false))
-        {
-            await conn.OpenAsync(ct).ConfigureAwait(false);
+#pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
+        await using var conn = new SqliteConnection(_connectionString);
+#pragma warning restore CA2007
+        await conn.OpenAsync(ct).ConfigureAwait(false);
 
-            var rowsAffected = await conn.ExecuteAsync(new CommandDefinition(
-                sql,
-                new
-                {
-                    Id = chat.Id.Value,
-                    Title = chat.Title,
-                    Tags = JsonSerializer.Serialize(chat.Tags),
-                    WorktreeId = chat.WorktreeBinding?.Value,
-                    IsDeleted = chat.IsDeleted ? 1 : 0,
-                    DeletedAt = chat.DeletedAt?.ToString("O"),
-                    SyncStatus = chat.SyncStatus.ToString(),
-                    Version = chat.Version,
-                    UpdatedAt = chat.UpdatedAt.ToString("O"),
-                    ExpectedVersion = chat.Version - 1,
-                },
-                cancellationToken: ct)).ConfigureAwait(false);
-
-            if (rowsAffected == 0)
+        var rowsAffected = await conn.ExecuteAsync(new CommandDefinition(
+            sql,
+            new
             {
-                throw new ConcurrencyException(
-                    $"Chat {chat.Id} was modified by another process. Expected version {chat.Version - 1} but entity has different version.");
-            }
+                Id = chat.Id.Value,
+                Title = chat.Title,
+                Tags = JsonSerializer.Serialize(chat.Tags),
+                worktree_id = chat.WorktreeBinding?.Value,
+                IsDeleted = chat.IsDeleted ? 1 : 0,
+                DeletedAt = chat.DeletedAt?.ToString("O"),
+                SyncStatus = chat.SyncStatus.ToString(),
+                Version = chat.Version,
+                UpdatedAt = chat.UpdatedAt.ToString("O"),
+                ExpectedVersion = chat.Version - 1,
+            },
+            cancellationToken: ct)).ConfigureAwait(false);
+
+        if (rowsAffected == 0)
+        {
+            throw new ConcurrencyException(
+                $"Chat {chat.Id} was modified by another process. Expected version {chat.Version - 1} but entity has different version.");
         }
     }
 
@@ -149,23 +152,22 @@ public sealed class SqliteChatRepository : IChatRepository
                 updated_at = @UpdatedAt,
                 version = version + 1,
                 sync_status = 'Pending'
-            WHERE id = @Id AND is_deleted = 0";
+            WHERE id = @Id";
 
-        var conn = new SqliteConnection(_connectionString);
-        await using (conn.ConfigureAwait(false))
-        {
-            await conn.OpenAsync(ct).ConfigureAwait(false);
+#pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
+        await using var conn = new SqliteConnection(_connectionString);
+#pragma warning restore CA2007
+        await conn.OpenAsync(ct).ConfigureAwait(false);
 
-            await conn.ExecuteAsync(new CommandDefinition(
-                sql,
-                new
-                {
-                    Id = id.Value,
-                    DeletedAt = DateTimeOffset.UtcNow.ToString("O"),
-                    UpdatedAt = DateTimeOffset.UtcNow.ToString("O"),
-                },
-                cancellationToken: ct)).ConfigureAwait(false);
-        }
+        await conn.ExecuteAsync(new CommandDefinition(
+            sql,
+            new
+            {
+                Id = id.Value,
+                DeletedAt = DateTimeOffset.UtcNow.ToString("O"),
+                UpdatedAt = DateTimeOffset.UtcNow.ToString("O"),
+            },
+            cancellationToken: ct)).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -199,52 +201,58 @@ public sealed class SqliteChatRepository : IChatRepository
             parameters.Add("CreatedBefore", filter.CreatedBefore.Value.ToString("O"));
         }
 
-        var conn = new SqliteConnection(_connectionString);
-        await using (conn.ConfigureAwait(false))
-        {
-            await conn.OpenAsync(ct).ConfigureAwait(false);
+#pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
+        await using var conn = new SqliteConnection(_connectionString);
+#pragma warning restore CA2007
+        await conn.OpenAsync(ct).ConfigureAwait(false);
 
-            // Get total count
-            var countSql = $"SELECT COUNT(*) FROM chats {whereClause}";
-            var totalCount = await conn.ExecuteScalarAsync<int>(
-                new CommandDefinition(countSql, parameters, cancellationToken: ct)).ConfigureAwait(false);
+        // Get total count
+        var countSql = $"SELECT COUNT(*) FROM chats {whereClause}";
+        var totalCount = await conn.ExecuteScalarAsync<int>(
+            new CommandDefinition(countSql, parameters, cancellationToken: ct)).ConfigureAwait(false);
 
-            // Get paged results
-            var dataSql = $@"
-                SELECT * FROM chats {whereClause}
+        // Get paged results
+        var dataSql = $@"
+                SELECT id, title, tags, worktree_id AS WorktreeId,
+                       is_deleted AS IsDeleted, deleted_at AS DeletedAt,
+                       sync_status AS SyncStatus, version,
+                       created_at AS CreatedAt, updated_at AS UpdatedAt
+                FROM chats {whereClause}
                 ORDER BY updated_at DESC
                 LIMIT @PageSize OFFSET @Offset";
 
-            parameters.Add("PageSize", filter.PageSize);
-            parameters.Add("Offset", filter.Page * filter.PageSize);
+        parameters.Add("PageSize", filter.PageSize);
+        parameters.Add("Offset", filter.Page * filter.PageSize);
 
-            var rows = await conn.QueryAsync<ChatRow>(
-                new CommandDefinition(dataSql, parameters, cancellationToken: ct)).ConfigureAwait(false);
+        var rows = await conn.QueryAsync<ChatRow>(
+            new CommandDefinition(dataSql, parameters, cancellationToken: ct)).ConfigureAwait(false);
 
-            var chats = rows.Select(MapToChat).ToList();
+        var chats = rows.Select(MapToChat).ToList();
 
-            return new PagedResult<Chat>(chats, totalCount, filter.Page, filter.PageSize);
-        }
+        return new PagedResult<Chat>(chats, totalCount, filter.Page, filter.PageSize);
     }
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<Chat>> GetByWorktreeAsync(WorktreeId worktreeId, CancellationToken ct)
     {
         const string sql = @"
-            SELECT * FROM chats
+            SELECT id, title, tags, worktree_id AS WorktreeId,
+                   is_deleted AS IsDeleted, deleted_at AS DeletedAt,
+                   sync_status AS SyncStatus, version,
+                   created_at AS CreatedAt, updated_at AS UpdatedAt
+            FROM chats
             WHERE worktree_id = @WorktreeId AND is_deleted = 0
             ORDER BY updated_at DESC";
 
-        var conn = new SqliteConnection(_connectionString);
-        await using (conn.ConfigureAwait(false))
-        {
-            await conn.OpenAsync(ct).ConfigureAwait(false);
+#pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
+        await using var conn = new SqliteConnection(_connectionString);
+#pragma warning restore CA2007
+        await conn.OpenAsync(ct).ConfigureAwait(false);
 
-            var rows = await conn.QueryAsync<ChatRow>(
-                new CommandDefinition(sql, new { WorktreeId = worktreeId.Value }, cancellationToken: ct)).ConfigureAwait(false);
+        var rows = await conn.QueryAsync<ChatRow>(
+            new CommandDefinition(sql, new { WorktreeId = worktreeId.Value }, cancellationToken: ct)).ConfigureAwait(false);
 
-            return rows.Select(MapToChat).ToList();
-        }
+        return rows.Select(MapToChat).ToList();
     }
 
     /// <inheritdoc/>
@@ -254,16 +262,15 @@ public sealed class SqliteChatRepository : IChatRepository
             DELETE FROM chats
             WHERE is_deleted = 1 AND deleted_at < @Before";
 
-        var conn = new SqliteConnection(_connectionString);
-        await using (conn.ConfigureAwait(false))
-        {
-            await conn.OpenAsync(ct).ConfigureAwait(false);
+#pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
+        await using var conn = new SqliteConnection(_connectionString);
+#pragma warning restore CA2007
+        await conn.OpenAsync(ct).ConfigureAwait(false);
 
-            var rowsDeleted = await conn.ExecuteAsync(
-                new CommandDefinition(sql, new { Before = before.ToString("O") }, cancellationToken: ct)).ConfigureAwait(false);
+        var rowsDeleted = await conn.ExecuteAsync(
+            new CommandDefinition(sql, new { Before = before.ToString("O") }, cancellationToken: ct)).ConfigureAwait(false);
 
-            return rowsDeleted;
-        }
+        return rowsDeleted;
     }
 
     private static Chat MapToChat(ChatRow row)

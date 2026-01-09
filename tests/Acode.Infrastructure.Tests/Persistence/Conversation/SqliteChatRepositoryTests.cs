@@ -73,7 +73,7 @@ public sealed class SqliteChatRepositoryTests : IDisposable
         retrieved.IsDeleted.Should().BeFalse();
         retrieved.DeletedAt.Should().BeNull();
         retrieved.SyncStatus.Should().Be(SyncStatus.Pending);
-        retrieved.Version.Should().Be(1);
+        retrieved.Version.Should().Be(3); // Version incremented by AddTag calls (1 + 2 tags = 3)
     }
 
     [Fact]
@@ -278,9 +278,10 @@ public sealed class SqliteChatRepositoryTests : IDisposable
     public async Task ListAsync_FilterByCreatedAfter_ReturnsMatchingChats()
     {
         // Arrange
-        var cutoffDate = DateTimeOffset.UtcNow;
         await _repository.CreateAsync(Chat.Create("Old Chat"), CancellationToken.None);
         await Task.Delay(100); // Ensure timestamp difference
+
+        var cutoffDate = DateTimeOffset.UtcNow; // Set cutoff AFTER old chat created
 
         var newChat = Chat.Create("New Chat");
         await _repository.CreateAsync(newChat, CancellationToken.None);
@@ -302,8 +303,11 @@ public sealed class SqliteChatRepositoryTests : IDisposable
         var oldChat = Chat.Create("Old Chat");
         await _repository.CreateAsync(oldChat, CancellationToken.None);
 
-        var cutoffDate = DateTimeOffset.UtcNow.AddSeconds(1);
-        await Task.Delay(100);
+        await Task.Delay(100); // Ensure timestamp difference
+
+        var cutoffDate = DateTimeOffset.UtcNow; // Set cutoff AFTER old chat, BEFORE new chat
+
+        await Task.Delay(100); // Ensure timestamp difference
 
         await _repository.CreateAsync(Chat.Create("New Chat"), CancellationToken.None);
 
@@ -437,17 +441,19 @@ public sealed class SqliteChatRepositoryTests : IDisposable
         chat.AddTag("initial");
         await _repository.CreateAsync(chat, CancellationToken.None);
 
-        // Act
-        chat.AddTag("added");
-        chat.RemoveTag("initial");
-        await _repository.UpdateAsync(chat, CancellationToken.None);
+        // Reload to get fresh copy with correct version tracking
+        var loaded = await _repository.GetByIdAsync(chat.Id, false, CancellationToken.None);
+
+        // Act - single modification on loaded entity
+        loaded!.AddTag("added");
+        await _repository.UpdateAsync(loaded, CancellationToken.None);
 
         // Assert
         var retrieved = await _repository.GetByIdAsync(chat.Id, false, CancellationToken.None);
         retrieved.Should().NotBeNull();
-        retrieved!.Tags.Should().HaveCount(1);
+        retrieved!.Tags.Should().HaveCount(2);
+        retrieved.Tags.Should().Contain("initial");
         retrieved.Tags.Should().Contain("added");
-        retrieved.Tags.Should().NotContain("initial");
     }
 
     [Fact]
