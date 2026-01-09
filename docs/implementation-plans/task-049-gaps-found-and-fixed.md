@@ -491,7 +491,31 @@ Created all three enums with XML documentation:
 - **Total**: ~1,700-2,000 lines of code
 - **Estimated Time**: 3-4 hours
 
-**Starting Implementation Now** (following methodology: fix gaps immediately while context is fresh)
+**Implementation Progress**:
+
+**Part 1: Repository Interfaces** ✅ COMPLETE
+- Created `IRunRepository.cs` with 6 methods
+- Created `IMessageRepository.cs` with 5 methods
+- All methods documented (SA1611, SA1615 compliance)
+- Commit: `a455c3f`
+- Build: 0 errors, 0 warnings
+
+**Part 2: SqliteRunRepository** ✅ COMPLETE
+- Created `SqliteRunRepository.cs` (~235 lines)
+- Implements all 6 IRunRepository methods with Dapper
+- Created `SqliteRunRepositoryTests.cs` (17 integration tests)
+- All tests passing: 17/17 ✅
+- Fixed issues:
+  - ChatId.New() → ChatId.NewId()
+  - RunId.New() → RunId.NewId()
+  - Schema path: AppDomain.CurrentDomain.BaseDirectory → Directory.GetCurrentDirectory()
+- Test coverage: CreateAsync, GetByIdAsync, UpdateAsync, ListByChatAsync, GetLatestAsync, DeleteAsync
+- Tests cover: round-trip persistence, ordering, filtering, edge cases, all run statuses
+- Commit: (pending)
+- Build: 0 errors, 0 warnings
+
+**Part 3: SqliteMessageRepository** 🔄 IN PROGRESS
+- Next step: Implement SqliteMessageRepository with integration tests
 
 ---
 
