@@ -1,4 +1,4 @@
-#pragma warning disable CA2007 // await using doesn't support ConfigureAwait
+#pragma warning disable CA2007 // Library/infrastructure code does not depend on a synchronization context and this file may use 'await using', which cannot call ConfigureAwait; CA2007 is intentionally disabled for the entire file.
 
 using Acode.Application.Database;
 using Microsoft.Data.Sqlite;
