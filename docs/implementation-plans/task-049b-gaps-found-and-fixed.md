@@ -36,10 +36,15 @@
 - 06b3c48: IChatRepository.DeleteAsync for hard delete
 - 948a515: ChatCommand router with TODO stubs
 
-**Status**: 7/9 subcommands implemented (New, Open, Rename, Delete, Restore, Purge, Status).
-Remaining: ListAsync, ShowAsync. Build errors in StatusAsync to fix (Count property vs method).
+**Status**: ✅ 9/9 subcommands fully implemented and build passing.
+Completed: New, Open, Rename, Delete, Restore, Purge, Status, List, Show.
+All acceptance criteria AC-001-102 addressed in implementations.
 
-**Next**: Fix build errors, implement ListAsync and ShowAsync, commit, then write tests.
+**Commits**:
+- dbfddc1: Fixed build errors in StatusAsync (ChatId.Value, LINQ .Count())
+- 4a0ef48: Implemented ListAsync and ShowAsync commands
+
+**Next**: Write unit tests for all 9 commands, then integration tests.
 
 ## Context
 
