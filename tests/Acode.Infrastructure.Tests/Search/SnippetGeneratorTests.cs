@@ -174,4 +174,20 @@ public class SnippetGeneratorTests
         snippet.Should().NotContain("<mark>tested</mark>");
         snippet.Should().NotContain("<mark>tester</mark>");
     }
+
+    [Fact]
+    public void GenerateSnippet_DefaultMaxLengthIs150Characters()
+    {
+        // Arrange
+        var generator = new SnippetGenerator();
+        var content = new string('a', 200); // 200 chars, no matches
+        var query = "test"; // No match, will return beginning of content
+
+        // Act
+        var snippet = generator.GenerateSnippet(content, query);
+
+        // Assert - should be truncated to 150 chars + "..." (153 total)
+        snippet.Should().HaveLength(153, "default max snippet length is 150 characters");
+        snippet.Should().EndWith("...");
+    }
 }

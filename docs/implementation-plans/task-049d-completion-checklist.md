@@ -114,7 +114,7 @@ Files modified:
 
 ### P1.2: Fix Snippet Length Default (AC-058)
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Problem**:
 - Spec says: 150 characters default
@@ -148,7 +148,13 @@ dotnet test --filter "SnippetGeneratorTests" --verbosity normal
 - [✅] All SnippetGeneratorTests passing
 - [✅] AC-058 marked ✅ in audit report
 
-**Evidence Required**: Paste test output showing SnippetGeneratorTests passing
+**Evidence**: 11/11 SnippetGeneratorTests passing (2026-01-10)
+```
+Passed!  - Failed:     0, Passed:    11, Skipped:     0, Total:    11
+```
+Files modified:
+- src/Acode.Infrastructure/Search/SnippetGenerator.cs:10 (changed MaxSnippetLength from 200 to 150)
+- tests/Acode.Infrastructure.Tests/Search/SnippetGeneratorTests.cs:178-193 (added test verifying 150 char default)
 
 ---
 

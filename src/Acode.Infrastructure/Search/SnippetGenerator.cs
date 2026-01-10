@@ -7,7 +7,7 @@ namespace Acode.Infrastructure.Search;
 /// </summary>
 public sealed class SnippetGenerator
 {
-    private const int MaxSnippetLength = 200;
+    private const int MaxSnippetLength = 150;
     private const int ContextChars = 80;
 
     /// <summary>
