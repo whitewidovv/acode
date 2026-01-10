@@ -40,11 +40,21 @@
 Completed: New, Open, Rename, Delete, Restore, Purge, Status, List, Show.
 All acceptance criteria AC-001-102 addressed in implementations.
 
+**Testing Status**:
+- ✅ Unit Tests: 33/33 passing (ChatCommandTests.cs)
+- ⏸️ Integration Tests: 1/6 passing (ChatCommandIntegrationTests.cs - schema alignment needed)
+- ⏹️ E2E Tests: Not started
+- ⏹️ Performance Benchmarks: Not started
+
 **Commits**:
 - dbfddc1: Fixed build errors in StatusAsync (ChatId.Value, LINQ .Count())
 - 4a0ef48: Implemented ListAsync and ShowAsync commands
+- 712ac04: Comprehensive ChatCommand unit tests (33 tests passing)
+- b2eb18c: WIP integration tests (schema alignment needed)
 
-**Next**: Task 049c-f require significant implementation.
+**Next**:
+- Fix integration test schema to match SqliteRunRepository expectations
+- Task 049c-f require significant implementation.
 
 ## Task 049 Suite Completion Status
 
