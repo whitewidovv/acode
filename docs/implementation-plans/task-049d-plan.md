@@ -36,11 +36,11 @@
 - [x] Fix StyleCop violations (split types into separate files)
 - [x] Commit: 1482c34 `feat(task-049d): Add Search domain value objects (Phase 1)`
 
-### Phase 2: Application Interfaces ✅ / 🔄 / -
-- [ ] Create src/Acode.Application/Interfaces/ISearchService.cs (25 lines)
-- [ ] Verify interface compiles
-- [ ] Add XML documentation
-- [ ] Commit: `feat(task-049d): Add ISearchService interface`
+### Phase 2: Application Interfaces ✅
+- [x] Create src/Acode.Application/Interfaces/ISearchService.cs (88 lines)
+- [x] Verify interface compiles
+- [x] Add XML documentation
+- [x] Commit: f38b85d `feat(task-049d): Add ISearchService interface (Phase 2)`
 
 ### Phase 3: BM25Ranker (12 tests) ✅ / 🔄 / -
 - [ ] Create tests/Acode.Infrastructure.Tests/Search/BM25RankerTests.cs (12 tests)
