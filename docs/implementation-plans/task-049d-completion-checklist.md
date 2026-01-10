@@ -257,27 +257,34 @@ acode search "JWT" --json
 **Success Criteria**:
 - [✅] TableSearchFormatter created and tested (8/8 tests passing)
 - [✅] JsonSearchFormatter created and tested (4/4 tests passing)
-- [⚠️] SearchCommandTests deferred to P7 (0/12 tests - integration tests)
+- [✅] SearchCommandTests created and tested (12/12 tests passing)
 - [✅] SearchCommand uses formatters based on --json flag
 - [✅] AC-114, AC-115, AC-116 functionally complete (table default, JSON with --json)
 
-**Evidence**: 12/12 formatter tests passing (2026-01-10)
+**Evidence**: 24/24 tests passing (2026-01-10)
 ```
+# Formatter tests (12 tests)
 Passed!  - Failed:     0, Passed:    12, Skipped:     0, Total:    12
+
+# SearchCommand integration tests (12 tests)
+Test Run Successful.
+Total tests: 12
+     Passed: 12
+ Total time: 1.7345 Seconds
 ```
+
 Files created:
 - src/Acode.Cli/Formatting/IOutputFormatter.cs (interface)
 - src/Acode.Cli/Formatting/TableSearchFormatter.cs (table with ANSI colors)
 - src/Acode.Cli/Formatting/JsonSearchFormatter.cs (JSON with camelCase)
 - tests/Acode.Cli.Tests/Formatting/TableSearchFormatterTests.cs (8 tests)
 - tests/Acode.Cli.Tests/Formatting/JsonSearchFormatterTests.cs (4 tests)
+- tests/Acode.Cli.Tests/Commands/SearchCommandTests.cs (12 integration tests)
 
 Files modified:
 - src/Acode.Cli/Commands/SearchCommand.cs (refactored to use formatters)
 
-**Deferred to P7**: 12 SearchCommand integration tests (mocking SearchService, testing CLI arg parsing)
-
-**Spec Mismatch Resolution**: Table output is now default, JSON output with `--json` flag. Formatters proven to work via 12 passing tests.
+**Spec Mismatch Resolution**: Table output is now default, JSON output with `--json` flag. All formatters and CLI command proven to work via 24 passing tests.
 
 ---
 
