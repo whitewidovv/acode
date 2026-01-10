@@ -41,42 +41,48 @@ public sealed class ChatCommandIntegrationTests : IDisposable
         _connection = new SqliteConnection($"Data Source={_databasePath}");
         _connection.Open();
 
+        // Use exact schema from 001_InitialSchema.sql migration
         var createTablesSql = @"
-            CREATE TABLE IF NOT EXISTS chats (
+            CREATE TABLE chats (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 tags TEXT,
                 worktree_id TEXT,
-                is_deleted INTEGER NOT NULL DEFAULT 0,
+                is_deleted INTEGER DEFAULT 0,
                 deleted_at TEXT,
-                sync_status TEXT NOT NULL DEFAULT 'Pending',
-                version INTEGER NOT NULL DEFAULT 1,
+                sync_status TEXT DEFAULT 'Pending',
+                version INTEGER DEFAULT 1,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS runs (
+            CREATE TABLE runs (
                 id TEXT PRIMARY KEY,
                 chat_id TEXT NOT NULL,
                 model_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                tokens_in INTEGER DEFAULT 0,
+                tokens_out INTEGER DEFAULT 0,
                 sequence_number INTEGER NOT NULL,
-                sync_status TEXT NOT NULL DEFAULT 'Pending',
-                version INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+                error_message TEXT,
+                sync_status TEXT DEFAULT 'Pending',
+                FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+                UNIQUE(chat_id, sequence_number)
             );
 
-            CREATE TABLE IF NOT EXISTS messages (
+            CREATE TABLE messages (
                 id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
-                role TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
                 content TEXT NOT NULL,
                 tool_calls TEXT,
-                sequence_number INTEGER NOT NULL,
-                sync_status TEXT NOT NULL DEFAULT 'Pending',
                 created_at TEXT NOT NULL,
-                FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+                sequence_number INTEGER NOT NULL,
+                sync_status TEXT DEFAULT 'Pending',
+                FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+                UNIQUE(run_id, sequence_number)
             );";
 
         using var cmd = _connection.CreateCommand();
@@ -227,7 +233,7 @@ public sealed class ChatCommandIntegrationTests : IDisposable
 
         // Assert
         openResult.Should().Be(ExitCode.Success);
-        statusContext.Output.ToString().Should().Contain("Active chat:");
+        statusContext.Output.ToString().Should().Contain("Active Chat:");
         statusContext.Output.ToString().Should().Contain(chatId);
         statusContext.Output.ToString().Should().Contain("Chat For Opening");
     }
