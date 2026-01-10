@@ -1,6 +1,6 @@
-namespace Acode.Application.Fallback;
-
 using Acode.Domain.Modes;
+
+namespace Acode.Application.Fallback;
 
 /// <summary>
 /// Context for fallback resolution.
