@@ -39,7 +39,10 @@ public static class Program
         router.RegisterCommand(new ConfigCommand(loader, validator));
 
         // Parse global flags
-        var useJson = args.Contains("--json");
+        // FR-001: --json flag MUST enable JSONL mode
+        // FR-002: ACODE_JSON=1 env var MUST enable JSONL mode
+        var useJson = args.Contains("--json") ||
+                      string.Equals(Environment.GetEnvironmentVariable("ACODE_JSON"), "1", StringComparison.Ordinal);
         var noColor = args.Contains("--no-color");
 
         // Remove global flags from args

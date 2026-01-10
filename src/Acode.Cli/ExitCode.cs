@@ -63,6 +63,42 @@ public enum ExitCode
     UserCancellation = 5,
 
     /// <summary>
+    /// Indicates that user input was required but not available.
+    /// </summary>
+    /// <remarks>
+    /// Task 010.c FR-053: 10 MUST indicate input required.
+    /// Used in non-interactive mode when input is needed but unavailable.
+    /// </remarks>
+    InputRequired = 10,
+
+    /// <summary>
+    /// Indicates that an operation timed out.
+    /// </summary>
+    /// <remarks>
+    /// Task 010.c FR-054: 11 MUST indicate timeout.
+    /// Used when configured timeout expires during operation.
+    /// </remarks>
+    Timeout = 11,
+
+    /// <summary>
+    /// Indicates that approval was denied by policy.
+    /// </summary>
+    /// <remarks>
+    /// Task 010.c FR-055: 12 MUST indicate approval denied.
+    /// Used when approval policy rejects an action in non-interactive mode.
+    /// </remarks>
+    ApprovalDenied = 12,
+
+    /// <summary>
+    /// Indicates that pre-flight checks failed.
+    /// </summary>
+    /// <remarks>
+    /// Task 010.c FR-056: 13 MUST indicate pre-flight check failed.
+    /// Used when configuration, model, or permission checks fail.
+    /// </remarks>
+    PreflightFailed = 13,
+
+    /// <summary>
     /// Indicates the process received SIGINT (Ctrl+C).
     /// </summary>
     /// <remarks>
