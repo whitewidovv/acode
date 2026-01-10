@@ -1,5 +1,46 @@
 # Task 049b Gap Analysis and Fixes
 
+## INSTRUCTIONS FOR RESUMPTION AFTER CONTEXT COMPACTION
+
+**Current Status**: Phase 4 in progress - ChatCommand router complete, implementing subcommand methods.
+
+**What to do next**:
+1. Read this entire file to understand completed work and remaining tasks
+2. Implement remaining CLI subcommand methods in `src/Acode.Cli/Commands/ChatCommand.cs`
+3. Each subcommand is a private method (NewAsync, ListAsync, OpenAsync, etc.) - replace TODO stubs with implementation
+4. Follow existing pattern from ConfigCommand.cs in same directory
+5. Use injected dependencies: `_chatRepository`, `_runRepository`, `_messageRepository`, `_sessionManager`
+6. Follow TDD: write tests after each subcommand implementation
+7. Commit after each logical unit (1-2 subcommands implemented)
+8. Reference AC-001 through AC-115 in task spec for requirements
+
+**Key Architecture Notes**:
+- **NO MediatR/CQRS**: Implementation Prompt suggested it, but existing codebase uses custom ICommand pattern
+- CLI commands call repositories directly (no separate Command/Handler classes)
+- `ICommand` interface: `Task<ExitCode> ExecuteAsync(CommandContext context)`
+- CommandContext provides: Args, Output, Formatter, CancellationToken, Configuration
+- Repository interfaces already exist and are implemented in SQLite
+
+**File Locations**:
+- Task spec: `docs/tasks/refined-tasks/Epic 02/task-049b-crusd-apis-cli-commands.md`
+- CLI command: `src/Acode.Cli/Commands/ChatCommand.cs` (router complete, subcommands TODO)
+- Repositories: `src/Acode.Application/Conversation/Persistence/I*Repository.cs`
+- Domain entities: `src/Acode.Domain/Conversation/*.cs`
+- Tests: `tests/Acode.Cli.Tests/Commands/ChatCommandTests.cs` (create this)
+
+**Current Branch**: `feature/task-050-workspace-database-foundation`
+
+**Commits So Far**:
+- 33f2156: ChatSortField enum + ChatFilter extensions
+- 3570909: ISessionManager + InMemorySessionManager
+- 06b3c48: IChatRepository.DeleteAsync for hard delete
+- 948a515: ChatCommand router with TODO stubs
+
+**Status**: 7/9 subcommands implemented (New, Open, Rename, Delete, Restore, Purge, Status).
+Remaining: ListAsync, ShowAsync. Build errors in StatusAsync to fix (Count property vs method).
+
+**Next**: Fix build errors, implement ListAsync and ShowAsync, commit, then write tests.
+
 ## Context
 
 Task 049b implements CRUSD APIs + CLI Commands for conversation management. After reading the Implementation Prompt section and analyzing existing code, I've identified gaps between the specification and current implementation.
