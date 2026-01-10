@@ -9,9 +9,11 @@
    - **Skipping this wastes massive amounts of time and context**
 
 2. **Read the FULL "Testing Requirements" section** in EACH task file
-   - This section contains complete test code for ALL scenarios
+   - This section contains real test code, presumably for ALL scenarios
+   - If you think of a relevant meaningful test case not included, ADD IT
+   - Consider these guidelines the absolute minimum for testing requirements
    - It shows which testing framework to use (MSTest vs xUnit)
-   - It defines all test cases you need to implement
+   - All test cases defined must be implemented, at a minimum, with passing tests
    - **Use this to guide your TDD - write these tests FIRST**
 
 3. **Follow the code examples EXACTLY unless you have a demonstrably better approach**
