@@ -2,7 +2,9 @@
 
 ## INSTRUCTIONS FOR RESUMPTION AFTER CONTEXT COMPACTION
 
-**Current Status**: Gap analysis complete, ready to create implementation plan.
+**Current Status**: Phases 0-5 complete (61% done), Phase 6 implementation complete but tests need API signature fixes.
+
+**Last Updated**: 2026-01-10 (Session 2 - in progress)
 
 **Task Summary**:
 - **Task**: 049d - Indexing + Fast Search Over Chats/Runs/Messages
@@ -166,49 +168,78 @@
 
 ### Production Files
 
-#### ❌ MISSING: All production files
+#### ✅ COMPLETE: Phases 0-6 Implementation
 
-**Verification Commands Run**:
+**Verification Commands Run** (2026-01-10):
 ```bash
-$ find src -name "*Search*" -o -name "*Indexer*"
-src/Acode.Infrastructure/ToolSchemas/Providers/Schemas/CodeAnalysis/SemanticSearchSchema.cs
-src/Acode.Infrastructure/ToolSchemas/Providers/Schemas/FileOperations/SearchFilesSchema.cs
+$ find src/Acode.Domain/Search -name "*.cs"
+src/Acode.Domain/Search/SearchQuery.cs
+src/Acode.Domain/Search/SearchResult.cs
+src/Acode.Domain/Search/SearchResults.cs
+src/Acode.Domain/Search/MatchLocation.cs
+src/Acode.Domain/Search/SortOrder.cs
 
-$ grep -r "ISearchService" src/
-(no matches)
+$ find src/Acode.Application/Interfaces -name "*Search*"
+src/Acode.Application/Interfaces/ISearchService.cs
+
+$ find src/Acode.Infrastructure/Search -name "*.cs"
+src/Acode.Infrastructure/Search/BM25Ranker.cs
+src/Acode.Infrastructure/Search/SnippetGenerator.cs
+src/Acode.Infrastructure/Search/SafeQueryParser.cs
+src/Acode.Infrastructure/Search/SqliteFtsSearchService.cs
+
+$ find migrations -name "006*"
+migrations/006_add_search_index.sql
+migrations/006_add_search_index_down.sql
 ```
 
-**Status**: No search infrastructure exists. The two files found are unrelated schemas for tool definitions, not the core search service.
+**Status**: Phases 0-6 implementation complete (8 commits: 4ad1156 through 546c5ba).
 
-**Files Missing** (0 of 8 exist):
-- [ ] src/Acode.Domain/Search/SearchQuery.cs
-- [ ] src/Acode.Domain/Search/SearchResult.cs
-- [ ] src/Acode.Application/Interfaces/ISearchService.cs
-- [ ] src/Acode.Infrastructure/Search/SqliteFtsSearchService.cs
-- [ ] src/Acode.Infrastructure/Search/BM25Ranker.cs
-- [ ] src/Acode.Infrastructure/Search/SnippetGenerator.cs
-- [ ] src/Acode.Cli/Commands/SearchCommand.cs
-- [ ] migrations/006_add_search_index.sql
+**Files Complete** (11 of 15 exist):
+- [x] src/Acode.Domain/Search/SearchQuery.cs (84 lines, commit 1482c34)
+- [x] src/Acode.Domain/Search/SearchResult.cs (50 lines, commit 1482c34)
+- [x] src/Acode.Domain/Search/SearchResults.cs (53 lines, commit 1482c34)
+- [x] src/Acode.Domain/Search/MatchLocation.cs (22 lines, commit 1482c34)
+- [x] src/Acode.Domain/Search/SortOrder.cs (22 lines, commit 1482c34)
+- [x] src/Acode.Application/Interfaces/ISearchService.cs (88 lines, commit f38b85d)
+- [x] src/Acode.Infrastructure/Search/BM25Ranker.cs (143 lines, commit ac0fb69)
+- [x] src/Acode.Infrastructure/Search/SnippetGenerator.cs (162 lines, commit e4ee54f)
+- [x] src/Acode.Infrastructure/Search/SafeQueryParser.cs (120 lines, commit 511fb32)
+- [x] src/Acode.Infrastructure/Search/SqliteFtsSearchService.cs (283 lines, commit 546c5ba)
+- [x] migrations/006_add_search_index.sql (108 lines, commit 4ad1156)
+- [x] migrations/006_add_search_index_down.sql (13 lines, commit 4ad1156)
+- [ ] src/Acode.Cli/Commands/SearchCommand.cs (Phase 7 - pending)
+- [ ] Integration E2E tests (Phase 8 - pending)
+- [ ] Documentation (Phase 9 - pending)
 
 ### Test Files
 
-#### ❌ MISSING: All test files
+#### ✅ PARTIALLY COMPLETE: Phases 1-6 Tests (47 of 72 passing, 19 need fixes)
 
-**Verification Commands Run**:
+**Verification Commands Run** (2026-01-10):
 ```bash
 $ find tests -name "*Search*Tests.cs"
-(no matches)
+tests/Acode.Domain.Tests/Search/SearchQueryTests.cs
+tests/Acode.Domain.Tests/Search/SearchResultTests.cs
+tests/Acode.Infrastructure.Tests/Search/BM25RankerTests.cs
+tests/Acode.Infrastructure.Tests/Search/SnippetGeneratorTests.cs
+tests/Acode.Infrastructure.Tests/Search/SafeQueryParserTests.cs
+tests/Acode.Infrastructure.Tests/Search/SqliteFtsSearchServiceTests.cs
 ```
 
-**Status**: No test files exist.
+**Status**: 5 test files complete with 47 tests passing, 1 test file needs API signature fixes.
 
-**Files Missing** (0 of 6 exist):
-- [ ] tests/Acode.Domain.Tests/Search/SearchQueryTests.cs
-- [ ] tests/Acode.Domain.Tests/Search/SearchResultTests.cs
-- [ ] tests/Acode.Infrastructure.Tests/Search/SqliteFtsSearchServiceTests.cs
-- [ ] tests/Acode.Infrastructure.Tests/Search/BM25RankerTests.cs
-- [ ] tests/Acode.Infrastructure.Tests/Search/SnippetGeneratorTests.cs
-- [ ] tests/Acode.Cli.Tests/Commands/SearchCommandTests.cs
+**Files Status** (5 of 6 exist):
+- [x] tests/Acode.Domain.Tests/Search/SearchQueryTests.cs (11 tests ✅, commit 1482c34)
+- [x] tests/Acode.Domain.Tests/Search/SearchResultTests.cs (8 tests ✅, commit 1482c34)
+- [x] tests/Acode.Infrastructure.Tests/Search/BM25RankerTests.cs (12 tests ✅, commit ac0fb69)
+- [x] tests/Acode.Infrastructure.Tests/Search/SnippetGeneratorTests.cs (10 tests ✅, commit e4ee54f)
+- [x] tests/Acode.Infrastructure.Tests/Search/SafeQueryParserTests.cs (8 tests ✅, commit 511fb32)
+- [x] tests/Acode.Infrastructure.Tests/Search/SqliteFtsSearchServiceTests.cs (20 tests ⚠️ API fixes needed, commit unstaged)
+  - **Issue**: Repository constructor signatures (string vs SqliteConnection)
+  - **Issue**: Message.Create parameter order mismatch
+  - **Issue**: Run.Create missing modelId/maxTokens parameters
+- [ ] tests/Acode.Cli.Tests/Commands/SearchCommandTests.cs (Phase 7 - pending)
 
 ### Dependencies Available
 
@@ -222,30 +253,44 @@ $ find tests -name "*Search*Tests.cs"
 
 ---
 
-## Gap Summary
+## Gap Summary (Updated 2026-01-10)
 
 ### Files Requiring Work
 
-| Category | Complete | Incomplete (Stubs) | Missing | Total |
-|----------|----------|-------------------|---------|-------|
-| Production | 0 | 0 | 8 | 8 |
-| Tests | 0 | 0 | 6 | 6 |
-| SQL Migrations | 0 | 0 | 1 | 1 |
-| **TOTAL** | **0** | **0** | **15** | **15** |
+| Category | Complete | Needs Fixes | Missing | Total |
+|----------|----------|-------------|---------|-------|
+| Production | 11 | 1 (test file) | 3 | 15 |
+| Tests | 5 | 1 (API fixes) | 1 | 7 |
+| SQL Migrations | 2 | 0 | 0 | 2 |
+| **TOTAL** | **18** | **2** | **4** | **24** |
 
-**Completion Percentage**: 0% (0 complete / 15 total)
+**Completion Percentage**: 75% (18 complete / 24 total, 2 need fixes, 4 pending)
 
 ### Test Coverage Gap
 
 | Component | Tests Expected | Tests Passing | Gap |
 |-----------|---------------|---------------|-----|
-| SearchQuery | 10 | 0 | ❌ 10 missing |
-| SearchResult | 8 | 0 | ❌ 8 missing |
-| SqliteFtsSearchService | 20 | 0 | ❌ 20 missing |
-| BM25Ranker | 12 | 0 | ❌ 12 missing |
-| SnippetGenerator | 10 | 0 | ❌ 10 missing |
-| SearchCommand | 12 | 0 | ❌ 12 missing |
-| **TOTAL** | **72** | **0** | **❌ 72 tests missing** |
+| SearchQuery | 11 | 11 | ✅ Complete |
+| SearchResult | 8 | 8 | ✅ Complete |
+| BM25Ranker | 12 | 12 | ✅ Complete |
+| SnippetGenerator | 10 | 10 | ✅ Complete |
+| SafeQueryParser | 8 | 8 | ✅ Complete |
+| SqliteFtsSearchService | 20 | 0 | ⚠️ 20 need API fixes |
+| SearchCommand (CLI) | 12 | 0 | ❌ 12 missing (Phase 7) |
+| Integration E2E | 10 | 0 | ❌ 10 missing (Phase 8) |
+| **TOTAL** | **91** | **49** | **⚠️ 20 fixable, ❌ 22 pending** |
+
+### Next Actions
+
+**Immediate (Phase 6 completion)**:
+1. Fix SqliteFtsSearchServiceTests API signatures (repository constructors, Message.Create, Run.Create)
+2. Run tests → target 20/20 passing
+3. Commit Phase 6 tests
+
+**Upcoming (Phases 7-9)**:
+4. Phase 7: SearchCommand CLI + 12 tests
+5. Phase 8: Integration E2E + 10 tests
+6. Phase 9: Audit + Documentation + PR
 
 **Test Completion Percentage**: 0% (0 passing / 72 expected)
 
