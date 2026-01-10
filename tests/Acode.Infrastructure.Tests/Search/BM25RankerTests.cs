@@ -59,41 +59,59 @@ public class BM25RankerTests
     }
 
     [Fact]
-    public void CalculateScore_WithRecentMessage_AppliesRecencyBoost()
+    public void CalculateScore_WithVeryRecentMessage_Applies1_5xBoost()
     {
         // Arrange
         var ranker = new BM25Ranker();
         var query = "test";
         var content = "test content";
-        var recentDate = DateTime.UtcNow.AddDays(-5); // <7 days = 1.5x boost
-        var olderDate = DateTime.UtcNow.AddDays(-15); // 7-30 days = 1.0x boost
+        var veryRecentDate = DateTime.UtcNow.AddHours(-12); // <24 hours = 1.5x boost
+        var olderDate = DateTime.UtcNow.AddDays(-10); // >7 days = 1.0x (no boost)
 
         // Act
-        var recentScore = ranker.CalculateScore(query, content, recentDate);
+        var veryRecentScore = ranker.CalculateScore(query, content, veryRecentDate);
         var olderScore = ranker.CalculateScore(query, content, olderDate);
 
         // Assert
-        recentScore.Should().BeGreaterThan(olderScore);
-        (recentScore / olderScore).Should().BeApproximately(1.5, 0.1);
+        veryRecentScore.Should().BeGreaterThan(olderScore);
+        (veryRecentScore / olderScore).Should().BeApproximately(1.5, 0.1);
     }
 
     [Fact]
-    public void CalculateScore_WithOldMessage_AppliesPenalty()
+    public void CalculateScore_WithWeekOldMessage_Applies1_2xBoost()
     {
         // Arrange
         var ranker = new BM25Ranker();
         var query = "test";
         var content = "test content";
-        var normalDate = DateTime.UtcNow.AddDays(-15); // 7-30 days = 1.0x
-        var oldDate = DateTime.UtcNow.AddDays(-60); // >30 days = 0.8x
+        var weekOldDate = DateTime.UtcNow.AddDays(-5); // ≤7 days = 1.2x boost
+        var olderDate = DateTime.UtcNow.AddDays(-30); // >7 days = 1.0x (no boost)
 
         // Act
-        var normalScore = ranker.CalculateScore(query, content, normalDate);
-        var oldScore = ranker.CalculateScore(query, content, oldDate);
+        var weekOldScore = ranker.CalculateScore(query, content, weekOldDate);
+        var olderScore = ranker.CalculateScore(query, content, olderDate);
 
         // Assert
-        oldScore.Should().BeLessThan(normalScore);
-        (oldScore / normalScore).Should().BeApproximately(0.8, 0.1);
+        weekOldScore.Should().BeGreaterThan(olderScore);
+        (weekOldScore / olderScore).Should().BeApproximately(1.2, 0.1);
+    }
+
+    [Fact]
+    public void CalculateScore_WithOldMessage_AppliesNoBoostOrPenalty()
+    {
+        // Arrange
+        var ranker = new BM25Ranker();
+        var query = "test";
+        var content = "test content";
+        var oldDate = DateTime.UtcNow.AddDays(-60); // >7 days = 1.0x (no boost, no penalty)
+        var veryOldDate = DateTime.UtcNow.AddDays(-365); // >7 days = 1.0x (no penalty)
+
+        // Act
+        var oldScore = ranker.CalculateScore(query, content, oldDate);
+        var veryOldScore = ranker.CalculateScore(query, content, veryOldDate);
+
+        // Assert - Both should have same boost (1.0x)
+        (oldScore / veryOldScore).Should().BeApproximately(1.0, 0.01);
     }
 
     [Fact]

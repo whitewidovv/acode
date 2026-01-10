@@ -82,23 +82,27 @@ public sealed class BM25Ranker
 
     /// <summary>
     /// Calculates recency boost factor based on message age.
-    /// - Less than 7 days: 1.5x boost.
-    /// - 7-30 days: 1.0x (no boost).
-    /// - More than 30 days: 0.8x penalty.
+    /// - Less than 24 hours: 1.5x boost.
+    /// - 1-7 days: 1.2x boost.
+    /// - More than 7 days: 1.0x (no boost, no penalty).
     /// </summary>
     /// <param name="createdAt">The message creation timestamp.</param>
     /// <returns>The recency boost multiplier.</returns>
     private static double CalculateRecencyBoost(DateTime createdAt)
     {
         var age = DateTime.UtcNow - createdAt;
-        var daysSinceCreation = age.TotalDays;
 
-        return daysSinceCreation switch
+        if (age.TotalHours < 24)
         {
-            < 7 => 1.5,
-            < 30 => 1.0,
-            _ => 0.8
-        };
+            return 1.5;
+        }
+
+        if (age.TotalDays <= 7)
+        {
+            return 1.2;
+        }
+
+        return 1.0; // No boost or penalty for older messages
     }
 
     /// <summary>

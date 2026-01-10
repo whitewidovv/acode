@@ -59,7 +59,7 @@ These are implemented but with WRONG values/behavior. Must fix to match spec.
 
 ### P1.1: Fix Recency Boost Values (AC-051, AC-052, AC-053)
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Problem**:
 - Spec says: <24h = 1.5x, <7d = 1.2x, >30d = no change
@@ -100,7 +100,15 @@ dotnet test --filter "BM25RankerTests" --verbosity normal
 - [✅] All BM25RankerTests passing with new values
 - [✅] AC-051, AC-052, AC-053 marked ✅ in audit report
 
-**Evidence Required**: Paste test output showing all BM25RankerTests passing
+**Evidence**: 13/13 BM25RankerTests passing (2026-01-10)
+```
+Total tests: 13
+     Passed: 13
+     Failed: 0
+```
+Files modified:
+- src/Acode.Infrastructure/Search/BM25Ranker.cs:91-106 (fixed recency boost logic)
+- tests/Acode.Infrastructure.Tests/Search/BM25RankerTests.cs:62-115 (updated/added 3 tests)
 
 ---
 
