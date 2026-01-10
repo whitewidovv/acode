@@ -295,7 +295,7 @@ public sealed class SqliteMessageRepositoryTests : IDisposable
         // Create chat
         using var chatCmd = conn.CreateCommand();
         chatCmd.CommandText = @"
-            INSERT INTO chats (id, title, tags, worktree_id, is_deleted, deleted_at,
+            INSERT INTO conv_chats (id, title, tags, worktree_id, is_deleted, deleted_at,
                               sync_status, version, created_at, updated_at)
             VALUES (@Id, @Title, '[]', NULL, 0, NULL, 'Pending', 1, @CreatedAt, @UpdatedAt)";
         chatCmd.Parameters.AddWithValue("@Id", chatId.Value);
@@ -307,7 +307,7 @@ public sealed class SqliteMessageRepositoryTests : IDisposable
         // Create run
         using var runCmd = conn.CreateCommand();
         runCmd.CommandText = @"
-            INSERT INTO runs (id, chat_id, model_id, status, started_at, completed_at,
+            INSERT INTO conv_runs (id, chat_id, model_id, status, started_at, completed_at,
                              tokens_in, tokens_out, sequence_number, error_message, sync_status)
             VALUES (@Id, @ChatId, @ModelId, @Status, @StartedAt, NULL, 0, 0, 1, NULL, 'Pending')";
         runCmd.Parameters.AddWithValue("@Id", runId.Value);
