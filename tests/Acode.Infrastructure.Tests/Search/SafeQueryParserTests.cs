@@ -1,4 +1,4 @@
-using Acode.Domain.Search;
+using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.Search;
 using FluentAssertions;
 using Xunit;
@@ -158,7 +158,6 @@ public class SafeQueryParserTests
     }
 
     // NEW TESTS FOR BOOLEAN OPERATORS (P2.1)
-
     [Fact]
     public void ParseQuery_WithAND_ReturnsValidFtsQuery()
     {
@@ -368,5 +367,153 @@ public class SafeQueryParserTests
         result.Fts5Syntax.Should().Be("((auth OR oauth) AND (token NOT expired)) OR jwt");
         result.OperatorCount.Should().Be(4); // OR, AND, NOT, OR
         result.ErrorMessage.Should().BeNull();
+    }
+
+    // NEW TESTS FOR FIELD-SPECIFIC QUERY SYNTAX (P3.1)
+    [Fact]
+    public void ParseQuery_WithRoleUserPrefix_ExtractsRoleFilter()
+    {
+        // Arrange
+        var parser = new SafeQueryParser();
+        var query = "role:user authentication";
+
+        // Act
+        var result = parser.ParseQuery(query);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsValid.Should().BeTrue();
+        result.RoleFilter.Should().Be(MessageRole.User);
+        result.Fts5Syntax.Should().Be("authentication");
+        result.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseQuery_WithRoleAssistantPrefix_ExtractsRoleFilter()
+    {
+        // Arrange
+        var parser = new SafeQueryParser();
+        var query = "role:assistant JWT";
+
+        // Act
+        var result = parser.ParseQuery(query);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsValid.Should().BeTrue();
+        result.RoleFilter.Should().Be(MessageRole.Assistant);
+        result.Fts5Syntax.Should().Be("JWT");
+        result.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseQuery_WithChatNamePrefix_ExtractsChatFilter()
+    {
+        // Arrange
+        var parser = new SafeQueryParser();
+        var query = "chat:auth-discussion error";
+
+        // Act
+        var result = parser.ParseQuery(query);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsValid.Should().BeTrue();
+        result.ChatNameFilter.Should().Be("auth-discussion");
+        result.Fts5Syntax.Should().Be("error");
+        result.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseQuery_WithTitlePrefix_ExtractsTitleTerms()
+    {
+        // Arrange
+        var parser = new SafeQueryParser();
+        var query = "title:JWT title:authentication";
+
+        // Act
+        var result = parser.ParseQuery(query);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsValid.Should().BeTrue();
+        result.TitleTerms.Should().BeEquivalentTo(new[] { "JWT", "authentication" });
+        result.Fts5Syntax.Should().BeEmpty();
+        result.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseQuery_WithTagPrefix_ExtractsTagFilter()
+    {
+        // Arrange
+        var parser = new SafeQueryParser();
+        var query = "tag:security vulnerability";
+
+        // Act
+        var result = parser.ParseQuery(query);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsValid.Should().BeTrue();
+        result.TagFilter.Should().Be("security");
+        result.Fts5Syntax.Should().Be("vulnerability");
+        result.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseQuery_MultipleFieldPrefixes_ExtractsAll()
+    {
+        // Arrange
+        var parser = new SafeQueryParser();
+        var query = "role:user chat:test tag:bug error message";
+
+        // Act
+        var result = parser.ParseQuery(query);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsValid.Should().BeTrue();
+        result.RoleFilter.Should().Be(MessageRole.User);
+        result.ChatNameFilter.Should().Be("test");
+        result.TagFilter.Should().Be("bug");
+        result.Fts5Syntax.Should().Be("error OR message");
+        result.OperatorCount.Should().Be(1);
+        result.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseQuery_FieldPrefixWithBooleanOps_ParsesBoth()
+    {
+        // Arrange
+        var parser = new SafeQueryParser();
+        var query = "role:user (JWT AND validation)";
+
+        // Act
+        var result = parser.ParseQuery(query);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsValid.Should().BeTrue();
+        result.RoleFilter.Should().Be(MessageRole.User);
+        result.Fts5Syntax.Should().Be("(JWT AND validation)");
+        result.OperatorCount.Should().Be(1);
+        result.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void ParseQuery_InvalidRoleValue_ReturnsInvalid()
+    {
+        // Arrange
+        var parser = new SafeQueryParser();
+        var query = "role:invalid JWT";
+
+        // Act
+        var result = parser.ParseQuery(query);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("invalid role");
+        result.ErrorMessage.Should().Contain("user, assistant, system, or tool");
     }
 }

@@ -595,7 +595,7 @@ Currently implemented via flags (--role), but spec wants inline syntax (role:use
 
 ### P3.1: Extend SafeQueryParser to Parse Field Prefixes (AC-038 to AC-043)
 
-**Status**: [ ]
+**Status**: [🔄] IN PROGRESS (2026-01-10)
 
 **What to Implement**:
 

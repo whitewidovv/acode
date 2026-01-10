@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using Acode.Domain.Models.Inference;
 using Acode.Domain.Search;
 
 namespace Acode.Infrastructure.Search;
@@ -13,10 +14,10 @@ public sealed class SafeQueryParser
     private static readonly string[] BooleanOperators = new[] { "AND", "OR", "NOT" };
 
     /// <summary>
-    /// Parses and validates a user query for FTS5 execution with boolean operator support.
+    /// Parses and validates a user query for FTS5 execution with boolean operator support and field filters.
     /// </summary>
     /// <param name="query">The raw user query.</param>
-    /// <returns>A parsed FtsQuery with validation results.</returns>
+    /// <returns>A parsed FtsQuery with validation results and extracted field filters.</returns>
     public FtsQuery ParseQuery(string query)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -32,11 +33,27 @@ public sealed class SafeQueryParser
         // Normalize whitespace
         var normalized = Regex.Replace(query, @"\s+", " ").Trim();
 
-        // Tokenize: Split on spaces but preserve quoted phrases
+        // Tokenize: Split on spaces but preserve quoted phrases and field prefixes
         var tokens = TokenizeQuery(normalized);
 
-        // Validate and transform
-        var validationError = ValidateTokens(tokens, out int operatorCount);
+        // Extract field filters
+        var fieldFilters = ExtractFieldFilters(tokens, out var filterError);
+        if (filterError != null)
+        {
+            return new FtsQuery
+            {
+                Fts5Syntax = string.Empty,
+                OperatorCount = 0,
+                IsValid = false,
+                ErrorMessage = filterError,
+            };
+        }
+
+        // Remove field prefix tokens from main query tokens
+        var contentTokens = tokens.Where(t => t.Type != TokenType.FieldPrefix).ToList();
+
+        // Validate and transform remaining content tokens
+        var validationError = ValidateTokens(contentTokens, out int operatorCount);
         if (validationError != null)
         {
             return new FtsQuery
@@ -45,17 +62,27 @@ public sealed class SafeQueryParser
                 OperatorCount = operatorCount,
                 IsValid = false,
                 ErrorMessage = validationError,
+                RoleFilter = fieldFilters.RoleFilter,
+                ChatIdFilter = fieldFilters.ChatIdFilter,
+                ChatNameFilter = fieldFilters.ChatNameFilter,
+                TagFilter = fieldFilters.TagFilter,
+                TitleTerms = fieldFilters.TitleTerms,
             };
         }
 
-        // Build FTS5 syntax
-        var fts5Syntax = BuildFts5Syntax(tokens, out operatorCount);
+        // Build FTS5 syntax from content tokens
+        var fts5Syntax = BuildFts5Syntax(contentTokens, out operatorCount);
 
         return new FtsQuery
         {
             Fts5Syntax = fts5Syntax,
             OperatorCount = operatorCount,
             IsValid = true,
+            RoleFilter = fieldFilters.RoleFilter,
+            ChatIdFilter = fieldFilters.ChatIdFilter,
+            ChatNameFilter = fieldFilters.ChatNameFilter,
+            TagFilter = fieldFilters.TagFilter,
+            TitleTerms = fieldFilters.TitleTerms,
         };
     }
 
@@ -112,7 +139,7 @@ public sealed class SafeQueryParser
                 continue;
             }
 
-            // Handle words (including potential operators)
+            // Handle words (including potential operators and field prefixes)
             var wordStart = i;
             while (i < query.Length && !char.IsWhiteSpace(query[i]) && query[i] != '(' && query[i] != ')')
             {
@@ -120,6 +147,24 @@ public sealed class SafeQueryParser
             }
 
             var word = query.Substring(wordStart, i - wordStart);
+
+            // Check if it's a field prefix (e.g., "role:user", "chat:name", "title:term", "tag:name")
+            if (word.Contains(':', StringComparison.Ordinal))
+            {
+                var parts = word.Split(':', 2);
+                var fieldName = parts[0].ToLowerInvariant();
+                var fieldValue = parts.Length > 1 ? parts[1] : string.Empty;
+
+                if (fieldName is "role" or "chat" or "title" or "tag")
+                {
+                    tokens.Add(new Token
+                    {
+                        Type = TokenType.FieldPrefix,
+                        Value = word, // Keep original format for later parsing
+                    });
+                    continue;
+                }
+            }
 
             // Sanitize word (remove special chars except hyphens/underscores)
             var sanitized = SanitizeWord(word);
@@ -272,6 +317,63 @@ public sealed class SafeQueryParser
         return output;
     }
 
+    private static FieldFilters ExtractFieldFilters(List<Token> tokens, out string? errorMessage)
+    {
+        var filters = new FieldFilters();
+        errorMessage = null;
+
+        foreach (var token in tokens.Where(t => t.Type == TokenType.FieldPrefix))
+        {
+            var parts = token.Value.Split(':', 2);
+            if (parts.Length != 2)
+            {
+                continue;
+            }
+
+            var fieldName = parts[0].ToLowerInvariant();
+            var fieldValue = parts[1];
+
+            switch (fieldName)
+            {
+                case "role":
+                    if (Enum.TryParse<MessageRole>(fieldValue, ignoreCase: true, out var role))
+                    {
+                        filters.RoleFilter = role;
+                    }
+                    else
+                    {
+                        errorMessage = $"invalid role value '{fieldValue}'. Valid values: user, assistant, system, or tool.";
+                        return filters;
+                    }
+
+                    break;
+
+                case "chat":
+                    // Try parsing as GUID first, otherwise treat as chat name
+                    if (Guid.TryParse(fieldValue, out var chatId))
+                    {
+                        filters.ChatIdFilter = chatId;
+                    }
+                    else
+                    {
+                        filters.ChatNameFilter = fieldValue;
+                    }
+
+                    break;
+
+                case "title":
+                    filters.TitleTerms.Add(fieldValue);
+                    break;
+
+                case "tag":
+                    filters.TagFilter = fieldValue;
+                    break;
+            }
+        }
+
+        return filters;
+    }
+
 #pragma warning disable SA1201 // Nested types are placed at end for readability
     private enum TokenType
     {
@@ -280,6 +382,7 @@ public sealed class SafeQueryParser
         Operator,
         LeftParen,
         RightParen,
+        FieldPrefix,
     }
 
     private struct Token
@@ -287,6 +390,24 @@ public sealed class SafeQueryParser
         public TokenType Type { get; set; }
 
         public string Value { get; set; }
+    }
+
+    private struct FieldFilters
+    {
+        public MessageRole? RoleFilter { get; set; }
+
+        public Guid? ChatIdFilter { get; set; }
+
+        public string? ChatNameFilter { get; set; }
+
+        public string? TagFilter { get; set; }
+
+        public List<string> TitleTerms { get; set; }
+
+        public FieldFilters()
+        {
+            TitleTerms = new List<string>();
+        }
     }
 #pragma warning restore SA1201
 }
