@@ -425,6 +425,155 @@ public sealed class SearchE2ETests : IAsyncLifetime
         status.IsHealthy.Should().BeTrue();
     }
 
+    // BOOLEAN OPERATOR E2E TESTS (P2.1)
+    [Fact]
+    public async Task Should_Search_WithAND_Operator()
+    {
+        // Arrange - Create messages with different term combinations
+        var chat = Chat.Create("AND Operator Test");
+        await _chatRepository!.CreateAsync(chat, CancellationToken.None).ConfigureAwait(true);
+
+        var run = Run.Create(chat.Id, "llama3");
+        await _runRepository!.CreateAsync(run, CancellationToken.None).ConfigureAwait(true);
+
+        var message1 = Message.Create(run.Id, "user", "JWT authentication is secure", 1);
+        var message2 = Message.Create(run.Id, "user", "OAuth validation process", 2);
+        var message3 = Message.Create(run.Id, "user", "JWT is a token", 3);
+
+        await _messageRepository!.CreateAsync(message1, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message2, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message3, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search with AND operator (both terms must be present)
+        var query = new SearchQuery
+        {
+            QueryText = "JWT AND authentication",
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - Only message1 contains both "JWT" AND "authentication"
+        results.Should().NotBeNull();
+        results.TotalCount.Should().Be(1, "only one message contains both JWT and authentication");
+        results.Results.Should().HaveCount(1);
+        results.Results[0].Snippet.Should().ContainAll(new[] { "JWT", "authentication" });
+    }
+
+    [Fact]
+    public async Task Should_Search_WithOR_Operator()
+    {
+        // Arrange - Create messages with different terms
+        var chat = Chat.Create("OR Operator Test");
+        await _chatRepository!.CreateAsync(chat, CancellationToken.None).ConfigureAwait(true);
+
+        var run = Run.Create(chat.Id, "llama3");
+        await _runRepository!.CreateAsync(run, CancellationToken.None).ConfigureAwait(true);
+
+        var message1 = Message.Create(run.Id, "user", "JWT is a standard", 1);
+        var message2 = Message.Create(run.Id, "user", "OAuth is another standard", 2);
+        var message3 = Message.Create(run.Id, "user", "SAML authentication method", 3);
+
+        await _messageRepository!.CreateAsync(message1, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message2, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message3, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search with OR operator (either term can be present)
+        var query = new SearchQuery
+        {
+            QueryText = "JWT OR OAuth",
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - Both message1 and message2 should be returned (message3 should not)
+        results.Should().NotBeNull();
+        results.TotalCount.Should().Be(2, "two messages contain either JWT or OAuth");
+        results.Results.Should().HaveCount(2);
+        results.Results.Should().Contain(r => r.Snippet.Contains("JWT", StringComparison.OrdinalIgnoreCase));
+        results.Results.Should().Contain(r => r.Snippet.Contains("OAuth", StringComparison.OrdinalIgnoreCase));
+        results.Results.Should().NotContain(r => r.Snippet.Contains("SAML", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Should_Search_WithNOT_Operator()
+    {
+        // Arrange - Create messages with overlapping terms
+        var chat = Chat.Create("NOT Operator Test");
+        await _chatRepository!.CreateAsync(chat, CancellationToken.None).ConfigureAwait(true);
+
+        var run = Run.Create(chat.Id, "llama3");
+        await _runRepository!.CreateAsync(run, CancellationToken.None).ConfigureAwait(true);
+
+        var message1 = Message.Create(run.Id, "user", "JWT authentication flow", 1);
+        var message2 = Message.Create(run.Id, "user", "JWT validation process", 2);
+        var message3 = Message.Create(run.Id, "user", "OAuth token validation", 3);
+
+        await _messageRepository!.CreateAsync(message1, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message2, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message3, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search with NOT operator (exclude results with "validation")
+        var query = new SearchQuery
+        {
+            QueryText = "JWT NOT validation",
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - Only message1 contains JWT but NOT validation
+        results.Should().NotBeNull();
+        results.TotalCount.Should().Be(1, "only one message contains JWT but not validation");
+        results.Results.Should().HaveCount(1);
+        results.Results[0].Snippet.Should().Contain("JWT");
+        results.Results[0].Snippet.Should().Contain("authentication");
+        results.Results[0].Snippet.Should().NotContain("validation");
+    }
+
+    [Fact]
+    public async Task Should_Search_WithParentheses_Grouping()
+    {
+        // Arrange - Create messages with complex term combinations
+        var chat = Chat.Create("Parentheses Test");
+        await _chatRepository!.CreateAsync(chat, CancellationToken.None).ConfigureAwait(true);
+
+        var run = Run.Create(chat.Id, "llama3");
+        await _runRepository!.CreateAsync(run, CancellationToken.None).ConfigureAwait(true);
+
+        var message1 = Message.Create(run.Id, "user", "JWT validation is important", 1);
+        var message2 = Message.Create(run.Id, "user", "OAuth validation is required", 2);
+        var message3 = Message.Create(run.Id, "user", "JWT authentication flow", 3);
+        var message4 = Message.Create(run.Id, "user", "SAML protocol for SSO", 4);
+
+        await _messageRepository!.CreateAsync(message1, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message2, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message3, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message4, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search with grouped operators: (JWT OR OAuth) AND validation
+        var query = new SearchQuery
+        {
+            QueryText = "(JWT OR OAuth) AND validation",
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - Only message1 and message2 match: they have validation AND (JWT or OAuth)
+        results.Should().NotBeNull();
+        results.TotalCount.Should().Be(2, "two messages have (JWT OR OAuth) AND validation");
+        results.Results.Should().HaveCount(2);
+        results.Results.Should().OnlyContain(r => r.Snippet.Contains("validation", StringComparison.OrdinalIgnoreCase));
+        results.Results.Should().Contain(r => r.Snippet.Contains("JWT", StringComparison.OrdinalIgnoreCase));
+        results.Results.Should().Contain(r => r.Snippet.Contains("OAuth", StringComparison.OrdinalIgnoreCase));
+    }
+
     private async Task ApplySchemaAsync()
     {
         // Apply minimal schema needed for testing
