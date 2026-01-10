@@ -430,12 +430,12 @@ dotnet test --filter "SearchE2ETests" --verbosity normal
 - [✅] FtsQuery class created (src/Acode.Domain/Search/FtsQuery.cs)
 - [✅] SafeQueryParser.ParseQuery implemented (src/Acode.Infrastructure/Search/SafeQueryParser.cs)
 - [✅] 12 new parser tests passing (SafeQueryParserTests.cs)
-- [ ] 4 new E2E tests passing (SearchE2ETests.cs) - IN PROGRESS
-- [ ] AC-032, AC-033, AC-034, AC-035 marked ✅ in audit report
+- [✅] 4 new E2E tests passing (SearchE2ETests.cs)
+- [✅] AC-032, AC-033, AC-034, AC-035 marked ✅ in audit report
 
 **Evidence - Parser Tests (12/12 passing)**:
 ```
-Passed!  - Failed:     0, Passed:    20, Skipped:     0, Total:    20, Duration: 83 ms
+Passed!  - Failed:     0, Passed:    20, Skipped:     0, Total:    20, Duration: 79 ms
 Tests: SafeQueryParserTests (2026-01-10)
 - ParseQuery_WithAND_ReturnsValidFtsQuery
 - ParseQuery_WithOR_ReturnsValidFtsQuery
@@ -451,29 +451,47 @@ Tests: SafeQueryParserTests (2026-01-10)
 - ParseQuery_ComplexNested_ParsesCorrectly
 ```
 
+**Evidence - E2E Tests (4/4 passing)**:
+```
+Passed!  - Failed:     0, Passed:    14, Skipped:     0, Total:    14, Duration: 9 s
+Tests: SearchE2ETests (2026-01-10)
+- Should_Search_WithAND_Operator (both terms must be present)
+- Should_Search_WithOR_Operator (either term matches)
+- Should_Search_WithNOT_Operator (excludes specified term)
+- Should_Search_WithParentheses_Grouping (complex nested: "(JWT OR OAuth) AND validation")
+```
+
 Commits:
 - TDD RED: feat(task-049d-P2): add boolean operator tests (TDD RED)
 - TDD GREEN: feat(task-049d-P2): implement boolean operator parsing (TDD GREEN)
+- feat(task-049d-P2): add E2E integration tests for boolean operators (commit 7896c6f)
 
-**Evidence - E2E Tests**: Pending (writing now)
+**Status**: ✅ P2.1 COMPLETE (16/16 tests passing)
 
 ---
 
 ### P2.2: Enforce Max 5 Operators Limit (AC-036)
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Already implemented in P2.1** - SafeQueryParser validates operator count
 
 **What to Verify**:
-- Test: `ParseQuery_MoreThan5Operators_ReturnsInvalid` exists and passes
-- Query with 6+ operators returns `IsValid=false`
+- Test: `ParseQuery_MoreThan5Operators_ReturnsInvalid` exists and passes ✅
+- Query with 6+ operators returns `IsValid=false` ✅
 
 **Success Criteria**:
 - [✅] Test exists and passes
 - [✅] AC-036 marked ✅ in audit report
 
-**Evidence Required**: Test output showing validation works
+**Evidence**: Test `ParseQuery_MoreThan5Operators_ReturnsInvalid` from SafeQueryParserTests passes
+```csharp
+// Test input: "a AND b OR c AND d NOT e OR f AND g" (6 operators)
+// Expected: IsValid=false, ErrorMessage contains "maximum 5"
+// Result: ✅ PASSING (included in 20/20 SafeQueryParserTests)
+```
+
+**Status**: ✅ P2.2 COMPLETE (verification passed)
 
 ---
 
