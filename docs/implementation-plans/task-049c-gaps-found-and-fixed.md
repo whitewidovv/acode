@@ -2,7 +2,7 @@
 
 ## INSTRUCTIONS FOR RESUMPTION AFTER CONTEXT COMPACTION
 
-**Current Status**: Phases 0-3 COMPLETE, starting Phase 4 (AtomicFileLockService).
+**Current Status**: Phases 0-4 COMPLETE, starting Phase 5 (CLI Binding Management).
 
 **What to do next**:
 1. Read this entire file to understand completed work and remaining tasks
@@ -412,13 +412,16 @@ public static WorktreeId From(string value) => new(value);
 6. VERIFY: All lock tests passing
 
 **Acceptance**:
-- [ ] AtomicFileLockService.cs implemented
-- [ ] Atomic write-rename pattern working (AC-047)
-- [ ] Stale lock detection working (AC-056-065)
-- [ ] Wait/timeout logic working (AC-049-053)
-- [ ] Unix file permissions set (AC-039)
-- [ ] All lock tests passing
-- [ ] Build GREEN
+- [x] AtomicFileLockService.cs implemented (230 lines)
+- [x] SafeLockPathResolver.cs created (43 lines, path traversal prevention)
+- [x] LockData.cs created (14 lines, internal DTO)
+- [x] WorktreeLock.GetTerminalId() made internal (via AssemblyInfo.cs InternalsVisibleTo)
+- [x] Atomic write-rename pattern working (AC-047) - File.Move with overwrite: false
+- [x] Stale lock detection working (AC-056-065) - >5 minutes threshold
+- [x] Wait/timeout logic working (AC-049-053) - TimeoutException after elapsed
+- [x] Unix file permissions set (AC-039) - UnixFileMode.UserRead | UserWrite
+- [x] All lock tests passing (9/9 AtomicFileLockServiceTests)
+- [x] Build GREEN (0 errors, 0 warnings, 1821 tests passing)
 
 ---
 

@@ -91,7 +91,12 @@ public sealed class WorktreeLock
     /// <returns>True if the lock process ID matches the current process, otherwise false.</returns>
     public bool IsOwnedByCurrentProcess() => ProcessId == Environment.ProcessId;
 
-    private static string GetTerminalId()
+    /// <summary>
+    /// Gets the current terminal identifier.
+    /// Internal for use by lock infrastructure.
+    /// </summary>
+    /// <returns>The terminal identifier (TTY on Unix, session ID on Windows).</returns>
+    internal static string GetTerminalId()
     {
         // Unix: Use TTY, Windows: Use session ID
         if (!OperatingSystem.IsWindows())
