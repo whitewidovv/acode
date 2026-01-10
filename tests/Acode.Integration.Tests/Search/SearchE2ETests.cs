@@ -35,10 +35,10 @@ public sealed class SearchE2ETests : IAsyncLifetime
         // Apply schema migrations
         await ApplySchemaAsync().ConfigureAwait(true);
 
-        // Initialize repositories with the same connection string
-        _chatRepository = new SqliteChatRepository(connectionString);
-        _runRepository = new SqliteRunRepository(connectionString);
-        _messageRepository = new SqliteMessageRepository(connectionString);
+        // Initialize repositories with the database file path (NOT connection string)
+        _chatRepository = new SqliteChatRepository(_dbFilePath);
+        _runRepository = new SqliteRunRepository(_dbFilePath);
+        _messageRepository = new SqliteMessageRepository(_dbFilePath);
 
         // Initialize search service
         _searchService = new SqliteFtsSearchService(_connection);
@@ -150,7 +150,7 @@ public sealed class SearchE2ETests : IAsyncLifetime
         // Manually update created_at to simulate old message
         using (var cmd = _connection!.CreateCommand())
         {
-            cmd.CommandText = "UPDATE messages SET created_at = @oldDate WHERE id = @messageId";
+            cmd.CommandText = "UPDATE conv_messages SET created_at = @oldDate WHERE id = @messageId";
             cmd.Parameters.AddWithValue("@oldDate", DateTime.UtcNow.AddDays(-90).ToString("O"));
             cmd.Parameters.AddWithValue("@messageId", message1.Id.Value);
             await cmd.ExecuteNonQueryAsync().ConfigureAwait(true);
@@ -248,7 +248,8 @@ public sealed class SearchE2ETests : IAsyncLifetime
 
         // First result should have higher score (more occurrences)
         results.Results[0].Score.Should().BeGreaterThan(results.Results[1].Score);
-        results.Results[0].Snippet.Should().Contain("JWT JWT JWT");
+        results.Results[0].Snippet.Should().Contain("<mark>JWT</mark>");
+        results.Results[0].Snippet.Should().Contain("authentication");
     }
 
     [Fact]
@@ -429,9 +430,9 @@ public sealed class SearchE2ETests : IAsyncLifetime
         // Apply minimal schema needed for testing
         using var cmd = _connection!.CreateCommand();
 
-        // Create chats table (without conv_ prefix to match repository expectations)
+        // Create chats table (with conv_ prefix to match production schema)
         cmd.CommandText = @"
-            CREATE TABLE IF NOT EXISTS chats (
+            CREATE TABLE IF NOT EXISTS conv_chats (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 tags TEXT,
@@ -450,40 +451,34 @@ public sealed class SearchE2ETests : IAsyncLifetime
 
         // Create runs table
         cmd.CommandText = @"
-            CREATE TABLE IF NOT EXISTS runs (
+            CREATE TABLE IF NOT EXISTS conv_runs (
                 id TEXT PRIMARY KEY,
                 chat_id TEXT NOT NULL,
                 model_id TEXT NOT NULL,
                 sequence_number INTEGER NOT NULL DEFAULT 0,
-                started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-                ended_at TEXT,
                 status TEXT NOT NULL DEFAULT 'running',
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                completed_at TEXT,
+                tokens_in INTEGER NOT NULL DEFAULT 0,
+                tokens_out INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
                 sync_status TEXT NOT NULL DEFAULT 'pending',
-                sync_at TEXT,
-                remote_id TEXT,
-                version INTEGER NOT NULL DEFAULT 1,
-                FOREIGN KEY (chat_id) REFERENCES chats(id)
+                FOREIGN KEY (chat_id) REFERENCES conv_chats(id)
             );";
         await cmd.ExecuteNonQueryAsync().ConfigureAwait(true);
 
         // Create messages table
         cmd.CommandText = @"
-            CREATE TABLE IF NOT EXISTS messages (
+            CREATE TABLE IF NOT EXISTS conv_messages (
                 id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
                 role TEXT NOT NULL,
                 content TEXT,
-                sequence_number INTEGER NOT NULL DEFAULT 0,
-                metadata TEXT,
+                tool_calls TEXT,
                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                sequence_number INTEGER NOT NULL DEFAULT 0,
                 sync_status TEXT NOT NULL DEFAULT 'pending',
-                sync_at TEXT,
-                remote_id TEXT,
-                version INTEGER NOT NULL DEFAULT 1,
-                FOREIGN KEY (run_id) REFERENCES runs(id)
+                FOREIGN KEY (run_id) REFERENCES conv_runs(id)
             );";
         await cmd.ExecuteNonQueryAsync().ConfigureAwait(true);
 
@@ -505,7 +500,7 @@ public sealed class SearchE2ETests : IAsyncLifetime
         // Create triggers for automatic indexing
         cmd.CommandText = @"
             CREATE TRIGGER IF NOT EXISTS conversation_search_after_insert
-            AFTER INSERT ON messages
+            AFTER INSERT ON conv_messages
             BEGIN
                 INSERT INTO conversation_search (
                     message_id, chat_id, run_id, created_at, role, content, chat_title, tags
@@ -519,15 +514,15 @@ public sealed class SearchE2ETests : IAsyncLifetime
                     NEW.content,
                     c.title,
                     c.tags
-                FROM runs r
-                INNER JOIN chats c ON r.chat_id = c.id
+                FROM conv_runs r
+                INNER JOIN conv_chats c ON r.chat_id = c.id
                 WHERE r.id = NEW.run_id;
             END;";
         await cmd.ExecuteNonQueryAsync().ConfigureAwait(true);
 
         cmd.CommandText = @"
             CREATE TRIGGER IF NOT EXISTS conversation_search_after_update
-            AFTER UPDATE ON messages
+            AFTER UPDATE ON conv_messages
             BEGIN
                 DELETE FROM conversation_search WHERE message_id = OLD.id;
                 INSERT INTO conversation_search (
@@ -542,15 +537,15 @@ public sealed class SearchE2ETests : IAsyncLifetime
                     NEW.content,
                     c.title,
                     c.tags
-                FROM runs r
-                INNER JOIN chats c ON r.chat_id = c.id
+                FROM conv_runs r
+                INNER JOIN conv_chats c ON r.chat_id = c.id
                 WHERE r.id = NEW.run_id;
             END;";
         await cmd.ExecuteNonQueryAsync().ConfigureAwait(true);
 
         cmd.CommandText = @"
             CREATE TRIGGER IF NOT EXISTS conversation_search_after_delete
-            AFTER DELETE ON messages
+            AFTER DELETE ON conv_messages
             BEGIN
                 DELETE FROM conversation_search WHERE message_id = OLD.id;
             END;";

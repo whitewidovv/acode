@@ -37,7 +37,7 @@ public sealed class SqliteChatRepository : IChatRepository
         ArgumentNullException.ThrowIfNull(chat);
 
         const string sql = @"
-            INSERT INTO chats (id, title, tags, worktree_id, is_deleted, deleted_at,
+            INSERT INTO conv_chats (id, title, tags, worktree_id, is_deleted, deleted_at,
                               sync_status, version, created_at, updated_at)
             VALUES (@Id, @Title, @Tags, @worktree_id, @IsDeleted, @DeletedAt,
                    @SyncStatus, @Version, @CreatedAt, @UpdatedAt)";
@@ -75,7 +75,7 @@ public sealed class SqliteChatRepository : IChatRepository
                    is_deleted AS IsDeleted, deleted_at AS DeletedAt,
                    sync_status AS SyncStatus, version,
                    created_at AS CreatedAt, updated_at AS UpdatedAt
-            FROM chats
+            FROM conv_chats
             WHERE id = @Id";
 
 #pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
@@ -102,7 +102,7 @@ public sealed class SqliteChatRepository : IChatRepository
         ArgumentNullException.ThrowIfNull(chat);
 
         const string sql = @"
-            UPDATE chats
+            UPDATE conv_chats
             SET title = @Title,
                 tags = @Tags,
                 worktree_id = @worktree_id,
@@ -146,7 +146,7 @@ public sealed class SqliteChatRepository : IChatRepository
     public async Task SoftDeleteAsync(ChatId id, CancellationToken ct)
     {
         const string sql = @"
-            UPDATE chats
+            UPDATE conv_chats
             SET is_deleted = 1,
                 deleted_at = @DeletedAt,
                 updated_at = @UpdatedAt,
@@ -207,7 +207,7 @@ public sealed class SqliteChatRepository : IChatRepository
         await conn.OpenAsync(ct).ConfigureAwait(false);
 
         // Get total count
-        var countSql = $"SELECT COUNT(*) FROM chats {whereClause}";
+        var countSql = $"SELECT COUNT(*) FROM conv_chats {whereClause}";
         var totalCount = await conn.ExecuteScalarAsync<int>(
             new CommandDefinition(countSql, parameters, cancellationToken: ct)).ConfigureAwait(false);
 
@@ -217,7 +217,7 @@ public sealed class SqliteChatRepository : IChatRepository
                        is_deleted AS IsDeleted, deleted_at AS DeletedAt,
                        sync_status AS SyncStatus, version,
                        created_at AS CreatedAt, updated_at AS UpdatedAt
-                FROM chats {whereClause}
+                FROM conv_chats {whereClause}
                 ORDER BY updated_at DESC
                 LIMIT @PageSize OFFSET @Offset";
 
@@ -240,7 +240,7 @@ public sealed class SqliteChatRepository : IChatRepository
                    is_deleted AS IsDeleted, deleted_at AS DeletedAt,
                    sync_status AS SyncStatus, version,
                    created_at AS CreatedAt, updated_at AS UpdatedAt
-            FROM chats
+            FROM conv_chats
             WHERE worktree_id = @WorktreeId AND is_deleted = 0
             ORDER BY updated_at DESC";
 
@@ -259,7 +259,7 @@ public sealed class SqliteChatRepository : IChatRepository
     public async Task<int> PurgeDeletedAsync(DateTimeOffset before, CancellationToken ct)
     {
         const string sql = @"
-            DELETE FROM chats
+            DELETE FROM conv_chats
             WHERE is_deleted = 1 AND deleted_at < @Before";
 
 #pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
@@ -279,7 +279,7 @@ public sealed class SqliteChatRepository : IChatRepository
         ArgumentNullException.ThrowIfNull(id);
 
         const string sql = @"
-            DELETE FROM chats
+            DELETE FROM conv_chats
             WHERE id = @Id";
 
 #pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections

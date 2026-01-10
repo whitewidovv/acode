@@ -35,7 +35,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
         ArgumentNullException.ThrowIfNull(message);
 
         const string sql = @"
-            INSERT INTO messages (id, run_id, role, content, tool_calls, created_at, sequence_number, sync_status)
+            INSERT INTO conv_messages (id, run_id, role, content, tool_calls, created_at, sequence_number, sync_status)
             VALUES (@Id, @RunId, @Role, @Content, @ToolCalls, @CreatedAt, @SequenceNumber, @SyncStatus)";
 
 #pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections

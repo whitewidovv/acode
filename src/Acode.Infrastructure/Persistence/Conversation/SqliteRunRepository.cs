@@ -35,7 +35,7 @@ public sealed class SqliteRunRepository : IRunRepository
         ArgumentNullException.ThrowIfNull(run);
 
         const string sql = @"
-            INSERT INTO runs (id, chat_id, model_id, status, started_at, completed_at,
+            INSERT INTO conv_runs (id, chat_id, model_id, status, started_at, completed_at,
                              tokens_in, tokens_out, sequence_number, error_message, sync_status)
             VALUES (@Id, @ChatId, @ModelId, @Status, @StartedAt, @CompletedAt,
                    @TokensIn, @TokensOut, @SequenceNumber, @ErrorMessage, @SyncStatus)";

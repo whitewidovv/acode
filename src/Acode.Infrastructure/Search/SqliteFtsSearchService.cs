@@ -76,7 +76,7 @@ public sealed class SqliteFtsSearchService : ISearchService
                 var messageId = MessageId.From(reader.GetString(0));
                 var chatId = ChatId.From(reader.GetString(1));
                 var chatTitle = reader.GetString(2);
-                var role = Enum.Parse<MessageRole>(reader.GetString(3));
+                var role = Enum.Parse<MessageRole>(reader.GetString(3), ignoreCase: true);
                 var createdAt = DateTime.Parse(reader.GetString(4));
                 var content = reader.GetString(5);
 
@@ -257,10 +257,10 @@ public sealed class SqliteFtsSearchService : ISearchService
             parameters.Add(("@chatId", query.ChatId.Value.Value));
         }
 
-        // Apply RoleFilter
+        // Apply RoleFilter (case-insensitive comparison)
         if (query.RoleFilter.HasValue)
         {
-            sql += " AND cs.role = @role";
+            sql += " AND LOWER(cs.role) = LOWER(@role)";
             parameters.Add(("@role", query.RoleFilter.Value.ToString()));
         }
 
