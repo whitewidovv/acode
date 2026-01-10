@@ -139,9 +139,28 @@ Task 049b implements CRUSD APIs + CLI Commands for conversation management. Afte
 
 ## Progress Tracking
 
-- [ ] Phase 1: Support Types
-- [ ] Phase 2: Domain Layer
-- [ ] Phase 3: Application Layer
-- [ ] Phase 4: Repository Extensions
-- [ ] Phase 5: CLI Commands
-- [ ] Phase 6: Testing
+- [x] Phase 1: Support Types (ChatSortField, ChatFilter extensions)
+- [x] Phase 2: Session Management (ISessionManager, InMemorySessionManager)
+- [x] Phase 3: Repository Extensions (IChatRepository.DeleteAsync)
+- [ ] Phase 4: CLI Commands (ChatCommand router + 9 subcommands)
+- [ ] Phase 5: Testing
+
+## Completed Work
+
+### Phase 1: Support Types ✅
+- Created ChatSortField enum (CreatedAt, UpdatedAt, Title)
+- Extended ChatFilter with TitleContains, SortBy, SortDescending
+- Defaults: SortBy=UpdatedAt, SortDescending=true
+- Commit: 33f2156
+
+### Phase 2: Session Management ✅
+- Created ISessionManager interface (SetActiveChatAsync, GetActiveChatAsync, ClearActiveChatAsync)
+- Implemented InMemorySessionManager in Infrastructure layer
+- In-memory storage (not persisted across CLI invocations)
+- Commit: 3570909
+
+### Phase 3: Repository Extensions ✅
+- Added IChatRepository.DeleteAsync(ChatId id) for hard delete
+- Implemented in SqliteChatRepository with CASCADE DELETE
+- Foreign key constraints automatically delete runs and messages
+- Commit: 06b3c48
