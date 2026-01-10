@@ -71,4 +71,16 @@ public interface IChatRepository
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The number of chats permanently deleted.</returns>
     Task<int> PurgeDeletedAsync(DateTimeOffset before, CancellationToken ct);
+
+    /// <summary>
+    /// Permanently deletes a specific Chat by ID (hard delete).
+    /// </summary>
+    /// <param name="id">The chat ID to permanently delete.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    /// <remarks>
+    /// This operation is irreversible. Cascade deletes all associated runs and messages.
+    /// Use SoftDeleteAsync for recoverable deletion.
+    /// </remarks>
+    Task DeleteAsync(ChatId id, CancellationToken ct);
 }

@@ -273,6 +273,24 @@ public sealed class SqliteChatRepository : IChatRepository
         return rowsDeleted;
     }
 
+    /// <inheritdoc/>
+    public async Task DeleteAsync(ChatId id, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+
+        const string sql = @"
+            DELETE FROM chats
+            WHERE id = @Id";
+
+#pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
+        await using var conn = new SqliteConnection(_connectionString);
+#pragma warning restore CA2007
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+
+        await conn.ExecuteAsync(
+            new CommandDefinition(sql, new { Id = id.Value }, cancellationToken: ct)).ConfigureAwait(false);
+    }
+
     private static Chat MapToChat(ChatRow row)
     {
         var tags = string.IsNullOrWhiteSpace(row.Tags)
