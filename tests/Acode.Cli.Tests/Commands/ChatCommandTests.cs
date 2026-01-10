@@ -8,10 +8,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Acode.Application.Concurrency;
 using Acode.Application.Conversation.Persistence;
 using Acode.Application.Conversation.Session;
 using Acode.Cli.Commands;
+using Acode.Domain.Concurrency;
 using Acode.Domain.Conversation;
+using Acode.Domain.Worktree;
 using FluentAssertions;
 using NSubstitute;
 using Xunit;
@@ -26,6 +29,7 @@ public sealed class ChatCommandTests
     private readonly IRunRepository _runRepository;
     private readonly IMessageRepository _messageRepository;
     private readonly ISessionManager _sessionManager;
+    private readonly IBindingService _bindingService;
     private readonly ChatCommand _command;
 
     public ChatCommandTests()
@@ -34,12 +38,14 @@ public sealed class ChatCommandTests
         _runRepository = Substitute.For<IRunRepository>();
         _messageRepository = Substitute.For<IMessageRepository>();
         _sessionManager = Substitute.For<ISessionManager>();
+        _bindingService = Substitute.For<IBindingService>();
 
         _command = new ChatCommand(
             _chatRepository,
             _runRepository,
             _messageRepository,
-            _sessionManager);
+            _sessionManager,
+            _bindingService);
     }
 
     [Fact]
@@ -678,14 +684,176 @@ public sealed class ChatCommandTests
         help.Should().Contain("status");
     }
 
-    private static CommandContext CreateContext(string[] args)
+    // ==================== Binding Management Tests ====================
+    [Fact]
+    public async Task BindAsync_WithValidChatId_CreatesBinding()
+    {
+        // Arrange
+        var chatId = ChatId.NewId();
+        var worktreeId = WorktreeId.FromPath("/home/user/project/feature/auth");
+        var config = new Dictionary<string, object> { ["CurrentWorktree"] = worktreeId };
+        var context = CreateContext(new[] { "bind", chatId.Value }, config);
+
+        _chatRepository.GetByIdAsync(chatId, Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Chat.Create("Test Chat"));
+
+        // Act
+        var result = await _command.ExecuteAsync(context);
+
+        // Assert
+        result.Should().Be(ExitCode.Success);
+        await _bindingService.Received(1).CreateBindingAsync(worktreeId, chatId, Arg.Any<CancellationToken>());
+        context.Output.ToString().Should().Contain("Bound");
+    }
+
+    [Fact]
+    public async Task BindAsync_WithNonExistentChat_ReturnsNotFound()
+    {
+        // Arrange
+        var chatId = ChatId.NewId();
+        var worktreeId = WorktreeId.FromPath("/home/user/project/feature/auth");
+        var config = new Dictionary<string, object> { ["CurrentWorktree"] = worktreeId };
+        var context = CreateContext(new[] { "bind", chatId.Value }, config);
+
+        _chatRepository.GetByIdAsync(chatId, Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns((Chat?)null);
+
+        // Act
+        var result = await _command.ExecuteAsync(context);
+
+        // Assert
+        result.Should().Be(ExitCode.GeneralError);
+        await _bindingService.DidNotReceive().CreateBindingAsync(Arg.Any<WorktreeId>(), Arg.Any<ChatId>(), Arg.Any<CancellationToken>());
+        context.Output.ToString().Should().Contain("not found");
+    }
+
+    [Fact]
+    public async Task BindAsync_WhenAlreadyBound_ReturnsError()
+    {
+        // Arrange
+        var chatId = ChatId.NewId();
+        var worktreeId = WorktreeId.FromPath("/home/user/project/feature/auth");
+        var config = new Dictionary<string, object> { ["CurrentWorktree"] = worktreeId };
+        var context = CreateContext(new[] { "bind", chatId.Value }, config);
+
+        _chatRepository.GetByIdAsync(chatId, Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Chat.Create("Test Chat"));
+
+        _bindingService.CreateBindingAsync(worktreeId, chatId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("Worktree is already bound")));
+
+        // Act
+        var result = await _command.ExecuteAsync(context);
+
+        // Assert
+        result.Should().Be(ExitCode.GeneralError);
+        context.Output.ToString().Should().Contain("already bound");
+    }
+
+    [Fact]
+    public async Task UnbindAsync_RemovesBinding()
+    {
+        // Arrange
+        var worktreeId = WorktreeId.FromPath("/home/user/project/feature/auth");
+        var chatId = ChatId.NewId();
+        var binding = WorktreeBinding.Create(worktreeId, chatId);
+        var config = new Dictionary<string, object> { ["CurrentWorktree"] = worktreeId };
+        var context = CreateContext(new[] { "unbind", "--force" }, config);
+
+        _bindingService.GetBoundChatAsync(worktreeId, Arg.Any<CancellationToken>())
+            .Returns(chatId);
+
+        // Act
+        var result = await _command.ExecuteAsync(context);
+
+        // Assert
+        result.Should().Be(ExitCode.Success);
+        await _bindingService.Received(1).DeleteBindingAsync(worktreeId, Arg.Any<CancellationToken>());
+        context.Output.ToString().Should().Contain("Unbound");
+    }
+
+    [Fact]
+    public async Task UnbindAsync_WhenNotBound_ReturnsNotFound()
+    {
+        // Arrange
+        var worktreeId = WorktreeId.FromPath("/home/user/project/feature/auth");
+        var config = new Dictionary<string, object> { ["CurrentWorktree"] = worktreeId };
+        var context = CreateContext(new[] { "unbind", "--force" }, config);
+
+        _bindingService.GetBoundChatAsync(worktreeId, Arg.Any<CancellationToken>())
+            .Returns((ChatId?)null);
+
+        // Act
+        var result = await _command.ExecuteAsync(context);
+
+        // Assert
+        result.Should().Be(ExitCode.GeneralError);
+        await _bindingService.DidNotReceive().DeleteBindingAsync(Arg.Any<WorktreeId>(), Arg.Any<CancellationToken>());
+        context.Output.ToString().Should().Contain("not bound");
+    }
+
+    [Fact]
+    public async Task BindingsAsync_ListsAllBindings()
+    {
+        // Arrange
+        var worktree1 = WorktreeId.FromPath("/home/user/project/feature/auth");
+        var worktree2 = WorktreeId.FromPath("/home/user/project/feature/payments");
+        var chat1 = ChatId.NewId();
+        var chat2 = ChatId.NewId();
+        var bindings = new List<WorktreeBinding>
+        {
+            WorktreeBinding.Create(worktree1, chat1),
+            WorktreeBinding.Create(worktree2, chat2),
+        };
+        var context = CreateContext(new[] { "bindings" });
+
+        _bindingService.ListAllBindingsAsync(Arg.Any<CancellationToken>())
+            .Returns(bindings);
+
+        _chatRepository.GetByIdAsync(chat1, Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Chat.Create("Auth Chat"));
+        _chatRepository.GetByIdAsync(chat2, Arg.Any<bool>(), Arg.Any<CancellationToken>())
+            .Returns(Chat.Create("Payments Chat"));
+
+        // Act
+        var result = await _command.ExecuteAsync(context);
+
+        // Assert
+        result.Should().Be(ExitCode.Success);
+
+        // Note: WorktreeId.FromPath() creates a hash, so we verify the hash values
+        // Future enhancement: Store original path for display
+        context.Output.ToString().Should().Contain(worktree1.Value);
+        context.Output.ToString().Should().Contain(worktree2.Value);
+        context.Output.ToString().Should().Contain("Auth Chat");
+        context.Output.ToString().Should().Contain("Payments Chat");
+    }
+
+    [Fact]
+    public async Task BindingsAsync_WithNoBindings_ShowsEmpty()
+    {
+        // Arrange
+        var context = CreateContext(new[] { "bindings" });
+
+        _bindingService.ListAllBindingsAsync(Arg.Any<CancellationToken>())
+            .Returns(new List<WorktreeBinding>());
+
+        // Act
+        var result = await _command.ExecuteAsync(context);
+
+        // Assert
+        result.Should().Be(ExitCode.Success);
+        context.Output.ToString().Should().Contain("No bindings");
+    }
+
+    private static CommandContext CreateContext(string[] args, Dictionary<string, object>? config = null)
     {
         return new CommandContext
         {
             Args = args,
             Output = new StringWriter(),
             Formatter = Substitute.For<IOutputFormatter>(),
-            Configuration = new Dictionary<string, object>(),
+            Configuration = config ?? new Dictionary<string, object>(),
             CancellationToken = CancellationToken.None,
         };
     }

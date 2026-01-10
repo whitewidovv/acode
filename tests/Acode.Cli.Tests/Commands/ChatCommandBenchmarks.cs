@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Acode.Application.Concurrency;
 using Acode.Application.Conversation.Persistence;
 using Acode.Application.Conversation.Session;
 using Acode.Cli.Commands;
@@ -17,6 +18,7 @@ using Acode.Infrastructure.Persistence.Conversation;
 using Acode.Infrastructure.Session;
 using BenchmarkDotNet.Attributes;
 using Microsoft.Data.Sqlite;
+using NSubstitute;
 
 /// <summary>
 /// Performance benchmarks for ChatCommand operations.
@@ -100,7 +102,8 @@ public class ChatCommandBenchmarks : IDisposable
             _chatRepository,
             _runRepository,
             _messageRepository,
-            _sessionManager);
+            _sessionManager,
+            Substitute.For<IBindingService>());
 
         // Pre-create a test chat for benchmarks that need it
         var testChat = Chat.Create("Benchmark Test Chat");
