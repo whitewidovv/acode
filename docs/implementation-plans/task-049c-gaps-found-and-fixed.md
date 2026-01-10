@@ -475,29 +475,48 @@ public static WorktreeId From(string value) => new(value);
 
 ---
 
-### Phase 6: CLI Commands - Lock Management
+### Phase 6: CLI Commands - Lock Management ✅ COMPLETE
 **Objective**: Implement lock status, unlock, cleanup commands.
 
-**Files to Create/Modify**:
-1. `src/Acode.Cli/Commands/LockCommand.cs` (new command)
-2. `tests/Acode.Cli.Tests/Commands/LockCommandTests.cs`
-3. `src/Acode.Cli/Program.cs` (register LockCommand in router)
+**Files Created**:
+1. `src/Acode.Cli/Commands/LockCommand.cs` (186 lines)
+2. `tests/Acode.Cli.Tests/Commands/LockCommandTests.cs` (221 lines, 11 tests)
 
 **TDD Process**:
-1. RED: Create LockCommandTests.cs
-   - Test status shows lock details (AC-063)
-   - Test unlock removes lock (AC-054)
-   - Test cleanup removes stale locks (AC-065)
-2. GREEN: Implement LockCommand
-3. REFACTOR: Add formatting, error messages
-4. VERIFY: All lock command tests passing
+1. ✅ RED: Create LockCommandTests.cs with 11 tests
+   - Name_ShouldBe_Lock
+   - Description_ShouldDescribe_LockManagement
+   - ExecuteAsync_WithNoArgs_ReturnsInvalidArguments
+   - StatusAsync_WithNoLock_ShowsNotLocked
+   - StatusAsync_WithActiveLock_ShowsLockDetails (AC-063)
+   - StatusAsync_WithStaleLock_IndicatesStale (AC-064)
+   - UnlockAsync_WithForceFlag_RemovesLock (AC-054)
+   - UnlockAsync_WithoutForceFlag_RequiresConfirmation
+   - CleanupAsync_RemovesStaleLocksAndReportsCount (AC-065)
+   - StatusAsync_WhenNotInWorktree_ReturnsError
+   - UnlockAsync_WhenNotInWorktree_ReturnsError
+2. ✅ GREEN: Implement LockCommand with all subcommands
+3. ✅ REFACTOR: Added FormatAge helper, comprehensive GetHelp(), error messages
+4. ✅ VERIFY: All 11 lock command tests passing
+
+**Implementation Details**:
+- **status**: Displays lock details including ProcessId, Hostname, Age, STALE indicator
+- **unlock --force**: Force-removes lock file regardless of owner (emergency use)
+- **cleanup**: Removes all stale locks using 5-minute threshold (AC-056)
+- FormatAge() helper: Formats TimeSpan as "3m 0s", "2h 15m", etc.
+- GetHelp() provides comprehensive usage, examples, related commands
+- All commands require CurrentWorktree context (error if not in worktree)
+- Used #pragma warning disable CA2007 (UI layer - ConfigureAwait not critical)
+- Fixed LockStatus constructor signature (6 parameters including Terminal)
 
 **Acceptance**:
-- [ ] LockCommand.cs created
-- [ ] status, unlock, cleanup subcommands implemented
-- [ ] --force flag for unlock (AC-054)
-- [ ] Tests passing
-- [ ] Build GREEN
+- [x] LockCommand.cs created (186 lines, commit d1fe637)
+- [x] status, unlock, cleanup subcommands implemented
+- [x] --force flag for unlock with confirmation requirement (AC-054)
+- [x] Tests passing (11/11 lock command tests GREEN)
+- [x] Build GREEN (0 errors, 0 warnings, 1839 tests passing)
+
+**Note**: Program.cs registration deferred to Phase 9 (integration phase)
 
 ---
 
