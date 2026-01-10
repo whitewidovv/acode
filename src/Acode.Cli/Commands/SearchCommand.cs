@@ -2,10 +2,10 @@
 namespace Acode.Cli.Commands;
 
 using System;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Acode.Application.Interfaces;
+using Acode.Cli.Formatting;
 using Acode.Domain.Conversation;
 using Acode.Domain.Models.Inference;
 using Acode.Domain.Search;
@@ -183,41 +183,15 @@ RELATED COMMANDS:
         {
             var results = await _searchService.SearchAsync(query, CancellationToken.None).ConfigureAwait(false);
 
-            if (jsonOutput)
-            {
-                var json = JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true });
-                await context.Output.WriteLineAsync(json).ConfigureAwait(false);
-            }
-            else
-            {
-                // Table output
-                if (results.Results.Count == 0)
-                {
-                    await context.Output.WriteLineAsync("No results found.").ConfigureAwait(false);
-                }
-                else
-                {
-                    await context.Output.WriteLineAsync($"{"Chat",-20} {"Date",-16} {"Role",-10} {"Snippet",-50} {"Score",8}").ConfigureAwait(false);
-                    await context.Output.WriteLineAsync(new string('-', 105)).ConfigureAwait(false);
+            // Select formatter based on output mode
+            IOutputFormatter formatter = jsonOutput
+                ? new JsonSearchFormatter()
+                : new TableSearchFormatter();
 
-                    foreach (var result in results.Results)
-                    {
-                        var chat = result.ChatTitle.Length > 18 ? result.ChatTitle.Substring(0, 18) + ".." : result.ChatTitle;
-                        var date = result.CreatedAt.ToString("yyyy-MM-dd HH:mm");
-                        var snippet = result.Snippet.Length > 48 ? result.Snippet.Substring(0, 48) + ".." : result.Snippet;
-
-                        // Remove <mark> tags for plain text output
-                        snippet = snippet.Replace("<mark>", string.Empty, StringComparison.Ordinal).Replace("</mark>", string.Empty, StringComparison.Ordinal);
-
-                        await context.Output.WriteLineAsync(
-                            $"{chat,-20} {date,-16} {result.Role,-10} {snippet,-50} {result.Score,8:F2}").ConfigureAwait(false);
-                    }
-
-                    await context.Output.WriteLineAsync(string.Empty).ConfigureAwait(false);
-                    await context.Output.WriteLineAsync(
-                        $"Page {results.PageNumber}/{results.TotalPages} | Total: {results.TotalCount} results | Query time: {results.QueryTimeMs:F0}ms").ConfigureAwait(false);
-                }
-            }
+            // Use StringWriter to format output, then write to context.Output
+            using var stringWriter = new StringWriter();
+            formatter.WriteSearchResults(results, stringWriter);
+            await context.Output.WriteAsync(stringWriter.ToString()).ConfigureAwait(false);
 
             return ExitCode.Success;
         }
