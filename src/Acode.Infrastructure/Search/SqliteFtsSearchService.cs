@@ -52,7 +52,21 @@ public sealed class SqliteFtsSearchService : ISearchService
                 "Check query for balanced parentheses, valid operators (AND/OR/NOT), and operator limit (max 5)");
         }
 
-        if (string.IsNullOrWhiteSpace(ftsQuery.Fts5Syntax))
+        // Merge field filters extracted from query text into SearchQuery
+        // (role:, chat:, title:, tag: prefixes override CLI flags)
+        if (ftsQuery.RoleFilter.HasValue)
+        {
+            query = query with { RoleFilter = ftsQuery.RoleFilter };
+        }
+
+        if (ftsQuery.ChatIdFilter.HasValue)
+        {
+            query = query with { ChatId = ChatId.From(ftsQuery.ChatIdFilter.Value.ToString()) };
+        }
+
+        // Note: ChatNameFilter would require IChatRepository.GetByNameAsync (not yet implemented)
+        // Note: TitleTerms and TagFilter will be applied in BuildSearchQuery
+        if (string.IsNullOrWhiteSpace(ftsQuery.Fts5Syntax) && ftsQuery.TitleTerms.Count == 0)
         {
             return new SearchResults
             {
@@ -64,8 +78,8 @@ public sealed class SqliteFtsSearchService : ISearchService
             };
         }
 
-        // Build SQL query
-        var sql = BuildSearchQuery(query, ftsQuery.Fts5Syntax, out var parameters);
+        // Build SQL query (includes title and tag filters from ftsQuery)
+        var sql = BuildSearchQuery(query, ftsQuery, out var parameters);
 
         // Execute search
         var allResults = new List<SearchResult>();
@@ -233,12 +247,12 @@ public sealed class SqliteFtsSearchService : ISearchService
     /// Builds the FTS5 search query SQL with filters.
     /// </summary>
     /// <param name="query">The search query.</param>
-    /// <param name="safeQuery">The sanitized FTS5 query text.</param>
+    /// <param name="ftsQuery">The parsed FTS query with field filters.</param>
     /// <param name="parameters">Output parameters for the query.</param>
     /// <returns>The SQL query string.</returns>
     private static string BuildSearchQuery(
         SearchQuery query,
-        string safeQuery,
+        FtsQuery ftsQuery,
         out List<(string Name, object Value)> parameters)
     {
         parameters = new List<(string Name, object Value)>();
@@ -253,37 +267,70 @@ public sealed class SqliteFtsSearchService : ISearchService
                 m.content
             FROM conversation_search cs
             INNER JOIN conv_messages m ON cs.message_id = m.id
-            WHERE conversation_search MATCH @query
         ";
 
-        parameters.Add(("@query", safeQuery));
+        // Build WHERE clause
+        var whereConditions = new List<string>();
+
+        // FTS5 query (if not empty)
+        if (!string.IsNullOrWhiteSpace(ftsQuery.Fts5Syntax))
+        {
+            whereConditions.Add("conversation_search MATCH @query");
+            parameters.Add(("@query", ftsQuery.Fts5Syntax));
+        }
 
         // Apply ChatId filter
         if (query.ChatId.HasValue)
         {
-            sql += " AND cs.chat_id = @chatId";
+            whereConditions.Add("cs.chat_id = @chatId");
             parameters.Add(("@chatId", query.ChatId.Value.Value));
         }
 
         // Apply RoleFilter (case-insensitive comparison)
         if (query.RoleFilter.HasValue)
         {
-            sql += " AND LOWER(cs.role) = LOWER(@role)";
+            whereConditions.Add("LOWER(cs.role) = LOWER(@role)");
             parameters.Add(("@role", query.RoleFilter.Value.ToString()));
         }
 
         // Apply Since date filter
         if (query.Since.HasValue)
         {
-            sql += " AND cs.created_at >= @since";
+            whereConditions.Add("cs.created_at >= @since");
             parameters.Add(("@since", query.Since.Value.ToString("O")));
         }
 
         // Apply Until date filter
         if (query.Until.HasValue)
         {
-            sql += " AND cs.created_at <= @until";
+            whereConditions.Add("cs.created_at <= @until");
             parameters.Add(("@until", query.Until.Value.ToString("O")));
+        }
+
+        // Apply title filter (from field prefix)
+        if (ftsQuery.TitleTerms.Count > 0)
+        {
+            var titleConditions = new List<string>();
+            for (int i = 0; i < ftsQuery.TitleTerms.Count; i++)
+            {
+                titleConditions.Add($"cs.chat_title LIKE @titleTerm{i}");
+                parameters.Add(($"@titleTerm{i}", $"%{ftsQuery.TitleTerms[i]}%"));
+            }
+
+            whereConditions.Add($"({string.Join(" OR ", titleConditions)})");
+        }
+
+        // Apply tag filter (from field prefix)
+        if (!string.IsNullOrWhiteSpace(ftsQuery.TagFilter))
+        {
+            whereConditions.Add("cs.tags LIKE @tagFilter");
+            parameters.Add(("@tagFilter", $"%{ftsQuery.TagFilter}%"));
+        }
+
+        // Combine WHERE conditions
+        if (whereConditions.Count > 0)
+        {
+            sql += " WHERE " + string.Join(" AND ", whereConditions);
         }
 
         return sql;
