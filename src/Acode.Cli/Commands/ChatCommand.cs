@@ -177,10 +177,117 @@ Examples:
         }
     }
 
-    private Task<ExitCode> ListAsync(CommandContext context)
+    private async Task<ExitCode> ListAsync(CommandContext context)
     {
-        // TODO: Implement ListChatsCommand logic
-        return Task.FromResult(ExitCode.RuntimeError);
+        // AC-013-028: List chats with filtering, sorting, pagination
+        // Parse flags: --archived, --filter, --sort, --limit, --offset
+        var includeArchived = context.Args.Contains("--archived");
+        string? filterText = null;
+        var sortBy = Application.Conversation.Persistence.ChatSortField.UpdatedAt; // Default: updated
+        var limit = 50; // Default page size
+        var offset = 0;
+
+        // Parse arguments
+        for (var i = 1; i < context.Args.Length; i++)
+        {
+            if (context.Args[i] == "--filter" && i + 1 < context.Args.Length)
+            {
+                filterText = context.Args[++i];
+            }
+            else if (context.Args[i] == "--sort" && i + 1 < context.Args.Length)
+            {
+                var sortField = context.Args[++i].ToLowerInvariant();
+                sortBy = sortField switch
+                {
+                    "created" => Application.Conversation.Persistence.ChatSortField.CreatedAt,
+                    "updated" => Application.Conversation.Persistence.ChatSortField.UpdatedAt,
+                    "title" => Application.Conversation.Persistence.ChatSortField.Title,
+                    _ => Application.Conversation.Persistence.ChatSortField.UpdatedAt
+                };
+            }
+            else if (context.Args[i] == "--limit" && i + 1 < context.Args.Length)
+            {
+                if (int.TryParse(context.Args[++i], out var parsedLimit))
+                {
+                    limit = parsedLimit;
+                }
+            }
+            else if (context.Args[i] == "--offset" && i + 1 < context.Args.Length)
+            {
+                if (int.TryParse(context.Args[++i], out var parsedOffset))
+                {
+                    offset = parsedOffset;
+                }
+            }
+        }
+
+        try
+        {
+            // AC-021: Calculate page from offset
+            var page = offset / limit;
+
+            // Create filter
+            var filter = new Application.Conversation.Persistence.ChatFilter
+            {
+                IncludeDeleted = includeArchived,
+                TitleContains = filterText,
+                SortBy = sortBy,
+                SortDescending = sortBy != Application.Conversation.Persistence.ChatSortField.Title, // Title sorts ascending, others descending
+                Page = page,
+                PageSize = limit
+            };
+
+            // AC-013: Query repository
+            var result = await _chatRepository.ListAsync(filter, context.CancellationToken).ConfigureAwait(false);
+
+            // AC-025: Handle empty result
+            if (result.Items.Count == 0)
+            {
+                await context.Output.WriteLineAsync("No chats found").ConfigureAwait(false);
+                return ExitCode.Success;
+            }
+
+            // AC-013: Display table
+            await context.Output.WriteLineAsync($"{"ID",-15} {"Title",-40} {"Updated",-20} {"Runs",-6}").ConfigureAwait(false);
+            await context.Output.WriteLineAsync(new string('-', 83)).ConfigureAwait(false);
+
+            foreach (var chat in result.Items)
+            {
+                // AC-022: Truncate ID to first 12 chars
+                var chatIdDisplay = chat.Id.Value.Length > 12
+                    ? chat.Id.Value.Substring(0, 12) + "..."
+                    : chat.Id.Value;
+
+                // Get run count for this chat
+                var runs = await _runRepository.ListByChatAsync(chat.Id, context.CancellationToken).ConfigureAwait(false);
+                var runCount = runs.Count();
+
+                // Truncate title if too long
+                var titleDisplay = chat.Title.Length > 38
+                    ? chat.Title.Substring(0, 38) + ".."
+                    : chat.Title;
+
+                // AC-015: Show archived indicator
+                if (chat.IsDeleted && includeArchived)
+                {
+                    titleDisplay += " [ARCHIVED]";
+                }
+
+                await context.Output.WriteLineAsync(
+                    $"{chatIdDisplay,-15} {titleDisplay,-40} {chat.UpdatedAt:yyyy-MM-dd HH:mm:ss,-20} {runCount,-6}").ConfigureAwait(false);
+            }
+
+            // Show pagination info
+            await context.Output.WriteLineAsync(string.Empty).ConfigureAwait(false);
+            await context.Output.WriteLineAsync($"Showing {result.Items.Count} of {result.TotalCount} total chats (Page {result.Page + 1} of {result.TotalPages})").ConfigureAwait(false);
+
+            return ExitCode.Success;
+        }
+        catch (Exception ex)
+        {
+            await context.Output.WriteLineAsync($"Error listing chats: {ex.Message}").ConfigureAwait(false);
+            return ExitCode.RuntimeError;
+        }
     }
 
     private async Task<ExitCode> OpenAsync(CommandContext context)
@@ -237,10 +344,87 @@ Examples:
         }
     }
 
-    private Task<ExitCode> ShowAsync(CommandContext context)
+    private async Task<ExitCode> ShowAsync(CommandContext context)
     {
-        // TODO: Implement ShowChatCommand logic
-        return Task.FromResult(ExitCode.RuntimeError);
+        // AC-037-048: Show detailed chat information
+        if (context.Args.Length < 2)
+        {
+            await context.Output.WriteLineAsync("Error: Missing chat ID").ConfigureAwait(false);
+            await context.Output.WriteLineAsync("Usage: acode chat show <id>").ConfigureAwait(false);
+            return ExitCode.InvalidArguments;
+        }
+
+        var chatIdStr = context.Args[1];
+
+        try
+        {
+            var chatId = Domain.Conversation.ChatId.From(chatIdStr);
+
+            // AC-044: Include soft-deleted chats
+            var chat = await _chatRepository.GetByIdAsync(chatId, includeRuns: false, context.CancellationToken).ConfigureAwait(false);
+
+            // AC-043: Chat not found
+            if (chat == null)
+            {
+                await context.Output.WriteLineAsync($"Error ACODE-CHAT-CMD-001: Chat '{chatIdStr}' not found").ConfigureAwait(false);
+                return ExitCode.RuntimeError;
+            }
+
+            // AC-038: Display chat details
+            await context.Output.WriteLineAsync($"Chat Details:").ConfigureAwait(false);
+            await context.Output.WriteLineAsync($"  ID: {chat.Id.Value}").ConfigureAwait(false);
+            await context.Output.WriteLineAsync($"  Title: {chat.Title}").ConfigureAwait(false);
+
+            // AC-047: ISO 8601 formatted timestamps
+            await context.Output.WriteLineAsync($"  Created: {chat.CreatedAt:yyyy-MM-ddTHH:mm:ssZ}").ConfigureAwait(false);
+            await context.Output.WriteLineAsync($"  Updated: {chat.UpdatedAt:yyyy-MM-ddTHH:mm:ssZ}").ConfigureAwait(false);
+
+            // Tags
+            if (chat.Tags.Any())
+            {
+                await context.Output.WriteLineAsync($"  Tags: {string.Join(", ", chat.Tags)}").ConfigureAwait(false);
+            }
+            else
+            {
+                await context.Output.WriteLineAsync($"  Tags: none").ConfigureAwait(false);
+            }
+
+            // Worktree binding
+            await context.Output.WriteLineAsync($"  Worktree: {chat.WorktreeBinding?.Value ?? "none"}").ConfigureAwait(false);
+
+            // AC-044: Show deleted status
+            await context.Output.WriteLineAsync($"  Status: {(chat.IsDeleted ? "Archived" : "Active")}").ConfigureAwait(false);
+
+            // AC-039, AC-040, AC-041, AC-042: Show run count, message count
+            var runs = await _runRepository.ListByChatAsync(chat.Id, context.CancellationToken).ConfigureAwait(false);
+            var runCount = runs.Count();
+            var messageCount = 0;
+
+            // AC-048: Handle chats with 0 runs gracefully
+            foreach (var run in runs)
+            {
+                var messages = await _messageRepository.ListByRunAsync(run.Id, context.CancellationToken).ConfigureAwait(false);
+                messageCount += messages.Count();
+            }
+
+            await context.Output.WriteLineAsync($"  Runs: {runCount}").ConfigureAwait(false);
+            await context.Output.WriteLineAsync($"  Messages: {messageCount}").ConfigureAwait(false);
+
+            // AC-042: Last activity timestamp
+            await context.Output.WriteLineAsync($"  Last Activity: {chat.UpdatedAt:yyyy-MM-dd HH:mm:ss} UTC").ConfigureAwait(false);
+
+            return ExitCode.Success;
+        }
+        catch (FormatException)
+        {
+            await context.Output.WriteLineAsync($"Error: Invalid chat ID format '{chatIdStr}'").ConfigureAwait(false);
+            return ExitCode.InvalidArguments;
+        }
+        catch (Exception ex)
+        {
+            await context.Output.WriteLineAsync($"Error: {ex.Message}").ConfigureAwait(false);
+            return ExitCode.RuntimeError;
+        }
     }
 
     private async Task<ExitCode> RenameAsync(CommandContext context)
