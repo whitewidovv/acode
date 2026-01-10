@@ -37,7 +37,7 @@ public sealed class SqliteConnectionFactory : IConnectionFactory
 
         // Ensure directory exists
         var directory = Path.GetDirectoryName(_options.Path);
-        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        if (!string.IsNullOrEmpty(directory))
         {
             Directory.CreateDirectory(directory);
             _logger.LogDebug("Created database directory: {Directory}", directory);
