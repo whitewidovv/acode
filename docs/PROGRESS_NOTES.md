@@ -1,9 +1,108 @@
 ---
 
-## Session: 2026-01-10 (Current) - Task 049d IN PROGRESS (Phases 0-8)
+## Session: 2026-01-10 (Current) - Task 049d PHASE 8 COMPLETE ✅
 
 ### Summary
-Task-049d (Indexing + Fast Search) in progress. Completed Phases 0-7 (migration, domain, dependencies, service, CLI) with 66 tests passing. Phase 8 (E2E integration tests) created but blocked on database connection issue. SearchCommand CLI complete and committed. Build GREEN. 9 commits on feature branch.
+Task-049d (Indexing + Fast Search) Phase 8 complete! Fixed database connection issues and critical repository table naming bug. All 10 E2E integration tests now passing. Fixed repository table names to match production schema (conv_ prefixes). Partial fix for repository unit tests (22/50 passing, was 0/50). Build GREEN. 12 commits on feature branch.
+
+### Key Achievements
+- ✅ All 10 SearchE2ETests passing (end-to-end search functionality validated)
+- ✅ Fixed critical bug: repositories now use production table names (conv_chats, conv_runs, conv_messages)
+- ✅ Fixed enum parsing and role filter case sensitivity issues
+- 🔄 Repository unit tests: 22/50 passing (improvement, more work needed on test helpers)
+
+### Phase 8: E2E Tests - Issues Fixed (Commits: 1b62d2d, 4a425fa)
+
+#### Issue 1: Database Connection (RESOLVED ✅)
+**Problem**: Repository constructors expect file path, not connection string
+- Test was passing: `new SqliteChatRepository("Data Source=/tmp/test.db")`
+- Repository constructs: `_connectionString = $"Data Source={databasePath};Mode=ReadWriteCreate"`
+- Result: Connection string like `"Data Source=Data Source=/tmp/test.db;..."`  (invalid!)
+
+**Fix**: Pass file path directly: `new SqliteChatRepository(_dbFilePath)`
+- Commit: 1b62d2d
+
+#### Issue 2: Repository Table Names (CRITICAL BUG FIXED ✅)
+**Problem**: Production schema uses `conv_` prefixes, repositories used non-prefixed tables
+- Migration 002: Creates `conv_chats`, `conv_runs`, `conv_messages`
+- Repositories: Used `chats`, `runs`, `messages` (WRONG!)
+- **Impact**: Application would not work with actual production database
+
+**Fix**: Updated all repositories to use conv_ prefixed tables
+- SqliteChatRepository: All 9 SQL statements updated
+- SqliteRunRepository: All SQL statements updated
+- SqliteMessageRepository: All SQL statements updated
+- Commit: 1b62d2d
+
+#### Issue 3: Enum Parsing Case Sensitivity (RESOLVED ✅)
+**Problem**: Database stores role as lowercase "user", enum parse is case-sensitive
+- `Enum.Parse<MessageRole>(reader.GetString(3))` failed on "user"
+- MessageRole enum has "User" (capitalized)
+
+**Fix**: Added `ignoreCase: true` parameter
+- `Enum.Parse<MessageRole>(reader.GetString(3), ignoreCase: true)`
+- Commit: 1b62d2d
+
+#### Issue 4: Role Filter Case Sensitivity (RESOLVED ✅)
+**Problem**: Role filter comparison was case-sensitive
+- Filter: `cs.role = @role` with value "User"
+- Database: stores "user" (lowercase)
+- SQLite: case-sensitive comparison by default
+
+**Fix**: Use case-insensitive comparison
+- Changed to: `LOWER(cs.role) = LOWER(@role)`
+- Commit: 1b62d2d
+
+#### Issue 5: Test Assertion with Markup (RESOLVED ✅)
+**Problem**: Snippet contains `<mark>` tags but test expected plain text
+- Snippet: `"<mark>JWT</mark> <mark>JWT</mark> <mark>JWT</mark> authentication"`
+- Test: Expected to contain "JWT JWT JWT" (fails due to markup)
+
+**Fix**: Updated assertion to account for markup
+- Changed from: `.Should().Contain("JWT JWT JWT")`
+- Changed to: `.Should().Contain("<mark>JWT</mark>")` and `.Should().Contain("authentication")`
+- Commit: 1b62d2d
+
+#### Issue 6: Migration Schema References (RESOLVED ✅)
+**Problem**: 001_InitialSchema.sql had mixed table name references
+- CREATE TABLE statements updated to conv_ prefix
+- FOREIGN KEY references still used old names: `REFERENCES chats(id)`
+- INDEX statements still used old names: `ON chats(worktree_id)`
+
+**Fix**: Updated all references in migration file
+- FOREIGN KEYs: `REFERENCES conv_chats(id)`, `REFERENCES conv_runs(id)`
+- INDEXes: `ON conv_chats(...)`, `ON conv_runs(...)`, `ON conv_messages(...)`
+- Commit: 4a425fa
+
+### Test Results
+
+**E2E Integration Tests**: ✅ 10/10 passing
+- Should_Index_And_Search_Messages_End_To_End
+- Should_Filter_Results_By_ChatId
+- Should_Filter_Results_By_Date_Range
+- Should_Filter_Results_By_Role
+- Should_Rank_Results_By_Relevance_With_BM25
+- Should_Apply_Pagination_Correctly
+- Should_Generate_Snippets_With_Mark_Tags
+- Should_Handle_Large_Corpus_Within_Performance_SLA (1000 messages in <500ms)
+- Should_Rebuild_Index_Successfully
+- Should_Return_Index_Status_Correctly
+
+**Repository Unit Tests**: 🔄 22/50 passing (was 0/50)
+- All SqliteChatRepository tests: ✅ Passing
+- SqliteRunRepository tests: 🔄 Partially passing (test helper table references need fixing)
+- SqliteMessageRepository tests: 🔄 Partially passing (test helper table references need fixing)
+
+### Next Steps
+- Complete fixing remaining repository unit test helper code (28 failures remaining)
+- OR proceed to Phase 9: Audit + PR (E2E tests validate production paths)
+
+---
+
+## Session: 2026-01-10 (Previous) - Task 049d Phases 0-7
+
+### Summary
+Task-049d (Indexing + Fast Search) Phases 0-7 complete. Implemented migration, domain, dependencies, service, CLI with 66 tests passing. SearchCommand CLI complete and committed. Phase 8 E2E tests created but initially blocked on database issues.
 
 ### Completed Work (This Session)
 
