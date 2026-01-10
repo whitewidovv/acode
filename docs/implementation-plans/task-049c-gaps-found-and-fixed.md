@@ -2,7 +2,7 @@
 
 ## INSTRUCTIONS FOR RESUMPTION AFTER CONTEXT COMPACTION
 
-**Current Status**: Phase 0 COMPLETE, Phase 1 COMPLETE, starting Phase 2 (Application Interfaces).
+**Current Status**: Phases 0-3 COMPLETE, starting Phase 4 (AtomicFileLockService).
 
 **What to do next**:
 1. Read this entire file to understand completed work and remaining tasks
@@ -358,7 +358,7 @@ public static WorktreeId From(string value) => new(value);
 
 ---
 
-### Phase 3: Infrastructure - SqliteBindingRepository
+### Phase 3: Infrastructure - SqliteBindingRepository ✅
 **Objective**: Implement binding persistence layer.
 
 **Files to Create**:
@@ -377,11 +377,12 @@ public static WorktreeId From(string value) => new(value);
 4. VERIFY: All repository tests passing
 
 **Acceptance**:
-- [ ] SqliteBindingRepository.cs implemented
-- [ ] One-to-one constraint enforced (AC-018)
-- [ ] All repository methods tested
-- [ ] Tests passing
-- [ ] Build GREEN
+- [x] SqliteBindingRepository.cs implemented (188 lines)
+- [x] IBindingRepository.cs interface created
+- [x] One-to-one constraint enforced (AC-018) via InvalidOperationException
+- [x] All repository methods tested (9 tests)
+- [x] Tests passing (9/9 SqliteBindingRepositoryTests)
+- [x] Build GREEN (0 errors, 0 warnings, 1812 tests passing)
 
 ---
 
