@@ -514,8 +514,26 @@ Created all three enums with XML documentation:
 - Commit: (pending)
 - Build: 0 errors, 0 warnings
 
-**Part 3: SqliteMessageRepository** 🔄 IN PROGRESS
-- Next step: Implement SqliteMessageRepository with integration tests
+**Part 3: SqliteMessageRepository** ✅ COMPLETE
+- Created `SqliteMessageRepository.cs` (~192 lines)
+- Implements all 5 IMessageRepository methods with Dapper
+- Created `SqliteMessageRepositoryTests.cs` (12 integration tests)
+- All tests passing: 12/12 ✅
+- Fixed issues:
+  - Message.Reconstitute requires IEnumerable<ToolCall>?, not string
+  - Deserialize JSON tool_calls from database back to ToolCall array
+  - Tuple element names required (SA1414)
+- Test coverage: CreateAsync, GetByIdAsync, UpdateAsync, ListByRunAsync, DeleteByRunAsync
+- Tests cover: round-trip persistence, tool calls JSON, all message roles, ordering, cascade delete
+- Commit: (pending)
+- Build: 0 errors, 0 warnings
+
+**Gap #13 Summary** ✅ COMPLETE
+- Task 049a Phases 7 & 8 are now fully complete
+- All 3 repository interfaces implemented: IChatRepository, IRunRepository, IMessageRepository
+- All 3 SQLite implementations complete: SqliteChatRepository (21 tests), SqliteRunRepository (17 tests), SqliteMessageRepository (12 tests)
+- **Total: 50 repository integration tests passing** ✅
+- Task 049a is now truly complete (all acceptance criteria AC-042, AC-043, AC-044 satisfied)
 
 ---
 
