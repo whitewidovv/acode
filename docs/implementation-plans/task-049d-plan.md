@@ -66,13 +66,15 @@
 - [ ] Fix violations
 - [ ] Commit: `feat(task-049d): Add SafeQueryParser for FTS5`
 
-### Phase 6: SqliteFtsSearchService (20 tests) ✅ / 🔄 / -
-- [ ] Create tests/Acode.Infrastructure.Tests/Search/SqliteFtsSearchServiceTests.cs (20 tests)
-- [ ] Run tests → RED
-- [ ] Create src/Acode.Infrastructure/Search/SqliteFtsSearchService.cs (150 lines)
-- [ ] Run tests → GREEN (20/20 passing)
+### Phase 6: SqliteFtsSearchService (20 tests) 🔄
+- [x] Create tests/Acode.Infrastructure.Tests/Search/SqliteFtsSearchServiceTests.cs (20 tests)
+- [x] Run tests → RED (compilation failures expected)
+- [x] Create src/Acode.Infrastructure/Search/SqliteFtsSearchService.cs (283 lines)
+- [ ] Fix test file API signature mismatches (repository constructors, Message.Create, Run.Create)
+- [ ] Run tests → GREEN (20/20 passing target)
 - [ ] Fix violations
-- [ ] Commit: `feat(task-049d): Add SqliteFtsSearchService`
+- [x] Commit: 546c5ba `feat(task-049d): Add SqliteFtsSearchService implementation (Phase 6 WIP)`
+- **Status**: Implementation complete, tests need API signature fixes
 
 ### Phase 7: SearchCommand CLI (12 tests) ✅ / 🔄 / -
 - [ ] Create tests/Acode.Cli.Tests/Commands/SearchCommandTests.cs (12 tests)
