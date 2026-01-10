@@ -46,7 +46,10 @@ public sealed class SqliteFtsSearchService : ISearchService
         var ftsQuery = _queryParser.ParseQuery(query.QueryText);
         if (!ftsQuery.IsValid)
         {
-            throw new ArgumentException($"Invalid query: {ftsQuery.ErrorMessage}");
+            throw new SearchException(
+                SearchErrorCodes.InvalidQuerySyntax,
+                $"Invalid query syntax: {ftsQuery.ErrorMessage}",
+                "Check query for balanced parentheses, valid operators (AND/OR/NOT), and operator limit (max 5)");
         }
 
         if (string.IsNullOrWhiteSpace(ftsQuery.Fts5Syntax))

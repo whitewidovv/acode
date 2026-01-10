@@ -195,6 +195,14 @@ RELATED COMMANDS:
 
             return ExitCode.Success;
         }
+        catch (SearchException ex)
+        {
+            // Display structured error with code and remediation
+            await context.Output.WriteLineAsync($"Error [{ex.ErrorCode}]: {ex.Message}").ConfigureAwait(false);
+            await context.Output.WriteLineAsync($"").ConfigureAwait(false);
+            await context.Output.WriteLineAsync($"How to fix: {ex.Remediation}").ConfigureAwait(false);
+            return ExitCode.InvalidArguments;
+        }
         catch (Exception ex)
         {
             await context.Output.WriteLineAsync($"Error: {ex.Message}").ConfigureAwait(false);
