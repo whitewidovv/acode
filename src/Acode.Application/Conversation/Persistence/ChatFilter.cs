@@ -30,6 +30,21 @@ public record ChatFilter
     public bool IncludeDeleted { get; init; } = false;
 
     /// <summary>
+    /// Gets or inits the title substring to filter by (case-insensitive).
+    /// </summary>
+    public string? TitleContains { get; init; }
+
+    /// <summary>
+    /// Gets or inits the field to sort by.
+    /// </summary>
+    public ChatSortField SortBy { get; init; } = ChatSortField.UpdatedAt;
+
+    /// <summary>
+    /// Gets a value indicating whether to sort in descending order.
+    /// </summary>
+    public bool SortDescending { get; init; } = true;
+
+    /// <summary>
     /// Gets or inits the page number (zero-based).
     /// </summary>
     public int Page { get; init; } = 0;
