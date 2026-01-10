@@ -15,23 +15,26 @@
 
 ## Implementation Progress
 
-### Phase 0: Database Migration ✅ / 🔄 / -
-- [ ] Create migrations/006_add_search_index.sql
-- [ ] Create migrations/006_add_search_index_down.sql
-- [ ] Test migration runs successfully
-- [ ] Verify FTS5 table created
-- [ ] Verify triggers created
-- [ ] Commit: `feat(task-049d): Add FTS5 search index migration`
+### Phase 0: Database Migration ✅
+- [x] Create migrations/006_add_search_index.sql
+- [x] Create migrations/006_add_search_index_down.sql
+- [x] Test migration runs successfully
+- [x] Verify FTS5 table created
+- [x] Verify triggers created
+- [x] Commit: 4ad1156 `feat(task-049d): Add FTS5 search index migration`
 
-### Phase 1: Domain Value Objects (18 tests) ✅ / 🔄 / -
-- [ ] Create tests/Acode.Domain.Tests/Search/SearchQueryTests.cs (10 tests)
-- [ ] Create tests/Acode.Domain.Tests/Search/SearchResultTests.cs (8 tests)
-- [ ] Run tests → RED (compilation fails)
-- [ ] Create src/Acode.Domain/Search/SearchQuery.cs (50 lines)
-- [ ] Create src/Acode.Domain/Search/SearchResult.cs (40 lines)
-- [ ] Run tests → GREEN (18/18 passing)
-- [ ] Fix StyleCop violations
-- [ ] Commit: `feat(task-049d): Add SearchQuery and SearchResult value objects`
+### Phase 1: Domain Value Objects (19 tests) ✅
+- [x] Create tests/Acode.Domain.Tests/Search/SearchQueryTests.cs (11 tests)
+- [x] Create tests/Acode.Domain.Tests/Search/SearchResultTests.cs (8 tests)
+- [x] Run tests → RED (compilation fails)
+- [x] Create src/Acode.Domain/Search/SearchQuery.cs (84 lines)
+- [x] Create src/Acode.Domain/Search/SearchResult.cs (50 lines)
+- [x] Create src/Acode.Domain/Search/SearchResults.cs (53 lines)
+- [x] Create src/Acode.Domain/Search/MatchLocation.cs (22 lines)
+- [x] Create src/Acode.Domain/Search/SortOrder.cs (22 lines)
+- [x] Run tests → GREEN (19/19 passing)
+- [x] Fix StyleCop violations (split types into separate files)
+- [x] Commit: 1482c34 `feat(task-049d): Add Search domain value objects (Phase 1)`
 
 ### Phase 2: Application Interfaces ✅ / 🔄 / -
 - [ ] Create src/Acode.Application/Interfaces/ISearchService.cs (25 lines)
