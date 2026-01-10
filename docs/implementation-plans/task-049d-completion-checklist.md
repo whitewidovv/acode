@@ -497,7 +497,7 @@ Commits:
 
 ### P2.3: Return Error Code for Invalid Boolean Syntax (AC-037)
 
-**Status**: [ ]
+**Status**: [✅]
 
 **What to Implement**:
 
@@ -555,13 +555,37 @@ dotnet test --filter "SearchCommandTests" --verbosity normal
 ```
 
 **Success Criteria**:
-- [✅] SearchErrorCodes class created with 6 codes
-- [✅] SqliteFtsSearchService returns ACODE-SRCH-001 for invalid syntax
-- [✅] SearchCommand displays error code + remediation
+- [✅] SearchErrorCodes class created with 6 codes (src/Acode.Domain/Search/SearchErrorCodes.cs)
+- [✅] SearchException class created (src/Acode.Domain/Search/SearchException.cs)
+- [✅] SqliteFtsSearchService throws SearchException with ACODE-SRCH-001 for invalid syntax
+- [✅] SearchCommand catches SearchException and displays formatted error + remediation
 - [✅] 3 new tests passing
 - [✅] AC-037 marked ✅ in audit report
 
-**Evidence Required**: Paste test output showing error handling tests passing
+**Evidence - Error Handling Tests (3/3 passing)**:
+```
+Passed!  - Failed:     0, Passed:     3, Skipped:     0, Total:     3, Duration: 5 ms
+Tests: SqliteFtsSearchServiceTests (2026-01-10)
+- SearchAsync_WithInvalidBooleanSyntax_ThrowsSearchException
+  (Query: "AND invalid", ErrorCode: ACODE-SRCH-001, Message: "cannot start with")
+- SearchAsync_WithTooManyOperators_ThrowsSearchException
+  (Query: "a AND b OR c AND d NOT e OR f AND g", ErrorCode: ACODE-SRCH-001, Message: "6 operators", "maximum 5")
+- SearchAsync_WithUnbalancedParentheses_ThrowsSearchException
+  (Query: "(JWT AND validation", ErrorCode: ACODE-SRCH-001, Message: "unbalanced")
+```
+
+Commits:
+- feat(task-049d-P2.3): implement error codes for search validation (AC-037) (commit fbd20a3)
+
+**Status**: ✅ P2.3 COMPLETE (3/3 error handling tests passing)
+
+---
+
+**PRIORITY 2 SUMMARY**: ✅ COMPLETE (AC-032 to AC-037)
+- P2.1: Boolean operator parsing (16 tests: 12 parser + 4 E2E) ✅
+- P2.2: Max 5 operators validation ✅
+- P2.3: Error codes with remediation (3 tests) ✅
+- **Total tests for Priority 2: 19 tests (all passing)**
 
 ---
 
