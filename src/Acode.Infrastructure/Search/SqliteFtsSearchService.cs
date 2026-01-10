@@ -43,8 +43,13 @@ public sealed class SqliteFtsSearchService : ISearchService
         var stopwatch = Stopwatch.StartNew();
 
         // Parse and sanitize query
-        var safeQuery = _queryParser.ParseQuery(query.QueryText);
-        if (string.IsNullOrWhiteSpace(safeQuery))
+        var ftsQuery = _queryParser.ParseQuery(query.QueryText);
+        if (!ftsQuery.IsValid)
+        {
+            throw new ArgumentException($"Invalid query: {ftsQuery.ErrorMessage}");
+        }
+
+        if (string.IsNullOrWhiteSpace(ftsQuery.Fts5Syntax))
         {
             return new SearchResults
             {
@@ -57,7 +62,7 @@ public sealed class SqliteFtsSearchService : ISearchService
         }
 
         // Build SQL query
-        var sql = BuildSearchQuery(query, safeQuery, out var parameters);
+        var sql = BuildSearchQuery(query, ftsQuery.Fts5Syntax, out var parameters);
 
         // Execute search
         var allResults = new List<SearchResult>();
