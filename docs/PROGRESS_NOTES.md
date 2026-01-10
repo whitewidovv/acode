@@ -1654,3 +1654,102 @@ Next up:
 - Implementation plan being updated as work progresses
 - Working autonomously until context runs low or task complete
 - Current token usage: ~115k/200k (still plenty of room - 85k remaining)
+
+---
+
+## 2026-01-10: Task 049d - Phase 9 Audit Complete (Gap Analysis Methodology Applied)
+
+**Audit Results**: ❌ **INCOMPLETE - 20% Semantic Completion**
+
+### Summary
+
+Applied gap analysis methodology per docs/GAP_ANALYSIS_METHODOLOGY.md to verify actual implementation against 132 acceptance criteria.
+
+**Findings**:
+- **Files Created**: 15/15 (100%) ✅
+- **Tests Passing**: 40/40 (100%) ✅
+- **Semantic Completion**: 27/132 AC (20%) ❌
+- **Partial Coverage**: 56/132 AC (42%) with implicit/untested features
+
+### Critical Spec Mismatches Discovered
+
+1. **Recency Boost Values (AC-051 to AC-053)**:
+   - Spec: <24h = 1.5x, <7d = 1.2x, >30d = no change
+   - Implementation: <7d = 1.5x, 7-30d = 1.0x, >30d = 0.8x
+   - Location: BM25Ranker.cs:58-76
+
+2. **Snippet Length Default (AC-058)**:
+   - Spec: 150 characters
+   - Implementation: 200 characters
+   - Location: SnippetGenerator.cs:28
+
+3. **SearchCommand Output Format (AC-114 to AC-116)**:
+   - Spec: Table format default, --json flag for JSON
+   - Implementation: JSON-only output, no table format
+   - Location: SearchCommand.cs:79-228
+
+### Missing Features (0% Coverage)
+
+- **Boolean Operators** (AC-032 to AC-037): AND, OR, NOT, parentheses
+- **Field-Specific Queries** (AC-038 to AC-043): role:, chat:, title:, tag: syntax
+- **Error Codes** (AC-121 to AC-127): ACODE-SRCH-001 through ACODE-SRCH-006
+- **CLI Index Commands**: status, rebuild, optimize not exposed to CLI
+- **Configurable Settings**: Recency boost, snippet length, highlight tags hardcoded
+
+### Coverage Breakdown by Category
+
+| Category | Coverage | Status |
+|----------|----------|--------|
+| Indexing - Content | 20% | 2/10 covered |
+| Indexing - Backend | 50% | 4/8 (SQLite only) |
+| Indexing - Performance | 0% | 0/6 tested |
+| Search - Basic | 14% | 1/7 covered |
+| Search - Boolean | 0% | **All missing** |
+| Search - Field-Specific | 0% | **All missing** |
+| Ranking - Relevance | 29% | 2/7 covered |
+| Ranking - Recency | **SPEC MISMATCH** | 0% + wrong values |
+| Snippets | 33% | 4/12 covered |
+| Filters | 38% | 11/29 covered |
+| Index Maintenance | 33% | 8/24 covered |
+| CLI | 20% | 2/10 covered |
+| Error Handling | 0% | **All missing** |
+| Performance SLAs | 20% | 1/5 tested |
+
+### User's Critical Reminder
+
+> "remember, presence does not dictate completion. only semantic completion dictates completion. 100 tests with lorem ipsum does us no good."
+
+**Audit validated this principle**: Files exist and tests pass, but only 20% of acceptance criteria are semantically complete.
+
+### Remediation Options Presented
+
+**Option 1: Full Compliance (20-30 hours)**
+- Implement all 132 AC
+- Add 50+ tests
+- 100% specification coverage
+
+**Option 2: Fix Critical Issues (4-6 hours) - RECOMMENDED**
+- Fix 3 spec mismatches
+- Add error codes
+- Expose CLI index commands
+- Defer enhancements to future tasks
+
+**Option 3: Document Deviations (2 hours)**
+- Ship with known gaps
+- Document in TASK-049d-DEFERRED.md
+- Update spec with implementation notes
+
+### Artifacts Created
+
+- **Audit Report**: docs/audits/task-049d-audit-report.md (567 lines)
+- **Commit**: 5fbb390 "docs(task-049d): Complete gap analysis audit"
+- **Status**: Awaiting user decision on remediation path
+
+### Next Steps
+
+User must decide remediation approach:
+1. Full compliance → 20-30 hours additional work
+2. Fix critical issues → 4-6 hours, defer enhancements
+3. Document deviations → 2 hours, ship as-is
+
+**Current Status**: Phase 9 audit complete, awaiting user input.
