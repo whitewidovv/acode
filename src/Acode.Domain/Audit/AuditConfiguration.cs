@@ -43,4 +43,16 @@ public sealed record AuditConfiguration
     /// </summary>
     public IReadOnlyList<ExportFormat> ExportFormats { get; init; } =
         new List<ExportFormat> { ExportFormat.Json, ExportFormat.Csv, ExportFormat.Text }.AsReadOnly();
+
+    /// <summary>
+    /// Gets the maximum file size in bytes before rotation is triggered.
+    /// Used by AuditLogRotator for file rotation decisions.
+    /// </summary>
+    public long MaxFileSize { get; init; } = 10 * 1024 * 1024; // 10MB default
+
+    /// <summary>
+    /// Gets the maximum total storage in bytes for all audit logs.
+    /// When exceeded, oldest logs are deleted.
+    /// </summary>
+    public long MaxTotalStorage { get; init; } = 1024L * 1024 * 1024; // 1GB default
 }

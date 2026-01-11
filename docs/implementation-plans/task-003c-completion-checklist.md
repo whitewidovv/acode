@@ -280,7 +280,7 @@ IDisposable BeginSpan(string operation);
 ---
 
 ### Gap #8: Infrastructure - AuditLogRotator
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Infrastructure/Audit/AuditLogRotator.cs`
 
 **Why Needed**: Implementation Prompt line 5165 lists this as required infrastructure component.
@@ -299,7 +299,21 @@ IDisposable BeginSpan(string operation);
 - Old logs properly archived
 - No data loss during rotation
 
-**Evidence**: [To be filled when complete]
+**Evidence**: All 10 tests passed
+- AuditLogRotator.cs (173 lines) with RotateIfNeededAsync, CleanupExpiredLogsAsync, EnforceStorageLimitAsync
+- RotationResult.cs (17 lines) return type
+- AuditLogRotatorTests.cs (270 lines) with 10 test methods covering:
+  - Size-based rotation
+  - Skip rotation when under limit
+  - Unix permission preservation
+  - Atomic operations (no data loss)
+  - Expired log cleanup (retention policy)
+  - Storage limit enforcement
+  - Sequential numbering (.1, .2, .3, etc.)
+  - Deletion event logging (OnBeforeDelete)
+  - Non-existent file handling
+  - Non-.jsonl file filtering
+- Added MaxFileSize and MaxTotalStorage properties to AuditConfiguration.cs
 
 ---
 
