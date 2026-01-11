@@ -1,3 +1,45 @@
+# Progress Notes
+
+## Session 2026-01-11 - Task 003c STARTED
+
+### Task Status: 🔄 **IN PROGRESS**
+
+**Task**: 003c - Define Audit Baseline Requirements
+**Branch**: feature/task-003c-audit-baseline
+
+### Gap Analysis Complete
+- **Total Gaps Identified**: 28
+- **Completed**: 0
+- **In Progress**: 0 (about to start Gap #1)
+- **Remaining**: 28
+
+### Key Findings from Gap Analysis
+1. **Value Objects Format Wrong**: EventId, SessionId, CorrelationId use Guid format instead of required prefixed format (evt_xxx, sess_xxx, corr_xxx)
+2. **Missing SpanId**: SpanId value object doesn't exist
+3. **AuditEvent Incomplete**: Missing SpanId and ParentSpanId properties
+4. **IAuditLogger Incomplete**: Missing 3 methods (simplified LogAsync, BeginCorrelation, BeginSpan)
+5. **Infrastructure Layer Missing**: FileAuditWriter, AuditLogRotator, AuditIntegrityVerifier, AuditRedactor, AuditExporter, AuditConfigurationLoader all missing
+6. **CLI Commands Missing**: All 8 audit CLI commands (list, show, search, verify, export, stats, tail, cleanup) missing
+7. **Tests Incomplete**: Comprehensive AuditEventTests suite missing (15 tests required)
+8. **Integration Missing**: File operations, command execution, security violations not integrated with audit
+
+### Implementation Plan
+Following TDD approach, implementing 28 gaps in order:
+- Gap #1: Fix value object formats (NEXT)
+- Gap #2: Create SpanId value object
+- Gap #3: Add SpanId properties to AuditEvent
+- Gap #4: Create AuditEventTests suite (15 tests)
+- Gap #5: Expand IAuditLogger interface
+- Gaps #6-27: Infrastructure, Application, CLI, Integration
+- Gap #28: Final verification
+
+### Current Step
+Starting Gap #1: Value Objects Format Compliance
+
+Will write failing tests first, then implement format change to make tests pass.
+
+---
+
 # Task 002b Progress Notes
 
 ## Session 2026-01-11 (Task 002b Completion)
