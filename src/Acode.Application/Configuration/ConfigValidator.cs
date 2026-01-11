@@ -4,10 +4,12 @@ namespace Acode.Application.Configuration;
 
 /// <summary>
 /// Validates configuration against schema and business rules.
+/// Orchestrates schema validation and semantic validation.
 /// </summary>
 public sealed class ConfigValidator : IConfigValidator
 {
     private readonly ISchemaValidator? _schemaValidator;
+    private readonly SemanticValidator _semanticValidator;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigValidator"/> class.
@@ -16,6 +18,7 @@ public sealed class ConfigValidator : IConfigValidator
     public ConfigValidator(ISchemaValidator? schemaValidator = null)
     {
         _schemaValidator = schemaValidator;
+        _semanticValidator = new SemanticValidator();
     }
 
     /// <inheritdoc/>
@@ -79,7 +82,14 @@ public sealed class ConfigValidator : IConfigValidator
             });
         }
 
-        // Add more semantic validation as needed
+        // Run semantic validation
+        var semanticResult = _semanticValidator.Validate(config);
+        if (!semanticResult.IsValid)
+        {
+            errors.AddRange(semanticResult.Errors);
+        }
+
+        // Return aggregated errors
         return errors.Count == 0
             ? ValidationResult.Success()
             : ValidationResult.Failure(errors);
