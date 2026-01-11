@@ -968,11 +968,29 @@ Follow TDD strictly (RED → GREEN → REFACTOR) for each gap:
 ## PROGRESS TRACKING
 
 - Start Date: 2026-01-11
-- Estimated Completion: TBD (work until complete or context low)
-- Current Gap: #1 (not started)
-- Gaps Completed: 0 / 20
-- Tests Passing: 4 (baseline)
-- Build Status: ✅ (baseline)
+- Current Session: 2026-01-11
+- Current Gap: #14 (CLI commands - pending)
+- Gaps Completed: 13 / 20 (65% complete)
+- Tests Passing: 5 unit + 11 integration = 16 tests ✅
+- Build Status: ✅ Clean (no warnings, no errors)
+
+**Completed Gaps:**
+- ✅ Gaps #6-7: Verified existing tests (RiskId, DreadScore)
+- ✅ Gap #9: Created IRiskRegister interface
+- ✅ Gaps #10-11: RiskRegisterLoader with TDD (5 unit tests passing)
+- ✅ Gap #12: YamlRiskRegisterRepository implementation
+- ✅ Gap #13: Integration tests (11 tests passing with actual YAML)
+
+**Remaining Work:**
+- Gap #14: RisksCommand (list all risks)
+- Gap #15: RiskDetailCommand (show specific risk)
+- Gap #16: MitigationsCommand (list all mitigations)
+- Gap #17: VerifyMitigationsCommand (verify implementation status)
+- Gap #18: E2E tests for CLI
+- Gap #19: Generate risk-register.md documentation
+- Gap #20: Wire commands to SecurityCommand
+- Gap #21: Update CHANGELOG.md
+- Final: Audit and create PR
 
 ---
 
