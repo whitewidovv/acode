@@ -10,15 +10,64 @@ As Claude Code, you normally have internal biases for speed and token efficiency
 **CRITICAL** : Before starting ANY work, be sure to read and internalize Section 3 (Core Working Principles), especially 3.1 (Perfection and Completeness Over Speed) and 3.2 (Gap Analysis and Completion Checklist). These principles are non-negotiable and must be followed strictly. AS SUCH, realize that presence of a file or of a method does not equal complete. only semantic completeness counts. you must verify that every part of the spec is fully implemented, tested, documented, and audited before declaring a task complete, and that means creating the list in writing to the file `docs/implementation-plans/task-XXX-completion-checklist.md` as described in 3.2, and following it to the letter. if you realize something was missed while implementing, you must add it to the checklist and complete it before declaring the task complete. 
 
 1. ## Section 1. Notifications
-When you are ready to continue or need my input, notify me using:
-powershell.exe -c "[System.Media.SystemSounds]::Question.Play()"
 
-if you are trying to notify me multiple times in succession, wait at least 10 seconds between notifications to avoid overwhelming me.
+**CRITICAL: You MUST notify the user at the end of EVERY response where you are awaiting input.**
 
-if you are notifying me because you have reached low context (<5k tokens remaining), please include in your message the exact file and line number where you stopped, and a brief propmt that i can pass back to you to get you rolling again, realizing that the conversation may be compacted so be as specific as possible / necessary to get a fresh context claude agent going again accurately. 
+This repository uses worktrees (e.g., `/mnt/c/Users/neilo/source/local coding agent.worktrees/1`, `.../2`, etc.), and multiple Claude agents may be running simultaneously in different worktrees. To help the user manage multiple windows efficiently, you must:
 
-if you are attempting to defer something, use 
- powershell.exe -c "[System.Media.SystemSounds]::Beep.Play()" before and after the question sound, in the script above, so i know you are deferring something and not just notifying me of progress, and explain clearly in your message what you are deferring and why. realize that, as outlined below, deferring work is only allowed in very specific circumstances (it depends on future scoped work -- literally only reason we're allowed to defer), and you must explain clearly why the work literally cannot be completed now, and what task it should be moved to, and then if i agree to the deferral, you must update the task specification files to reflect the agreed change before proceeding.
+### Dynamic Window Identification
+
+Extract the worktree identifier from your current working directory and use it in all notifications:
+- Working directory: `/mnt/c/Users/neilo/source/local coding agent.worktrees/1` → Window identifier: `1`
+- Working directory: `/mnt/c/Users/neilo/source/local coding agent.worktrees/2` → Window identifier: `2`
+- Working directory: `/mnt/c/Users/neilo/source/local coding agent.worktrees/foobar` → Window identifier: `foobar`
+
+### Notification Types
+
+Use Windows Speech Synthesizer for all notifications. You must announce different messages based on context:
+
+#### 1. Awaiting Input (REQUIRED at end of EVERY response)
+When you are ready to continue or need user input, notify using:
+```bash
+powershell.exe -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('Window [X] Needs Input')"
+```
+Replace `[X]` with the worktree identifier extracted from your working directory.
+
+**Example for worktree 1:**
+```bash
+powershell.exe -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('Window 1 Needs Input')"
+```
+
+#### 2. Deferral Request
+When you need to defer work (RARE - only for future-scoped dependencies), notify using:
+```bash
+powershell.exe -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('Window [X] Deferral Request')"
+```
+
+Then explain clearly:
+- What you are deferring and why
+- Why the work literally cannot be completed now
+- What task it should be moved to
+- Wait for user approval to modify task scope
+
+Remember: Deferring is only allowed when work depends on future-scoped tasks. Past-scoped work that should have been done but wasn't is NOT a valid reason to defer—implement it now instead.
+
+#### 3. Task Complete
+When the task is FULLY complete (all subtasks done, tests passing, audit passed, PR created), notify using:
+```bash
+powershell.exe -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('Window [X] Task Complete')"
+```
+
+### Terminal Flashing (If Possible)
+
+If you can make the terminal flash or request attention until it receives focus, do so. This helps the user notice which window needs attention across multiple concurrent worktrees.
+
+### Additional Guidelines
+
+- **Wait at least 10 seconds** between multiple notifications in succession to avoid overwhelming the user
+- **Low context notifications** (<5k tokens remaining): Include the exact file and line number where you stopped, and a brief prompt for continuation (conversation may be compacted, so be specific)
+- **Always use the dynamic worktree identifier**—never hardcode "Window 1" or "Window 2"
+- **Remember**: You must notify at the END of every response where you're awaiting input. This is not optional.
 
 2. ## Section 2. Autonomous Work and Asynchronous Communication
 
