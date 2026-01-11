@@ -824,7 +824,7 @@ File: src/Acode.Domain/Search/SearchErrorCodes.cs
 
 ### P4.2: Implement Query Timeout (AC-122)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
@@ -885,7 +885,7 @@ dotnet test --filter "SqliteFtsSearchServiceTests.SearchAsync_ExceedingTimeout" 
 
 ### P4.3: Implement Invalid Date Filter Error (AC-123)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
@@ -960,7 +960,7 @@ dotnet test --filter "SearchCommandTests" --verbosity normal
 
 ### P4.4: Implement Invalid Role Filter Error (AC-124)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
@@ -1004,7 +1004,7 @@ dotnet test --filter "SearchCommandTests" --verbosity normal
 
 ### P4.5: Implement Index Corruption Detection (AC-125)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
@@ -1076,7 +1076,7 @@ dotnet test --filter "SqliteFtsSearchServiceTests.GetIndexStatusAsync" --verbosi
 
 ### P4.6: Implement Index Not Initialized Error (AC-126)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
