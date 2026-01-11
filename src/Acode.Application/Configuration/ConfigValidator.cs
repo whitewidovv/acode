@@ -4,10 +4,12 @@ namespace Acode.Application.Configuration;
 
 /// <summary>
 /// Validates configuration against schema and business rules.
+/// Orchestrates schema validation and semantic validation.
 /// </summary>
 public sealed class ConfigValidator : IConfigValidator
 {
     private readonly ISchemaValidator? _schemaValidator;
+    private readonly SemanticValidator _semanticValidator;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigValidator"/> class.
@@ -16,6 +18,7 @@ public sealed class ConfigValidator : IConfigValidator
     public ConfigValidator(ISchemaValidator? schemaValidator = null)
     {
         _schemaValidator = schemaValidator;
+        _semanticValidator = new SemanticValidator();
     }
 
     /// <inheritdoc/>
@@ -39,7 +42,7 @@ public sealed class ConfigValidator : IConfigValidator
         {
             return ValidationResult.Failure(new ValidationError
             {
-                Code = ConfigErrorCodes.FileTooBig,
+                Code = ConfigErrorCodes.FileTooLarge,
                 Message = $"Configuration file is too large: {fileInfo.Length} bytes (max 1MB)",
                 Severity = ValidationSeverity.Error
             });
@@ -72,14 +75,21 @@ public sealed class ConfigValidator : IConfigValidator
         {
             errors.Add(new ValidationError
             {
-                Code = ConfigErrorCodes.MissingRequiredField,
+                Code = ConfigErrorCodes.RequiredFieldMissing,
                 Message = "schema_version is required",
                 Severity = ValidationSeverity.Error,
                 Path = "schema_version"
             });
         }
 
-        // Add more semantic validation as needed
+        // Run semantic validation
+        var semanticResult = _semanticValidator.Validate(config);
+        if (!semanticResult.IsValid)
+        {
+            errors.AddRange(semanticResult.Errors);
+        }
+
+        // Return aggregated errors
         return errors.Count == 0
             ? ValidationResult.Success()
             : ValidationResult.Failure(errors);

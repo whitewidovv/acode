@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Acode.Domain\Acode.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Acode.Application\Acode.Application.csproj" />
+    <ProjectReference Include="..\..\src\Acode.Infrastructure\Acode.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

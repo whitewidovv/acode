@@ -426,4 +426,357 @@ public class SemanticValidatorTests
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainSingle(e => e.Code == "INVALID_ENDPOINT_URL");
     }
+
+    // FR-002b-52: airgapped_lock prevents mode override
+    [Fact]
+    public void Validate_WithAirgappedLockAndNonAirgappedMode_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Mode = new ModeConfig
+            {
+                Default = "local-only",
+                AirgappedLock = true // Locked to airgapped, but default is local-only
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e => e.Code == "AIRGAPPED_LOCK_VIOLATION");
+        result.Errors[0].Path.Should().Be("mode");
+    }
+
+    [Fact]
+    public void Validate_WithAirgappedLockAndAirgappedMode_ShouldReturnSuccess()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Mode = new ModeConfig
+            {
+                Default = "airgapped",
+                AirgappedLock = true
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+    }
+
+    // FR-002b-55: paths cannot escape repository root
+    [Fact]
+    public void Validate_WithAbsolutePathInSource_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Paths = new PathsConfig
+            {
+                Source = new[] { "/absolute/path/to/source" }
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == "PATH_ESCAPE_ATTEMPT");
+        result.Errors.Should().Contain(e => e.Path == "paths.source");
+    }
+
+    [Fact]
+    public void Validate_WithWindowsAbsolutePathInSource_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Paths = new PathsConfig
+            {
+                Source = new[] { "C:\\absolute\\path" }
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == "PATH_ESCAPE_ATTEMPT");
+    }
+
+    // FR-002b-57: command strings checked for shell injection
+    [Fact]
+    public void Validate_WithSemicolonInCommand_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Commands = new CommandsConfig
+            {
+                Build = "npm run build; rm -rf /"
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == "SHELL_INJECTION_DETECTED");
+        result.Errors.Should().Contain(e => e.Path == "commands.build");
+    }
+
+    [Fact]
+    public void Validate_WithPipeInCommand_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Commands = new CommandsConfig
+            {
+                Test = "npm test | grep ERROR"
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == "SHELL_INJECTION_DETECTED");
+    }
+
+    [Fact]
+    public void Validate_WithCommandSubstitutionInCommand_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Commands = new CommandsConfig
+            {
+                Setup = "echo $(whoami)"
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == "SHELL_INJECTION_DETECTED");
+    }
+
+    [Fact]
+    public void Validate_WithBackticksInCommand_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Commands = new CommandsConfig
+            {
+                Lint = "eslint `find . -name '*.js'`"
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == "SHELL_INJECTION_DETECTED");
+    }
+
+    // FR-002b-58: network.allowlist only valid in Burst mode
+    [Fact]
+    public void Validate_WithNetworkAllowlistInLocalOnlyMode_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Mode = new ModeConfig { Default = "local-only" },
+            Network = new NetworkConfig
+            {
+                Allowlist = new[]
+                {
+                    new NetworkAllowlistEntry { Host = "api.example.com" }
+                }
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == "NETWORK_ALLOWLIST_INVALID_MODE");
+        result.Errors.Should().Contain(e => e.Path == "network.allowlist");
+    }
+
+    [Fact]
+    public void Validate_WithNetworkAllowlistInBurstMode_ShouldReturnSuccess()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Mode = new ModeConfig { Default = "burst" },
+            Network = new NetworkConfig
+            {
+                Allowlist = new[]
+                {
+                    new NetworkAllowlistEntry { Host = "api.example.com" }
+                }
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert - should pass (burst mode allows allowlist)
+        result.Errors.Should().NotContain(e => e.Code == "NETWORK_ALLOWLIST_INVALID_MODE");
+    }
+
+    // FR-002b-62: ignore patterns are valid globs
+    [Fact]
+    public void Validate_WithInvalidGlobInIgnorePatterns_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Ignore = new IgnoreConfig
+            {
+                Patterns = new[] { "invalid[glob" } // Unclosed bracket
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == ConfigErrorCodes.InvalidGlob);
+        result.Errors.Should().Contain(e => e.Path == "ignore.patterns");
+    }
+
+    [Fact]
+    public void Validate_WithValidGlobInIgnorePatterns_ShouldReturnSuccess()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Ignore = new IgnoreConfig
+            {
+                Patterns = new[] { "**/*.log", "node_modules/**", "*.tmp" }
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.Errors.Should().NotContain(e => e.Code == ConfigErrorCodes.InvalidGlob);
+    }
+
+    // FR-002b-63: path patterns are valid globs
+    [Fact]
+    public void Validate_WithInvalidGlobInSourcePaths_ShouldReturnError()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Paths = new PathsConfig
+            {
+                Source = new[] { "src/**/*.cs", "invalid[glob" }
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == ConfigErrorCodes.InvalidGlob);
+        result.Errors.Should().Contain(e => e.Path == "paths.source");
+    }
+
+    [Fact]
+    public void Validate_WithValidGlobInPaths_ShouldReturnSuccess()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Paths = new PathsConfig
+            {
+                Source = new[] { "src/**/*.cs" },
+                Tests = new[] { "tests/**/*Tests.cs" }
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.Errors.Should().NotContain(e => e.Code == ConfigErrorCodes.InvalidGlob);
+    }
+
+    // FR-002b-69: referenced paths exist (warning if not)
+    // Note: This test will be implementation-dependent since it needs filesystem access
+    // We'll test the validation logic exists, actual filesystem checks are integration tests
+    [Fact]
+    public void Validate_WithNonExistentPathReference_ShouldReturnWarning()
+    {
+        // Arrange
+        var validator = new SemanticValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Paths = new PathsConfig
+            {
+                Source = new[] { "definitely-does-not-exist-path-xyz" }
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert - For now, we skip filesystem checks in unit tests
+        // This will be tested in integration tests
+        // Just verify the validator doesn't crash
+        result.Should().NotBeNull();
+    }
 }

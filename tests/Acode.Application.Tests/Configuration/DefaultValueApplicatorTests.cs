@@ -233,4 +233,56 @@ public class DefaultValueApplicatorTests
         config.Mode.Should().BeNull(); // Original unchanged
         result!.Mode.Should().NotBeNull(); // Result has defaults
     }
+
+    [Fact]
+    public void Apply_WithMultipleMissingFields_ShouldApplyAllDefaults()
+    {
+        // Arrange
+        var applicator = new DefaultValueApplicator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = string.Empty, // Missing - should get default
+            Mode = null, // Missing - should get defaults
+            Model = null // Missing - should get defaults
+        };
+
+        // Act
+        var result = applicator.Apply(config);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.SchemaVersion.Should().Be("1.0.0");
+        result.Mode.Should().NotBeNull();
+        result.Mode!.Default.Should().Be("local-only");
+        result.Mode.AllowBurst.Should().BeTrue("default allow_burst is true per FR-002b-96");
+        result.Model.Should().NotBeNull();
+        result.Model!.Provider.Should().Be("ollama");
+    }
+
+    [Fact]
+    public void Apply_WithAllFieldsAlreadyPresent_ShouldOnlyCreateNewInstance()
+    {
+        // Arrange - Config with all fields explicitly set
+        var applicator = new DefaultValueApplicator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "2.0.0",
+            Project = new ProjectConfig { Name = "my-project", Type = "python" },
+            Mode = new ModeConfig { Default = "airgapped", AllowBurst = false },
+            Model = new ModelConfig { Provider = "vllm", Name = "custom-model" }
+        };
+
+        // Act
+        var result = applicator.Apply(config);
+
+        // Assert - All explicit values preserved
+        result.Should().NotBeNull();
+        result!.SchemaVersion.Should().Be("2.0.0", "explicit schema version should be preserved");
+        result.Project.Should().NotBeNull();
+        result.Project!.Name.Should().Be("my-project");
+        result.Mode.Should().NotBeNull();
+        result.Mode!.Default.Should().Be("airgapped", "explicit mode should be preserved");
+        result.Model.Should().NotBeNull();
+        result.Model!.Provider.Should().Be("vllm", "explicit provider should be preserved");
+    }
 }
