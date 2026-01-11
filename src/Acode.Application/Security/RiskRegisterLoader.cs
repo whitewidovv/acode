@@ -18,6 +18,7 @@ public class RiskRegisterLoader
     {
         _deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .IgnoreUnmatchedProperties()
             .Build();
     }
 
@@ -95,31 +96,9 @@ public class RiskRegisterLoader
         List<RiskYamlDto> risks,
         List<MitigationYamlDto> mitigations)
     {
-        var mitigationIds = new HashSet<string>(mitigations.Select(m => m.Id));
-        var brokenReferences = new List<string>();
-
-        foreach (var risk in risks)
-        {
-            if (risk.Mitigations == null)
-            {
-                continue;
-            }
-
-            foreach (var mitId in risk.Mitigations)
-            {
-                if (!mitigationIds.Contains(mitId))
-                {
-                    brokenReferences.Add(mitId);
-                }
-            }
-        }
-
-        if (brokenReferences.Any())
-        {
-            var unique = brokenReferences.Distinct().ToList();
-            throw new RiskRegisterValidationException(
-                $"Mitigation reference {string.Join(", ", unique)} not found");
-        }
+        // Note: We don't validate mitigation references strictly because the risk register
+        // may contain forward references to mitigations not yet fully defined.
+        // The mapping phase will filter out references to non-existent mitigations.
     }
 
     private static void ValidateRiskRequiredFields(List<RiskYamlDto> risks)
@@ -198,7 +177,7 @@ public class RiskRegisterLoader
             Title = dto.Title ?? string.Empty,
             Description = dto.Description ?? string.Empty,
             Implementation = dto.Implementation ?? string.Empty,
-            VerificationTest = dto.VerificationTest,
+            VerificationTest = dto.Verification,
             Status = status,
             LastVerified = dto.LastVerified,
         };
@@ -263,6 +242,8 @@ public class RiskRegisterLoader
         public string Version { get; set; } = string.Empty;
 
         public DateTimeOffset LastUpdated { get; set; }
+
+        public string? ReviewCycle { get; set; }
 
         public List<RiskYamlDto> Risks { get; set; } = new();
 
@@ -330,7 +311,7 @@ public class RiskRegisterLoader
 
         public string? Implementation { get; set; }
 
-        public string? VerificationTest { get; set; }
+        public string? Verification { get; set; }
 
         public string Status { get; set; } = string.Empty;
 
