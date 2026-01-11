@@ -328,18 +328,16 @@ public sealed class SemanticValidator
         ValidateCommandForShellInjection(config.Commands?.Start, "commands.start", errors);
 
         // FR-002b-58: network.allowlist only valid in Burst mode
-        if (config.Network?.Allowlist?.Count > 0)
+        if (config.Network?.Allowlist?.Count > 0 &&
+            !string.Equals(config.Mode?.Default, "burst", StringComparison.OrdinalIgnoreCase))
         {
-            if (!string.Equals(config.Mode?.Default, "burst", StringComparison.OrdinalIgnoreCase))
+            errors.Add(new ValidationError
             {
-                errors.Add(new ValidationError
-                {
-                    Code = "NETWORK_ALLOWLIST_INVALID_MODE",
-                    Message = "network.allowlist is only valid in 'burst' mode",
-                    Severity = ValidationSeverity.Error,
-                    Path = "network.allowlist"
-                });
-            }
+                Code = "NETWORK_ALLOWLIST_INVALID_MODE",
+                Message = "network.allowlist is only valid in 'burst' mode",
+                Severity = ValidationSeverity.Error,
+                Path = "network.allowlist"
+            });
         }
 
         // FR-002b-62: ignore patterns are valid globs
