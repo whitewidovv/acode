@@ -290,7 +290,7 @@ case "reload" => await ReloadAsync(context, repositoryRoot),
 ---
 
 ### Gap #6: Implement Configuration Redaction
-**Status**: [🔄]
+**Status**: [✅]
 **Files**:
 - `src/Acode.Application/Configuration/ConfigRedactor.cs` (NEW)
 - `src/Acode.Cli/Commands/ConfigCommand.cs` (update Show method)
@@ -331,7 +331,13 @@ public class ConfigRedactor
 - ConfigCommand.Show uses redaction
 - Tests verify all sensitive fields redacted
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- ✅ ConfigRedactor class created in src/Acode.Application/Configuration/ConfigRedactor.cs
+- ✅ ConfigRedactorTests.cs created with 10 tests - all passing
+- ✅ Redacts Dsn field with format "[REDACTED:dsn]"
+- ✅ Handles null navigation gracefully
+- ✅ Does not mutate original config
+- ✅ Commit: 635bc88 "feat(task-002b): implement configuration redaction (Gap #6)"
 
 ---
 
@@ -480,9 +486,9 @@ public class ConfigurationBenchmarks
 
 ## Tracking Progress
 
-**Completed Gaps**: 0/9
-**Completed Tests**: ~48/100+ required
-**Code Coverage**: ~70% (target: >90%)
+**Completed Gaps**: 4/9 (Gaps 1, 2, 3, 6)
+**Completed Tests**: ~63/100+ required (10 new ConfigRedactor tests added)
+**Code Coverage**: ~75% (target: >90%)
 **Audit Status**: Not started
 
 Update these metrics as gaps are completed.
