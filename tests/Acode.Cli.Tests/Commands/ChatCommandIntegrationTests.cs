@@ -45,7 +45,7 @@ public sealed class ChatCommandIntegrationTests : IDisposable
 
         // Use exact schema from 001_InitialSchema.sql migration
         var createTablesSql = @"
-            CREATE TABLE chats (
+            CREATE TABLE conv_chats (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 tags TEXT,
@@ -58,7 +58,7 @@ public sealed class ChatCommandIntegrationTests : IDisposable
                 updated_at TEXT NOT NULL
             );
 
-            CREATE TABLE runs (
+            CREATE TABLE conv_runs (
                 id TEXT PRIMARY KEY,
                 chat_id TEXT NOT NULL,
                 model_id TEXT NOT NULL,
@@ -70,11 +70,11 @@ public sealed class ChatCommandIntegrationTests : IDisposable
                 sequence_number INTEGER NOT NULL,
                 error_message TEXT,
                 sync_status TEXT DEFAULT 'Pending',
-                FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+                FOREIGN KEY (chat_id) REFERENCES conv_chats(id) ON DELETE CASCADE,
                 UNIQUE(chat_id, sequence_number)
             );
 
-            CREATE TABLE messages (
+            CREATE TABLE conv_messages (
                 id TEXT PRIMARY KEY,
                 run_id TEXT NOT NULL,
                 role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
@@ -83,7 +83,7 @@ public sealed class ChatCommandIntegrationTests : IDisposable
                 created_at TEXT NOT NULL,
                 sequence_number INTEGER NOT NULL,
                 sync_status TEXT DEFAULT 'Pending',
-                FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+                FOREIGN KEY (run_id) REFERENCES conv_runs(id) ON DELETE CASCADE,
                 UNIQUE(run_id, sequence_number)
             );";
 

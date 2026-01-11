@@ -1,3 +1,5 @@
+#pragma warning disable IDE0005 // Using directive is unnecessary
+
 using Acode.Domain.Configuration;
 using Acode.Infrastructure.Search;
 using FluentAssertions;

@@ -1,3 +1,5 @@
+#pragma warning disable IDE0005 // Using directive is unnecessary
+
 using Acode.Domain.Conversation;
 using Acode.Domain.Models.Inference;
 using Acode.Domain.Search;
