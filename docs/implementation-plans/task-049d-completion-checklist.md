@@ -1779,7 +1779,7 @@ dotnet test --filter "SearchE2ETests" --verbosity normal
 
 ### P7.4: Edge Case Tests for Query Handling (AC-026, AC-027, AC-028, AC-029, AC-030, AC-031)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE (5/6 tests - AC-030 parser performance deferred)
 
 **Tests to Create**:
 - tests/Acode.Integration.Tests/Search/SearchE2ETests.cs (ADD 6 NEW):
