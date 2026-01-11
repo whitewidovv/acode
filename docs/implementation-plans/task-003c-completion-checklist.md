@@ -358,7 +358,7 @@ IDisposable BeginSpan(string operation);
 ---
 
 ### Gap #10: Infrastructure - AuditRedactor
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Infrastructure/Audit/AuditRedactor.cs`
 
 **Why Needed**: Implementation Prompt line 5354-5421 provides complete implementation for redacting sensitive data.
@@ -376,7 +376,32 @@ IDisposable BeginSpan(string operation);
 - Tests verify each pattern type
 - No false positives on non-sensitive data
 
-**Evidence**: [To be filled when complete]
+**Evidence**: All 22 tests passed
+- AuditRedactor.cs (133 lines) with security-critical redaction:
+  - Redact: String pattern matching with 6 regex patterns
+  - RedactData: Dictionary key-based redaction
+  - Special handling for Bearer tokens (no delimiter)
+  - Special handling for PEM keys
+  - Preserves key names, redacts only values
+- Regex patterns (using .NET 7+ GeneratedRegex for performance):
+  - Password patterns (password=, db_password:, etc.)
+  - Token patterns (token=, access_token:, etc.)
+  - API key patterns (api_key=, apiKey:, x-api-key:, etc.)
+  - Secret patterns (secret=, aws_secret_access_key=, etc.)
+  - Bearer tokens (Bearer eyJ..., Authorization: Bearer...)
+  - PEM keys (-----BEGIN RSA PRIVATE KEY-----)
+- AuditRedactorTests.cs (218 lines) with 22 test methods covering:
+  - API key redaction (3 variations)
+  - Password redaction (4 variations)
+  - Token redaction (4 variations)
+  - Secret pattern redaction (3 variations)
+  - Dictionary key sensitivity (password, api_key, token, credential)
+  - Nested secrets in JSON strings
+  - Non-sensitive data preservation
+  - Empty input handling
+  - Multiple secrets in single string
+  - String values in dictionaries
+  - Case-insensitive key detection
 
 ---
 
