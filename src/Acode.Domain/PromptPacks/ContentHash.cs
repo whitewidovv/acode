@@ -6,6 +6,11 @@ namespace Acode.Domain.PromptPacks;
 /// <summary>
 /// Represents a SHA-256 content hash for integrity verification.
 /// </summary>
+/// <remarks>
+/// Uses case-insensitive comparison for hash values.
+/// Implemented as a class with IEquatable rather than record because
+/// record equality is case-sensitive and we need case-insensitive matching.
+/// </remarks>
 public sealed class ContentHash : IEquatable<ContentHash>
 {
     private readonly string _value;

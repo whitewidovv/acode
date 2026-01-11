@@ -134,7 +134,7 @@ public sealed class TimeoutManager : IDisposable
         try
         {
             await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, linkedCts.Token)
-                .ConfigureAwait(true);
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

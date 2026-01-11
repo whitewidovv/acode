@@ -59,7 +59,7 @@ public sealed class PreflightChecker : IPreflightChecker
 
             try
             {
-                var checkResult = await check.RunAsync(cancellationToken).ConfigureAwait(true);
+                var checkResult = await check.RunAsync(cancellationToken).ConfigureAwait(false);
                 result.AddResult(checkResult);
 
                 if (checkResult.Passed)

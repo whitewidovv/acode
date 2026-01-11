@@ -133,7 +133,7 @@ public sealed class SignalHandler
 
         try
         {
-            await Task.Delay(timeout, _shutdownCts.Token).ConfigureAwait(true);
+            await Task.Delay(timeout, _shutdownCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

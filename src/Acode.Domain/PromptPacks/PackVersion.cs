@@ -5,6 +5,11 @@ namespace Acode.Domain.PromptPacks;
 /// <summary>
 /// Represents a semantic version (SemVer 2.0) for prompt pack versioning.
 /// </summary>
+/// <remarks>
+/// Implements value-based equality excluding BuildMetadata per SemVer 2.0 specification.
+/// Implemented as a class with IEquatable rather than record because
+/// record equality would include BuildMetadata, violating SemVer semantics.
+/// </remarks>
 public sealed partial class PackVersion : IComparable<PackVersion>, IEquatable<PackVersion>
 {
     private static readonly Regex SemVerRegex = SemVerPattern();
