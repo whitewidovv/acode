@@ -122,7 +122,7 @@ public sealed record SpanId
 ---
 
 ### Gap #3: Add SpanId and ParentSpanId to AuditEvent
-**Status**: [🔄]
+**Status**: [✅]
 **File to Modify**: `src/Acode.Domain/Audit/AuditEvent.cs`
 
 **Why Needed**: Implementation Prompt line 5200-5201 defines SpanId and ParentSpanId as optional properties. Testing Requirements line 1009-1032 validate these properties.
@@ -141,12 +141,15 @@ public SpanId? ParentSpanId { get; init; }
 - Properties are optional (nullable)
 - Tests pass: Should_Support_SpanId(), Should_Support_ParentSpanId()
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- Added SpanId? and ParentSpanId? properties to AuditEvent
+- Build successful, no errors
+- Properties are nullable as per spec
 
 ---
 
 ### Gap #4: AuditEvent Tests File
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `tests/Acode.Domain.Tests/Audit/AuditEventTests.cs`
 
 **Why Needed**: Testing Requirements line 831-1115 defines comprehensive test suite for AuditEvent with 13 tests.
@@ -176,12 +179,16 @@ public SpanId? ParentSpanId { get; init; }
 - Tests verify immutability, serialization, format compliance
 - All tests pass
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- AuditEventTests.cs created with 15 test methods
+- All 19 test executions passing (includes theory with 5 cases)
+- Tests validate: ID formats, timestamps, serialization, span hierarchy
+- JSON serialization to single-line JSONL format verified
 
 ---
 
 ### Gap #5: Expand IAuditLogger Interface
-**Status**: [ ]
+**Status**: [🔄]
 **File to Modify**: `src/Acode.Application/Audit/IAuditLogger.cs`
 
 **Why Needed**: Implementation Prompt line 5252-5284 defines complete IAuditLogger interface with 5 methods. Current implementation only has 2 methods.
@@ -806,9 +813,9 @@ Each command should:
 ## Summary
 
 **Total Gaps**: 28
-**Completed**: 2
-**In Progress**: 1 (Gap #3)
-**Remaining**: 25
+**Completed**: 4
+**In Progress**: 1 (Gap #5)
+**Remaining**: 23
 
 ## Next Steps
 
