@@ -318,7 +318,7 @@ IDisposable BeginSpan(string operation);
 ---
 
 ### Gap #9: Infrastructure - AuditIntegrityVerifier
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Infrastructure/Audit/AuditIntegrityVerifier.cs`
 
 **Why Needed**: Implementation Prompt line 5166 lists this as required infrastructure component. Required for `audit verify` CLI command.
@@ -338,7 +338,22 @@ IDisposable BeginSpan(string operation);
 - Verifies checksums correctly
 - Reports clear errors
 
-**Evidence**: [To be filled when complete]
+**Evidence**: All 10 tests passed
+- AuditIntegrityVerifier.cs (92 lines) with three methods:
+  - ComputeChecksum: SHA256 hash computation
+  - WriteChecksumFile: Create .sha256 sidecar file
+  - Verify: Compare file checksum against sidecar
+- AuditIntegrityVerifierTests.cs (265 lines) with 10 test methods covering:
+  - SHA256 checksum computation (64 hex chars, lowercase)
+  - Checksum updates on each write
+  - Modification detection
+  - Truncation detection
+  - Insertion detection
+  - Checksum file creation
+  - Valid log verification
+  - Missing checksum file handling
+  - Missing log file handling
+  - Empty file verification
 
 ---
 
