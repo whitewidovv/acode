@@ -11,13 +11,12 @@ Requirements: FR-002a-72, FR-002a-80, NFR-002a-05
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Dict, Any
 
 import pytest
 import yaml
-from jsonschema import Draft202012Validator, ValidationError, validators
+from jsonschema import Draft202012Validator, ValidationError
 
 
 # Paths relative to repository root

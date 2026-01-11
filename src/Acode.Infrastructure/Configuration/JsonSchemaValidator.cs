@@ -38,9 +38,22 @@ public sealed class JsonSchemaValidator : ISchemaValidator
 
         using var reader = new StreamReader(stream);
         var schemaJson = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        var schema = await JsonSchema.FromJsonAsync(schemaJson, cancellationToken).ConfigureAwait(false);
 
-        return new JsonSchemaValidator(schema);
+        // Write to temp file for proper $ref resolution (FromFileAsync handles this better)
+        var tempFile = Path.Combine(Path.GetTempPath(), $"config-schema-{Guid.NewGuid()}.json");
+        try
+        {
+            await File.WriteAllTextAsync(tempFile, schemaJson, cancellationToken).ConfigureAwait(false);
+            var schema = await JsonSchema.FromFileAsync(tempFile, cancellationToken).ConfigureAwait(false);
+            return new JsonSchemaValidator(schema);
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+            {
+                File.Delete(tempFile);
+            }
+        }
     }
 
     /// <summary>
@@ -110,8 +123,11 @@ public sealed class JsonSchemaValidator : ISchemaValidator
             // Serialize to JSON using Newtonsoft.Json (preserves types better)
             var json = JsonConvert.SerializeObject(yamlObject, Formatting.None);
 
-            // Validate against schema
-            var schemaErrors = _schema.Validate(json);
+            // Parse JSON to ensure it's well-formed before validation
+            var jsonObject = Newtonsoft.Json.Linq.JToken.Parse(json);
+
+            // Validate against schema using the schema's built-in validator
+            var schemaErrors = _schema.Validate(jsonObject);
 
             if (schemaErrors.Count == 0)
             {

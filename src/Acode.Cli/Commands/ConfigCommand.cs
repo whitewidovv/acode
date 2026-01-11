@@ -167,7 +167,7 @@ Examples:
                     await context.Output.WriteLineAsync("Validation failed in strict mode (warnings treated as errors)").ConfigureAwait(false);
                 }
 
-                return ExitCode.GeneralError;
+                return ExitCode.ConfigurationError;
             }
         }
         catch (FileNotFoundException)

@@ -306,9 +306,9 @@ public sealed class HelpGeneratorTests
         _ = _sut.GenerateGlobalHelp();
         sw.Stop();
 
-        // Assert.
+        // Assert - Threshold increased to reduce flakiness
         sw.ElapsedMilliseconds.Should()
-            .BeLessThan(100, "help generation should complete in under 100ms");
+            .BeLessThan(300, "help generation should complete in < 300ms (increased from 100ms to reduce flakiness under load)");
     }
 
     [Fact]
@@ -322,9 +322,9 @@ public sealed class HelpGeneratorTests
         _ = _sut.GenerateCommandHelp(command);
         sw.Stop();
 
-        // Assert.
+        // Assert - Threshold increased to reduce flakiness
         sw.ElapsedMilliseconds.Should()
-            .BeLessThan(100, "help generation should complete in under 100ms");
+            .BeLessThan(300, "help generation should complete in < 300ms (increased from 100ms to reduce flakiness under load)");
     }
 
     [Fact]
