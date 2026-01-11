@@ -239,4 +239,168 @@ public sealed class ConfigValidatorTests
         result.WarningsOnly.Should().NotBeEmpty();
         result.WarningsOnly.Should().ContainSingle(e => e.Code == "DUPLICATE_LANGUAGES");
     }
+
+    [Fact]
+    public async Task Validate_ConcurrentValidation_ShouldBeThreadSafe()
+    {
+        // Arrange - Test thread safety with concurrent validation calls
+        var validator = new ConfigValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Mode = new ModeConfig
+            {
+                Default = "local-only"
+            }
+        };
+
+        // Act - Run 10 concurrent validations
+        var tasks = Enumerable.Range(0, 10)
+            .Select(_ => Task.Run(() => validator.Validate(config)))
+            .ToArray();
+
+        var results = await Task.WhenAll(tasks).ConfigureAwait(true);
+
+        // Assert - All validations should succeed
+        foreach (var result in results)
+        {
+            result.IsValid.Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task ValidateFileAsync_WithValidConfigAndNoSchemaValidator_ShouldReturnSuccess()
+    {
+        // Arrange - When no schema validator, should still succeed with valid file
+        var validator = new ConfigValidator();
+        var tempFile = Path.GetTempFileName();
+
+        try
+        {
+            await File.WriteAllTextAsync(tempFile, "schema_version: \"1.0.0\"").ConfigureAwait(true);
+
+            // Act
+            var result = await validator.ValidateFileAsync(tempFile).ConfigureAwait(true);
+
+            // Assert
+            result.IsValid.Should().BeTrue();
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+            {
+                File.Delete(tempFile);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ValidateFileAsync_WithComplexValidConfig_ShouldReturnSuccess()
+    {
+        // Arrange
+        var validator = new ConfigValidator();
+        var tempFile = Path.GetTempFileName();
+
+        try
+        {
+            var configContent = @"
+schema_version: ""1.0.0""
+project:
+  name: test-project
+  type: dotnet
+mode:
+  default: local-only
+  allow_burst: false
+";
+            await File.WriteAllTextAsync(tempFile, configContent).ConfigureAwait(true);
+
+            // Act
+            var result = await validator.ValidateFileAsync(tempFile).ConfigureAwait(true);
+
+            // Assert
+            result.IsValid.Should().BeTrue();
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+            {
+                File.Delete(tempFile);
+            }
+        }
+    }
+
+    [Fact]
+    public void Validate_WithAllValidationLayersSucceeding_ShouldReturnSuccess()
+    {
+        // Arrange - Config that passes both schema and semantic validation
+        var validator = new ConfigValidator();
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Project = new ProjectConfig
+            {
+                Name = "test-project",
+                Type = "dotnet",
+                Languages = new[] { "csharp" }
+            },
+            Mode = new ModeConfig
+            {
+                Default = "local-only",
+                AllowBurst = false
+            },
+            Model = new ModelConfig
+            {
+                Provider = "ollama",
+                Name = "codellama:7b"
+            }
+        };
+
+        // Act
+        var result = validator.Validate(config);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
+        result.WarningsOnly.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ValidateFileAsync_WithSchemaErrors_ShouldReturnEarlyWithoutSemanticValidation()
+    {
+        // Arrange - When schema validation fails, validation stops early
+        var schemaValidator = Substitute.For<ISchemaValidator>();
+        var validator = new ConfigValidator(schemaValidator);
+        var tempFile = Path.GetTempFileName();
+
+        try
+        {
+            // Create a file (content doesn't matter - schema validator will fail it)
+            await File.WriteAllTextAsync(tempFile, "invalid: config").ConfigureAwait(true);
+
+            // Mock schema error
+            var schemaError = new ValidationError
+            {
+                Code = ConfigErrorCodes.TypeMismatch,
+                Message = "Schema validation failed",
+                Severity = ValidationSeverity.Error
+            };
+
+            schemaValidator.ValidateAsync(tempFile, Arg.Any<CancellationToken>())
+                .Returns(ValidationResult.Failure(schemaError));
+
+            // Act
+            var result = await validator.ValidateFileAsync(tempFile).ConfigureAwait(true);
+
+            // Assert - Should only have schema error (validation stops early)
+            result.IsValid.Should().BeFalse();
+            result.Errors.Should().ContainSingle(e => e.Code == ConfigErrorCodes.TypeMismatch);
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+            {
+                File.Delete(tempFile);
+            }
+        }
+    }
 }
