@@ -17,22 +17,32 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public sealed class AtomicFileLockService : ILockService
 {
+    /// <summary>
+    /// Default threshold for considering a lock stale (5 minutes).
+    /// Can be configured based on deployment needs.
+    /// </summary>
+    private static readonly TimeSpan DefaultStaleLockThreshold = TimeSpan.FromMinutes(5);
+
     private readonly string _locksDirectory;
     private readonly ILogger<AtomicFileLockService> _logger;
     private readonly SafeLockPathResolver _pathResolver;
+    private readonly TimeSpan _staleLockThreshold;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AtomicFileLockService"/> class.
     /// </summary>
     /// <param name="workspaceRoot">The workspace root directory.</param>
     /// <param name="logger">The logger instance.</param>
+    /// <param name="staleLockThreshold">Optional threshold for stale lock detection. Defaults to 5 minutes.</param>
     public AtomicFileLockService(
         string workspaceRoot,
-        ILogger<AtomicFileLockService> logger)
+        ILogger<AtomicFileLockService> logger,
+        TimeSpan? staleLockThreshold = null)
     {
         _locksDirectory = Path.Combine(workspaceRoot, ".agent", "locks");
         _logger = logger;
         _pathResolver = new SafeLockPathResolver(workspaceRoot, logger);
+        _staleLockThreshold = staleLockThreshold ?? DefaultStaleLockThreshold;
 
         Directory.CreateDirectory(_locksDirectory);
     }
@@ -139,7 +149,7 @@ public sealed class AtomicFileLockService : ILockService
         }
 
         var age = DateTimeOffset.UtcNow - data.LockedAt;
-        var isStale = age > TimeSpan.FromMinutes(5);
+        var isStale = age > _staleLockThreshold;
 
         return new LockStatus(true, isStale, age, data.ProcessId, data.Hostname, data.Terminal);
     }
