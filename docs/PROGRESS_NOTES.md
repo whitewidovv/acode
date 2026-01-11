@@ -33,7 +33,9 @@ Following TDD approach, implementing 28 gaps in order:
 - Gaps #6-27: Infrastructure, Application, CLI, Integration
 - Gap #28: Final verification
 
-### MAJOR MILESTONE: Gaps 1-6 Complete ✅ (21.4% of Task 003c)
+### MAJOR MILESTONE: Gaps 1-10 Complete ✅ (35.7% of Task 003c)
+
+**Domain Layer Complete** (Gaps 1-6):
 - **Gap #1**: Value objects (EventId, SessionId, CorrelationId) - 27 tests passing
 - **Gap #2**: SpanId value object - 9 tests passing
 - **Gap #3**: Added SpanId/ParentSpanId to AuditEvent
@@ -41,9 +43,16 @@ Following TDD approach, implementing 28 gaps in order:
 - **Gap #5**: IAuditLogger interface expanded - 5 methods total
 - **Gap #6**: Domain supporting types (4 classes + 2 enums)
 
-**Total Tests Passing**: 55+ (all domain layer tests)
-**Gaps Completed**: 6/28 (21.4%)
-**Files Created/Modified**: 20+
+**Infrastructure Layer (Phase 1) Complete** (Gaps 7-10):
+- **Gap #7**: FileAuditWriter - JSONL with SHA256 checksums, rotation
+- **Gap #8**: AuditLogRotator - Size/time-based rotation, cleanup, storage limits (10 tests)
+- **Gap #9**: AuditIntegrityVerifier - Tamper detection via checksums (10 tests)
+- **Gap #10**: AuditRedactor - Sensitive data redaction, 6 regex patterns (22 tests)
+
+**Total Tests Passing**: 97+ (all infrastructure tests green)
+**Gaps Completed**: 10/28 (35.7%)
+**Files Created/Modified**: 30+
+**Commits**: 15+ (all pushed to remote)
 
 ### Commits This Session
 - 12+ commits on feature/task-003c-audit-baseline branch
