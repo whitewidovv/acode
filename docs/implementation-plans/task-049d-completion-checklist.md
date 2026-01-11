@@ -1448,7 +1448,7 @@ Currently all values hardcoded. Need configuration support.
 
 ### P6.1: Create SearchSettings Configuration Class
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
@@ -1512,7 +1512,7 @@ Currently all values hardcoded. Need configuration support.
 
 ### P6.2: Update BM25Ranker to Use SearchSettings (AC-054, AC-055)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
@@ -1565,7 +1565,7 @@ Currently all values hardcoded. Need configuration support.
 
 ### P6.3: Update SnippetGenerator to Use SearchSettings (AC-059)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
@@ -1614,7 +1614,7 @@ Currently all values hardcoded. Need configuration support.
 
 ### P6.4: Update SnippetGenerator to Use Configurable Highlight Tags (AC-065)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
@@ -2164,12 +2164,12 @@ acode search "test" --json
 **Current Progress**: 0/132 AC complete (27/132 from Phase 0-8, need 105 more)
 
 **Priorities Completed**:
-- [ ] Priority 1: Fix Spec Mismatches (3 items)
-- [ ] Priority 2: Boolean Operators (3 items)
+- [✅] Priority 1: Fix Spec Mismatches (3 items) - COMPLETE
+- [✅] Priority 2: Boolean Operators (3 items) - COMPLETE
 - [✅] Priority 3: Field-Specific Queries (1 item) - COMPLETE
 - [✅] Priority 4: Error Codes (7 items) - COMPLETE
 - [✅] Priority 5: CLI Index Commands (3 items) - COMPLETE
-- [ ] Priority 6: Configurable Settings (4 items)
+- [✅] Priority 6: Configurable Settings (4 items) - COMPLETE
 - [ ] Priority 7: Missing Tests (10 items)
 
 **Total New Tests Expected**: ~100+ tests
