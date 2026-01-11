@@ -251,70 +251,54 @@ public sealed class SemanticValidator
         // FR-002b-55: paths cannot escape repository root (absolute paths)
         if (config.Paths?.Source != null)
         {
-            foreach (var path in config.Paths.Source)
-            {
-                if (IsAbsolutePath(path))
+            errors.AddRange(config.Paths.Source
+                .Where(IsAbsolutePath)
+                .Select(path => new ValidationError
                 {
-                    errors.Add(new ValidationError
-                    {
-                        Code = "PATH_ESCAPE_ATTEMPT",
-                        Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
-                        Severity = ValidationSeverity.Error,
-                        Path = "paths.source"
-                    });
-                }
-            }
+                    Code = "PATH_ESCAPE_ATTEMPT",
+                    Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
+                    Severity = ValidationSeverity.Error,
+                    Path = "paths.source"
+                }));
         }
 
         if (config.Paths?.Tests != null)
         {
-            foreach (var path in config.Paths.Tests)
-            {
-                if (IsAbsolutePath(path))
+            errors.AddRange(config.Paths.Tests
+                .Where(IsAbsolutePath)
+                .Select(path => new ValidationError
                 {
-                    errors.Add(new ValidationError
-                    {
-                        Code = "PATH_ESCAPE_ATTEMPT",
-                        Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
-                        Severity = ValidationSeverity.Error,
-                        Path = "paths.tests"
-                    });
-                }
-            }
+                    Code = "PATH_ESCAPE_ATTEMPT",
+                    Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
+                    Severity = ValidationSeverity.Error,
+                    Path = "paths.tests"
+                }));
         }
 
         if (config.Paths?.Output != null)
         {
-            foreach (var path in config.Paths.Output)
-            {
-                if (IsAbsolutePath(path))
+            errors.AddRange(config.Paths.Output
+                .Where(IsAbsolutePath)
+                .Select(path => new ValidationError
                 {
-                    errors.Add(new ValidationError
-                    {
-                        Code = "PATH_ESCAPE_ATTEMPT",
-                        Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
-                        Severity = ValidationSeverity.Error,
-                        Path = "paths.output"
-                    });
-                }
-            }
+                    Code = "PATH_ESCAPE_ATTEMPT",
+                    Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
+                    Severity = ValidationSeverity.Error,
+                    Path = "paths.output"
+                }));
         }
 
         if (config.Paths?.Docs != null)
         {
-            foreach (var path in config.Paths.Docs)
-            {
-                if (IsAbsolutePath(path))
+            errors.AddRange(config.Paths.Docs
+                .Where(IsAbsolutePath)
+                .Select(path => new ValidationError
                 {
-                    errors.Add(new ValidationError
-                    {
-                        Code = "PATH_ESCAPE_ATTEMPT",
-                        Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
-                        Severity = ValidationSeverity.Error,
-                        Path = "paths.docs"
-                    });
-                }
-            }
+                    Code = "PATH_ESCAPE_ATTEMPT",
+                    Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
+                    Severity = ValidationSeverity.Error,
+                    Path = "paths.docs"
+                }));
         }
 
         // FR-002b-57: command strings checked for shell injection
@@ -341,79 +325,67 @@ public sealed class SemanticValidator
         // FR-002b-62: ignore patterns are valid globs
         if (config.Ignore?.Patterns != null)
         {
-            foreach (var pattern in config.Ignore.Patterns)
-            {
-                if (!IsValidGlobPattern(pattern))
+            errors.AddRange(config.Ignore.Patterns
+                .Where(pattern => !IsValidGlobPattern(pattern))
+                .Select(pattern => new ValidationError
                 {
-                    errors.Add(new ValidationError
-                    {
-                        Code = ConfigErrorCodes.InvalidGlob,
-                        Message = $"Invalid glob pattern: {pattern}",
-                        Severity = ValidationSeverity.Error,
-                        Path = "ignore.patterns"
-                    });
-                }
-            }
+                    Code = ConfigErrorCodes.InvalidGlob,
+                    Message = $"Invalid glob pattern: {pattern}",
+                    Severity = ValidationSeverity.Error,
+                    Path = "ignore.patterns"
+                }));
         }
 
         if (config.Ignore?.Additional != null)
         {
-            foreach (var pattern in config.Ignore.Additional)
-            {
-                if (!IsValidGlobPattern(pattern))
+            errors.AddRange(config.Ignore.Additional
+                .Where(pattern => !IsValidGlobPattern(pattern))
+                .Select(pattern => new ValidationError
                 {
-                    errors.Add(new ValidationError
-                    {
-                        Code = ConfigErrorCodes.InvalidGlob,
-                        Message = $"Invalid glob pattern: {pattern}",
-                        Severity = ValidationSeverity.Error,
-                        Path = "ignore.additional"
-                    });
-                }
-            }
+                    Code = ConfigErrorCodes.InvalidGlob,
+                    Message = $"Invalid glob pattern: {pattern}",
+                    Severity = ValidationSeverity.Error,
+                    Path = "ignore.additional"
+                }));
         }
 
         // FR-002b-63: path patterns are valid globs
         if (config.Paths?.Source != null)
         {
-            foreach (var pattern in config.Paths.Source)
-            {
-                // Check if pattern contains glob characters or brackets
-                if ((pattern.Contains('*', StringComparison.Ordinal) ||
+            errors.AddRange(config.Paths.Source
+                .Where(pattern =>
+
+                    // Check if pattern contains glob characters or brackets
+                    (pattern.Contains('*', StringComparison.Ordinal) ||
                      pattern.Contains('[', StringComparison.Ordinal) ||
                      pattern.Contains('{', StringComparison.Ordinal)) &&
                     !IsValidGlobPattern(pattern))
+                .Select(pattern => new ValidationError
                 {
-                    errors.Add(new ValidationError
-                    {
-                        Code = ConfigErrorCodes.InvalidGlob,
-                        Message = $"Invalid glob pattern: {pattern}",
-                        Severity = ValidationSeverity.Error,
-                        Path = "paths.source"
-                    });
-                }
-            }
+                    Code = ConfigErrorCodes.InvalidGlob,
+                    Message = $"Invalid glob pattern: {pattern}",
+                    Severity = ValidationSeverity.Error,
+                    Path = "paths.source"
+                }));
         }
 
         if (config.Paths?.Tests != null)
         {
-            foreach (var pattern in config.Paths.Tests)
-            {
-                // Check if pattern contains glob characters or brackets
-                if ((pattern.Contains('*', StringComparison.Ordinal) ||
+            errors.AddRange(config.Paths.Tests
+                .Where(pattern =>
+
+                    // Check if pattern contains glob characters or brackets
+                    (pattern.Contains('*', StringComparison.Ordinal) ||
                      pattern.Contains('[', StringComparison.Ordinal) ||
                      pattern.Contains('{', StringComparison.Ordinal)) &&
                     !IsValidGlobPattern(pattern))
+                .Select(pattern => new ValidationError
                 {
-                    errors.Add(new ValidationError
-                    {
-                        Code = ConfigErrorCodes.InvalidGlob,
-                        Message = $"Invalid glob pattern: {pattern}",
-                        Severity = ValidationSeverity.Error,
-                        Path = "paths.tests"
-                    });
-                }
-            }
+                    Code = ConfigErrorCodes.InvalidGlob,
+                    Message = $"Invalid glob pattern: {pattern}",
+                    Severity = ValidationSeverity.Error,
+                    Path = "paths.tests"
+                }));
         }
 
         // FR-002b-69: referenced paths exist (warning if not)
