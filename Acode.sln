@@ -25,6 +25,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Acode.Cli.Tests", "tests\Ac
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Acode.Integration.Tests", "tests\Acode.Integration.Tests\Acode.Integration.Tests.csproj", "{5BE4AAA8-82B7-4D58-95DD-C6B1C30F65E9}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Acode.Infrastructure.Benchmarks", "tests\Acode.Infrastructure.Benchmarks\Acode.Infrastructure.Benchmarks.csproj", "{81BFC5B3-ACE7-4073-BBA8-31FDEC203CC1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -70,6 +72,10 @@ Global
 		{5BE4AAA8-82B7-4D58-95DD-C6B1C30F65E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5BE4AAA8-82B7-4D58-95DD-C6B1C30F65E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5BE4AAA8-82B7-4D58-95DD-C6B1C30F65E9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{81BFC5B3-ACE7-4073-BBA8-31FDEC203CC1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{81BFC5B3-ACE7-4073-BBA8-31FDEC203CC1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{81BFC5B3-ACE7-4073-BBA8-31FDEC203CC1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{81BFC5B3-ACE7-4073-BBA8-31FDEC203CC1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{5D1511A4-43EA-4DB5-B2EB-83ED1538BF0A} = {66DFEDAE-E1FA-43CE-A717-A0B7D402ACBF}
@@ -81,5 +87,6 @@ Global
 		{1C09F211-95B7-46FE-8774-CF4D77882554} = {48EA2BD7-3F6A-435A-A677-5E73893AD371}
 		{D3FD8C16-C928-47B3-BAD3-B8360F054378} = {48EA2BD7-3F6A-435A-A677-5E73893AD371}
 		{5BE4AAA8-82B7-4D58-95DD-C6B1C30F65E9} = {48EA2BD7-3F6A-435A-A677-5E73893AD371}
+		{81BFC5B3-ACE7-4073-BBA8-31FDEC203CC1} = {48EA2BD7-3F6A-435A-A677-5E73893AD371}
 	EndGlobalSection
 EndGlobal
