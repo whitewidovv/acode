@@ -199,7 +199,7 @@ All 32 tests pass. File: tests/Acode.Domain.Tests/Modes/MatrixExporterTests.cs
 
 ## GAP #2: Create ConfigMatrixCommandTests.cs
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **File to Create**: `tests/Acode.Cli.Tests/Commands/ConfigMatrixCommandTests.cs`
 
@@ -301,10 +301,10 @@ dotnet test --filter "FullyQualifiedName~ConfigMatrixCommandTests" --verbosity n
 ```
 
 **Success Criteria**:
-- [ ] File created at correct path
-- [ ] Minimum 8 tests implemented
-- [ ] All tests pass against existing ConfigMatrixCommand code
-- [ ] IT-001a-04 satisfied
+- [✅] File created at correct path
+- [✅] Minimum 8 tests implemented (16 tests created, exceeding minimum)
+- [✅] All tests pass against existing ConfigMatrixCommand code
+- [✅] IT-001a-04 satisfied
 
 **Commit Message Template**:
 ```
@@ -324,7 +324,21 @@ All tests pass. Closes gap #2 for task-001a.
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
 
-**Evidence**: [To be filled when complete - paste test run output]
+**Evidence**:
+```
+Test Run Successful.
+Total tests: 16
+     Passed: 16
+ Total time: 4.3990 Seconds
+
+Tests created:
+- Basic properties: 3 tests (Name_ReturnsMatrix, Aliases_ReturnsEmpty, Description_ReturnsNonEmpty)
+- Execution scenarios: 9 tests (ExecuteAsync_NoOptions_DisplaysFullMatrix, WithModeFilter_OnlyDisplaysThatMode, WithCapabilityFilter_ShowsCapabilityAcrossModes, WithJsonFormat_OutputsJson, WithTableFormat_OutputsTable, WithInvalidMode_UsesNoFilter, WithInvalidCapability_DisplaysDefaultTable, CombiningModeAndCapability_ShowsCapabilityComparison, JsonFormatWithModeFilter_StillOutputsFullJson)
+- Case insensitivity: 2 tests (WithCaseInsensitiveMode_Works, WithCaseInsensitiveCapability_Works)
+- Help and error handling: 2 tests (GetHelp_ReturnsUsageInstructions, ExecuteAsync_WithNullContext_ThrowsArgumentNullException)
+
+All 16 tests pass. File: tests/Acode.Cli.Tests/Commands/ConfigMatrixCommandTests.cs
+```
 
 ---
 
