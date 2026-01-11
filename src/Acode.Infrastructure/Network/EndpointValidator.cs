@@ -55,8 +55,7 @@ public class EndpointValidator : IEndpointValidator
         // LocalOnly mode: Check denylist for external LLM APIs
         if (LlmApiDenylist.IsDenied(endpoint))
         {
-            var reason = $"External LLM API '{endpoint.Host}' is denied in LocalOnly mode. " +
-                         $"Switch to Burst mode to use external APIs, or use local inference (localhost:11434).";
+            var reason = $"External LLM API '{endpoint.Host}' is denied in LocalOnly mode. Switch to Burst mode to use external APIs, or use local inference (localhost:11434).";
             return EndpointValidationResult.Denied("HC-01", reason);
         }
 

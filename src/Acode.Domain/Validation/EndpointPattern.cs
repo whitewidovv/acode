@@ -133,19 +133,15 @@ public record EndpointPattern
         // Should NOT match: openai.com (no subdomain)
         if (Pattern.StartsWith("*."))
         {
-            var domain = Pattern.Substring(2); // Remove "*."
+            var domain = Pattern[2..]; // Remove "*."
 
-            // Check if host ends with the domain (has subdomain)
-            // e.g., "api.openai.com" ends with "openai.com"
-            // but "openai.com" does NOT have a subdomain
-            if (uri.Host.EndsWith(domain, StringComparison.OrdinalIgnoreCase))
+            // Check if host ends with the domain and has a subdomain prefix
+            // e.g., "api.openai.com" ends with "openai.com" and has length > domain.Length
+            // but "openai.com" does NOT have a subdomain (length == domain.Length)
+            if (uri.Host.EndsWith(domain, StringComparison.OrdinalIgnoreCase)
+                && uri.Host.Length > domain.Length)
             {
-                // Ensure there's actually a subdomain prefix
-                // If host == domain, there's no subdomain
-                if (uri.Host.Length > domain.Length)
-                {
-                    return true;
-                }
+                return true;
             }
 
             return false;

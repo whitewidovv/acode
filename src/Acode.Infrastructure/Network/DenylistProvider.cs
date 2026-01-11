@@ -63,9 +63,14 @@ public class DenylistProvider
             // Invalid JSON - fall back to built-in
             return GetBuiltInDenylist();
         }
-        catch (Exception)
+        catch (IOException)
         {
-            // Any other error - fall back to built-in
+            // File access error - fall back to built-in
+            return GetBuiltInDenylist();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Permission denied - fall back to built-in
             return GetBuiltInDenylist();
         }
     }
@@ -97,36 +102,38 @@ public class DenylistProvider
 
     private static bool TryParsePatternType(string typeString, out PatternType patternType)
     {
-        return typeString?.ToLowerInvariant() switch
+        switch (typeString?.ToLowerInvariant())
         {
-            "exact" => SetOut(out patternType, PatternType.Exact),
-            "wildcard" => SetOut(out patternType, PatternType.Wildcard),
-            "regex" => SetOut(out patternType, PatternType.Regex),
-            _ => SetOut(out patternType, default, false)
-        };
-    }
-
-    private static bool SetOut<T>(out T value, T setValue, bool returnValue = true)
-    {
-        value = setValue;
-        return returnValue;
+            case "exact":
+                patternType = PatternType.Exact;
+                return true;
+            case "wildcard":
+                patternType = PatternType.Wildcard;
+                return true;
+            case "regex":
+                patternType = PatternType.Regex;
+                return true;
+            default:
+                patternType = default;
+                return false;
+        }
     }
 
     private class DenylistJson
     {
-        public string Version { get; set; } = string.Empty;
+        public required string Version { get; init; }
 
-        public string Updated { get; set; } = string.Empty;
+        public required string Updated { get; init; }
 
-        public List<PatternEntry> Patterns { get; set; } = new();
+        public required List<PatternEntry> Patterns { get; init; }
     }
 
     private class PatternEntry
     {
-        public string Pattern { get; set; } = string.Empty;
+        public required string Pattern { get; init; }
 
-        public string Type { get; set; } = string.Empty;
+        public required string Type { get; init; }
 
-        public string Description { get; set; } = string.Empty;
+        public required string Description { get; init; }
     }
 }

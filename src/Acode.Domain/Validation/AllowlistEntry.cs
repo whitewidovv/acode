@@ -127,10 +127,25 @@ public record AllowlistEntry
 
     private static bool IsLocalhostEquivalent(string host)
     {
-        // Strip brackets from IPv6 if present
-        var normalizedHost = host.TrimStart('[').TrimEnd(']');
+        var normalizedHost = NormalizeHost(host);
         return _localhostEquivalents.Any(equiv =>
-            equiv.TrimStart('[').TrimEnd(']').Equals(normalizedHost, StringComparison.OrdinalIgnoreCase));
+            NormalizeHost(equiv).Equals(normalizedHost, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeHost(string host)
+    {
+        if (string.IsNullOrEmpty(host))
+        {
+            return host;
+        }
+
+        // Strip brackets only when they are used as IPv6 delimiters
+        if (host.Length >= 2 && host[0] == '[' && host[^1] == ']')
+        {
+            return host[1..^1];
+        }
+
+        return host;
     }
 
     private static bool PortsEqual(int[]? ports1, int[]? ports2)
