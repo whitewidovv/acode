@@ -236,18 +236,16 @@ public sealed class SemanticValidator
         }
 
         // FR-002b-52: airgapped_lock prevents mode override
-        if (config.Mode?.AirgappedLock == true)
+        if (config.Mode?.AirgappedLock == true &&
+            !string.Equals(config.Mode.Default, "airgapped", StringComparison.OrdinalIgnoreCase))
         {
-            if (!string.Equals(config.Mode.Default, "airgapped", StringComparison.OrdinalIgnoreCase))
+            errors.Add(new ValidationError
             {
-                errors.Add(new ValidationError
-                {
-                    Code = "AIRGAPPED_LOCK_VIOLATION",
-                    Message = "When airgapped_lock is true, mode.default must be 'airgapped'",
-                    Severity = ValidationSeverity.Error,
-                    Path = "mode"
-                });
-            }
+                Code = "AIRGAPPED_LOCK_VIOLATION",
+                Message = "When airgapped_lock is true, mode.default must be 'airgapped'",
+                Severity = ValidationSeverity.Error,
+                Path = "mode"
+            });
         }
 
         // FR-002b-55: paths cannot escape repository root (absolute paths)
