@@ -93,7 +93,7 @@ public class ConfigCommandTests
         var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
         // Assert
-        exitCode.Should().Be(ExitCode.GeneralError, "validation should return error code for invalid config");
+        exitCode.Should().Be(ExitCode.ConfigurationError, "validation should return configuration error code for invalid config");
         output.ToString().Should().Contain("Invalid mode", "error message should be shown");
     }
 

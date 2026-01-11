@@ -125,7 +125,7 @@ Examples:
                     await context.Output.WriteLineAsync($"  [{severity}] {error.Path}: {error.Message}").ConfigureAwait(false);
                 }
 
-                return ExitCode.GeneralError;
+                return ExitCode.ConfigurationError;
             }
         }
         catch (FileNotFoundException)

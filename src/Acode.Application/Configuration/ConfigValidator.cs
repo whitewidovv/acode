@@ -78,6 +78,18 @@ public sealed class ConfigValidator : IConfigValidator
                 Path = "schema_version"
             });
         }
+        else if (config.SchemaVersion != "1.0.0")
+        {
+            // Only version 1.0.0 is currently supported
+            errors.Add(new ValidationError
+            {
+                Code = ConfigErrorCodes.UnsupportedVersion,
+                Message = $"Schema version '{config.SchemaVersion}' is not supported. Supported versions: 1.0.0",
+                Severity = ValidationSeverity.Error,
+                Path = "schema_version",
+                Suggestion = "Update schema_version to 1.0.0"
+            });
+        }
 
         // Add more semantic validation as needed
         return errors.Count == 0

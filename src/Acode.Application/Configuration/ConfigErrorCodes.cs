@@ -25,14 +25,15 @@ public static class ConfigErrorCodes
     public const string UnknownField = "CFG024";
 
     // Semantic errors (CFG030-CFG049)
-    public const string InvalidMode = "CFG030";
-    public const string InvalidProvider = "CFG031";
-    public const string InvalidEndpoint = "CFG032";
-    public const string PathTraversal = "CFG033";
-    public const string PathNotFound = "CFG034";
-    public const string InvalidCommand = "CFG035";
-    public const string CircularDependency = "CFG036";
-    public const string InvalidNetworkAllowlist = "CFG037";
+    public const string UnsupportedVersion = "CFG030";
+    public const string InvalidMode = "CFG031";
+    public const string InvalidProvider = "CFG032";
+    public const string InvalidEndpoint = "CFG033";
+    public const string PathTraversal = "CFG034";
+    public const string PathNotFound = "CFG035";
+    public const string InvalidCommand = "CFG036";
+    public const string CircularDependency = "CFG037";
+    public const string InvalidNetworkAllowlist = "CFG038";
 
     // Interpolation errors (CFG050-CFG059)
     public const string UndefinedVariable = "CFG050";

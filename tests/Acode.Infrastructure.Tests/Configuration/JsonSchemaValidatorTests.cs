@@ -151,6 +151,12 @@ commands:
 
         // Assert
         result.Should().NotBeNull();
+        if (!result.IsValid)
+        {
+            var errors = string.Join(Environment.NewLine, result.Errors.Select(e => $"{e.Code}: {e.Message}"));
+            throw new Exception($"Validation failed with errors:{Environment.NewLine}{errors}");
+        }
+
         result.IsValid.Should().BeTrue();
         result.Errors.Should().BeEmpty();
     }
