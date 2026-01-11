@@ -1,0 +1,488 @@
+# Task 002b - Gap Analysis and Implementation Checklist
+
+**Task:** Implement Parser + Validator Requirements for .agent/config.yml
+**Status:** In Progress
+**Branch:** feature/task-002b-llm-api-denylist
+
+## Instructions for Resumption
+
+If context runs out, a fresh agent should:
+1. Read this checklist from top to bottom
+2. Continue from the first [ ] (uncompleted) item
+3. Follow TDD: Write tests first (RED), then implementation (GREEN), then refactor
+4. Mark items [🔄] when starting, [✅] when complete
+5. Commit after each completed gap with descriptive message
+6. Update this file after each commit
+
+## WHAT EXISTS (Already Complete or Mostly Complete)
+
+The following files exist and are substantially complete:
+
+### Domain Layer
+- ✅ `src/Acode.Domain/Configuration/AcodeConfig.cs` - All nested config classes present
+- ✅ `src/Acode.Domain/Configuration/ConfigDefaults.cs` - Complete with all constants
+
+### Application Layer
+- ✅ `src/Acode.Application/Configuration/IConfigLoader.cs` - Interface defined
+- ✅ `src/Acode.Application/Configuration/IConfigValidator.cs` - Interface defined
+- ✅ `src/Acode.Application/Configuration/IConfigCache.cs` - Interface defined
+- ✅ `src/Acode.Application/Configuration/IConfigReader.cs` - Interface defined
+- ✅ `src/Acode.Application/Configuration/ISchemaValidator.cs` - Interface defined
+- ✅ `src/Acode.Application/Configuration/ValidationResult.cs` - Complete
+- ✅ `src/Acode.Application/Configuration/ValidationError.cs` - Complete
+- ✅ `src/Acode.Application/Configuration/ValidationSeverity.cs` - Complete
+- ✅ `src/Acode.Application/Configuration/EnvironmentInterpolator.cs` - Complete implementation
+- ✅ `src/Acode.Application/Configuration/DefaultValueApplicator.cs` - Basic implementation (may need expansion)
+- ⚠️ `src/Acode.Application/Configuration/SemanticValidator.cs` - Exists but missing several rules
+- ⚠️ `src/Acode.Application/Configuration/ConfigValidator.cs` - Very basic, needs integration with SemanticValidator
+- ✅ `src/Acode.Application/Configuration/ConfigLoader.cs` - Basic implementation
+- ✅ `src/Acode.Application/Configuration/ConfigCache.cs` - Exists
+
+### Infrastructure Layer
+- ✅ `src/Acode.Infrastructure/Configuration/YamlConfigReader.cs` - Complete with limits enforced
+- ✅ `src/Acode.Infrastructure/Configuration/JsonSchemaValidator.cs` - Complete
+- ✅ `src/Acode.Infrastructure/Configuration/ReadOnlyCollectionNodeDeserializer.cs` - Helper exists
+
+### CLI Layer
+- ✅ `src/Acode.Cli/Commands/ConfigCommand.cs` - Implements `validate` and `show` subcommands
+
+### Tests
+- ✅ `tests/Acode.Domain.Tests/Configuration/AcodeConfigTests.cs` - 11 tests
+- ✅ `tests/Acode.Domain.Tests/Configuration/ConfigDefaultsTests.cs` - Tests for defaults
+- ✅ `tests/Acode.Application.Tests/Configuration/SemanticValidatorTests.cs` - 17 tests
+- ✅ `tests/Acode.Application.Tests/Configuration/EnvironmentInterpolatorTests.cs` - 10 tests
+- ✅ `tests/Acode.Infrastructure.Tests/Configuration/YamlConfigReaderTests.cs` - 10 tests
+
+## GAPS IDENTIFIED (What's Missing or Needs Fixing)
+
+### Gap #1: Fix ConfigErrorCodes Format
+**Status**: [ ]
+**File**: `src/Acode.Application/Configuration/ConfigErrorCodes.cs`
+**Why Needed**: FR-002b requires error codes in format ACODE-CFG-NNN, currently they are CFG0NN
+**Current State**: Error codes exist but wrong format (CFG001 instead of ACODE-CFG-001)
+
+**Required Changes**:
+1. Update all error code constants from "CFG0XX" to "ACODE-CFG-0XX" format
+2. Ensure all 25 error codes from spec are present (ACODE-CFG-001 through ACODE-CFG-025)
+3. Update all usages in ConfigValidator, SemanticValidator, JsonSchemaValidator, YamlConfigReader
+
+**Success Criteria**:
+- All error codes match format from spec lines 401-429
+- All 25 error codes are defined
+- All usages updated
+- Tests still pass
+
+**Evidence**: [To be filled when complete]
+
+---
+
+### Gap #2: Add Missing Semantic Validation Rules
+**Status**: [ ]
+**File**: `src/Acode.Application/Configuration/SemanticValidator.cs`
+**Why Needed**: FR-002b-52, FR-002b-55, FR-002b-57, FR-002b-58, FR-002b-62, FR-002b-63, FR-002b-69
+**Current State**: SemanticValidator has some rules but missing several from spec
+
+**Test File**: `tests/Acode.Application.Tests/Configuration/SemanticValidatorTests.cs`
+
+**Missing Rules to Add**:
+1. **FR-002b-52**: airgapped_lock prevents mode override check
+   - If airgapped_lock is true, mode.default must be "airgapped"
+
+2. **FR-002b-55**: Paths cannot escape repository root
+   - Check for absolute paths
+   - Check for paths starting with "/"
+
+3. **FR-002b-57**: Command strings checked for shell injection patterns
+   - Check for dangerous patterns: `;`, `&&`, `||`, `|`, `$()`, backticks
+   - Applies to Commands.Setup, Build, Test, Lint, Format, Start
+
+4. **FR-002b-58**: network.allowlist only valid in Burst mode
+   - If network.allowlist is present and mode is not "burst", error
+
+5. **FR-002b-62**: Ignore patterns are valid globs
+   - Validate glob syntax for Ignore.Patterns and Ignore.Additional
+
+6. **FR-002b-63**: Path patterns are valid globs
+   - Validate glob syntax for Paths.Source, Tests, Output, Docs
+
+7. **FR-002b-69**: Referenced paths exist (warning if not)
+   - Check if paths.source entries exist (warning level)
+   - Check if paths.tests entries exist (warning level)
+
+**Implementation Pattern**: Add new validation methods to SemanticValidator class, following existing pattern
+
+**TDD Approach**:
+1. Write failing tests for each missing rule (RED)
+2. Implement the rule (GREEN)
+3. Refactor if needed
+
+**Success Criteria**:
+- All 7 missing semantic rules implemented
+- Tests pass for each rule
+- Tests verify both positive and negative cases
+- Error messages are actionable
+
+**Evidence**: [To be filled when complete]
+
+---
+
+### Gap #3: Integrate SemanticValidator into ConfigValidator
+**Status**: [ ]
+**Files**:
+- `src/Acode.Application/Configuration/ConfigValidator.cs`
+- `tests/Acode.Application.Tests/Configuration/ConfigValidatorTests.cs` (may need creation)
+
+**Why Needed**: ConfigValidator is currently very basic and doesn't integrate SemanticValidator
+**Current State**: ConfigValidator only validates file existence and calls SchemaValidator
+
+**Required Changes**:
+1. Add ISemanticValidator interface or use SemanticValidator directly
+2. Integrate SemanticValidator into ConfigValidator.ValidateFileAsync
+3. Ensure validation order: Schema → Semantic
+4. Aggregate all errors from both validators
+5. Create comprehensive tests
+
+**Implementation Pattern**:
+```csharp
+public async Task<ValidationResult> ValidateFileAsync(string configFilePath, CancellationToken ct)
+{
+    // 1. File checks (exists, size)
+    // 2. Schema validation (if available)
+    // 3. Load config
+    // 4. Semantic validation
+    // 5. Aggregate all errors
+    return result;
+}
+```
+
+**Success Criteria**:
+- ConfigValidator integrates SemanticValidator
+- Validation order is correct
+- All errors are aggregated
+- Tests cover integration
+
+**Evidence**: [To be filled when complete]
+
+---
+
+### Gap #4: Add Missing Test Coverage
+**Status**: [ ]
+**Files**: Multiple test files need expansion
+
+**Why Needed**: Spec calls for comprehensive testing (40 unit tests, 15 integration, 12 E2E, 10 perf benchmarks)
+**Current Test Counts**:
+- AcodeConfigTests: 11 tests (need ~20)
+- SemanticValidatorTests: 17 tests (need ~25)
+- EnvironmentInterpolatorTests: 10 tests (need ~15)
+- YamlConfigReaderTests: 10 tests (need ~20)
+- ConfigValidatorTests: MISSING (need 15+)
+- Integration tests: MISSING (need 15)
+- E2E tests: EXISTS (ConfigE2ETests.cs) but may need expansion
+
+**Required Test Additions**:
+
+#### Unit Tests to Add:
+1. **ConfigValidatorTests.cs** (NEW FILE - 15 tests):
+   - Test file not found handling
+   - Test file size limit enforcement
+   - Test schema validation integration
+   - Test semantic validation integration
+   - Test error aggregation
+   - Test warning vs error severity
+   - Test concurrent validation (thread safety)
+
+2. **More SemanticValidatorTests** (8 additional tests for Gap #2 rules):
+   - Test airgapped_lock enforcement
+   - Test path traversal detection (root escape)
+   - Test shell injection pattern detection
+   - Test network allowlist mode restriction
+   - Test glob pattern validation (ignore)
+   - Test glob pattern validation (paths)
+   - Test referenced path existence warnings
+
+3. **EnvironmentInterpolatorTests** (5 additional tests):
+   - Test maximum replacement limit
+   - Test case sensitivity
+   - Test nested variable names
+   - Test performance with 100 replacements
+   - Test edge cases with special characters
+
+4. **YamlConfigReaderTests** (10 additional tests):
+   - Test UTF-8 BOM handling
+   - Test non-UTF-8 rejection
+   - Test circular anchor detection
+   - Test multiple document rejection
+   - Test nesting depth limit
+   - Test key count limit
+   - Test error message formatting
+   - Test suggestion generation
+   - Test empty file handling
+   - Test whitespace-only file handling
+
+5. **DefaultValueApplicatorTests.cs** (NEW FILE - 10 tests):
+   - Test defaults not overriding explicit values
+   - Test schema_version default
+   - Test mode defaults
+   - Test model defaults
+   - Test nested object creation
+   - Test null input handling
+
+#### Integration Tests (NEW FILE - 15 tests):
+Create `tests/Acode.Integration.Tests/Configuration/ConfigurationIntegrationTests.cs`:
+- Test end-to-end config loading with defaults
+- Test end-to-end with environment variable interpolation
+- Test LocalOnly mode constraints enforced
+- Test Airgapped mode constraints enforced
+- Test Burst mode allowed
+- Test config caching
+- Test cache invalidation
+- Test concurrent config loads (thread safety)
+- Test config reload after file change
+- Test validation with real YAML files
+- Test error reporting with real files
+- Test .NET project config
+- Test Node.js project config
+- Test Python project config
+- Test config with all optional fields
+
+**Success Criteria**:
+- >90% code coverage on Configuration namespace
+- All critical paths tested
+- Edge cases covered
+- Performance benchmarks passing
+
+**Evidence**: [To be filled when complete]
+
+---
+
+### Gap #5: Add Missing CLI Commands and Features
+**Status**: [ ]
+**File**: `src/Acode.Cli/Commands/ConfigCommand.cs`
+**Why Needed**: Spec requires `config reload`, `config init`, `--strict` mode
+
+**Current State**: Only `validate` and `show` subcommands exist
+
+**Required Additions**:
+1. **`config init` subcommand** - Creates minimal .agent/config.yml
+2. **`config reload` subcommand** - Invalidates cache, reloads config
+3. **`--strict` flag for validate** - Treats warnings as errors
+4. **IDE-parseable error format** - Include file:line:column in output
+5. **Redaction in show command** - Redact sensitive fields (api_key, token, password, secret)
+
+**Implementation Pattern** (from spec lines 860-870):
+```csharp
+case "init" => await InitAsync(context, repositoryRoot),
+case "reload" => await ReloadAsync(context, repositoryRoot),
+```
+
+**Test File**: `tests/Acode.Cli.Tests/Commands/ConfigCommandTests.cs`
+
+**Success Criteria**:
+- `config init` creates valid minimal config
+- `config reload` invalidates cache
+- `--strict` promotes warnings to errors
+- Error format includes file:line:column
+- Sensitive fields redacted in `show` output
+- Tests cover all new subcommands
+
+**Evidence**: [To be filled when complete]
+
+---
+
+### Gap #6: Implement Configuration Redaction
+**Status**: [ ]
+**Files**:
+- `src/Acode.Application/Configuration/ConfigRedactor.cs` (NEW)
+- `src/Acode.Cli/Commands/ConfigCommand.cs` (update Show method)
+- `tests/Acode.Application.Tests/Configuration/ConfigRedactorTests.cs` (NEW)
+
+**Why Needed**: NFR-002b-06 through NFR-002b-10 require redaction of sensitive fields
+
+**Current State**: Redaction not implemented
+
+**Required Implementation**:
+1. Create ConfigRedactor class
+2. Identify sensitive field names: api_key, token, password, secret, dsn (from StoragePostgresConfig)
+3. Redaction format: "[REDACTED:field_name]"
+4. Redact when serializing config for display
+5. Never log sensitive values
+
+**Sensitive Fields in AcodeConfig**:
+- Any field containing "key", "token", "password", "secret", "dsn"
+- Specifically: storage.remote.postgres.dsn
+
+**Implementation Pattern**:
+```csharp
+public class ConfigRedactor
+{
+    private static readonly string[] SensitiveFieldNames = { "api_key", "token", "password", "secret", "dsn" };
+
+    public AcodeConfig Redact(AcodeConfig config)
+    {
+        // Return new config with sensitive fields replaced with "[REDACTED:field_name]"
+    }
+}
+```
+
+**Success Criteria**:
+- ConfigRedactor class created
+- All sensitive fields redacted
+- Redaction format matches spec
+- ConfigCommand.Show uses redaction
+- Tests verify all sensitive fields redacted
+
+**Evidence**: [To be filled when complete]
+
+---
+
+### Gap #7: Fix CLI Exit Codes
+**Status**: [ ]
+**File**: `src/Acode.Cli/Commands/ConfigCommand.cs`
+**Why Needed**: Spec requires specific exit codes (lines 1186-1192)
+
+**Current State**: Uses generic ExitCode enum values
+
+**Required Exit Codes**:
+- 0 = Success / Valid configuration
+- 1 = Validation errors (schema or semantic)
+- 2 = Parse errors (YAML syntax)
+- 3 = File not found
+- 4 = Internal error (if needed)
+
+**Implementation Pattern**:
+Map exceptions to correct exit codes:
+- ValidationResult with errors → Exit code 1
+- YamlException → Exit code 2
+- FileNotFoundException → Exit code 3
+- Other exceptions → Exit code 4
+
+**Success Criteria**:
+- ConfigCommand returns correct exit codes for each error type
+- Tests verify exit codes
+- Documentation updated
+
+**Evidence**: [To be filled when complete]
+
+---
+
+### Gap #8: Add Performance Benchmarks
+**Status**: [ ]
+**File**: Create `tests/Acode.Performance.Tests/Configuration/ConfigurationBenchmarks.cs` (NEW)
+
+**Why Needed**: Spec requires performance benchmarks (spec lines 873-886)
+
+**Required Benchmarks** (using BenchmarkDotNet):
+1. Parse minimal config < 10ms
+2. Parse full config < 30ms
+3. Validate minimal config < 10ms
+4. Validate full config < 30ms
+5. Total load (parse+validate) < 100ms
+6. Cached config access < 1ms
+7. Memory: parse 1MB file < 5MB peak
+8. Memory: config object < 100KB
+9. Interpolation (100 vars) < 10ms
+10. Schema compilation < 500ms
+
+**Implementation Pattern**:
+```csharp
+[MemoryDiagnoser]
+public class ConfigurationBenchmarks
+{
+    [Benchmark]
+    public void ParseMinimalConfig() { ... }
+
+    [Benchmark]
+    public void ValidateFullConfig() { ... }
+}
+```
+
+**Success Criteria**:
+- All 10 benchmarks implemented
+- All benchmarks meet target performance
+- Benchmark results documented
+
+**Evidence**: [To be filled when complete]
+
+---
+
+### Gap #9: Add E2E Regression Tests
+**Status**: [ ]
+**File**: `tests/Acode.Integration.Tests/ConfigE2ETests.cs` (update existing)
+
+**Why Needed**: Spec requires E2E scenarios (spec lines 856-872, 906-1013)
+
+**Current State**: ConfigE2ETests.cs exists but may not cover all scenarios
+
+**Required E2E Scenarios** (18 total from spec):
+1. Valid configuration → Exit code 0
+2. Invalid YAML syntax → Exit code 2, error with line number
+3. Schema violation → Exit code 1, error with code
+4. Environment variable interpolation works
+5. Missing environment variable → Error
+6. Environment variable with default works
+7. Path traversal attempt → Error
+8. Unknown field → Warning (exit 0)
+9. Strict mode unknown field → Error (exit 1)
+10. Config show with redaction
+11. Config file not found → Exit code 3
+12. Large file rejection → Error
+13. Multiple errors reported
+14. Config reload works
+15. Default values applied
+16. LocalOnly mode constraints enforced
+17. IDE-parseable error format
+18. JSON output mode works
+
+**Success Criteria**:
+- All 18 E2E scenarios have tests
+- Tests use real config files
+- Tests verify exit codes
+- Tests verify error messages
+
+**Evidence**: [To be filled when complete]
+
+---
+
+## Implementation Order (Following TDD)
+
+**Phase 1: Fix Error Codes** (Gap #1)
+- Low risk, foundational change needed first
+
+**Phase 2: Add Missing Semantic Validations** (Gap #2)
+- Follow TDD: tests first, then implementation
+- One rule at a time, commit per rule
+
+**Phase 3: Integrate Validators** (Gap #3)
+- After Gap #2 complete, integrate into ConfigValidator
+
+**Phase 4: Expand Test Coverage** (Gap #4)
+- Fill in missing unit and integration tests
+- Ensure >90% coverage
+
+**Phase 5: Implement Redaction** (Gap #6)
+- Needed for Gap #5 (CLI show command)
+
+**Phase 6: Enhance CLI Commands** (Gap #5)
+- Add init, reload, --strict
+- Fix exit codes (Gap #7)
+- Apply redaction
+
+**Phase 7: Performance & E2E** (Gaps #8, #9)
+- Add benchmarks
+- Complete E2E scenarios
+
+**Phase 8: Final Audit**
+- Run full audit per docs/AUDIT-GUIDELINES.md
+- Verify all FRs and NFRs met
+- Create PR
+
+---
+
+## Tracking Progress
+
+**Completed Gaps**: 0/9
+**Completed Tests**: ~48/100+ required
+**Code Coverage**: ~70% (target: >90%)
+**Audit Status**: Not started
+
+Update these metrics as gaps are completed.
