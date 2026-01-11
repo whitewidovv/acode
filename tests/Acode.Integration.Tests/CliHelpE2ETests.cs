@@ -95,21 +95,31 @@ public sealed class CliHelpE2ETests : IDisposable
         string workingDir,
         params string[] args)
     {
-        // Find the CLI project by searching up from test assembly location
+        // Find the CLI executable by searching up from test assembly location
         var testAssembly = typeof(CliHelpE2ETests).Assembly.Location;
         var testDir = Path.GetDirectoryName(testAssembly)!;
         var solutionDir = Path.GetFullPath(Path.Combine(testDir, "..", "..", "..", "..", ".."));
-        var cliProjectPath = Path.Combine(solutionDir, "src", "Acode.Cli", "Acode.Cli.csproj");
 
-        if (!File.Exists(cliProjectPath))
+        // Use the compiled executable directly instead of dotnet run
+        var cliExePath = Path.Combine(solutionDir, "src", "Acode.Cli", "bin", "Debug", "net8.0", "Acode.Cli.exe");
+
+        // Fallback to dll if exe doesn't exist (Linux/macOS)
+        if (!File.Exists(cliExePath))
         {
-            throw new InvalidOperationException($"CLI project not found at: {cliProjectPath}");
+            var cliDllPath = Path.Combine(solutionDir, "src", "Acode.Cli", "bin", "Debug", "net8.0", "Acode.Cli.dll");
+            if (!File.Exists(cliDllPath))
+            {
+                throw new InvalidOperationException($"CLI executable not found at: {cliExePath} or {cliDllPath}");
+            }
+
+            // Use dotnet to run the dll on non-Windows platforms
+            return RunWithDotnet(cliDllPath, workingDir, args);
         }
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = "dotnet",
-            Arguments = $"run --project \"{cliProjectPath}\" --no-build -- {string.Join(" ", args)}",
+            FileName = cliExePath,
+            Arguments = string.Join(" ", args),
             WorkingDirectory = workingDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -127,6 +137,38 @@ public sealed class CliHelpE2ETests : IDisposable
         var stderr = process.StandardError.ReadToEnd();
         process.WaitForExit();
 
-        return (process.ExitCode, stdout, stderr);
+        // Combine stdout and stderr for assertion purposes (CLI may write to either)
+        var combinedOutput = stdout + stderr;
+        return (process.ExitCode, combinedOutput, stderr);
+    }
+
+    private static (int ExitCode, string StdOut, string StdErr) RunWithDotnet(
+        string dllPath,
+        string workingDir,
+        string[] args)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            Arguments = $"\"{dllPath}\" {string.Join(" ", args)}",
+            WorkingDirectory = workingDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        using var process = Process.Start(startInfo);
+        if (process == null)
+        {
+            throw new InvalidOperationException("Failed to start process");
+        }
+
+        var stdout = process.StandardOutput.ReadToEnd();
+        var stderr = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        var combinedOutput = stdout + stderr;
+        return (process.ExitCode, combinedOutput, stderr);
     }
 }

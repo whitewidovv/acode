@@ -11,8 +11,6 @@ namespace Acode.Infrastructure.Tests.Configuration;
 /// </summary>
 public class JsonSchemaValidatorTests
 {
-    private const string SchemaPath = "/mnt/c/Users/neilo/source/local coding agent/data/config-schema.json";
-
     [Fact]
     public async Task CreateFromEmbeddedResourceAsync_ShouldCreateValidator()
     {
@@ -26,8 +24,11 @@ public class JsonSchemaValidatorTests
     [Fact]
     public async Task CreateAsync_WithValidSchemaPath_ShouldCreateValidator()
     {
-        // Arrange & Act
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        // Arrange
+        var schemaPath = GetSchemaPath();
+
+        // Act
+        var validator = await JsonSchemaValidator.CreateAsync(schemaPath).ConfigureAwait(true);
 
         // Assert
         validator.Should().NotBeNull();
@@ -37,7 +38,7 @@ public class JsonSchemaValidatorTests
     public async Task CreateAsync_WithNonExistentSchema_ShouldThrowFileNotFoundException()
     {
         // Arrange
-        var invalidPath = "/tmp/does-not-exist.json";
+        var invalidPath = Path.Combine(Path.GetTempPath(), "does-not-exist.json");
 
         // Act & Assert
         await Assert.ThrowsAsync<FileNotFoundException>(
@@ -66,7 +67,7 @@ schema_version: ""1.0.0""
     public async Task ValidateYaml_WithValidMinimalConfig_ShouldReturnSuccess()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
         var yaml = @"
 schema_version: ""1.0.0""
 ";
@@ -84,7 +85,7 @@ schema_version: ""1.0.0""
     public async Task ValidateYaml_WithMissingRequiredField_ShouldReturnErrors()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
         var yaml = @"
 project:
   name: ""test-project""
@@ -104,7 +105,7 @@ project:
     public async Task ValidateYaml_WithInvalidYaml_ShouldReturnYamlParseError()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
         var yaml = @"
 invalid: yaml: syntax:
   - unclosed bracket [
@@ -126,7 +127,7 @@ invalid: yaml: syntax:
     public async Task ValidateYaml_WithFullValidConfig_ShouldReturnSuccess()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
         var yaml = @"
 schema_version: ""1.0.0""
 project:
@@ -159,7 +160,7 @@ commands:
     public async Task ValidateYaml_WithInvalidEnumValue_ShouldReturnSchemaViolation()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
         var yaml = @"
 schema_version: ""1.0.0""
 mode:
@@ -180,7 +181,7 @@ mode:
     public async Task ValidateYaml_WithInvalidType_ShouldReturnSchemaViolation()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
         var yaml = @"
 schema_version: ""1.0.0""
 model:
@@ -201,7 +202,7 @@ model:
     public async Task ValidateAsync_WithValidFile_ShouldReturnSuccess()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
         var tempFile = Path.GetTempFileName();
         var yaml = @"
 schema_version: ""1.0.0""
@@ -228,8 +229,8 @@ schema_version: ""1.0.0""
     public async Task ValidateAsync_WithNonExistentFile_ShouldReturnFileNotFoundError()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
-        var nonExistentFile = "/tmp/does-not-exist.yml";
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
+        var nonExistentFile = Path.Combine(Path.GetTempPath(), "does-not-exist.yml");
 
         // Act
         var result = await validator.ValidateAsync(nonExistentFile).ConfigureAwait(true);
@@ -246,7 +247,7 @@ schema_version: ""1.0.0""
     public async Task ValidateYaml_ErrorsOnly_ShouldFilterWarnings()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
         var yaml = @"
 project:
   name: ""test""
@@ -265,7 +266,7 @@ project:
     public async Task ValidateYaml_WithValidCommandFormats_ShouldAcceptAll()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
 
         // Test string format
         var yamlString = @"
@@ -309,7 +310,7 @@ commands:
     public async Task ValidateYaml_ErrorPath_ShouldIndicateLocation()
     {
         // Arrange
-        var validator = await JsonSchemaValidator.CreateAsync(SchemaPath).ConfigureAwait(true);
+        var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
         var yaml = @"
 schema_version: ""1.0.0""
 mode:
@@ -322,5 +323,14 @@ mode:
         // Assert
         result.Errors.Should().NotBeEmpty();
         result.Errors.Should().Contain(e => !string.IsNullOrEmpty(e.Path));
+    }
+
+    private static string GetSchemaPath()
+    {
+        // Find the schema file relative to the test assembly
+        var assemblyLocation = typeof(JsonSchemaValidatorTests).Assembly.Location;
+        var testDir = Path.GetDirectoryName(assemblyLocation)!;
+        var solutionDir = Path.GetFullPath(Path.Combine(testDir, "..", "..", "..", "..", ".."));
+        return Path.Combine(solutionDir, "data", "config-schema.json");
     }
 }

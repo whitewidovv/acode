@@ -1,4 +1,5 @@
 using System.Text;
+using Acode.Application.PromptPacks;
 using Acode.Domain.PromptPacks;
 
 namespace Acode.Infrastructure.PromptPacks;
@@ -6,7 +7,7 @@ namespace Acode.Infrastructure.PromptPacks;
 /// <summary>
 /// Provides content hashing functionality for prompt pack integrity verification.
 /// </summary>
-public sealed class ContentHasher
+public sealed class ContentHasher : IContentHasher
 {
     /// <summary>
     /// Computes a hash from path/content pairs directly.

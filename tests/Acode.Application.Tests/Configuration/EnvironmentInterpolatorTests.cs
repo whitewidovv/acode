@@ -147,8 +147,16 @@ public class EnvironmentInterpolatorTests
     }
 
     [Fact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
     public void Interpolate_IsCaseSensitive()
     {
+        // Skip on Windows - environment variables are case-insensitive on Windows
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
         // Arrange
         Environment.SetEnvironmentVariable("TestVar", "lowercase");
         Environment.SetEnvironmentVariable("TESTVAR", "uppercase");

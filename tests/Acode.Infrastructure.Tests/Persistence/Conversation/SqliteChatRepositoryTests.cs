@@ -30,9 +30,22 @@ public sealed class SqliteChatRepositoryTests : IDisposable
 
     public void Dispose()
     {
+        // Clear SQLite connection pool to release file locks
+        SqliteConnection.ClearAllPools();
+
+        // Small delay to ensure connections are released
+        Thread.Sleep(50);
+
         if (File.Exists(_dbPath))
         {
-            File.Delete(_dbPath);
+            try
+            {
+                File.Delete(_dbPath);
+            }
+            catch (IOException)
+            {
+                // Ignore if file still locked - will be cleaned up by OS
+            }
         }
     }
 
