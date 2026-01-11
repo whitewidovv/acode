@@ -152,6 +152,128 @@ public sealed class SqliteMessageRepository : IMessageRepository
             new CommandDefinition(sql, new { RunId = runId.Value }, cancellationToken: ct)).ConfigureAwait(false);
     }
 
+    public async Task<MessageId> AppendAsync(RunId runId, Message message, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+
+        // Get next sequence number for this run
+        const string getSeqSql = @"
+            SELECT COALESCE(MAX(sequence_number), 0) + 1
+            FROM conv_messages
+            WHERE run_id = @RunId";
+
+        const string insertSql = @"
+            INSERT INTO conv_messages (id, run_id, role, content, tool_calls, created_at, sequence_number, sync_status)
+            VALUES (@Id, @RunId, @Role, @Content, @ToolCalls, @CreatedAt, @SequenceNumber, @SyncStatus)";
+
+#pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
+        await using var conn = new SqliteConnection(_connectionString);
+#pragma warning restore CA2007
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+
+        // Get next sequence number
+        var nextSeq = await conn.QuerySingleAsync<int>(
+            new CommandDefinition(getSeqSql, new { RunId = runId.Value }, cancellationToken: ct)).ConfigureAwait(false);
+
+        // Set sequence number on the message
+        var messageWithSeq = Message.Reconstitute(
+            message.Id,
+            message.RunId,
+            message.Role.ToString(),
+            message.Content,
+            message.ToolCalls,
+            message.CreatedAt,
+            nextSeq,
+            message.SyncStatus);
+
+        // Insert with assigned sequence number
+        var toolCallsJson = messageWithSeq.ToolCalls?.Any() == true
+            ? System.Text.Json.JsonSerializer.Serialize(messageWithSeq.ToolCalls)
+            : null;
+
+        await conn.ExecuteAsync(
+            new CommandDefinition(
+                insertSql,
+                new
+                {
+                    Id = messageWithSeq.Id.Value,
+                    RunId = messageWithSeq.RunId.Value,
+                    Role = messageWithSeq.Role.ToString(),
+                    messageWithSeq.Content,
+                    ToolCalls = toolCallsJson,
+                    CreatedAt = messageWithSeq.CreatedAt.ToString("O"),
+                    SequenceNumber = nextSeq,
+                    SyncStatus = messageWithSeq.SyncStatus.ToString()
+                },
+                cancellationToken: ct)).ConfigureAwait(false);
+
+        return messageWithSeq.Id;
+    }
+
+    public async Task BulkCreateAsync(IEnumerable<Message> messages, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+
+        var messageList = messages.ToList();
+        if (!messageList.Any())
+        {
+            return;
+        }
+
+        const string getSeqSql = @"
+            SELECT COALESCE(MAX(sequence_number), 0) + 1
+            FROM conv_messages
+            WHERE run_id = @RunId";
+
+        const string insertSql = @"
+            INSERT INTO conv_messages (id, run_id, role, content, tool_calls, created_at, sequence_number, sync_status)
+            VALUES (@Id, @RunId, @Role, @Content, @ToolCalls, @CreatedAt, @SequenceNumber, @SyncStatus)";
+
+#pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
+        await using var conn = new SqliteConnection(_connectionString);
+#pragma warning restore CA2007
+        await conn.OpenAsync(ct).ConfigureAwait(false);
+
+        // Group messages by RunId to get correct sequence numbers
+        var messagesByRun = messageList.GroupBy(m => m.RunId.Value);
+
+        foreach (var runGroup in messagesByRun)
+        {
+            var runId = runGroup.Key;
+
+            // Get next sequence number for this run
+            var nextSeq = await conn.QuerySingleAsync<int>(
+                new CommandDefinition(getSeqSql, new { RunId = runId }, cancellationToken: ct)).ConfigureAwait(false);
+
+            // Assign sequence numbers and prepare batch insert
+            var parameters = new List<object>();
+            var seqCounter = nextSeq;
+
+            foreach (var message in runGroup)
+            {
+                var toolCallsJson = message.ToolCalls?.Any() == true
+                    ? System.Text.Json.JsonSerializer.Serialize(message.ToolCalls)
+                    : null;
+
+                parameters.Add(new
+                {
+                    Id = message.Id.Value,
+                    RunId = message.RunId.Value,
+                    Role = message.Role.ToString(),
+                    message.Content,
+                    ToolCalls = toolCallsJson,
+                    CreatedAt = message.CreatedAt.ToString("O"),
+                    SequenceNumber = seqCounter++,
+                    SyncStatus = message.SyncStatus.ToString()
+                });
+            }
+
+            // Bulk insert all messages for this run
+            await conn.ExecuteAsync(
+                new CommandDefinition(insertSql, parameters, cancellationToken: ct)).ConfigureAwait(false);
+        }
+    }
+
     private static Message MapToMessage(MessageRow row)
     {
         IEnumerable<ToolCall>? toolCalls = null;

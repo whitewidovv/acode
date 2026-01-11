@@ -37,4 +37,17 @@ public interface IMessageRepository
     /// <param name="ct">Cancellation token.</param>
     /// <returns>A task representing the async operation.</returns>
     Task DeleteByRunAsync(RunId runId, CancellationToken ct);
+
+    /// <summary>Appends a Message to a specific Run with auto-assigned sequence number.</summary>
+    /// <param name="runId">The Run ID to append the message to.</param>
+    /// <param name="message">The Message entity to append.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The ID of the created Message.</returns>
+    Task<MessageId> AppendAsync(RunId runId, Message message, CancellationToken ct);
+
+    /// <summary>Bulk inserts multiple Messages efficiently in a single operation.</summary>
+    /// <param name="messages">The collection of Message entities to insert.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A task representing the async operation.</returns>
+    Task BulkCreateAsync(IEnumerable<Message> messages, CancellationToken ct);
 }
