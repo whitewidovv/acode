@@ -93,6 +93,9 @@ Examples:
     {
         try
         {
+            // Check for --strict flag
+            var strictMode = context.Args.Contains("--strict", StringComparer.OrdinalIgnoreCase);
+
             await context.Output.WriteLineAsync("Validating configuration...").ConfigureAwait(false);
             await context.Output.WriteLineAsync().ConfigureAwait(false);
 
@@ -119,7 +122,11 @@ Examples:
 
             await context.Output.WriteLineAsync().ConfigureAwait(false);
 
-            if (result.IsValid)
+            // In strict mode, warnings are treated as errors
+            var hasWarnings = result.WarningsOnly.Count > 0;
+            var hasErrors = result.ErrorsOnly.Count > 0;
+
+            if (result.IsValid && (!strictMode || !hasWarnings))
             {
                 await context.Output.WriteLineAsync("  ✓ Configuration valid").ConfigureAwait(false);
                 return ExitCode.Success;
@@ -128,12 +135,22 @@ Examples:
             {
                 await context.Output.WriteLineAsync("  ✗ Configuration invalid").ConfigureAwait(false);
                 await context.Output.WriteLineAsync().ConfigureAwait(false);
-                await context.Output.WriteLineAsync("Errors:").ConfigureAwait(false);
+
+                if (hasErrors || (strictMode && hasWarnings))
+                {
+                    await context.Output.WriteLineAsync("Errors:").ConfigureAwait(false);
+                }
 
                 foreach (var error in result.Errors)
                 {
                     var severity = error.Severity == ValidationSeverity.Error ? "ERROR" : "WARNING";
                     await context.Output.WriteLineAsync($"  [{severity}] {error.Path}: {error.Message}").ConfigureAwait(false);
+                }
+
+                if (strictMode && hasWarnings)
+                {
+                    await context.Output.WriteLineAsync().ConfigureAwait(false);
+                    await context.Output.WriteLineAsync("Validation failed in strict mode (warnings treated as errors)").ConfigureAwait(false);
                 }
 
                 return ExitCode.GeneralError;

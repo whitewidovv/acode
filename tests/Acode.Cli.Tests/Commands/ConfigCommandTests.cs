@@ -470,4 +470,79 @@ public class ConfigCommandTests
         mockCache.Received(1).InvalidateAll();
         output.ToString().Should().Contain("Configuration cache invalidated", "success message should indicate cache invalidation");
     }
+
+    [Fact]
+    public async Task ExecuteAsync_ValidateWithStrictFlagAndWarnings_TreatsWarningsAsErrors()
+    {
+        // Arrange
+        var command = new ConfigCommand(_mockLoader, _mockValidator);
+        var config = new AcodeConfig { SchemaVersion = "1.0.0" };
+        var validationResult = new ValidationResult
+        {
+            IsValid = true, // No errors, but has warnings
+            Errors = new List<ValidationError>
+            {
+                new()
+                {
+                    Code = "UNKNOWN_FIELD",
+                    Message = "Unknown field 'foo'",
+                    Path = "foo",
+                    Severity = ValidationSeverity.Warning,
+                },
+            }.AsReadOnly(),
+        };
+
+        _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(config);
+        _mockValidator.Validate(config)
+            .Returns(validationResult);
+
+        var output = new StringWriter();
+        var context = new CommandContext
+        {
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "validate", "--strict" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
+
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+        // Assert
+        exitCode.Should().Be(ExitCode.GeneralError, "strict mode should treat warnings as errors");
+        output.ToString().Should().Contain("Unknown field", "warning message should be shown");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ValidateWithStrictFlagAndNoWarnings_ReturnsSuccess()
+    {
+        // Arrange
+        var command = new ConfigCommand(_mockLoader, _mockValidator);
+        var config = new AcodeConfig { SchemaVersion = "1.0.0" };
+        var validationResult = new ValidationResult { IsValid = true };
+
+        _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(config);
+        _mockValidator.Validate(config)
+            .Returns(validationResult);
+
+        var output = new StringWriter();
+        var context = new CommandContext
+        {
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "validate", "--strict" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
+
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+        // Assert
+        exitCode.Should().Be(ExitCode.Success, "strict mode should succeed when no warnings");
+        output.ToString().Should().Contain("valid", "success message should be shown");
+    }
 }
