@@ -145,20 +145,21 @@ public sealed record EndpointPattern
 ```
 
 ### 1.3 Update LlmApiDenylist to Use Patterns
-- [ ] **File**: `src/Acode.Domain/Validation/LlmApiDenylist.cs` (UPDATE existing)
-- [ ] Change from `FrozenSet<string>` to `FrozenSet<EndpointPattern>`
-- [ ] Update static constructor to create EndpointPattern instances
-- [ ] Update `IsDenied(Uri)` to iterate patterns and call `Matches(uri)`
-- [ ] Add regex patterns for Azure OpenAI: `.*\.openai\.azure\.com`
-- [ ] Add regex patterns for AWS Bedrock: `bedrock.*\.amazonaws\.com`, `bedrock-runtime.*\.amazonaws\.com`
-- [ ] Keep existing exact patterns for major providers
-- [ ] Add wildcard patterns for subdomains: `*.openai.com`, `*.anthropic.com`
-- [ ] **Tests**: `tests/Acode.Domain.Tests/Validation/LlmApiDenylistTests.cs` (UPDATE existing)
-  - Test Azure OpenAI regex pattern: https://foo.openai.azure.com should be denied
-  - Test AWS Bedrock regex pattern: https://bedrock-runtime.us-west-2.amazonaws.com should be denied
-  - Test wildcard pattern: https://chat.openai.com should be denied
-  - Test subdomain not matching root: https://openai.com should NOT be denied (no subdomain)
-  - All existing tests should still pass
+- [✅] **File**: `src/Acode.Domain/Validation/LlmApiDenylist.cs` (UPDATED)
+- [✅] Change from `FrozenSet<string>` to `FrozenSet<EndpointPattern>`
+- [✅] Update static constructor to create EndpointPattern instances
+- [✅] Update `IsDenied(Uri)` to iterate patterns and call `Matches(uri)`
+- [✅] Add regex patterns for Azure OpenAI: `.*\.openai\.azure\.com`
+- [✅] Add regex patterns for AWS Bedrock: `bedrock.*\.amazonaws\.com`
+- [✅] Keep existing exact patterns for major providers
+- [✅] Add wildcard patterns for subdomains: `*.openai.com`, `*.anthropic.com`
+- [✅] Changed method: `GetDeniedHosts()` → `GetDeniedPatterns()`
+- [✅] **Tests**: `tests/Acode.Domain.Tests/Validation/LlmApiDenylistTests.cs` (UPDATED)
+  - [✅] Test Azure OpenAI regex pattern: https://foo.openai.azure.com should be denied
+  - [✅] Test AWS Bedrock regex pattern: all regions should be denied
+  - [✅] Test wildcard pattern: https://chat.openai.com should be denied
+  - [✅] Test subdomain not matching root: https://openai.com should NOT be denied
+  - [✅] All existing tests still passing (26/26 tests passing)
 
 **Implementation notes:**
 - This enhances the existing implementation to support FR-001b-34, FR-001b-35
