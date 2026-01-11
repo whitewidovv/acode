@@ -1,6 +1,52 @@
 ---
 
-## Session: 2026-01-10 (Current) - Task 049d PHASE 8 COMPLETE ✅
+## Session: 2026-01-11 - Task 001b Pattern Matching Implementation (IN PROGRESS 🔄)
+
+### Summary
+Started task-001b (Define No External LLM API Validation Rules) in fresh worktree 2. Created comprehensive completion checklist via gap analysis. Phases 1.1 and 1.2 complete with full TDD (RED-GREEN-REFACTOR). Next: Update LlmApiDenylist to use new pattern matching.
+
+### Key Achievements
+- ✅ Phase 1.1: PatternType enum (Exact, Wildcard, Regex) with 5 passing tests
+- ✅ Phase 1.2: EndpointPattern record with advanced matching logic, 14 passing tests
+- ✅ All tests passing, build GREEN (0 errors, 0 warnings)
+- ✅ Fixed git worktree path (WSL /mnt instead of Windows C:/)
+- ✅ Created task-001b-completion-checklist.md with comprehensive gap analysis
+
+### Phase 1.1: PatternType Enum (Commit: effdacf)
+- Created `PatternType` enum with Exact=0, Wildcard=1, Regex=2
+- XML documentation referencing FR-001b-13, FR-001b-34, FR-001b-35
+- Tests verify enum values, comparability, switch expression support
+- **Tests**: 5/5 passing
+
+### Phase 1.2: EndpointPattern Record (Commit: f53b8eb)
+- Created `EndpointPattern` record with Pattern, Type, Description properties
+- Implemented `Matches(Uri)` method with pattern type switching
+- Lazy regex compilation for performance (NFR-001b-23)
+- Custom Equals/GetHashCode to exclude _compiledRegex from equality
+- Invalid regex patterns throw ArgumentException on first use
+- **Pattern matching features**:
+  - Exact: `api.openai.com` matches exact hostname
+  - Wildcard: `*.openai.com` matches subdomains (NOT root domain)
+  - Regex: `bedrock.*\.amazonaws\.com` for complex patterns
+  - Case-insensitive for all types
+- **Tests**: 14/14 passing, comprehensive coverage of all pattern types
+
+### Next Steps
+- 🔄 Phase 1.3: Update LlmApiDenylist to use EndpointPattern instead of FrozenSet<string>
+- Pending: Implement Allowlist (Phase 2)
+- Pending: IEndpointValidator interface + implementation (Phase 3)
+- Pending: Loadable denylist from file (Phase 4)
+- Pending: Integration tests, documentation, audit (Phases 5-7)
+
+### Technical Notes
+- Following strict TDD per CLAUDE.md (tests FIRST, all commits granular)
+- Feature branch: `feature/task-001b-endpoint-validation-rules`
+- Working autonomously until task complete or <5k tokens remaining
+- Context remaining: ~86k tokens
+
+---
+
+## Session: 2026-01-10 - Task 049d PHASE 8 COMPLETE ✅
 
 ### Summary
 Task-049d (Indexing + Fast Search) Phase 8 complete! Fixed database connection issues and critical repository table naming bug. All 10 E2E integration tests now passing. Fixed repository table names to match production schema (conv_ prefixes). Partial fix for repository unit tests (22/50 passing, was 0/50). Build GREEN. 12 commits on feature branch.

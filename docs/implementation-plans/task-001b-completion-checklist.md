@@ -57,10 +57,10 @@ This checklist was created via gap analysis per CLAUDE.md Section 3.2. Each item
 **Goal**: Implement advanced pattern matching per spec lines 770-798
 
 ### 1.1 Create PatternType Enum
-- [ ] **File**: `src/Acode.Domain/Validation/PatternType.cs`
-- [ ] Define enum with: Exact, Wildcard, Regex (per spec line 792-797)
-- [ ] Add XML documentation referencing FR-001b-13, FR-001b-34, FR-001b-35
-- [ ] **Tests**: `tests/Acode.Domain.Tests/Validation/PatternTypeTests.cs`
+- [✅] **File**: `src/Acode.Domain/Validation/PatternType.cs`
+- [✅] Define enum with: Exact, Wildcard, Regex (per spec line 792-797)
+- [✅] Add XML documentation referencing FR-001b-13, FR-001b-34, FR-001b-35
+- [✅] **Tests**: `tests/Acode.Domain.Tests/Validation/PatternTypeTests.cs`
   - Test enum values exist
   - Test enum can be compared
 
@@ -75,23 +75,26 @@ public enum PatternType
 ```
 
 ### 1.2 Create EndpointPattern Record
-- [ ] **File**: `src/Acode.Domain/Validation/EndpointPattern.cs`
-- [ ] Properties: Pattern (string), Type (PatternType), Description (string?)
-- [ ] Method: `bool Matches(Uri uri)` with switch on PatternType
-- [ ] Private field: `Regex? _compiledRegex` for pre-compiled regex patterns
-- [ ] Private methods: `MatchExact(Uri)`, `MatchWildcard(Uri)`, `MatchRegex(Uri)`
-- [ ] Constructor that pre-compiles regex if Type == Regex
-- [ ] **Tests**: `tests/Acode.Domain.Tests/Validation/EndpointPatternTests.cs`
-  - Test exact matching: "api.openai.com" matches https://api.openai.com/v1/chat
-  - Test exact matching: "api.openai.com" does NOT match https://chat.openai.com
-  - Test wildcard matching: "*.openai.com" matches https://chat.openai.com
-  - Test wildcard matching: "*.openai.com" matches https://api.openai.com
-  - Test wildcard matching: "*.openai.com" does NOT match https://openai.com (no subdomain)
-  - Test regex matching: ".*\\.azure\\.com" matches https://foo.azure.com
-  - Test regex matching: "bedrock.*\\.amazonaws\\.com" matches bedrock-runtime.us-east-1.amazonaws.com
-  - Test case insensitive matching for all types
-  - Test invalid regex pattern throws at construction
-  - Test pre-compiled regex is reused (performance)
+- [✅] **File**: `src/Acode.Domain/Validation/EndpointPattern.cs`
+- [✅] Properties: Pattern (string), Type (PatternType), Description (string?)
+- [✅] Method: `bool Matches(Uri uri)` with switch on PatternType
+- [✅] Private field: `Lazy<Regex?>` for pre-compiled regex patterns
+- [✅] Private methods: `MatchExact(Uri)`, `MatchWildcard(Uri)`, `MatchRegex(Uri)`
+- [✅] Constructor with lazy regex compilation
+- [✅] Custom Equals/GetHashCode excluding _compiledRegex
+- [✅] **Tests**: `tests/Acode.Domain.Tests/Validation/EndpointPatternTests.cs`
+  - [✅] Test exact matching: "api.openai.com" matches https://api.openai.com/v1/chat
+  - [✅] Test exact matching: "api.openai.com" does NOT match https://chat.openai.com
+  - [✅] Test wildcard matching: "*.openai.com" matches https://chat.openai.com
+  - [✅] Test wildcard matching: "*.openai.com" matches https://api.openai.com
+  - [✅] Test wildcard matching: "*.openai.com" does NOT match https://openai.com (no subdomain)
+  - [✅] Test regex matching: ".*\\.azure\\.com" matches https://foo.azure.com
+  - [✅] Test regex matching: "bedrock.*\\.amazonaws\\.com" matches bedrock-runtime.us-east-1.amazonaws.com
+  - [✅] Test case insensitive matching for all types
+  - [✅] Test invalid regex pattern throws on first use (lazy validation)
+  - [✅] Test pre-compiled regex is reused (performance)
+  - [✅] Test record equality
+  - [✅] Test unknown pattern type returns false
 
 **Implementation notes from spec (lines 770-798):**
 ```csharp

@@ -3,59 +3,66 @@ using System.Collections.Frozen;
 namespace Acode.Domain.Validation;
 
 /// <summary>
-/// Denylist of external LLM API endpoints.
+/// Denylist of external LLM API endpoints using pattern matching.
 /// Enforces HC-01: No external LLM APIs in LocalOnly/Airgapped modes.
 /// </summary>
 /// <remarks>
 /// This list is immutable and cannot be bypassed. Per Task 001.b.
+/// Supports exact, wildcard, and regex patterns for comprehensive matching.
 /// </remarks>
 public static class LlmApiDenylist
 {
-    private static readonly FrozenSet<string> _deniedHosts;
+    private static readonly FrozenSet<EndpointPattern> _deniedPatterns;
 
     static LlmApiDenylist()
     {
-        _deniedHosts = new[]
+        _deniedPatterns = new EndpointPattern[]
         {
-            // OpenAI
-            "api.openai.com",
-            "openai.azure.com",
+            // OpenAI - exact API endpoint
+            new() { Pattern = "api.openai.com", Type = PatternType.Exact, Description = "OpenAI API" },
 
-            // Anthropic
-            "api.anthropic.com",
+            // OpenAI - wildcard for all subdomains (chat, platform, beta, etc.)
+            new() { Pattern = "*.openai.com", Type = PatternType.Wildcard, Description = "OpenAI subdomains" },
 
-            // Google AI
-            "generativelanguage.googleapis.com",
-            "ai.googleapis.com",
+            // Azure OpenAI - exact root domain
+            new() { Pattern = "openai.azure.com", Type = PatternType.Exact, Description = "Azure OpenAI root" },
 
-            // Cohere
-            "api.cohere.ai",
-            "api.cohere.com",
+            // Azure OpenAI - regex pattern for custom instances
+            new() { Pattern = @".*\.openai\.azure\.com", Type = PatternType.Regex, Description = "Azure OpenAI instances" },
 
-            // AI21 Labs
-            "api.ai21.com",
+            // Anthropic - exact API endpoint
+            new() { Pattern = "api.anthropic.com", Type = PatternType.Exact, Description = "Anthropic API" },
 
-            // Hugging Face
-            "api-inference.huggingface.co",
+            // Anthropic - wildcard for all subdomains
+            new() { Pattern = "*.anthropic.com", Type = PatternType.Wildcard, Description = "Anthropic subdomains" },
 
-            // Together.ai
-            "api.together.xyz",
+            // Google AI - exact endpoints
+            new() { Pattern = "generativelanguage.googleapis.com", Type = PatternType.Exact, Description = "Google Generative Language API" },
+            new() { Pattern = "ai.googleapis.com", Type = PatternType.Exact, Description = "Google AI API" },
 
-            // Replicate
-            "api.replicate.com",
+            // Cohere - exact endpoints
+            new() { Pattern = "api.cohere.ai", Type = PatternType.Exact, Description = "Cohere API (.ai)" },
+            new() { Pattern = "api.cohere.com", Type = PatternType.Exact, Description = "Cohere API (.com)" },
 
-            // AWS Bedrock (common endpoints)
-            "bedrock-runtime.us-east-1.amazonaws.com",
-            "bedrock-runtime.us-west-2.amazonaws.com",
-            "bedrock-runtime.eu-west-1.amazonaws.com",
+            // AI21 Labs - exact endpoint
+            new() { Pattern = "api.ai21.com", Type = PatternType.Exact, Description = "AI21 Labs API" },
 
-            // Azure OpenAI (pattern matching)
-            // Note: Azure OpenAI uses *.openai.azure.com which is covered above
-        }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+            // Hugging Face - exact endpoint
+            new() { Pattern = "api-inference.huggingface.co", Type = PatternType.Exact, Description = "Hugging Face Inference API" },
+
+            // Together.ai - exact endpoint
+            new() { Pattern = "api.together.xyz", Type = PatternType.Exact, Description = "Together.ai API" },
+
+            // Replicate - exact endpoint
+            new() { Pattern = "api.replicate.com", Type = PatternType.Exact, Description = "Replicate API" },
+
+            // AWS Bedrock - regex pattern for all regions
+            new() { Pattern = @"bedrock.*\.amazonaws\.com", Type = PatternType.Regex, Description = "AWS Bedrock (all regions)" },
+        }.ToFrozenSet();
     }
 
     /// <summary>
-    /// Check if a URI is denied.
+    /// Check if a URI is denied by any pattern in the denylist.
     /// </summary>
     /// <param name="uri">URI to check.</param>
     /// <returns>True if denied, false otherwise.</returns>
@@ -63,25 +70,16 @@ public static class LlmApiDenylist
     {
         ArgumentNullException.ThrowIfNull(uri);
 
-        var host = uri.Host.ToLowerInvariant();
-
-        // Exact match
-        if (_deniedHosts.Contains(host))
-        {
-            return true;
-        }
-
-        // Subdomain match (e.g., xxx.openai.azure.com)
-        return _deniedHosts
-            .Any(deniedHost => host.EndsWith("." + deniedHost, StringComparison.OrdinalIgnoreCase));
+        // Check each pattern to see if URI matches
+        return _deniedPatterns.Any(pattern => pattern.Matches(uri));
     }
 
     /// <summary>
-    /// Get all denied hosts for documentation/debugging.
+    /// Get all denied patterns for documentation/debugging.
     /// </summary>
-    /// <returns>Immutable set of denied hosts.</returns>
-    public static IReadOnlySet<string> GetDeniedHosts()
+    /// <returns>Immutable set of endpoint patterns.</returns>
+    public static IReadOnlySet<EndpointPattern> GetDeniedPatterns()
     {
-        return _deniedHosts;
+        return _deniedPatterns;
     }
 }
