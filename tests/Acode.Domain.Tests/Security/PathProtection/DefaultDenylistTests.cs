@@ -5,7 +5,7 @@ using FluentAssertions;
 
 /// <summary>
 /// Comprehensive tests for DefaultDenylist verifying all required entries.
-/// Spec: task-003b lines 817-1125
+/// Spec: task-003b lines 817-1125.
 /// </summary>
 public class DefaultDenylistTests
 {
