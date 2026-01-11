@@ -69,7 +69,7 @@ Create the missing test files listed below following strict TDD. All production 
 
 ## GAP #1: Create MatrixExporterTests.cs
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **File to Create**: `tests/Acode.Domain.Tests/Modes/MatrixExporterTests.cs`
 
@@ -157,10 +157,10 @@ dotnet test --filter "FullyQualifiedName~MatrixExporterTests" --verbosity normal
 ```
 
 **Success Criteria**:
-- [ ] File created at correct path
-- [ ] Minimum 6 tests implemented
-- [ ] All tests pass against existing MatrixExporter code
-- [ ] UT-001a-09, UT-001a-10, UT-001a-11 satisfied
+- [✅] File created at correct path
+- [✅] Minimum 6 tests implemented (32 tests created, exceeding minimum)
+- [✅] All tests pass against existing MatrixExporter code
+- [✅] UT-001a-09, UT-001a-10, UT-001a-11 satisfied
 
 **Commit Message Template**:
 ```
@@ -178,7 +178,22 @@ All tests pass. Closes gap #1 for task-001a.
 Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
 
-**Evidence**: [To be filled when complete - paste test run output]
+**Evidence**:
+```
+Test Run Successful.
+Total tests: 32
+     Passed: 32
+ Total time: 1.3895 Seconds
+
+Tests created:
+- JSON Export: 7 tests (ToJson_ReturnsValidJson, ToJson_ContainsAllMatrixEntries, ToJson_ContainsAllThreeModes, ToJson_ContainsAll26Capabilities, ToJson_RoundTripPreservesData, ToJson_UsesIndentedFormatting, ToJson_UsesCamelCasePropertyNames)
+- Markdown Table: 10 tests (ProducesFormattedTable, ContainsAllModes, ContainsAllCapabilities, Has78DataRows, WithModeFilter_OnlyIncludesThatMode, WithBurstMode, WithAirgappedMode, ShowsRationaleForAllEntries, ShowsPrerequisitesForConditionalEntries, WithNullMode_ShowsAllModes)
+- CSV Export: 5 tests (ProducesValidCsv, Has78DataRows, EscapesQuotesInFields, ContainsAllModes, ContainsAllPermissionTypes)
+- Capability Comparison: 7 tests (ShowsCapabilityAcrossAllModes, FormatsAsMarkdownTable, HasHeading, OrdersModesByEnum, ShowsRationaleForEachMode, OpenAiApi_ShowsExpectedPermissions, WithEveryCapability_Succeeds)
+- Performance: 3 tests (ToJson_PerformanceIsAcceptable, ToMarkdownTable_PerformanceIsAcceptable, ToCsv_PerformanceIsAcceptable)
+
+All 32 tests pass. File: tests/Acode.Domain.Tests/Modes/MatrixExporterTests.cs
+```
 
 ---
 
