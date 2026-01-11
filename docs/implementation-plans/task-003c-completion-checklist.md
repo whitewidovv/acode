@@ -73,7 +73,7 @@ Currently these use Guid.ToString() which returns format like "123e4567-e89b-12d
 ---
 
 ### Gap #2: SpanId Value Object
-**Status**: [🔄]
+**Status**: [✅]
 **File to Create**: `src/Acode.Domain/Audit/SpanId.cs`
 
 **Why Needed**: Testing Requirements line 1009-1018, 1021-1032 require SpanId support. Implementation Prompt line 5144, 5200-5201 defines SpanId as required value object.
@@ -113,12 +113,16 @@ public sealed record SpanId
 - SpanId.New() generates unique IDs matching `^span_[a-zA-Z0-9]+$`
 - Tests pass: Should_Support_SpanId(), Should_Support_ParentSpanId()
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- SpanId.cs created with complete implementation
+- SpanIdTests.cs created with 9 tests
+- All 9 tests passing
+- Format validation: span_[a-zA-Z0-9]+
 
 ---
 
 ### Gap #3: Add SpanId and ParentSpanId to AuditEvent
-**Status**: [ ]
+**Status**: [🔄]
 **File to Modify**: `src/Acode.Domain/Audit/AuditEvent.cs`
 
 **Why Needed**: Implementation Prompt line 5200-5201 defines SpanId and ParentSpanId as optional properties. Testing Requirements line 1009-1032 validate these properties.
@@ -802,9 +806,9 @@ Each command should:
 ## Summary
 
 **Total Gaps**: 28
-**Completed**: 1
-**In Progress**: 1 (Gap #2)
-**Remaining**: 26
+**Completed**: 2
+**In Progress**: 1 (Gap #3)
+**Remaining**: 25
 
 ## Next Steps
 

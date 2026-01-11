@@ -32,6 +32,16 @@ public sealed record AuditEvent
     public required CorrelationId CorrelationId { get; init; }
 
     /// <summary>
+    /// Gets the span identifier for hierarchical tracing.
+    /// </summary>
+    public SpanId? SpanId { get; init; }
+
+    /// <summary>
+    /// Gets the parent span identifier for hierarchical tracing.
+    /// </summary>
+    public SpanId? ParentSpanId { get; init; }
+
+    /// <summary>
     /// Gets the type of audit event.
     /// </summary>
     public required AuditEventType EventType { get; init; }
