@@ -112,7 +112,7 @@ public class DefaultAllowlistTests
         var isAllowed = DefaultAllowlist.IsAllowed(uri);
 
         // Assert
-        isAllowed.Should().BeFalse("localhost with non-Ollama port should NOT be allowed by default");
+        isAllowed.Should().BeFalse("localhost should be restricted to the Ollama default port 11434 in the default allowlist configuration");
     }
 
     [Fact]
