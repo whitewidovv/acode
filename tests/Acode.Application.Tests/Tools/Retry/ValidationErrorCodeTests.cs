@@ -2,7 +2,6 @@ namespace Acode.Application.Tests.Tools.Retry;
 
 using Acode.Application.Tools.Retry;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for ValidationErrorCode constants.

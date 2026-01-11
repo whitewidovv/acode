@@ -1,6 +1,5 @@
 using Acode.Infrastructure.Configuration;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Configuration;
 

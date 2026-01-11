@@ -3,7 +3,6 @@ using Acode.Infrastructure.PromptPacks;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.PromptPacks;
 

@@ -7,7 +7,6 @@ using Acode.Domain.Tools;
 using Acode.Infrastructure.Tools;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 /// <summary>
 /// Tests for ToolSchemaRegistry implementation.

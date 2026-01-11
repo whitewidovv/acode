@@ -8,7 +8,6 @@ using Acode.Infrastructure.Ollama;
 using Acode.Infrastructure.Tools;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
 /// <summary>
 /// Tests for <see cref="ServiceCollectionExtensions"/>.

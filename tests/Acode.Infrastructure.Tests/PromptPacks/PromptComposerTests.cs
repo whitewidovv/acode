@@ -4,7 +4,6 @@ using Acode.Infrastructure.PromptPacks;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
-using Xunit;
 
 #pragma warning disable SA1615 // Element return value should be documented - not needed for xUnit tests
 

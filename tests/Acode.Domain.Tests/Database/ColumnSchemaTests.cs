@@ -2,7 +2,6 @@
 
 using Acode.Domain.Database;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Domain.Tests.Database;
 

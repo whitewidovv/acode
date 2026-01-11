@@ -9,7 +9,6 @@ using Acode.Infrastructure.Ollama;
 using Acode.Infrastructure.Ollama.Exceptions;
 using Acode.Infrastructure.Tests.Ollama.Http;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for <see cref="OllamaProvider"/> ChatAsync method.

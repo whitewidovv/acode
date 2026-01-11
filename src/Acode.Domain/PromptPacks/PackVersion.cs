@@ -15,9 +15,9 @@ public sealed partial class PackVersion : IComparable<PackVersion>, IEquatable<P
     /// <param name="major">The major version number.</param>
     /// <param name="minor">The minor version number.</param>
     /// <param name="patch">The patch version number.</param>
-    /// <param name="prerelease">The optional prerelease suffix.</param>
+    /// <param name="preRelease">The optional pre-release suffix.</param>
     /// <param name="buildMetadata">The optional build metadata.</param>
-    public PackVersion(int major, int minor, int patch, string? prerelease = null, string? buildMetadata = null)
+    public PackVersion(int major, int minor, int patch, string? preRelease = null, string? buildMetadata = null)
     {
         if (major < 0)
         {
@@ -37,7 +37,7 @@ public sealed partial class PackVersion : IComparable<PackVersion>, IEquatable<P
         Major = major;
         Minor = minor;
         Patch = patch;
-        Prerelease = prerelease;
+        PreRelease = preRelease;
         BuildMetadata = buildMetadata;
     }
 
@@ -57,9 +57,9 @@ public sealed partial class PackVersion : IComparable<PackVersion>, IEquatable<P
     public int Patch { get; }
 
     /// <summary>
-    /// Gets the optional prerelease suffix (e.g., "alpha", "beta.1").
+    /// Gets the optional pre-release suffix (e.g., "alpha", "beta.1").
     /// </summary>
-    public string? Prerelease { get; }
+    public string? PreRelease { get; }
 
     /// <summary>
     /// Gets the optional build metadata.
@@ -67,9 +67,9 @@ public sealed partial class PackVersion : IComparable<PackVersion>, IEquatable<P
     public string? BuildMetadata { get; }
 
     /// <summary>
-    /// Gets a value indicating whether this is a prerelease version.
+    /// Gets a value indicating whether this is a pre-release version.
     /// </summary>
-    public bool IsPrerelease => !string.IsNullOrEmpty(Prerelease);
+    public bool IsPreRelease => !string.IsNullOrEmpty(PreRelease);
 
     /// <summary>
     /// Less than operator.
@@ -237,20 +237,20 @@ public sealed partial class PackVersion : IComparable<PackVersion>, IEquatable<P
             return patchCompare;
         }
 
-        // Prerelease versions have lower precedence
-        if (IsPrerelease && !other.IsPrerelease)
+        // Pre-release versions have lower precedence
+        if (IsPreRelease && !other.IsPreRelease)
         {
             return -1;
         }
 
-        if (!IsPrerelease && other.IsPrerelease)
+        if (!IsPreRelease && other.IsPreRelease)
         {
             return 1;
         }
 
-        if (IsPrerelease && other.IsPrerelease)
+        if (IsPreRelease && other.IsPreRelease)
         {
-            return string.Compare(Prerelease, other.Prerelease, StringComparison.Ordinal);
+            return string.Compare(PreRelease, other.PreRelease, StringComparison.Ordinal);
         }
 
         return 0;
@@ -267,7 +267,7 @@ public sealed partial class PackVersion : IComparable<PackVersion>, IEquatable<P
         return Major == other.Major
             && Minor == other.Minor
             && Patch == other.Patch
-            && string.Equals(Prerelease, other.Prerelease, StringComparison.Ordinal);
+            && string.Equals(PreRelease, other.PreRelease, StringComparison.Ordinal);
     }
 
     /// <inheritdoc/>
@@ -279,7 +279,7 @@ public sealed partial class PackVersion : IComparable<PackVersion>, IEquatable<P
     /// <inheritdoc/>
     public override int GetHashCode()
     {
-        return HashCode.Combine(Major, Minor, Patch, Prerelease);
+        return HashCode.Combine(Major, Minor, Patch, PreRelease);
     }
 
     /// <inheritdoc/>
@@ -287,9 +287,9 @@ public sealed partial class PackVersion : IComparable<PackVersion>, IEquatable<P
     {
         var version = $"{Major}.{Minor}.{Patch}";
 
-        if (!string.IsNullOrEmpty(Prerelease))
+        if (!string.IsNullOrEmpty(PreRelease))
         {
-            version += $"-{Prerelease}";
+            version += $"-{PreRelease}";
         }
 
         if (!string.IsNullOrEmpty(BuildMetadata))

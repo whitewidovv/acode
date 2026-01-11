@@ -75,6 +75,190 @@ This task delivers:
 
 ---
 
+## Use Cases
+
+### Use Case 1: Elena the Backend Developer — Validating API Changes with Rapid Feedback
+
+**Persona:** Elena is a backend developer working on a .NET microservices project using xUnit for testing. She's implementing a new authentication endpoint and needs to verify that her changes don't break existing functionality while ensuring the new endpoint works correctly.
+
+**Before (Manual Test Execution):**
+- Elena modifies `/src/AuthService/Controllers/AuthController.cs` to add OAuth2 support
+- She opens terminal, navigates to `/tests/AuthService.Tests`
+- Runs `dotnet test --filter "Category=Auth"` manually
+- Waits 12 seconds for test execution
+- Parses visual output: "Test Run Successful. Total: 47, Passed: 46, Failed: 1"
+- Searches scrollback to find which test failed: `ValidateTokenExpiry_ExpiredToken_ReturnsFalse`
+- Opens TRX file manually to see failure details: "Expected: false, Actual: true"
+- Fixes the bug, runs tests again manually
+- Repeats this 5 times during development
+- **Total time spent on test cycle**: 8 minutes (5 iterations × 1.6 minutes)
+- **Cognitive load**: High (context switching between code and terminal, manual parsing)
+- **Error-prone**: Must remember exact filter syntax, easy to miss failures in scrollback
+
+**After (Unified Test Runner Wrapper):**
+- Elena modifies the same file using Acode
+- Agent detects code change, automatically triggers: `acode test --filter "Category==Auth" --project AuthService.Tests`
+- Test runner:
+  1. Detects xUnit framework from project references
+  2. Invokes `dotnet test --filter "Category=Auth" --logger trx --no-build`
+  3. Parses TRX output in realtime
+  4. Returns structured `TestRunResult` to agent within 1.2 seconds
+- Agent receives:
+  ```json
+  {
+    "totalTests": 47,
+    "passedTests": 46,
+    "failedTests": 1,
+    "duration": 1.2,
+    "results": [
+      {
+        "testName": "ValidateTokenExpiry_ExpiredToken_ReturnsFalse",
+        "outcome": "Failed",
+        "errorMessage": "Expected: false, Actual: true",
+        "stackTrace": "at AuthService.Tests.TokenValidatorTests.ValidateTokenExpiry_ExpiredToken_ReturnsFalse() in /tests/AuthService.Tests/TokenValidatorTests.cs:line 42"
+      }
+    ]
+  }
+  ```
+- Agent analyzes failure, identifies bug in `/src/AuthService/TokenValidator.cs:67`, proposes fix
+- Auto-runs tests again after fix, confirms all 47 pass
+- **Total time spent**: 2.4 seconds (2 iterations × 1.2 seconds)
+- **Cognitive load**: Zero (fully automated)
+- **Accuracy**: 100% (structured parsing, no manual interpretation)
+
+**Improvement Metrics:**
+- **Time reduction**: 8 minutes → 2.4 seconds = **99.5% faster**
+- **Developer productivity**: Elena saves ~45 minutes/day on test cycles (average 6 API changes/day)
+- **ROI**: $112.50/day × 20 working days/month = **$2,250/month per developer**
+- **Quality improvement**: Zero missed test failures (previously ~3% of failures missed in scrollback)
+
+---
+
+### Use Case 2: Marcus the AI Agent — Test-Driven Refactoring in Polyglot Codebase
+
+**Persona:** Marcus is Acode's autonomous coding agent tasked with refactoring a monorepo containing both a .NET backend (xUnit tests) and a React frontend (Vitest tests). The refactoring involves renaming a shared data model used across both projects.
+
+**Before (Without Unified Test Wrapper):**
+- Marcus receives task: "Rename `UserProfile` to `UserAccount` across codebase"
+- Attempts to run .NET tests: must know to use `dotnet test`, parse TRX format
+- Attempts to run Node.js tests: must know to use `npm test`, parse Jest JSON reporter
+- Framework detection fails 40% of the time (hardcoded paths, wrong assumptions)
+- Test result parsing errors occur in 15% of runs (TRX schema variations, Jest version differences)
+- Agent cannot determine if refactoring broke tests without external CI pipeline
+- **Success rate**: 60% (40% failure rate due to framework detection/parsing errors)
+- **Time to complete**: 45 minutes (including retries and manual human intervention)
+
+**After (Unified Test Runner Wrapper):**
+- Marcus receives the same task
+- Step 1: Invokes `acode detect` to find all projects (Task 019a)
+  - Discovers: `/backend/UserService.csproj` (xUnit), `/frontend/package.json` (Vitest)
+- Step 2: Performs refactoring across 47 files
+- Step 3: Validates backend changes:
+  ```bash
+  acode test --project UserService.csproj --timeout 60
+  ```
+  - Test runner auto-detects xUnit, invokes `dotnet test`, parses TRX
+  - Returns: `{ "totalTests": 238, "passedTests": 235, "failedTests": 3, "duration": 8.4 }`
+- Step 4: Analyzes 3 failed tests, identifies missed rename in `UserService/Mappers/ProfileMapper.cs`
+- Step 5: Fixes mapper, re-runs tests, confirms all 238 pass
+- Step 6: Validates frontend changes:
+  ```bash
+  acode test --project frontend --filter "UserAccount"
+  ```
+  - Test runner auto-detects Vitest, invokes `npm test -- --reporter=json`, parses JSON output
+  - Returns: `{ "totalTests": 64, "passedTests": 64, "failedTests": 0, "duration": 3.2 }`
+- Step 7: Commits refactoring with confidence (all 302 tests passing)
+- **Success rate**: 98% (2% failure rate due to legitimate test failures, not tooling issues)
+- **Time to complete**: 4.5 minutes (fully autonomous, no human intervention)
+- **Confidence**: 100% (structured test results provide proof of correctness)
+
+**Improvement Metrics:**
+- **Reliability**: 60% → 98% success rate = **63% improvement**
+- **Speed**: 45 minutes → 4.5 minutes = **90% time reduction**
+- **Autonomy**: 0% → 100% (eliminated need for human intervention to run/interpret tests)
+- **Framework coverage**: 2 frameworks (xUnit, Vitest) tested with single unified API
+- **Agent capability unlock**: Enables autonomous refactoring tasks previously requiring human oversight
+
+---
+
+### Use Case 3: Jordan the DevOps Engineer — CI/CD Pipeline Integration with Unified Test Output
+
+**Persona:** Jordan is a DevOps engineer responsible for maintaining CI/CD pipelines for a polyglot microservices architecture. The team uses Jenkins, GitHub Actions, and Azure Pipelines across different projects. Jordan needs consistent test reporting to aggregate results in a dashboard.
+
+**Before (Fragmented Test Execution):**
+- Pipeline for .NET service:
+  ```yaml
+  - run: dotnet test --logger trx
+  - run: parse-trx.sh results.trx  # Custom parsing script
+  - run: upload-results.sh --format custom  # Custom format
+  ```
+- Pipeline for Node.js service:
+  ```yaml
+  - run: npm test -- --reporter=json > results.json
+  - run: parse-jest.js results.json  # Different custom parser
+  - run: upload-results.sh --format custom  # Same uploader, different logic
+  ```
+- **Challenges**:
+  1. **Maintenance burden**: 8 different parsing scripts across teams (Python, Bash, Node.js, PowerShell)
+  2. **Inconsistent formats**: Dashboard shows .NET results as "Total/Passed/Failed", Node results as "Suites/Tests/Failures"
+  3. **Framework lock-in**: Switching from Jest to Vitest requires rewriting parser
+  4. **Timeout handling**: No unified timeout enforcement, some pipelines hang for hours
+  5. **Coverage aggregation**: Manual correlation of coverage reports from different tools
+- **Time to add new service**: 4 hours (write parser, test, integrate with dashboard)
+- **Ongoing maintenance**: ~6 hours/month fixing parser bugs and format changes
+- **Dashboard accuracy**: 85% (15% of failures not captured due to parsing errors)
+
+**After (Unified Test Wrapper in CI/CD):**
+- Pipeline for .NET service:
+  ```yaml
+  - run: acode test --format json --coverage --timeout 300 > test-results.json
+  - run: upload-results.sh test-results.json  # Standard format
+  ```
+- Pipeline for Node.js service:
+  ```yaml
+  - run: acode test --format json --coverage --timeout 300 > test-results.json
+  - run: upload-results.sh test-results.json  # Identical command!
+  ```
+- **Benefits**:
+  1. **Single uploader**: One `upload-results.sh` script handles all projects
+  2. **Consistent format**: All results in unified JSON schema:
+     ```json
+     {
+       "totalTests": 156,
+       "passedTests": 154,
+       "failedTests": 2,
+       "skippedTests": 0,
+       "duration": 12.4,
+       "coverage": {
+         "lineRate": 0.847,
+         "branchRate": 0.792
+       },
+       "results": [...]
+     }
+     ```
+  3. **Framework agnostic**: Switching frameworks requires zero pipeline changes
+  4. **Built-in timeout**: `--timeout 300` ensures tests never hang beyond 5 minutes
+  5. **Unified coverage**: Coverage data in same schema regardless of tool (coverlet vs nyc)
+- **Time to add new service**: 10 minutes (copy existing pipeline, change project name)
+- **Ongoing maintenance**: <30 minutes/month (only `acode test` tool maintained centrally)
+- **Dashboard accuracy**: 99.5% (structured parsing eliminates interpretation errors)
+
+**Improvement Metrics:**
+- **Onboarding time**: 4 hours → 10 minutes = **96% reduction**
+- **Maintenance cost**: $600/month → $50/month = **92% cost reduction** (at $100/hour)
+- **Dashboard accuracy**: 85% → 99.5% = **14.5 percentage point improvement**
+- **Framework flexibility**: Zero-cost framework migration (previously $2,000+ per service)
+- **Pipeline consistency**: 100% of services use identical test execution pattern
+- **Operational risk**: Eliminated (timeouts prevent runaway pipelines)
+
+**ROI Calculation:**
+- Setup time saved: 3.9 hours/service × 12 services/year = 46.8 hours = **$4,680 savings/year**
+- Maintenance savings: $550/month × 12 months = **$6,600 savings/year**
+- Dashboard accuracy improvement value: Prevents ~2 production incidents/year from missed test failures = **$10,000 savings/year** (estimated $5K/incident)
+- **Total ROI**: $21,280/year for a 10-service organization
+
+---
+
 ## Glossary / Terms
 
 | Term | Definition |
@@ -108,6 +292,41 @@ The following items are explicitly excluded from Task 019.b:
 - **Test generation** - Execution only
 - **Debugging** - No debugger support
 - **Performance profiling** - Basic timing only
+
+---
+
+## Assumptions
+
+### Technical Assumptions
+
+1. **SDK Availability:** .NET SDK and Node.js runtime are installed and available on the system PATH
+2. **Project Built:** Test projects are already compiled and up-to-date, or `--no-build` flag is not used (for .NET)
+3. **Dependencies Installed:** All test framework packages and dependencies are restored via `dotnet restore` or `npm install`
+4. **Test Framework Installed:** Test projects reference at least one recognized test framework (xUnit/NUnit/MSTest/Jest/Mocha/Vitest)
+5. **TRX Logger Available:** .NET projects have access to the TRX logger (included in .NET SDK by default)
+6. **JSON Reporter Available:** Node.js test frameworks support JSON output (Jest has `--json` flag, Vitest supports custom reporters)
+7. **File System Access:** Runtime user has read/write permissions to project directories and temp directories for TRX/result files
+8. **Standard Output Redirection:** Test process stdout/stderr can be captured and redirected for parsing
+9. **Process Spawning:** Operating system allows spawning child processes for test execution
+10. **UTF-8 Encoding:** Test output is UTF-8 encoded (or compatible encoding) for reliable parsing
+
+### Operational Assumptions
+
+11. **Single Repository Root:** Each test execution operates within a single repository context (multi-repo scenarios handled via multiple invocations)
+12. **Test Projects Identifiable:** Test projects follow naming conventions (e.g., `*.Tests.csproj`, test scripts in `package.json`) for auto-detection
+13. **No Concurrent Builds:** Tests run while project is not being actively modified/built by another process (file locking)
+14. **Network Access for Restore:** If dependencies not cached, internet access available for package restore (configurable to fail-fast if offline)
+15. **Sufficient Disk Space:** Temporary TRX files, coverage reports, and logs can be written without disk-full errors
+16. **Environment Variables:** Test execution environment inherits necessary environment variables (e.g., `DOTNET_CLI_HOME`, `NODE_ENV`)
+17. **No Interactive Tests:** Tests do not require user input or GUI interaction (headless execution)
+18. **Test Timeout Acceptable:** Default timeout of 300 seconds (5 minutes) is sufficient for most test suites (configurable via options)
+
+### Integration Assumptions
+
+19. **Task-019a Complete:** Layout detection (Task 019a) is implemented and returns valid `DetectionResult` with test project metadata
+20. **Task-018 Complete:** Command runner (Task 018) is implemented and can execute processes with timeout/cancellation support
+21. **Task-002a Configuration:** Configuration system can provide test runner settings (default timeout, output format preferences)
+22. **Task-018c Artifacts:** Artifact storage system available to persist test results and coverage reports if requested
 
 ---
 
@@ -690,6 +909,1280 @@ The wrapper automatically detects the test framework:
 - [ ] AC-019B-94: Coverage file path is stored in result
 - [ ] AC-019B-95: Coverage summary is parsed (line %, branch %)
 - [ ] AC-019B-96: Coverage is optional and off by default
+
+---
+
+## Security
+
+### Threat 1: Command Injection via Test Filter Arguments
+
+**Risk Description:** Malicious test filter expressions could inject shell commands if filter arguments are not properly sanitized before being passed to `dotnet test` or `npm test` processes.
+
+**Attack Scenario:**
+```csharp
+// Attacker provides malicious filter
+var maliciousFilter = "UnitTests; rm -rf /; #";
+
+// Vulnerable code:
+var command = $"dotnet test --filter \"{maliciousFilter}\"";  // DANGEROUS!
+// Executes: dotnet test --filter "UnitTests; rm -rf /; #"
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Testing
+{
+    public sealed class FilterSanitizer
+    {
+        private readonly ILogger<FilterSanitizer> _logger;
+
+        // Allow only alphanumeric, dots, underscores, equals, ampersands, tilde, pipes
+        private static readonly Regex AllowedFilterPattern = new(
+            @"^[a-zA-Z0-9._=&~|() ]+$",
+            RegexOptions.Compiled);
+
+        // Detect shell metacharacters
+        private static readonly Regex ShellMetacharPattern = new(
+            @"[;&|`$<>{}[\]\\]",
+            RegexOptions.Compiled);
+
+        public FilterSanitizer(ILogger<FilterSanitizer> logger)
+        {
+            _logger = logger;
+        }
+
+        public ValidationResult ValidateFilter(string filter, FilterType filterType)
+        {
+            if (string.IsNullOrWhiteSpace(filter))
+            {
+                return ValidationResult.Success();  // Empty filter is valid (runs all tests)
+            }
+
+            // Check for shell metacharacters (strict)
+            if (ShellMetacharPattern.IsMatch(filter))
+            {
+                _logger.LogWarning(
+                    "Filter contains shell metacharacters: {Filter}",
+                    filter);
+                return ValidationResult.Fail(
+                    $"Filter '{filter}' contains invalid characters (;, &, |, `, $, <, >, etc.)");
+            }
+
+            // Validate against allowed pattern
+            if (!AllowedFilterPattern.IsMatch(filter))
+            {
+                _logger.LogWarning(
+                    "Filter does not match allowed pattern: {Filter}",
+                    filter);
+                return ValidationResult.Fail(
+                    $"Filter '{filter}' contains disallowed characters. " +
+                    "Allowed: alphanumeric, dots, underscores, equals, ampersands, tilde, pipes, parentheses");
+            }
+
+            // Framework-specific validation
+            var frameworkValidation = filterType switch
+            {
+                FilterType.DotNet => ValidateDotNetFilter(filter),
+                FilterType.Jest => ValidateJestFilter(filter),
+                FilterType.Mocha => ValidateMochaFilter(filter),
+                _ => ValidationResult.Success()
+            };
+
+            return frameworkValidation;
+        }
+
+        private ValidationResult ValidateDotNetFilter(string filter)
+        {
+            // .NET filter syntax: "FullyQualifiedName~Namespace.Class" or "Category=Unit&Priority=1"
+            // Validate specific keywords
+            var allowedKeywords = new[] { "FullyQualifiedName", "Name", "Category", "Priority", "TestCategory" };
+            var hasValidKeyword = false;
+
+            foreach (var keyword in allowedKeywords)
+            {
+                if (filter.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                {
+                    hasValidKeyword = true;
+                    break;
+                }
+            }
+
+            if (!hasValidKeyword && filter.Length > 0)
+            {
+                _logger.LogWarning(
+                    "DotNet filter does not contain recognized keywords: {Filter}",
+                    filter);
+            }
+
+            return ValidationResult.Success();
+        }
+
+        private ValidationResult ValidateJestFilter(string filter)
+        {
+            // Jest uses regex patterns, ensure they're safe
+            if (filter.Contains("(?", StringComparison.Ordinal))
+            {
+                return ValidationResult.Fail("Jest filter cannot contain regex look-ahead/behind");
+            }
+
+            return ValidationResult.Success();
+        }
+
+        private ValidationResult ValidateMochaFilter(string filter)
+        {
+            // Mocha --grep uses regex
+            if (filter.Length > 500)
+            {
+                return ValidationResult.Fail($"Mocha filter too long: {filter.Length} chars (max 500)");
+            }
+
+            return ValidationResult.Success();
+        }
+
+        /// <summary>
+        /// Escapes filter for safe process argument passing
+        /// </summary>
+        public string EscapeForProcessArgument(string filter, FilterType filterType)
+        {
+            // Always validate first
+            var validation = ValidateFilter(filter, filterType);
+            if (!validation.IsValid)
+            {
+                throw new ArgumentException(validation.ErrorMessage, nameof(filter));
+            }
+
+            // Escape double quotes and backslashes for command-line safety
+            var escaped = filter
+                .Replace("\\", "\\\\")  // Escape backslashes
+                .Replace("\"", "\\\""); // Escape double quotes
+
+            return escaped;
+        }
+    }
+
+    public enum FilterType
+    {
+        DotNet,
+        Jest,
+        Mocha,
+        Vitest
+    }
+
+    public readonly record struct ValidationResult(bool IsValid, string ErrorMessage)
+    {
+        public static ValidationResult Success() => new(true, string.Empty);
+        public static ValidationResult Fail(string message) => new(false, message);
+        public static ValidationResult Warn(string message) => new(true, message);  // Valid but with warning
+    }
+}
+```
+
+---
+
+### Threat 2: Path Traversal in Test Result File Output
+
+**Risk Description:** If test result file paths (TRX, coverage reports) are constructed from user input without validation, attackers could write results outside the intended directory, potentially overwriting system files.
+
+**Attack Scenario:**
+```csharp
+// Attacker provides malicious output path
+var maliciousPath = "../../../etc/passwd";
+
+// Vulnerable code:
+var outputPath = Path.Combine(_tempDir, maliciousPath + ".trx");  // DANGEROUS!
+// Results in: /tmp/../../../etc/passwd.trx => /etc/passwd.trx
+File.WriteAllText(outputPath, trxContent);  // Overwrites /etc/passwd.trx!
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System;
+using System.IO;
+using System.Linq;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Testing
+{
+    public sealed class SafeResultFileWriter
+    {
+        private readonly string _allowedRootPath;
+        private readonly ILogger<SafeResultFileWriter> _logger;
+
+        public SafeResultFileWriter(string allowedRootPath, ILogger<SafeResultFileWriter> logger)
+        {
+            _allowedRootPath = Path.GetFullPath(allowedRootPath);
+            _logger = logger;
+        }
+
+        public ValidationResult ValidateOutputPath(string requestedPath)
+        {
+            // Resolve to absolute path
+            var absolutePath = Path.GetFullPath(Path.Combine(_allowedRootPath, requestedPath));
+
+            // Ensure resolved path is within allowed root
+            if (!absolutePath.StartsWith(_allowedRootPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "Path traversal detected: {Requested} resolves to {Absolute} outside {Root}",
+                    requestedPath, absolutePath, _allowedRootPath);
+
+                return ValidationResult.Fail(
+                    $"Output path '{requestedPath}' resolves outside allowed directory");
+            }
+
+            // Check for excessive parent directory traversals (suspicious)
+            var traversalCount = requestedPath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+                .Count(segment => segment == "..");
+
+            if (traversalCount > 2)
+            {
+                _logger.LogWarning(
+                    "Excessive path traversal detected: {Count} levels in {Path}",
+                    traversalCount, requestedPath);
+
+                return ValidationResult.Warn(
+                    $"Output path '{requestedPath}' contains {traversalCount} parent traversals (suspicious)");
+            }
+
+            // Validate file extension (only allow known result formats)
+            var allowedExtensions = new[] { ".trx", ".xml", ".json", ".coverage", ".cobertura.xml" };
+            var extension = Path.GetExtension(absolutePath).ToLowerInvariant();
+
+            if (!allowedExtensions.Contains(extension))
+            {
+                _logger.LogWarning(
+                    "Invalid result file extension: {Extension} for {Path}",
+                    extension, requestedPath);
+
+                return ValidationResult.Fail(
+                    $"Output file extension '{extension}' not allowed. " +
+                    $"Allowed: {string.Join(", ", allowedExtensions)}");
+            }
+
+            return ValidationResult.Success();
+        }
+
+        public async Task<string> WriteTestResultAsync(
+            string requestedPath,
+            string content,
+            CancellationToken ct)
+        {
+            // Validate path
+            var validation = ValidateOutputPath(requestedPath);
+            if (!validation.IsValid)
+            {
+                throw new SecurityException($"Invalid output path: {validation.ErrorMessage}");
+            }
+
+            // Resolve safe absolute path
+            var safePath = Path.GetFullPath(Path.Combine(_allowedRootPath, requestedPath));
+
+            // Ensure directory exists
+            var directory = Path.GetDirectoryName(safePath);
+            if (!Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+                _logger.LogInformation("Created output directory: {Directory}", directory);
+            }
+
+            // Write atomically (temp file + rename)
+            var tempPath = safePath + ".tmp";
+            try
+            {
+                await File.WriteAllTextAsync(tempPath, content, ct);
+
+                // Atomic rename (overwrites if exists)
+                File.Move(tempPath, safePath, overwrite: true);
+
+                _logger.LogInformation("Wrote test result to: {Path}", safePath);
+                return safePath;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to write test result to: {Path}", safePath);
+
+                // Clean up temp file
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+
+                throw;
+            }
+        }
+    }
+}
+```
+
+---
+
+### Threat 3: Resource Exhaustion via Infinite Test Loops
+
+**Risk Description:** Malicious or buggy tests could enter infinite loops, consuming CPU indefinitely and blocking the agent. Without timeout enforcement, test runs could hang for hours.
+
+**Attack Scenario:**
+```csharp
+[Fact]
+public void MaliciousTest_InfiniteLoop()
+{
+    while (true)  // Infinite loop
+    {
+        Thread.Sleep(1000);
+    }
+}
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Testing
+{
+    public sealed class TimeoutEnforcedTestRunner
+    {
+        private readonly ILogger<TimeoutEnforcedTestRunner> _logger;
+        private readonly TimeSpan _defaultTimeout;
+
+        public TimeoutEnforcedTestRunner(
+            ILogger<TimeoutEnforcedTestRunner> logger,
+            TimeSpan defaultTimeout)
+        {
+            _logger = logger;
+            _defaultTimeout = defaultTimeout;
+        }
+
+        public async Task<TestRunResult> RunWithTimeoutAsync(
+            string testCommand,
+            string arguments,
+            string workingDirectory,
+            TimeSpan? customTimeout,
+            CancellationToken ct)
+        {
+            var effectiveTimeout = customTimeout ?? _defaultTimeout;
+            var sw = Stopwatch.StartNew();
+
+            _logger.LogInformation(
+                "Starting test run with timeout {Timeout}s: {Command} {Args}",
+                effectiveTimeout.TotalSeconds, testCommand, arguments);
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(effectiveTimeout);
+
+            Process? process = null;
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = testCommand,
+                    Arguments = arguments,
+                    WorkingDirectory = workingDirectory,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                process = Process.Start(psi);
+                if (process == null)
+                {
+                    throw new InvalidOperationException($"Failed to start process: {testCommand}");
+                }
+
+                // Wait for exit with timeout enforcement
+                await process.WaitForExitAsync(cts.Token);
+
+                sw.Stop();
+
+                var stdout = await process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+                var stderr = await process.StandardError.ReadToEndAsync(CancellationToken.None);
+
+                _logger.LogInformation(
+                    "Test run completed in {Duration}ms with exit code {ExitCode}",
+                    sw.ElapsedMilliseconds, process.ExitCode);
+
+                return new TestRunResult
+                {
+                    ExitCode = process.ExitCode,
+                    StandardOutput = stdout,
+                    StandardError = stderr,
+                    Duration = sw.Elapsed,
+                    TimedOut = false
+                };
+            }
+            catch (OperationCanceledException) when (cts.Token.IsCancellationRequested)
+            {
+                sw.Stop();
+
+                _logger.LogWarning(
+                    "Test run timed out after {Timeout}s (limit: {Limit}s)",
+                    sw.Elapsed.TotalSeconds, effectiveTimeout.TotalSeconds);
+
+                // Kill process tree
+                if (process != null && !process.HasExited)
+                {
+                    _logger.LogWarning("Killing test process {PID}", process.Id);
+
+                    try
+                    {
+                        // Kill process tree (parent + children)
+                        KillProcessTree(process.Id);
+                        process.Kill(entireProcessTree: true);
+                        process.WaitForExit(5000);  // Give it 5 seconds to die
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to kill test process {PID}", process.Id);
+                    }
+                }
+
+                // Return partial results (timeout)
+                return new TestRunResult
+                {
+                    ExitCode = -1,
+                    StandardOutput = string.Empty,
+                    StandardError = $"Test execution timed out after {effectiveTimeout.TotalSeconds} seconds",
+                    Duration = sw.Elapsed,
+                    TimedOut = true
+                };
+            }
+            finally
+            {
+                process?.Dispose();
+            }
+        }
+
+        private void KillProcessTree(int processId)
+        {
+            // Platform-specific process tree killing
+            if (OperatingSystem.IsWindows())
+            {
+                // Windows: use taskkill /T
+                var killProcess = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "taskkill",
+                    Arguments = $"/PID {processId} /T /F",
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                });
+                killProcess?.WaitForExit(3000);
+            }
+            else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            {
+                // Linux/macOS: kill process group
+                var killProcess = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "pkill",
+                    Arguments = $"-P {processId}",
+                    CreateNoWindow = true,
+                    UseShellExecute = false
+                });
+                killProcess?.WaitForExit(3000);
+            }
+        }
+    }
+
+    public sealed class TestRunResult
+    {
+        public int ExitCode { get; init; }
+        public string StandardOutput { get; init; } = string.Empty;
+        public string StandardError { get; init; } = string.Empty;
+        public TimeSpan Duration { get; init; }
+        public bool TimedOut { get; init; }
+    }
+}
+```
+
+---
+
+### Threat 4: Output Injection in Test Result Messages
+
+**Risk Description:** Malicious test code could inject ANSI escape codes or control characters into test output (error messages, stack traces) to manipulate terminal display, potentially hiding failures or injecting fake success messages.
+
+**Attack Scenario:**
+```csharp
+[Fact]
+public void MaliciousTest_OutputInjection()
+{
+    // Inject ANSI codes to clear screen and show fake success
+    var maliciousMessage = "\x1b[2J\x1b[H✓ All tests passed (0 failed, 1000 passed)";
+    throw new Exception(maliciousMessage);  // Appears as success!
+}
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System;
+using System.Text;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Testing
+{
+    public sealed class OutputSanitizer
+    {
+        private readonly ILogger<OutputSanitizer> _logger;
+
+        // ANSI escape code pattern (CSI sequences)
+        private static readonly Regex AnsiEscapePattern = new(
+            @"\x1b\[[0-9;]*[a-zA-Z]",
+            RegexOptions.Compiled);
+
+        // Control characters (except newline, tab, carriage return)
+        private static readonly Regex ControlCharPattern = new(
+            @"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]",
+            RegexOptions.Compiled);
+
+        public OutputSanitizer(ILogger<OutputSanitizer> logger)
+        {
+            _logger = logger;
+        }
+
+        public string SanitizeTestOutput(string rawOutput, int maxLength = 100_000)
+        {
+            if (string.IsNullOrEmpty(rawOutput))
+            {
+                return rawOutput;
+            }
+
+            // Truncate if too long (prevent memory exhaustion)
+            if (rawOutput.Length > maxLength)
+            {
+                _logger.LogWarning(
+                    "Test output truncated from {Original} to {Max} characters",
+                    rawOutput.Length, maxLength);
+
+                rawOutput = rawOutput.Substring(0, maxLength) + "\n[... output truncated ...]";
+            }
+
+            // Remove ANSI escape codes
+            var withoutAnsi = AnsiEscapePattern.Replace(rawOutput, string.Empty);
+
+            // Remove control characters (keep \n, \r, \t)
+            var sanitized = ControlCharPattern.Replace(withoutAnsi, string.Empty);
+
+            // Check if sanitization occurred
+            if (sanitized.Length != rawOutput.Length)
+            {
+                var removedChars = rawOutput.Length - sanitized.Length;
+                _logger.LogInformation(
+                    "Sanitized test output: removed {Count} ANSI/control characters",
+                    removedChars);
+            }
+
+            return sanitized;
+        }
+
+        public string SanitizeTestName(string testName, int maxLength = 500)
+        {
+            if (string.IsNullOrWhiteSpace(testName))
+            {
+                return "[unnamed test]";
+            }
+
+            // Remove control characters and ANSI codes
+            var sanitized = ControlCharPattern.Replace(testName, string.Empty);
+            sanitized = AnsiEscapePattern.Replace(sanitized, string.Empty);
+
+            // Truncate if too long
+            if (sanitized.Length > maxLength)
+            {
+                sanitized = sanitized.Substring(0, maxLength) + "...";
+            }
+
+            // Ensure non-empty
+            if (string.IsNullOrWhiteSpace(sanitized))
+            {
+                _logger.LogWarning("Test name sanitized to empty string, original: {Original}", testName);
+                return "[invalid test name]";
+            }
+
+            return sanitized;
+        }
+
+        public string SanitizeErrorMessage(string errorMessage, int maxLength = 5000)
+        {
+            if (string.IsNullOrWhiteSpace(errorMessage))
+            {
+                return errorMessage;
+            }
+
+            // Sanitize control chars and ANSI codes
+            var sanitized = SanitizeTestOutput(errorMessage, maxLength);
+
+            // Escape XML special characters (for TRX compatibility)
+            sanitized = EscapeXml(sanitized);
+
+            return sanitized;
+        }
+
+        private static string EscapeXml(string input)
+        {
+            if (string.IsNullOrEmpty(input))
+            {
+                return input;
+            }
+
+            return input
+                .Replace("&", "&amp;")
+                .Replace("<", "&lt;")
+                .Replace(">", "&gt;")
+                .Replace("\"", "&quot;")
+                .Replace("'", "&apos;");
+        }
+
+        public TestResult SanitizeTestResult(TestResult rawResult)
+        {
+            return new TestResult
+            {
+                TestName = SanitizeTestName(rawResult.TestName),
+                FullyQualifiedName = SanitizeTestName(rawResult.FullyQualifiedName),
+                Outcome = rawResult.Outcome,  // Enum, no sanitization needed
+                Duration = rawResult.Duration,
+                ErrorMessage = rawResult.ErrorMessage != null
+                    ? SanitizeErrorMessage(rawResult.ErrorMessage)
+                    : null,
+                StackTrace = rawResult.StackTrace != null
+                    ? SanitizeTestOutput(rawResult.StackTrace, maxLength: 10_000)
+                    : null
+            };
+        }
+    }
+
+    public sealed class TestResult
+    {
+        public string TestName { get; init; } = string.Empty;
+        public string FullyQualifiedName { get; init; } = string.Empty;
+        public TestOutcome Outcome { get; init; }
+        public TimeSpan Duration { get; init; }
+        public string? ErrorMessage { get; init; }
+        public string? StackTrace { get; init; }
+    }
+
+    public enum TestOutcome
+    {
+        Passed,
+        Failed,
+        Skipped,
+        NotExecuted
+    }
+}
+```
+
+---
+
+### Threat 5: Denial of Service via Massive Test Output
+
+**Risk Description:** Malicious tests could generate gigabytes of output (console writes in tight loops), causing memory exhaustion and process crashes.
+
+**Attack Scenario:**
+```csharp
+[Fact]
+public void MaliciousTest_OutputFlood()
+{
+    for (int i = 0; i < 100_000_000; i++)
+    {
+        Console.WriteLine(new string('A', 10_000));  // 1GB+ output
+    }
+}
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System;
+using System.IO;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Testing
+{
+    public sealed class BoundedOutputCapture
+    {
+        private readonly ILogger<BoundedOutputCapture> _logger;
+        private readonly int _maxOutputBytes;
+
+        public BoundedOutputCapture(
+            ILogger<BoundedOutputCapture> logger,
+            int maxOutputBytes = 10_000_000)  // 10MB default
+        {
+            _logger = logger;
+            _maxOutputBytes = maxOutputBytes;
+        }
+
+        public async Task<CapturedOutput> CaptureOutputAsync(
+            StreamReader outputStream,
+            string streamName,
+            CancellationToken ct)
+        {
+            var buffer = new StringBuilder();
+            var totalBytes = 0;
+            var truncated = false;
+
+            try
+            {
+                char[] chunk = new char[4096];
+                int charsRead;
+
+                while ((charsRead = await outputStream.ReadAsync(chunk, 0, chunk.Length, ct)) > 0)
+                {
+                    var chunkBytes = Encoding.UTF8.GetByteCount(chunk, 0, charsRead);
+                    totalBytes += chunkBytes;
+
+                    if (totalBytes > _maxOutputBytes)
+                    {
+                        truncated = true;
+                        _logger.LogWarning(
+                            "{Stream} output truncated at {Size} bytes (limit: {Limit} bytes)",
+                            streamName, totalBytes, _maxOutputBytes);
+
+                        buffer.Append($"\n\n[{streamName} TRUNCATED - exceeded {_maxOutputBytes} bytes limit]");
+                        break;
+                    }
+
+                    buffer.Append(chunk, 0, charsRead);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("{Stream} capture cancelled", streamName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error capturing {Stream} output", streamName);
+            }
+
+            return new CapturedOutput
+            {
+                Content = buffer.ToString(),
+                BytesRead = totalBytes,
+                Truncated = truncated
+            };
+        }
+
+        public async Task<(CapturedOutput stdout, CapturedOutput stderr)> CaptureAllAsync(
+            StreamReader stdoutStream,
+            StreamReader stderrStream,
+            CancellationToken ct)
+        {
+            // Capture stdout and stderr concurrently
+            var stdoutTask = CaptureOutputAsync(stdoutStream, "stdout", ct);
+            var stderrTask = CaptureOutputAsync(stderrStream, "stderr", ct);
+
+            await Task.WhenAll(stdoutTask, stderrTask);
+
+            return (await stdoutTask, await stderrTask);
+        }
+    }
+
+    public sealed class CapturedOutput
+    {
+        public string Content { get; init; } = string.Empty;
+        public int BytesRead { get; init; }
+        public bool Truncated { get; init; }
+    }
+}
+```
+
+---
+
+## Troubleshooting
+
+### Issue 1: No Tests Discovered in Test Project
+
+**Symptoms:**
+- `acode test` returns "0 tests found"
+- Output shows "Test run complete: 0 passed, 0 failed"
+- Project clearly contains test classes/methods
+- Manual `dotnet test` or `npm test` finds and runs tests successfully
+
+**Causes:**
+- Test project not built (missing compiled assemblies for .NET)
+- Test framework package not installed or not restored
+- Test class/method attributes missing or incorrect (e.g., missing `[Fact]` attribute)
+- Test discovery filters excluding all tests
+- Test project metadata indicates `IsTestProject=false` incorrectly
+- For Node.js: `test` script missing from `package.json`
+
+**Solutions:**
+
+**Solution 1: Verify Project is Built**
+```bash
+# For .NET projects
+dotnet build /path/to/MyApp.Tests.csproj --configuration Release
+
+# Verify DLL exists
+ls -la /path/to/MyApp.Tests/bin/Release/net8.0/MyApp.Tests.dll
+
+# Try test run without --no-build flag
+acode test --project MyApp.Tests --no-build false
+```
+
+**Solution 2: Check Test Framework Packages**
+```bash
+# For .NET projects - verify test framework is installed
+grep -A5 "<ItemGroup>" MyApp.Tests.csproj | grep -E "xunit|NUnit|MSTest"
+
+# Expected output (xUnit example):
+# <PackageReference Include="xunit" Version="2.6.2" />
+# <PackageReference Include="xunit.runner.visualstudio" Version="2.5.4" />
+# <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+
+# If missing, add packages
+dotnet add package xunit --version 2.6.2
+dotnet add package xunit.runner.visualstudio --version 2.5.4
+dotnet add package Microsoft.NET.Test.Sdk --version 17.8.0
+dotnet restore
+```
+
+**Solution 3: Verify Test Attributes**
+```csharp
+// WRONG - test will NOT be discovered:
+public class UserServiceTests
+{
+    public void GetUser_ValidId_ReturnsUser()  // Missing [Fact] attribute!
+    {
+        // Test code
+    }
+}
+
+// CORRECT - test WILL be discovered:
+using Xunit;
+
+public class UserServiceTests
+{
+    [Fact]  // Required attribute for xUnit
+    public void GetUser_ValidId_ReturnsUser()
+    {
+        // Test code
+    }
+}
+
+// For NUnit:
+using NUnit.Framework;
+
+[TestFixture]
+public class UserServiceTests
+{
+    [Test]  // NUnit uses [Test] instead of [Fact]
+    public void GetUser_ValidId_ReturnsUser()
+    {
+        // Test code
+    }
+}
+```
+
+**Solution 4: Run with Verbose Logging**
+```bash
+# Enable detailed discovery output
+acode test --project MyApp.Tests --verbose --log-level Debug
+
+# Output will show:
+# [DEBUG] Discovering tests in /repo/MyApp.Tests.csproj
+# [DEBUG] Test framework detected: xUnit 2.6.2
+# [DEBUG] Running: dotnet test MyApp.Tests.csproj --list-tests
+# [DEBUG] Discovered tests:
+#   - MyApp.Tests.UserServiceTests.GetUser_ValidId_ReturnsUser
+#   - MyApp.Tests.UserServiceTests.GetUser_InvalidId_ThrowsException
+# [INFO] Test discovery complete: 2 tests found
+```
+
+**Solution 5: Check Node.js Test Script**
+```bash
+# For Node.js projects - verify test script exists
+jq '.scripts.test' package.json
+
+# If null or missing, add test script:
+npm pkg set scripts.test="jest"
+
+# Or manually edit package.json:
+{
+  "scripts": {
+    "test": "jest",  // Add this line
+    "build": "tsc"
+  }
+}
+```
+
+---
+
+### Issue 2: TRX Parse Failure (Results Not Structured)
+
+**Symptoms:**
+- Test run completes but results show raw TRX XML instead of structured JSON
+- Error: "XmlException: The 'Results' start tag does not match"
+- Results object has `totalTests: 0` despite tests running
+- Log shows "TRX parser warning: invalid format"
+
+**Causes:**
+- TRX file corrupted or incomplete (test process crashed mid-write)
+- TRX format version mismatch (older/newer than expected schema)
+- Encoding issues (UTF-16 BOM causing parse failure)
+- Concurrent writes to same TRX file (race condition)
+- Disk full during TRX write (truncated file)
+
+**Solutions:**
+
+**Solution 1: Verify TRX File Integrity**
+```bash
+# Locate TRX file
+TRX_FILE=$(find ~/.acode/test-results -name "*.trx" | head -1)
+
+# Check file size (should be >1KB)
+ls -lh "$TRX_FILE"
+
+# Validate XML structure
+xmllint --noout "$TRX_FILE"
+# If valid: no output
+# If invalid: shows line/column of error
+
+# Check for truncation (last line should be </TestRun>)
+tail -1 "$TRX_FILE"
+```
+
+**Solution 2: Use JSON Reporter for Node.js**
+```bash
+# For Jest tests - use JSON reporter instead of default
+acode test --project frontend --output-format json
+
+# Or configure Jest to always output JSON:
+cat >> jest.config.js << 'EOF'
+module.exports = {
+  reporters: [
+    'default',
+    ['jest-json-reporter', {
+      outputPath: './test-results.json'
+    }]
+  ]
+};
+EOF
+
+npm install --save-dev jest-json-reporter
+```
+
+**Solution 3: Handle Encoding Issues**
+```csharp
+// In TrxParser.cs - auto-detect encoding
+public TestRunResult ParseTrx(string trxFilePath)
+{
+    // Read raw bytes to detect BOM
+    var bytes = File.ReadAllBytes(trxFilePath);
+    var encoding = DetectEncoding(bytes);
+
+    var xmlContent = encoding.GetString(bytes);
+
+    // Remove BOM if present
+    if (xmlContent.StartsWith("\uFEFF"))
+    {
+        xmlContent = xmlContent.Substring(1);
+    }
+
+    using var stringReader = new StringReader(xmlContent);
+    using var xmlReader = XmlReader.Create(stringReader, _xmlSettings);
+    var doc = XDocument.Load(xmlReader);
+
+    // Parse TestRun element
+    return ParseTestRunElement(doc.Root);
+}
+```
+
+**Solution 4: Enable Fallback to Raw Output**
+```bash
+# Configure test runner to return raw output on parse failure
+acode config set test.fallback-to-raw-output true
+
+# Now if TRX parse fails, you still get results:
+acode test --project MyApp.Tests
+# Output (on parse failure):
+# {
+#   "totalTests": -1,
+#   "rawOutput": "Test Run Successful.\nTotal tests: 47\nPassed: 46\nFailed: 1",
+#   "parseError": "TRX parse failed: invalid XML at line 42"
+# }
+```
+
+**Solution 5: Clear Stale TRX Files**
+```bash
+# Remove old TRX files that may conflict
+rm -rf ~/.acode/test-results/*.trx
+
+# Run test with fresh output
+acode test --project MyApp.Tests --force-refresh
+```
+
+---
+
+### Issue 3: Test Run Exceeds Timeout
+
+**Symptoms:**
+- Test execution stops after exactly 300 seconds (5 minutes)
+- Output shows "Test execution timed out after 300 seconds"
+- Some tests pass, but run is incomplete
+- Process killed before all tests complete
+
+**Causes:**
+- Tests legitimately slow (e.g., integration tests with database operations)
+- Infinite loop in test code
+- Test waiting for external resource that never responds (HTTP timeout, database deadlock)
+- Insufficient timeout for large test suite (1000+ tests)
+- Tests running sequentially instead of parallel (slower than expected)
+
+**Solutions:**
+
+**Solution 1: Increase Timeout**
+```bash
+# Set timeout to 10 minutes (600 seconds)
+acode test --project MyApp.Tests --timeout 600
+
+# For very large test suites, increase further
+acode test --project MyApp.Tests --timeout 1800  # 30 minutes
+
+# Set default timeout in config
+acode config set test.default-timeout-seconds 600
+```
+
+**Solution 2: Run Tests in Parallel**
+```bash
+# For .NET tests - enable parallel execution
+acode test --project MyApp.Tests -- --parallel
+
+# Or configure in .csproj:
+<PropertyGroup>
+  <ParallelizeTestCollections>true</ParallelizeTestCollections>
+  <MaxParallelThreads>4</MaxParallelThreads>
+</PropertyGroup>
+
+# For Jest - parallel is default, but can configure:
+npm test -- --maxWorkers=4
+```
+
+**Solution 3: Identify Slow Tests**
+```bash
+# Run with verbose timing to find culprits
+acode test --project MyApp.Tests --verbose
+
+# Output shows per-test durations:
+# [PASS] GetUser_ValidId_ReturnsUser (12ms)
+# [PASS] GetUser_InvalidId_ThrowsException (8ms)
+# [FAIL] GetUser_WithDatabase_IntegrationTest (45,230ms)  # SLOW!
+# [PASS] DeleteUser_ValidId_DeletesUser (15ms)
+
+# Run only slow test to diagnose:
+acode test --project MyApp.Tests --filter "GetUser_WithDatabase_IntegrationTest" --timeout 120
+```
+
+**Solution 4: Break Up Large Test Suites**
+```bash
+# Instead of running all 1000 tests at once, split by category
+acode test --project MyApp.Tests --filter "Category=Unit" --timeout 300
+acode test --project MyApp.Tests --filter "Category=Integration" --timeout 600
+acode test --project MyApp.Tests --filter "Category=E2E" --timeout 1800
+
+# Or run per-class:
+acode test --project MyApp.Tests --filter "FullyQualifiedName~UserServiceTests" --timeout 60
+acode test --project MyApp.Tests --filter "FullyQualifiedName~OrderServiceTests" --timeout 60
+```
+
+**Solution 5: Debug Infinite Loop**
+```bash
+# Run single test with debugger to identify infinite loop
+dotnet test MyApp.Tests.csproj --filter "FullyQualifiedName~SuspectedHangingTest" --logger "console;verbosity=detailed"
+
+# If test hangs, check for:
+# - while(true) with no exit condition
+# - await Task.Delay() with CancellationToken.None (never cancels)
+# - HTTP client calls without timeout configured
+```
+
+---
+
+### Issue 4: Test Framework Not Detected
+
+**Symptoms:**
+- Error: "No test framework detected for project /path/to/MyApp.Tests"
+- `acode detect` shows project but `isTestProject: false`
+- Manual `dotnet test` works but `acode test` fails
+- Tests run in IDE but not via CLI
+
+**Causes:**
+- Test framework package missing from project references
+- Package reference uses unexpected naming (e.g., `xunit.core` instead of `xunit`)
+- Test project is .NET Framework (not .NET Core/5+)
+- Custom test framework not in Acode's detection list
+- `IsTestProject` MSBuild property explicitly set to `false`
+
+**Solutions:**
+
+**Solution 1: Verify Test Framework Package**
+```bash
+# Check for standard test framework packages
+dotnet list package | grep -E "xunit|NUnit|MSTest"
+
+# Expected output (xUnit):
+# > xunit                   2.6.2
+# > xunit.runner.visualstudio  2.5.4
+# > Microsoft.NET.Test.Sdk  17.8.0
+
+# If missing Microsoft.NET.Test.Sdk, add it:
+dotnet add package Microsoft.NET.Test.Sdk --version 17.8.0
+```
+
+**Solution 2: Check IsTestProject Property**
+```xml
+<!-- In MyApp.Tests.csproj -->
+<PropertyGroup>
+  <TargetFramework>net8.0</TargetFramework>
+  <IsPackable>false</IsPackable>
+  <!-- Ensure IsTestProject is true or omitted (defaults to true for test projects) -->
+  <IsTestProject>true</IsTestProject>
+</PropertyGroup>
+```
+
+**Solution 3: Explicitly Specify Framework**
+```bash
+# Override auto-detection by specifying framework explicitly
+acode test --project MyApp.Tests --framework xunit
+
+# Supported frameworks: xunit, nunit, mstest, jest, mocha, vitest
+```
+
+**Solution 4: Check Framework Detection Logic**
+```csharp
+// Acode's detection heuristics (for reference):
+
+// xUnit detection:
+bool IsXUnit(ProjectMetadata project) =>
+    project.PackageReferences.ContainsKey("xunit") ||
+    project.PackageReferences.ContainsKey("xunit.core");
+
+// NUnit detection:
+bool IsNUnit(ProjectMetadata project) =>
+    project.PackageReferences.ContainsKey("NUnit") ||
+    project.PackageReferences.ContainsKey("nunit.framework");
+
+// MSTest detection:
+bool IsMSTest(ProjectMetadata project) =>
+    project.PackageReferences.ContainsKey("MSTest.TestFramework") ||
+    project.PackageReferences.ContainsKey("Microsoft.VisualStudio.TestPlatform.TestFramework");
+```
+
+**Solution 5: Use Repo Contract Hint**
+```yaml
+# In .acode/config.yml - provide explicit test framework hint
+test:
+  framework-overrides:
+    "tests/MyApp.Tests": xunit
+    "tests/MyApp.IntegrationTests": xunit
+    "frontend/src/__tests__": jest
+```
+
+---
+
+### Issue 5: Filter Syntax Error (No Tests Match Filter)
+
+**Symptoms:**
+- `acode test --filter "..."` returns "0 tests found"
+- Filter syntax appears correct but no matches
+- Removing filter runs all tests successfully
+- Error: "Filter expression is invalid"
+
+**Causes:**
+- Filter syntax varies between frameworks (.NET uses `~` for contains, Jest uses regex)
+- Typo in test name or namespace
+- Case sensitivity mismatch
+- Incorrect property name (e.g., `TestCategory` vs `Category`)
+- Special characters not escaped (e.g., parentheses in test names)
+
+**Solutions:**
+
+**Solution 1: Verify Filter Syntax for Framework**
+```bash
+# .NET filter syntax (uses property expressions)
+acode test --project MyApp.Tests --filter "FullyQualifiedName~UserService"      # Contains
+acode test --project MyApp.Tests --filter "Category=Unit"                       # Exact match
+acode test --project MyApp.Tests --filter "Name~GetUser"                        # Test name contains
+acode test --project MyApp.Tests --filter "Category=Unit&Priority=1"           # AND condition
+acode test --project MyApp.Tests --filter "Category=Unit|Category=Integration" # OR condition
+
+# Jest filter syntax (uses regex)
+acode test --project frontend --filter "UserService"       # Regex match (no quotes)
+acode test --project frontend --filter "^UserService"      # Starts with
+acode test --project frontend --filter "GetUser.*ValidId"  # Regex pattern
+
+# Mocha filter syntax (uses --grep)
+acode test --project backend-tests --filter "UserService"  # Substring match
+acode test --project backend-tests --filter "/^UserService/"  # Regex (wrapped in /)
+```
+
+**Solution 2: List All Tests to Find Correct Names**
+```bash
+# For .NET - list all test names
+dotnet test MyApp.Tests.csproj --list-tests
+
+# Output:
+# MyApp.Tests.UserServiceTests.GetUser_ValidId_ReturnsUser
+# MyApp.Tests.UserServiceTests.GetUser_InvalidId_ThrowsException
+# MyApp.Tests.OrderServiceTests.CreateOrder_ValidInput_CreatesOrder
+
+# Now use exact name in filter:
+acode test --project MyApp.Tests --filter "FullyQualifiedName~MyApp.Tests.UserServiceTests"
+```
+
+**Solution 3: Escape Special Characters**
+```bash
+# If test name contains parentheses, escape them:
+# Test name: "GetUser(ValidId)_ReturnsUser"
+
+# WRONG (will fail):
+acode test --filter "GetUser(ValidId)"
+
+# CORRECT (escaped):
+acode test --filter "GetUser\\(ValidId\\)"
+
+# Or use FullyQualifiedName with ~ (contains):
+acode test --filter "FullyQualifiedName~GetUser"
+```
+
+**Solution 4: Check Case Sensitivity**
+```bash
+# .NET filters are case-sensitive!
+
+# WRONG (won't match "UserServiceTests"):
+acode test --filter "FullyQualifiedName~userservicetests"
+
+# CORRECT:
+acode test --filter "FullyQualifiedName~UserServiceTests"
+
+# For case-insensitive matching, use wildcards:
+acode test --filter "Name~User"  # Matches "UserTests", "userTests", "USER_TESTS"
+```
+
+**Solution 5: Validate Filter Before Test Run**
+```bash
+# Use dry-run mode to validate filter (list tests that would run)
+acode test --project MyApp.Tests --filter "Category=Unit" --dry-run
+
+# Output shows matched tests:
+# [DRY-RUN] Would execute 47 tests:
+#   1. MyApp.Tests.UserServiceTests.GetUser_ValidId_ReturnsUser
+#   2. MyApp.Tests.UserServiceTests.GetUser_InvalidId_ThrowsException
+#   ... (45 more)
+
+# If output shows "Would execute 0 tests", filter is wrong
+```
 
 ---
 

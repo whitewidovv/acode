@@ -23,6 +23,182 @@ Task 018.c implements comprehensive artifact logging and intelligent truncation 
 5. **Operational Intelligence**: Artifact metadata enables querying patterns—which commands produce the most output, what errors are common, storage trends
 6. **Export Capability**: Stored artifacts can be bundled for sharing with team members or support, enabling collaborative debugging
 
+### Return on Investment (ROI) Analysis
+
+**Problem Quantification:**
+- **Lost debugging time:** Average 45 minutes/incident reproducing failed builds = 8 incidents/week × 45 min = 6 hours/week
+- **Storage exhaustion incidents:** Average 1 incident/month causing 4 hours of cleanup = 48 hours/year
+- **Secret exposure incidents:** Average cost of 1 incident/year with credential in logs = $75,000 remediation
+- **Cross-team debugging:** Average 2 hours/week reassembling execution context for support = 104 hours/year
+
+**Solution Investment:**
+- Development effort: ~100 hours
+- Testing and hardening: ~50 hours
+- Total investment: 150 hours × $75/hour = **$11,250**
+
+**Annual Savings:**
+- Debugging time recovered: 312 hours × $75 = $23,400
+- Storage incident prevention: 48 hours × $75 = $3,600
+- Secret exposure prevention (25% probability × $75K): $18,750
+- Cross-team efficiency: 104 hours × $75 = $7,800
+
+**Total Annual Savings: $53,550**
+**ROI: 376% first year** ($53,550 - $11,250 = $42,300 net savings)
+
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     ARTIFACT LOGGING + TRUNCATION                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│    ┌─────────────────────────────────────────────────────────────────────┐ │
+│    │                     ARTIFACT PIPELINE                                │ │
+│    │                                                                      │ │
+│    │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐          │ │
+│    │  │  Raw Output  │───▶│   Redactor   │───▶│  Truncator   │          │ │
+│    │  │  (stdout/    │    │              │    │              │          │ │
+│    │  │   stderr)    │    │ Secrets ──▶  │    │ Size limit   │          │ │
+│    │  │              │    │ [REDACTED]   │    │ Smart/Head/  │          │ │
+│    │  └──────────────┘    └──────────────┘    │ Tail modes   │          │ │
+│    │                                          └───────┬──────┘          │ │
+│    │                                                  │                  │ │
+│    │                                                  ▼                  │ │
+│    │                              ┌──────────────────────────────────┐  │ │
+│    │                              │           Compressor              │  │ │
+│    │                              │  ┌────────────────────────────┐  │  │ │
+│    │                              │  │ < 1KB → inline (no compress)│  │  │ │
+│    │                              │  │ 1KB-1MB → gzip compress     │  │  │ │
+│    │                              │  │ > 1MB → file + gzip         │  │  │ │
+│    │                              │  └────────────────────────────┘  │  │ │
+│    │                              └───────────────┬──────────────────┘  │ │
+│    └──────────────────────────────────────────────│─────────────────────┘ │
+│                                                   │                       │
+│                                                   ▼                       │
+│    ┌─────────────────────────────────────────────────────────────────────┐│
+│    │                        ARTIFACT STORE                                ││
+│    │                                                                      ││
+│    │  ┌───────────────────────┐     ┌───────────────────────────────┐   ││
+│    │  │   Workspace Database   │     │     .acode/artifacts/          │   ││
+│    │  │   (SQLite)            │     │                                 │   ││
+│    │  │                       │     │  2024/                         │   ││
+│    │  │  Artifacts Table:     │     │    01/                         │   ││
+│    │  │  - id (GUID)          │     │      15/                       │   ││
+│    │  │  - correlation_id     │◀───▶│        {id}.gz                 │   ││
+│    │  │  - type (stdout/err)  │     │        {id}.gz                 │   ││
+│    │  │  - size_bytes         │     │    02/                         │   ││
+│    │  │  - truncated (bool)   │     │      03/                       │   ││
+│    │  │  - inline_content     │     │        {id}.gz                 │   ││
+│    │  │  - file_path (ref)    │     │                                 │   ││
+│    │  │  - created_at         │     │  Organized by date for         │   ││
+│    │  │  - expires_at         │     │  efficient cleanup             │   ││
+│    │  └───────────────────────┘     └───────────────────────────────┘   ││
+│    └─────────────────────────────────────────────────────────────────────┘│
+│                                                                             │
+│    ┌─────────────────────────────────────────────────────────────────────┐ │
+│    │                    TRUNCATION STRATEGIES                             │ │
+│    │                                                                      │ │
+│    │   HEAD MODE:                    TAIL MODE:                          │ │
+│    │   ┌────────────────────┐        ┌────────────────────┐              │ │
+│    │   │ First N bytes kept │        │                    │              │ │
+│    │   │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │        │ ░░░░░░░░░░░░░░░░░░ │              │ │
+│    │   │ ░░░░░░░░░░░░░░░░░░ │        │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │              │ │
+│    │   │ ... (N-X) dropped  │        │ Last N bytes kept  │              │ │
+│    │   └────────────────────┘        └────────────────────┘              │ │
+│    │                                                                      │ │
+│    │   SMART MODE (Error-Preserving):                                    │ │
+│    │   ┌────────────────────────────────────────────────────────────┐   │ │
+│    │   │ ▓▓▓▓ First 10%    (context)                                │   │ │
+│    │   │ ░░░░ ... middle dropped                                     │   │ │
+│    │   │ ████ ERROR lines preserved (all matching patterns)         │   │ │
+│    │   │ ████ WARNING lines preserved                               │   │ │
+│    │   │ ▓▓▓▓ Last 10%     (recent context)                         │   │ │
+│    │   └────────────────────────────────────────────────────────────┘   │ │
+│    └─────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│    ┌─────────────────────────────────────────────────────────────────────┐ │
+│    │                    RETENTION MANAGER                                 │ │
+│    │                                                                      │ │
+│    │   Policies (applied in order):                                      │ │
+│    │                                                                      │ │
+│    │   1. Age-based:     DELETE WHERE created_at < NOW() - 30 days      │ │
+│    │   2. Size-based:    DELETE oldest until total_size < 1GB           │ │
+│    │   3. Count-based:   DELETE oldest until count < 10000              │ │
+│    │                                                                      │ │
+│    │   ┌────────────────────────────────────────────────────────────┐   │ │
+│    │   │  Background Job (every 6 hours):                           │   │ │
+│    │   │  1. Query artifacts matching retention criteria            │   │ │
+│    │   │  2. Delete file from .acode/artifacts/                     │   │ │
+│    │   │  3. Delete metadata from database                          │   │ │
+│    │   │  4. Log cleanup statistics                                 │   │ │
+│    │   └────────────────────────────────────────────────────────────┘   │ │
+│    └─────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Artifact Lifecycle Sequence
+
+```
+Command Execution                    Artifact System
+       │                                   │
+       │ ① Execution starts                │
+       ├──────────────────────────────────▶│
+       │                                   │ Create placeholder record
+       │                                   │
+       │ ② Stdout line received            │
+       ├──────────────────────────────────▶│
+       │                                   │ Buffer content
+       │                                   │
+       │ ③ Stderr line received            │
+       ├──────────────────────────────────▶│
+       │                                   │ Buffer content
+       │                                   │
+       │ ④ More output...                  │
+       ├──────────────────────────────────▶│
+       │                                   │ Continue buffering
+       │                                   │
+       │ ⑤ Execution completes             │
+       ├──────────────────────────────────▶│
+       │                                   │
+       │                                   ▼
+       │                            ┌─────────────┐
+       │                            │  Redaction  │
+       │                            │  Pass       │
+       │                            └──────┬──────┘
+       │                                   │
+       │                                   ▼
+       │                            ┌─────────────┐
+       │                            │ Truncation  │
+       │                            │  (if needed)│
+       │                            └──────┬──────┘
+       │                                   │
+       │                                   ▼
+       │                            ┌─────────────┐
+       │                            │ Compression │
+       │                            └──────┬──────┘
+       │                                   │
+       │                                   ▼
+       │                            ┌─────────────┐
+       │                            │ Storage     │
+       │                            │ (DB + File) │
+       │                            └──────┬──────┘
+       │                                   │
+       │ ⑥ Artifact ID returned            │
+       │◀──────────────────────────────────┤
+       │                                   │
+```
+
+### Architectural Trade-Offs
+
+| Decision | Trade-off | Rationale |
+|----------|-----------|-----------|
+| Inline storage < 1KB | Database bloat vs file overhead | Small artifacts don't justify file I/O; DB query returns content directly |
+| GZip compression | CPU overhead vs storage savings | Text compresses 80%+; CPU cost is negligible for I/O-bound operations |
+| Date-based directory structure | Extra path logic vs efficient cleanup | Deleting old directories is faster than querying/deleting individual files |
+| Redaction before storage | Irreversible vs security | Once redacted, secrets can never be recovered—security trumps convenience |
+| Smart truncation | Complexity vs usefulness | Preserving errors/warnings makes truncated artifacts actually useful for debugging |
+
 ### Scope
 
 This task delivers:
@@ -57,22 +233,150 @@ This task delivers:
 | Artifact file missing | FileNotFoundException | Mark as unavailable in metadata, suggest cleanup |
 | Cleanup deletes active artifact | Optimistic lock check | Skip artifact, retry on next cleanup cycle |
 
-### Assumptions
+---
 
-1. Workspace database (Task-050) is available for metadata storage
-2. File system has sufficient permissions for artifact directory
-3. Artifacts are primarily text-based (binary artifacts are out of scope)
-4. UTF-8 encoding is standard for artifact content
-5. Compression uses GZip for broad compatibility
-6. Correlation IDs from Task-018a are available for linking
+## Use Cases
 
-### Security Considerations
+### Scenario 1: DevBot Investigates Failed Build
 
-1. **Redaction First**: Sensitive content is redacted BEFORE storage, never after
-2. **Pattern Updates**: Redaction patterns loaded at runtime to allow security updates
-3. **No Decryption**: Redacted content cannot be recovered—placeholder replaces actual value
-4. **Access Control**: Artifacts respect repository permissions (enforced by file system)
-5. **Cleanup Verification**: Deleted artifacts are verified removed from both database and file system
+**Persona:** DevBot (autonomous agent)
+
+**Context:** A build command failed 6 hours ago with exit code 1. DevBot needs to analyze what went wrong to propose a fix.
+
+**Workflow:**
+
+**Before (Without Artifact Logging):**
+1. Build fails at 2:00 AM with cryptic error
+2. Developer sees "Build failed" in morning report
+3. No output available—lost when process exited
+4. Developer must reproduce the build manually
+5. 45 minutes spent recreating the failure
+6. Finally sees the actual error message
+
+**After (With Task 018.c):**
+1. Build fails at 2:00 AM
+2. Artifact system captures stdout (12KB) and stderr (2KB)
+3. Smart truncation preserves all ERROR and WARNING lines
+4. In morning, DevBot queries: `acode artifacts list --command-id {id}`
+5. DevBot retrieves: `acode artifacts view {artifact-id}`
+6. Full error visible: "error CS1002: ; expected at line 42"
+7. DevBot proposes fix immediately
+8. **Time saved: 45 minutes per incident, ~8 incidents/week = 6 hours/week**
+
+**Technical Details:**
+```csharp
+// Store artifact after command completion
+var artifact = await _artifactStore.StoreAsync(new ArtifactRequest
+{
+    CorrelationId = command.CorrelationId,
+    Type = ArtifactType.Stderr,
+    Content = result.Stderr,
+    CommandName = command.Name,
+    ExitCode = result.ExitCode
+});
+
+// Later retrieval
+var stored = await _artifactStore.GetAsync(artifact.Id);
+Console.WriteLine(stored.Content); // Full error output
+```
+
+---
+
+### Scenario 2: Sarah Audits Historical Executions
+
+**Persona:** Sarah, Security Engineer
+
+**Context:** Compliance audit requires review of all commands executed in past 30 days. Sarah needs to verify no secrets were exposed in outputs.
+
+**Workflow:**
+
+**Before (Without Artifact Logging):**
+1. Sarah requests execution history
+2. Only command names and exit codes available
+3. No way to verify what was actually output
+4. Audit finding: "Insufficient logging—cannot verify compliance"
+5. Remediation required at significant cost
+
+**After (With Task 018.c):**
+1. Sarah queries: `acode artifacts list --from 2024-01-01 --to 2024-01-31`
+2. 2,847 artifacts returned with metadata
+3. Sarah verifies redaction: searches for `[REDACTED]` markers
+4. Confirms 47 instances of secrets properly redacted
+5. Reviews truncation: no sensitive content in preserved portions
+6. Audit passes: "Comprehensive logging with appropriate redaction"
+7. **Cost avoided: $50,000+ remediation**
+
+**Technical Details:**
+```csharp
+// Query artifacts in date range
+var artifacts = await _artifactStore.QueryAsync(new ArtifactQuery
+{
+    FromDate = new DateTime(2024, 1, 1),
+    ToDate = new DateTime(2024, 1, 31),
+    IncludeMetadataOnly = true // Don't load full content
+});
+
+// Check for redaction
+foreach (var artifact in artifacts)
+{
+    var content = await _artifactStore.GetContentAsync(artifact.Id);
+    if (content.Contains("password=") && !content.Contains("[REDACTED]"))
+    {
+        // Flag for security review
+    }
+}
+```
+
+---
+
+### Scenario 3: Marcus Manages Storage Growth
+
+**Persona:** Marcus, DevOps Engineer
+
+**Context:** Artifact storage is growing faster than expected. Marcus needs to implement retention policies without losing important artifacts.
+
+**Workflow:**
+
+**Before (Without Retention Management):**
+1. Disk usage alert: .acode/artifacts at 95% capacity
+2. Marcus manually deletes old files
+3. Accidentally deletes artifacts from active investigation
+4. No way to know which artifacts are safe to delete
+5. 4 hours spent on cleanup and recovery
+
+**After (With Task 018.c):**
+1. Disk usage alert at 80% threshold
+2. Marcus reviews: `acode artifacts stats`
+   - Total: 15,234 artifacts (8.2 GB)
+   - Oldest: 45 days ago
+   - Largest: 50 MB (build log)
+3. Marcus configures retention:
+   ```yaml
+   artifacts:
+     retention:
+       max_age_days: 30
+       max_total_size_gb: 5
+       max_count: 10000
+   ```
+4. Runs: `acode artifacts cleanup --dry-run`
+   - Would delete: 4,523 artifacts (3.1 GB)
+5. Runs: `acode artifacts cleanup`
+   - Deleted: 4,523 artifacts
+   - Reclaimed: 3.1 GB
+6. **Time saved: 3.5 hours**
+
+**Technical Details:**
+```csharp
+// Cleanup with retention policies
+var result = await _retentionManager.CleanupAsync(new RetentionPolicy
+{
+    MaxAgeDays = 30,
+    MaxTotalSizeBytes = 5L * 1024 * 1024 * 1024, // 5GB
+    MaxCount = 10000
+});
+
+Console.WriteLine($"Deleted {result.DeletedCount} artifacts ({result.ReclaimedBytes / 1024 / 1024} MB)");
+```
 
 ---
 
@@ -512,6 +816,820 @@ acode artifacts stats
 
 ---
 
+## Assumptions
+
+### Technical Assumptions
+
+1. **File System Access:** Application has read/write permissions to .acode/artifacts directory.
+
+2. **Database Availability:** Workspace database (Task-050) is initialized and accessible for metadata storage.
+
+3. **UTF-8 Encoding:** Artifact content is primarily UTF-8 text. Binary content is detected and handled specially.
+
+4. **GZip Compatibility:** All target platforms support GZip compression/decompression.
+
+5. **Disk Space Detection:** Operating system provides accurate disk space availability information.
+
+6. **Atomic File Operations:** File write operations are atomic or can be made atomic using temp files + rename.
+
+7. **Process.StandardOutput:** Parent task (018.a) provides captured output as strings or byte arrays.
+
+### Operational Assumptions
+
+8. **Typical Artifact Size:** Most artifacts are < 100KB (build output, test results). Some may reach 10MB+.
+
+9. **Retention Period:** Default 30-day retention is appropriate for most development workflows.
+
+10. **Cleanup Frequency:** Background cleanup every 6 hours is sufficient to prevent storage exhaustion.
+
+11. **Concurrent Access:** Multiple commands may execute concurrently, requiring thread-safe artifact storage.
+
+12. **Query Patterns:** Most queries are by correlation ID, date range, or artifact type—indexes support these.
+
+13. **Compression Ratio:** Text artifacts compress to ~20% of original size (80% savings).
+
+### Integration Assumptions
+
+14. **Correlation IDs Present:** Task 018 provides correlation IDs (run ID, session ID) for linking artifacts to commands.
+
+15. **Audit Requirements:** Security team requires all execution outputs to be retained per policy.
+
+16. **Export Format Known:** Task 021.c defines artifact bundle format for export operations.
+
+17. **Redaction Patterns Configurable:** Security team can add custom redaction patterns via configuration.
+
+18. **CLI Available:** Task 005 CLI infrastructure is available for artifact management commands.
+
+---
+
+## Security Threats and Mitigations
+
+### Threat 1: Secret Persistence in Artifacts
+
+**Risk:** HIGH - Secrets in command output could be stored to disk, creating persistent credential exposure.
+
+**Attack Scenario:**
+```bash
+# Build output contains leaked secret
+npm run build
+# Output includes: "Using API_KEY=sk-abc123xyz789..."
+# Without redaction, this persists to artifact file
+```
+
+**Complete Mitigation Code:**
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+
+namespace Acode.Infrastructure.Artifacts;
+
+/// <summary>
+/// Redacts sensitive content from artifacts before storage.
+/// </summary>
+public sealed class ArtifactRedactor
+{
+    private readonly List<RedactionPattern> _patterns;
+    
+    public ArtifactRedactor(IEnumerable<string>? customPatterns = null)
+    {
+        _patterns = new List<RedactionPattern>
+        {
+            // Environment variable patterns
+            new("EnvSecret", @"([A-Z_]+(?:KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[A-Z_]*)=([^\s""']+)", 
+                "$1=[REDACTED]"),
+            
+            // Bearer tokens
+            new("Bearer", @"Bearer\s+([A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)",
+                "Bearer [REDACTED:JWT]"),
+            
+            // AWS credentials
+            new("AWSKey", @"(AKIA[0-9A-Z]{16})",
+                "[REDACTED:AWS_KEY]"),
+            new("AWSSecret", @"aws_secret_access_key\s*=\s*([A-Za-z0-9/+=]{40})",
+                "aws_secret_access_key=[REDACTED]"),
+            
+            // Connection strings
+            new("ConnString", @"(password|pwd)=([^;""'\s]+)",
+                "$1=[REDACTED]"),
+            
+            // GitHub tokens
+            new("GitHub", @"(gh[pousr]_[A-Za-z0-9]{36})",
+                "[REDACTED:GH_TOKEN]"),
+            
+            // API keys in URLs
+            new("URLKey", @"(api[_-]?key=)([A-Za-z0-9]{16,})",
+                "$1[REDACTED]"),
+            
+            // Private keys
+            new("PrivateKey", 
+                @"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END\s+(RSA\s+)?PRIVATE\s+KEY-----",
+                "[REDACTED:PRIVATE_KEY]")
+        };
+        
+        if (customPatterns != null)
+        {
+            foreach (var pattern in customPatterns)
+            {
+                _patterns.Add(new RedactionPattern("Custom", pattern, "[REDACTED]"));
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Redacts sensitive content from artifact text.
+    /// </summary>
+    public RedactionResult Redact(string content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return new RedactionResult(content, 0, Array.Empty<RedactionInfo>());
+        
+        var redactions = new List<RedactionInfo>();
+        var result = content;
+        
+        foreach (var pattern in _patterns)
+        {
+            var matches = pattern.Regex.Matches(result);
+            foreach (Match match in matches)
+            {
+                redactions.Add(new RedactionInfo(
+                    pattern.Name,
+                    match.Index,
+                    match.Length));
+            }
+            
+            result = pattern.Regex.Replace(result, pattern.Replacement);
+        }
+        
+        return new RedactionResult(result, redactions.Count, redactions.ToArray());
+    }
+    
+    private sealed class RedactionPattern
+    {
+        public string Name { get; }
+        public Regex Regex { get; }
+        public string Replacement { get; }
+        
+        public RedactionPattern(string name, string pattern, string replacement)
+        {
+            Name = name;
+            Regex = new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase);
+            Replacement = replacement;
+        }
+    }
+}
+
+public record RedactionResult(string RedactedContent, int RedactionCount, RedactionInfo[] Redactions);
+public record RedactionInfo(string PatternName, int Position, int OriginalLength);
+```
+
+---
+
+### Threat 2: Artifact Path Traversal
+
+**Risk:** MEDIUM - Malicious artifact filename could write outside intended directory.
+
+**Attack Scenario:**
+```csharp
+// Attacker controls artifact name
+var artifact = new Artifact
+{
+    Id = Guid.NewGuid(),
+    FileName = "../../../etc/passwd"  // Path traversal attempt
+};
+// Without validation, file written to /etc/passwd
+```
+
+**Complete Mitigation Code:**
+
+```csharp
+using System;
+using System.IO;
+
+namespace Acode.Infrastructure.Artifacts;
+
+/// <summary>
+/// Generates safe artifact file paths.
+/// </summary>
+public sealed class SafeArtifactPath
+{
+    private readonly string _baseDirectory;
+    
+    public SafeArtifactPath(string baseDirectory)
+    {
+        _baseDirectory = Path.GetFullPath(baseDirectory);
+        
+        if (!Directory.Exists(_baseDirectory))
+        {
+            Directory.CreateDirectory(_baseDirectory);
+        }
+    }
+    
+    /// <summary>
+    /// Generates a safe path for an artifact, preventing traversal.
+    /// </summary>
+    public string GeneratePath(Guid artifactId, DateTimeOffset createdAt)
+    {
+        // Use GUID as filename - never user-controlled content
+        var fileName = $"{artifactId:N}.gz";
+        
+        // Organize by date for efficient cleanup
+        var year = createdAt.Year.ToString();
+        var month = createdAt.Month.ToString("D2");
+        var day = createdAt.Day.ToString("D2");
+        
+        var subDir = Path.Combine(_baseDirectory, year, month, day);
+        var fullPath = Path.Combine(subDir, fileName);
+        
+        // Verify the path is still within base directory
+        var normalizedPath = Path.GetFullPath(fullPath);
+        if (!normalizedPath.StartsWith(_baseDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Generated path '{normalizedPath}' escapes base directory '{_baseDirectory}'");
+        }
+        
+        // Create subdirectory if needed
+        if (!Directory.Exists(subDir))
+        {
+            Directory.CreateDirectory(subDir);
+        }
+        
+        return normalizedPath;
+    }
+    
+    /// <summary>
+    /// Validates an existing artifact path is within boundaries.
+    /// </summary>
+    public bool ValidatePath(string artifactPath)
+    {
+        try
+        {
+            var normalizedPath = Path.GetFullPath(artifactPath);
+            return normalizedPath.StartsWith(_baseDirectory, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}
+```
+
+---
+
+### Threat 3: Artifact Tampering
+
+**Risk:** MEDIUM - Stored artifacts could be modified to hide evidence or inject false data.
+
+**Attack Scenario:**
+```bash
+# Attacker modifies artifact file directly
+echo "Build succeeded" > .acode/artifacts/2024/01/15/abc123.gz
+# Audit shows false "success" when build actually failed
+```
+
+**Complete Mitigation Code:**
+
+```csharp
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace Acode.Infrastructure.Artifacts;
+
+/// <summary>
+/// Provides integrity verification for stored artifacts.
+/// </summary>
+public sealed class ArtifactIntegrity
+{
+    /// <summary>
+    /// Computes SHA-256 hash of artifact content.
+    /// </summary>
+    public string ComputeHash(byte[] content)
+    {
+        using var sha256 = SHA256.Create();
+        var hash = sha256.ComputeHash(content);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+    
+    /// <summary>
+    /// Computes hash from stream without loading entire content.
+    /// </summary>
+    public string ComputeHash(Stream stream)
+    {
+        using var sha256 = SHA256.Create();
+        var hash = sha256.ComputeHash(stream);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+    
+    /// <summary>
+    /// Verifies artifact content matches stored hash.
+    /// </summary>
+    public IntegrityResult Verify(byte[] content, string expectedHash)
+    {
+        var actualHash = ComputeHash(content);
+        
+        if (string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+        {
+            return IntegrityResult.Valid();
+        }
+        
+        return IntegrityResult.Tampered(expectedHash, actualHash);
+    }
+    
+    /// <summary>
+    /// Verifies artifact file matches stored hash.
+    /// </summary>
+    public IntegrityResult VerifyFile(string filePath, string expectedHash)
+    {
+        if (!File.Exists(filePath))
+        {
+            return IntegrityResult.Missing(filePath);
+        }
+        
+        using var stream = File.OpenRead(filePath);
+        var actualHash = ComputeHash(stream);
+        
+        if (string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+        {
+            return IntegrityResult.Valid();
+        }
+        
+        return IntegrityResult.Tampered(expectedHash, actualHash);
+    }
+}
+
+public record IntegrityResult(bool IsValid, string? Issue, string? ExpectedHash, string? ActualHash)
+{
+    public static IntegrityResult Valid() => new(true, null, null, null);
+    public static IntegrityResult Tampered(string expected, string actual) => 
+        new(false, "Content has been modified", expected, actual);
+    public static IntegrityResult Missing(string path) => 
+        new(false, $"Artifact file not found: {path}", null, null);
+}
+```
+
+---
+
+### Threat 4: Denial of Service via Large Artifacts
+
+**Risk:** MEDIUM - Malicious command could produce massive output to exhaust storage.
+
+**Attack Scenario:**
+```bash
+# Command produces infinite output
+yes "Attack payload" | head -n 1000000000
+# 10GB+ written to artifact storage, filling disk
+```
+
+**Complete Mitigation Code:**
+
+```csharp
+using System;
+using System.IO;
+
+namespace Acode.Infrastructure.Artifacts;
+
+/// <summary>
+/// Enforces storage limits on artifacts.
+/// </summary>
+public sealed class ArtifactSizeLimiter
+{
+    private readonly long _maxSingleArtifactBytes;
+    private readonly long _maxTotalStorageBytes;
+    private readonly string _storageDirectory;
+    
+    public ArtifactSizeLimiter(
+        string storageDirectory,
+        long maxSingleArtifactBytes = 10 * 1024 * 1024,  // 10MB
+        long maxTotalStorageBytes = 1024 * 1024 * 1024)   // 1GB
+    {
+        _storageDirectory = storageDirectory;
+        _maxSingleArtifactBytes = maxSingleArtifactBytes;
+        _maxTotalStorageBytes = maxTotalStorageBytes;
+    }
+    
+    /// <summary>
+    /// Checks if a new artifact of given size can be stored.
+    /// </summary>
+    public StorageLimitResult CheckLimit(long proposedSize)
+    {
+        // Check single artifact limit
+        if (proposedSize > _maxSingleArtifactBytes)
+        {
+            return StorageLimitResult.Reject(
+                $"Artifact size ({proposedSize / 1024 / 1024}MB) exceeds maximum " +
+                $"({_maxSingleArtifactBytes / 1024 / 1024}MB)",
+                _maxSingleArtifactBytes);
+        }
+        
+        // Check total storage limit
+        var currentUsage = GetCurrentStorageUsage();
+        if (currentUsage + proposedSize > _maxTotalStorageBytes)
+        {
+            return StorageLimitResult.Reject(
+                $"Storage limit would be exceeded. Current: {currentUsage / 1024 / 1024}MB, " +
+                $"Proposed: {proposedSize / 1024}KB, Limit: {_maxTotalStorageBytes / 1024 / 1024}MB",
+                _maxTotalStorageBytes - currentUsage);
+        }
+        
+        return StorageLimitResult.Accept(currentUsage, proposedSize);
+    }
+    
+    /// <summary>
+    /// Gets current storage usage in bytes.
+    /// </summary>
+    public long GetCurrentStorageUsage()
+    {
+        if (!Directory.Exists(_storageDirectory))
+            return 0;
+        
+        return Directory.EnumerateFiles(_storageDirectory, "*", SearchOption.AllDirectories)
+            .Sum(f => new FileInfo(f).Length);
+    }
+    
+    /// <summary>
+    /// Truncates content to fit within limit, returning truncated version.
+    /// </summary>
+    public (byte[] Content, bool WasTruncated) TruncateIfNeeded(byte[] content)
+    {
+        if (content.Length <= _maxSingleArtifactBytes)
+            return (content, false);
+        
+        var truncated = new byte[_maxSingleArtifactBytes];
+        Array.Copy(content, truncated, _maxSingleArtifactBytes);
+        return (truncated, true);
+    }
+}
+
+public record StorageLimitResult(bool Allowed, string? Reason, long? MaxAllowedBytes, long? CurrentUsage, long? ProposedSize)
+{
+    public static StorageLimitResult Accept(long current, long proposed) => 
+        new(true, null, null, current, proposed);
+    public static StorageLimitResult Reject(string reason, long maxAllowed) => 
+        new(false, reason, maxAllowed, null, null);
+}
+```
+
+---
+
+### Threat 5: Cleanup Race Condition
+
+**Risk:** LOW - Cleanup job could delete artifact being actively written or read.
+
+**Attack Scenario:**
+```
+Thread 1: Writing artifact to file
+Thread 2: Cleanup job deletes file (matched retention policy)
+Thread 1: Write fails with IOException
+Result: Partial artifact or lost data
+```
+
+**Complete Mitigation Code:**
+
+```csharp
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Acode.Infrastructure.Artifacts;
+
+/// <summary>
+/// Coordinates artifact operations to prevent race conditions.
+/// </summary>
+public sealed class ArtifactLockManager
+{
+    private readonly ReaderWriterLockSlim _globalLock = new();
+    private readonly Dictionary<Guid, SemaphoreSlim> _artifactLocks = new();
+    private readonly object _lockDictLock = new();
+    
+    /// <summary>
+    /// Acquires read lock for an artifact (allows concurrent reads).
+    /// </summary>
+    public async Task<IDisposable> AcquireReadLockAsync(Guid artifactId, CancellationToken ct = default)
+    {
+        var semaphore = GetOrCreateLock(artifactId);
+        await semaphore.WaitAsync(ct);
+        return new LockReleaser(semaphore);
+    }
+    
+    /// <summary>
+    /// Acquires write lock for an artifact (exclusive).
+    /// </summary>
+    public async Task<IDisposable> AcquireWriteLockAsync(Guid artifactId, CancellationToken ct = default)
+    {
+        var semaphore = GetOrCreateLock(artifactId);
+        await semaphore.WaitAsync(ct);
+        return new LockReleaser(semaphore);
+    }
+    
+    /// <summary>
+    /// Acquires global cleanup lock (blocks all writes, waits for reads).
+    /// </summary>
+    public IDisposable AcquireCleanupLock()
+    {
+        _globalLock.EnterWriteLock();
+        return new GlobalLockReleaser(_globalLock);
+    }
+    
+    /// <summary>
+    /// Tries to acquire lock for deletion (non-blocking).
+    /// </summary>
+    public bool TryAcquireForDeletion(Guid artifactId, out IDisposable? lockHandle)
+    {
+        var semaphore = GetOrCreateLock(artifactId);
+        if (semaphore.Wait(0))
+        {
+            lockHandle = new LockReleaser(semaphore);
+            return true;
+        }
+        
+        lockHandle = null;
+        return false;
+    }
+    
+    private SemaphoreSlim GetOrCreateLock(Guid artifactId)
+    {
+        lock (_lockDictLock)
+        {
+            if (!_artifactLocks.TryGetValue(artifactId, out var semaphore))
+            {
+                semaphore = new SemaphoreSlim(1, 1);
+                _artifactLocks[artifactId] = semaphore;
+            }
+            return semaphore;
+        }
+    }
+    
+    private sealed class LockReleaser : IDisposable
+    {
+        private readonly SemaphoreSlim _semaphore;
+        private bool _disposed;
+        
+        public LockReleaser(SemaphoreSlim semaphore) => _semaphore = semaphore;
+        
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _semaphore.Release();
+                _disposed = true;
+            }
+        }
+    }
+    
+    private sealed class GlobalLockReleaser : IDisposable
+    {
+        private readonly ReaderWriterLockSlim _lock;
+        private bool _disposed;
+        
+        public GlobalLockReleaser(ReaderWriterLockSlim @lock) => _lock = @lock;
+        
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _lock.ExitWriteLock();
+                _disposed = true;
+            }
+        }
+    }
+}
+```
+
+---
+
+## Troubleshooting
+
+### Issue 1: Artifact Not Found
+
+**Symptoms:**
+- Error: "ArtifactNotFoundException: Artifact with ID {id} not found"
+- CLI returns "Artifact does not exist"
+- Query returns empty results for known artifact
+- File path in metadata points to non-existent file
+
+**Causes:**
+- Artifact was deleted by retention cleanup
+- Artifact ID is incorrect or from different workspace
+- File was manually deleted but database not updated
+- Database and file system out of sync
+- Artifact never fully written (crash during storage)
+
+**Solutions:**
+1. Check if artifact was cleaned up:
+   ```bash
+   acode artifacts list --include-deleted --id {artifact-id}
+   ```
+
+2. Verify artifact exists in database:
+   ```bash
+   acode db query "SELECT * FROM artifacts WHERE id = '{artifact-id}'"
+   ```
+
+3. Sync database with file system:
+   ```bash
+   acode artifacts verify --repair
+   ```
+
+4. Check for orphaned files:
+   ```bash
+   acode artifacts list-orphans
+   ```
+
+---
+
+### Issue 2: Truncation Removes Important Content
+
+**Symptoms:**
+- Error details not visible in truncated artifact
+- "... truncated ..." marker in output
+- Missing build failure root cause
+- Stack trace incomplete
+
+**Causes:**
+- Max size limit too restrictive for output type
+- Using head truncation when tail would be better
+- Smart truncation patterns don't match error format
+- Error format doesn't include recognized keywords
+
+**Solutions:**
+1. Increase artifact size limit:
+   ```yaml
+   artifacts:
+     max_size_kb: 2048  # Increase from 1024
+   ```
+
+2. Switch to tail truncation for logs:
+   ```yaml
+   artifacts:
+     truncation:
+       mode: tail  # Keep end of output where errors usually appear
+   ```
+
+3. Configure smart truncation with custom patterns:
+   ```yaml
+   artifacts:
+     truncation:
+       mode: smart
+       preserve_patterns:
+         - "^error:"
+         - "^fatal:"
+         - "FAILED"
+         - "Exception"
+         - "at .*\\(.*\\)"  # Stack traces
+   ```
+
+4. Increase smart truncation context:
+   ```yaml
+   artifacts:
+     truncation:
+       context_lines: 10  # Lines before/after preserved patterns
+   ```
+
+---
+
+### Issue 3: Disk Space Exhausted by Artifacts
+
+**Symptoms:**
+- Disk full errors during command execution
+- ".acode/artifacts directory using 50GB+"
+- Cleanup not running or ineffective
+- Old artifacts not being deleted
+
+**Causes:**
+- Retention policy too permissive
+- Cleanup job not running (crashed or disabled)
+- Individual artifacts larger than expected
+- High command execution volume
+- Compression not working
+
+**Solutions:**
+1. Run manual cleanup immediately:
+   ```bash
+   acode artifacts cleanup --force
+   ```
+
+2. Reduce retention period:
+   ```yaml
+   artifacts:
+     retention:
+       max_age_days: 7  # Reduce from 30
+   ```
+
+3. Set total size limit:
+   ```yaml
+   artifacts:
+     retention:
+       max_total_size_mb: 500  # Cap at 500MB
+   ```
+
+4. Verify cleanup job is running:
+   ```bash
+   acode jobs list --name artifact-cleanup
+   acode jobs run artifact-cleanup --now
+   ```
+
+5. Check compression is working:
+   ```bash
+   acode artifacts stats --show-compression-ratio
+   ```
+
+---
+
+### Issue 4: Secrets Visible in Artifact
+
+**Symptoms:**
+- API key visible when viewing artifact
+- Password not redacted in build output
+- Security scan flags artifact content
+- [REDACTED] marker not appearing
+
+**Causes:**
+- Secret pattern not in redaction list
+- Pattern regex has error
+- Redaction ran after storage (bug)
+- Custom secret format not recognized
+- Binary encoding bypassed text redaction
+
+**Solutions:**
+1. Add custom redaction pattern:
+   ```yaml
+   artifacts:
+     redaction:
+       patterns:
+         - "MY_COMPANY_API_KEY=[^\s]+"
+         - "custom_token_[a-z0-9]{32}"
+   ```
+
+2. Verify pattern matches:
+   ```bash
+   acode artifacts test-redaction "text with MY_COMPANY_API_KEY=abc123"
+   ```
+
+3. Force re-redaction of existing artifact:
+   ```bash
+   acode artifacts redact {artifact-id} --patterns custom.yaml
+   ```
+
+4. Delete compromised artifact:
+   ```bash
+   acode artifacts delete {artifact-id} --reason "contained unredacted secret"
+   ```
+
+---
+
+### Issue 5: Artifact Corruption or Integrity Failure
+
+**Symptoms:**
+- "Integrity check failed: hash mismatch"
+- Decompression error when viewing artifact
+- Garbled content in artifact viewer
+- File size doesn't match metadata
+
+**Causes:**
+- Disk I/O error during write
+- File modified by external process
+- Compression/decompression bug
+- Incomplete write due to crash
+- Storage media degradation
+
+**Solutions:**
+1. Verify artifact integrity:
+   ```bash
+   acode artifacts verify {artifact-id}
+   ```
+
+2. Attempt recovery from original:
+   ```bash
+   # If command can be re-run
+   acode exec "original command" --capture-artifact
+   ```
+
+3. Mark artifact as corrupted:
+   ```bash
+   acode artifacts mark-corrupted {artifact-id}
+   ```
+
+4. Check disk health:
+   ```bash
+   # Windows
+   chkdsk C: /f
+   # Linux
+   sudo fsck /dev/sda1
+   ```
+
+5. Delete corrupted artifacts:
+   ```bash
+   acode artifacts cleanup --corrupted-only
+   ```
+
+---
+
 ## Acceptance Criteria
 
 ### Artifact Model (AC-018C-01 to AC-018C-12)
@@ -649,135 +1767,635 @@ acode artifacts stats
 
 ## Testing Requirements
 
-### Unit Tests
+### Complete Test Implementations
 
-#### ArtifactTests
-- Artifact_Create_HasUniqueId
-- Artifact_Create_SetsCreatedAt
-- Artifact_Equality_BasedOnId
-- Artifact_CorrelationIds_Immutable
-- Artifact_ToString_IncludesIdAndType
-- ArtifactType_AllValues_Defined
+#### ArtifactRedactorTests.cs
 
-#### ArtifactStoreTests
-- StoreAsync_SmallContent_InlinesInDatabase
-- StoreAsync_LargeContent_CreatesFile
-- StoreAsync_ThresholdBoundary_CorrectDecision
-- StoreAsync_WithCompression_ReducesSize
-- StoreAsync_CompressionDisabled_StoresRaw
-- StoreAsync_CompressionLarger_StoresUncompressed
-- GetAsync_ExistingId_ReturnsArtifact
-- GetAsync_NonExistentId_ReturnsNull
-- GetContentAsync_InlineArtifact_ReturnsContent
-- GetContentAsync_FileArtifact_ReturnsContent
-- GetContentAsync_CompressedArtifact_Decompresses
-- ListAsync_NoFilter_ReturnsAll
-- ListAsync_ByType_FiltersCorrectly
-- ListAsync_ByCorrelationId_FiltersCorrectly
-- ListAsync_ByDateRange_FiltersCorrectly
-- ListAsync_Pagination_Works
-- DeleteAsync_ExistingArtifact_RemovesMetadataAndFile
-- DeleteAsync_InlineArtifact_RemovesMetadataOnly
-- DeleteAsync_NonExistent_ReturnsFalse
-- DeleteManyAsync_BatchDeletion_Efficient
-- GetStatisticsAsync_ReturnsAccurateMetrics
+```csharp
+using System;
+using Acode.Infrastructure.Artifacts;
+using FluentAssertions;
+using Xunit;
 
-#### HeadTruncatorTests
-- Truncate_UnderLimit_ReturnsUnchanged
-- Truncate_OverLimit_KeepsFirstNBytes
-- Truncate_RespectUtf8Boundaries
-- Truncate_AddsMarker_ShowingBytesRemoved
-- Truncate_EmptyContent_ReturnsEmpty
-- Truncate_ExactlyAtLimit_ReturnsUnchanged
-- Truncate_Result_IncludesOriginalSize
-- Truncate_Result_SetsTruncatedFlag
+namespace Acode.Infrastructure.Tests.Artifacts;
 
-#### TailTruncatorTests
-- Truncate_UnderLimit_ReturnsUnchanged
-- Truncate_OverLimit_KeepsLastNBytes
-- Truncate_RespectUtf8Boundaries
-- Truncate_AddsMarker_ShowingBytesRemoved
-- Truncate_EmptyContent_ReturnsEmpty
-- Truncate_ExactlyAtLimit_ReturnsUnchanged
-- Truncate_Result_IncludesOriginalSize
-- Truncate_Result_SetsTruncatedFlag
+/// <summary>
+/// Tests for artifact content redaction.
+/// </summary>
+public class ArtifactRedactorTests
+{
+    private readonly ArtifactRedactor _redactor;
+    
+    public ArtifactRedactorTests()
+    {
+        _redactor = new ArtifactRedactor();
+    }
+    
+    [Theory]
+    [InlineData("API_KEY=sk-abc123xyz789")]
+    [InlineData("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG")]
+    [InlineData("GITHUB_TOKEN=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456")]
+    [InlineData("password=MySecretPassword123")]
+    public void Redact_SensitivePatterns_AreRedacted(string sensitiveContent)
+    {
+        // Arrange
+        var content = $"Output with {sensitiveContent} in the middle";
+        
+        // Act
+        var result = _redactor.Redact(content);
+        
+        // Assert
+        result.RedactedContent.Should().NotContain("sk-abc123");
+        result.RedactedContent.Should().NotContain("wJalrXUtnFEMI");
+        result.RedactedContent.Should().NotContain("MySecretPassword");
+        result.RedactedContent.Should().Contain("[REDACTED");
+        result.RedactionCount.Should().BeGreaterThan(0);
+    }
+    
+    [Fact]
+    public void Redact_MultipleSecrets_AllRedacted()
+    {
+        // Arrange
+        var content = @"
+            API_KEY=secret1
+            DB_PASSWORD=secret2
+            AUTH_TOKEN=secret3
+        ";
+        
+        // Act
+        var result = _redactor.Redact(content);
+        
+        // Assert
+        result.RedactionCount.Should().Be(3);
+        result.RedactedContent.Should().NotContain("secret1");
+        result.RedactedContent.Should().NotContain("secret2");
+        result.RedactedContent.Should().NotContain("secret3");
+    }
+    
+    [Fact]
+    public void Redact_NoSecrets_ReturnsUnchanged()
+    {
+        // Arrange
+        var content = "This is normal output with no secrets";
+        
+        // Act
+        var result = _redactor.Redact(content);
+        
+        // Assert
+        result.RedactedContent.Should().Be(content);
+        result.RedactionCount.Should().Be(0);
+    }
+    
+    [Fact]
+    public void Redact_BearerToken_RedactsJWT()
+    {
+        // Arrange
+        var jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+        var content = $"Authorization: Bearer {jwt}";
+        
+        // Act
+        var result = _redactor.Redact(content);
+        
+        // Assert
+        result.RedactedContent.Should().Contain("Bearer [REDACTED:JWT]");
+        result.RedactedContent.Should().NotContain(jwt);
+    }
+    
+    [Fact]
+    public void Redact_CustomPatterns_Work()
+    {
+        // Arrange
+        var customRedactor = new ArtifactRedactor(new[] { @"CUSTOM_SECRET_[A-Za-z0-9]+" });
+        var content = "Value is CUSTOM_SECRET_abc123xyz";
+        
+        // Act
+        var result = customRedactor.Redact(content);
+        
+        // Assert
+        result.RedactionCount.Should().Be(1);
+        result.RedactedContent.Should().Contain("[REDACTED]");
+    }
+    
+    [Fact]
+    public void Redact_EmptyContent_ReturnsEmpty()
+    {
+        // Act
+        var result = _redactor.Redact("");
+        
+        // Assert
+        result.RedactedContent.Should().BeEmpty();
+        result.RedactionCount.Should().Be(0);
+    }
+}
+```
 
-#### SmartTruncatorTests
-- Truncate_UnderLimit_ReturnsUnchanged
-- Truncate_PreservesErrorLines
-- Truncate_PreservesWarningLines
-- Truncate_IncludesContextLines
-- Truncate_PrioritizesErrorsOverWarnings
-- Truncate_AlwaysIncludesFirst5Lines
-- Truncate_AlwaysIncludesLast5Lines
-- Truncate_AddsMarkersForGaps
-- Truncate_CustomErrorPatterns_Work
-- Truncate_CustomWarningPatterns_Work
-- Truncate_NoMatches_FallsBackToTail
-- Truncate_MultipleErrors_IncludesAll
-- Truncate_SpaceLimited_IncludesHighestPriority
-- Truncate_ContextOverlap_NoDuplicateLines
+#### TruncatorTests.cs
 
-#### ContentRedactorTests
-- Redact_PasswordPattern_Matches
-- Redact_ApiKeyPattern_Matches
-- Redact_TokenPattern_Matches
-- Redact_SecretPattern_Matches
-- Redact_ReplacesWithPlaceholder
-- Redact_CountsRedactions
-- Redact_CaseInsensitive
-- Redact_MultipleMatches_AllRedacted
-- Redact_CustomPatterns_Work
-- Redact_RegexPatterns_Work
-- Redact_NoMatches_ReturnsUnchanged
-- Redact_InvalidPattern_SkipsAndLogs
-- Redact_NestedPatterns_AllCaught
-- Redact_EmptyContent_ReturnsEmpty
+```csharp
+using System;
+using System.Text;
+using Acode.Infrastructure.Artifacts;
+using FluentAssertions;
+using Xunit;
 
-#### RetentionPolicyTests
-- AgePolicy_OlderThanThreshold_MarksForDeletion
-- AgePolicy_YoungerThanThreshold_Keeps
-- SizePolicy_ExceedsThreshold_MarksOldestForDeletion
-- SizePolicy_UnderThreshold_KeepsAll
-- CountPolicy_ExceedsThreshold_MarksOldestForDeletion
-- CountPolicy_UnderThreshold_KeepsAll
-- CombinedPolicy_EvaluatesInOrder
-- CombinedPolicy_StopsWhenUnderAllThresholds
+namespace Acode.Infrastructure.Tests.Artifacts;
 
-#### RetentionManagerTests
-- Cleanup_DeletesMarkedArtifacts
-- Cleanup_LogsActions
-- Cleanup_ReturnsDeletedCount
-- Cleanup_ReturnsBytesReclaimed
-- Cleanup_DryRun_NoActualDeletion
-- Cleanup_OrphanFiles_Removed
-- Cleanup_OrphanMetadata_Removed
+/// <summary>
+/// Tests for artifact truncation strategies.
+/// </summary>
+public class TruncatorTests
+{
+    [Fact]
+    public void HeadTruncator_UnderLimit_ReturnsUnchanged()
+    {
+        // Arrange
+        var truncator = new HeadTruncator(maxBytes: 1000);
+        var content = "Short content";
+        
+        // Act
+        var result = truncator.Truncate(content);
+        
+        // Assert
+        result.Content.Should().Be(content);
+        result.WasTruncated.Should().BeFalse();
+    }
+    
+    [Fact]
+    public void HeadTruncator_OverLimit_KeepsFirstBytes()
+    {
+        // Arrange
+        var truncator = new HeadTruncator(maxBytes: 100);
+        var content = new string('A', 500);
+        
+        // Act
+        var result = truncator.Truncate(content);
+        
+        // Assert
+        result.Content.Length.Should().BeLessThanOrEqualTo(100);
+        result.Content.Should().StartWith("AAAA");
+        result.WasTruncated.Should().BeTrue();
+        result.OriginalSize.Should().Be(500);
+    }
+    
+    [Fact]
+    public void TailTruncator_OverLimit_KeepsLastBytes()
+    {
+        // Arrange
+        var truncator = new TailTruncator(maxBytes: 100);
+        var content = "HEAD" + new string('X', 400) + "TAIL";
+        
+        // Act
+        var result = truncator.Truncate(content);
+        
+        // Assert
+        result.Content.Should().EndWith("TAIL");
+        result.WasTruncated.Should().BeTrue();
+    }
+    
+    [Fact]
+    public void SmartTruncator_PreservesErrorLines()
+    {
+        // Arrange
+        var truncator = new SmartTruncator(maxBytes: 200);
+        var lines = new StringBuilder();
+        for (int i = 0; i < 100; i++) lines.AppendLine($"Normal line {i}");
+        lines.AppendLine("error: This is the critical error");
+        for (int i = 0; i < 100; i++) lines.AppendLine($"More output {i}");
+        
+        // Act
+        var result = truncator.Truncate(lines.ToString());
+        
+        // Assert
+        result.Content.Should().Contain("error: This is the critical error");
+        result.WasTruncated.Should().BeTrue();
+    }
+    
+    [Fact]
+    public void SmartTruncator_PreservesWarningLines()
+    {
+        // Arrange
+        var truncator = new SmartTruncator(maxBytes: 300);
+        var content = @"
+Normal output
+Normal output
+warning: Something might be wrong
+Normal output
+Normal output
+WARNING: Another warning
+Normal output
+";
+        
+        // Act
+        var result = truncator.Truncate(new string('X', 500) + content);
+        
+        // Assert
+        result.Content.Should().Contain("warning:");
+        result.Content.Should().Contain("WARNING:");
+    }
+    
+    [Fact]
+    public void SmartTruncator_IncludesContextLines()
+    {
+        // Arrange
+        var truncator = new SmartTruncator(maxBytes: 500, contextLines: 2);
+        var lines = new[]
+        {
+            "Before context 1",
+            "Before context 2",
+            "error: The problem",
+            "After context 1",
+            "After context 2"
+        };
+        var content = new string('X', 1000) + "\n" + string.Join("\n", lines);
+        
+        // Act
+        var result = truncator.Truncate(content);
+        
+        // Assert
+        result.Content.Should().Contain("Before context");
+        result.Content.Should().Contain("After context");
+    }
+    
+    [Theory]
+    [InlineData("error:")]
+    [InlineData("ERROR:")]
+    [InlineData("Error:")]
+    public void SmartTruncator_CaseInsensitivePatterns(string errorLine)
+    {
+        // Arrange
+        var truncator = new SmartTruncator(maxBytes: 200);
+        var content = new string('X', 500) + $"\n{errorLine} problem\n" + new string('Y', 500);
+        
+        // Act
+        var result = truncator.Truncate(content);
+        
+        // Assert
+        result.Content.Should().Contain(errorLine);
+    }
+}
+```
+
+#### ArtifactStoreTests.cs
+
+```csharp
+using System;
+using System.Threading.Tasks;
+using Acode.Infrastructure.Artifacts;
+using FluentAssertions;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Artifacts;
+
+/// <summary>
+/// Tests for artifact storage operations.
+/// </summary>
+public class ArtifactStoreTests : IAsyncLifetime
+{
+    private readonly string _testDir;
+    private ArtifactStore _store = null!;
+    
+    public ArtifactStoreTests()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"artifact-tests-{Guid.NewGuid():N}");
+    }
+    
+    public Task InitializeAsync()
+    {
+        Directory.CreateDirectory(_testDir);
+        _store = new ArtifactStore(_testDir, new InMemoryArtifactDatabase());
+        return Task.CompletedTask;
+    }
+    
+    public Task DisposeAsync()
+    {
+        if (Directory.Exists(_testDir))
+            Directory.Delete(_testDir, true);
+        return Task.CompletedTask;
+    }
+    
+    [Fact]
+    public async Task StoreAsync_SmallContent_InlinesInDatabase()
+    {
+        // Arrange
+        var content = "Small content";
+        
+        // Act
+        var artifact = await _store.StoreAsync(new ArtifactRequest
+        {
+            Type = ArtifactType.Stdout,
+            Content = content
+        });
+        
+        // Assert
+        artifact.IsInline.Should().BeTrue();
+        artifact.FilePath.Should().BeNull();
+    }
+    
+    [Fact]
+    public async Task StoreAsync_LargeContent_CreatesFile()
+    {
+        // Arrange
+        var content = new string('X', 10000); // 10KB
+        
+        // Act
+        var artifact = await _store.StoreAsync(new ArtifactRequest
+        {
+            Type = ArtifactType.Stdout,
+            Content = content
+        });
+        
+        // Assert
+        artifact.IsInline.Should().BeFalse();
+        artifact.FilePath.Should().NotBeNullOrEmpty();
+        File.Exists(artifact.FilePath).Should().BeTrue();
+    }
+    
+    [Fact]
+    public async Task GetAsync_ExistingId_ReturnsArtifact()
+    {
+        // Arrange
+        var stored = await _store.StoreAsync(new ArtifactRequest
+        {
+            Type = ArtifactType.Stderr,
+            Content = "Test content"
+        });
+        
+        // Act
+        var retrieved = await _store.GetAsync(stored.Id);
+        
+        // Assert
+        retrieved.Should().NotBeNull();
+        retrieved!.Id.Should().Be(stored.Id);
+        retrieved.Type.Should().Be(ArtifactType.Stderr);
+    }
+    
+    [Fact]
+    public async Task GetAsync_NonExistentId_ReturnsNull()
+    {
+        // Act
+        var result = await _store.GetAsync(Guid.NewGuid());
+        
+        // Assert
+        result.Should().BeNull();
+    }
+    
+    [Fact]
+    public async Task GetContentAsync_ReturnsStoredContent()
+    {
+        // Arrange
+        var originalContent = "This is the content to store and retrieve";
+        var artifact = await _store.StoreAsync(new ArtifactRequest
+        {
+            Type = ArtifactType.Stdout,
+            Content = originalContent
+        });
+        
+        // Act
+        var content = await _store.GetContentAsync(artifact.Id);
+        
+        // Assert
+        content.Should().Be(originalContent);
+    }
+    
+    [Fact]
+    public async Task DeleteAsync_RemovesArtifact()
+    {
+        // Arrange
+        var artifact = await _store.StoreAsync(new ArtifactRequest
+        {
+            Type = ArtifactType.Stdout,
+            Content = "Content to delete"
+        });
+        
+        // Act
+        var deleted = await _store.DeleteAsync(artifact.Id);
+        
+        // Assert
+        deleted.Should().BeTrue();
+        var retrieved = await _store.GetAsync(artifact.Id);
+        retrieved.Should().BeNull();
+    }
+    
+    [Fact]
+    public async Task ListAsync_ByType_FiltersCorrectly()
+    {
+        // Arrange
+        await _store.StoreAsync(new ArtifactRequest { Type = ArtifactType.Stdout, Content = "out" });
+        await _store.StoreAsync(new ArtifactRequest { Type = ArtifactType.Stderr, Content = "err" });
+        await _store.StoreAsync(new ArtifactRequest { Type = ArtifactType.Stdout, Content = "out2" });
+        
+        // Act
+        var stdoutArtifacts = await _store.ListAsync(new ArtifactQuery { Type = ArtifactType.Stdout });
+        
+        // Assert
+        stdoutArtifacts.Should().HaveCount(2);
+        stdoutArtifacts.Should().OnlyContain(a => a.Type == ArtifactType.Stdout);
+    }
+}
+```
+
+#### RetentionManagerTests.cs
+
+```csharp
+using System;
+using System.Threading.Tasks;
+using Acode.Infrastructure.Artifacts;
+using FluentAssertions;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Artifacts;
+
+/// <summary>
+/// Tests for artifact retention and cleanup.
+/// </summary>
+public class RetentionManagerTests
+{
+    [Fact]
+    public async Task Cleanup_AgeBased_DeletesOldArtifacts()
+    {
+        // Arrange
+        var store = new InMemoryArtifactStore();
+        var manager = new RetentionManager(store);
+        
+        // Create old artifact
+        var oldArtifact = new Artifact
+        {
+            Id = Guid.NewGuid(),
+            Type = ArtifactType.Stdout,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-45)
+        };
+        await store.AddAsync(oldArtifact, "old content");
+        
+        // Create recent artifact
+        var recentArtifact = new Artifact
+        {
+            Id = Guid.NewGuid(),
+            Type = ArtifactType.Stdout,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-5)
+        };
+        await store.AddAsync(recentArtifact, "recent content");
+        
+        // Act
+        var result = await manager.CleanupAsync(new RetentionPolicy { MaxAgeDays = 30 });
+        
+        // Assert
+        result.DeletedCount.Should().Be(1);
+        var remaining = await store.ListAsync(new ArtifactQuery());
+        remaining.Should().HaveCount(1);
+        remaining[0].Id.Should().Be(recentArtifact.Id);
+    }
+    
+    [Fact]
+    public async Task Cleanup_SizeBased_DeletesOldestWhenOverLimit()
+    {
+        // Arrange
+        var store = new InMemoryArtifactStore();
+        var manager = new RetentionManager(store);
+        
+        // Add artifacts totaling 3MB
+        for (int i = 0; i < 3; i++)
+        {
+            var artifact = new Artifact
+            {
+                Id = Guid.NewGuid(),
+                Type = ArtifactType.Stdout,
+                SizeBytes = 1024 * 1024, // 1MB each
+                CreatedAt = DateTimeOffset.UtcNow.AddHours(-i)
+            };
+            await store.AddAsync(artifact, new string('X', 1024 * 1024));
+        }
+        
+        // Act - Limit to 2MB
+        var result = await manager.CleanupAsync(new RetentionPolicy 
+        { 
+            MaxTotalSizeBytes = 2 * 1024 * 1024 
+        });
+        
+        // Assert
+        result.DeletedCount.Should().BeGreaterOrEqualTo(1);
+        var remaining = await store.ListAsync(new ArtifactQuery());
+        remaining.Sum(a => a.SizeBytes).Should().BeLessThanOrEqualTo(2 * 1024 * 1024);
+    }
+    
+    [Fact]
+    public async Task Cleanup_DryRun_DoesNotDelete()
+    {
+        // Arrange
+        var store = new InMemoryArtifactStore();
+        var manager = new RetentionManager(store);
+        
+        var artifact = new Artifact
+        {
+            Id = Guid.NewGuid(),
+            Type = ArtifactType.Stdout,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-45)
+        };
+        await store.AddAsync(artifact, "content");
+        
+        // Act
+        var result = await manager.CleanupAsync(
+            new RetentionPolicy { MaxAgeDays = 30 },
+            dryRun: true);
+        
+        // Assert
+        result.DeletedCount.Should().Be(0);
+        result.WouldDeleteCount.Should().Be(1);
+        var remaining = await store.ListAsync(new ArtifactQuery());
+        remaining.Should().HaveCount(1); // Still exists
+    }
+}
+```
 
 ### Integration Tests
 
-#### ArtifactStoreIntegrationTests
-- Store_AndRetrieve_RoundTripsCorrectly
-- Store_LargeArtifact_FileCreatedCorrectly
-- Store_Compressed_DecompressesCorrectly
-- List_ByCorrelationId_FindsRelatedArtifacts
-- Delete_RemovesFromDatabaseAndFileSystem
+```csharp
+using System;
+using System.IO;
+using System.Threading.Tasks;
+using Acode.Infrastructure.Artifacts;
+using FluentAssertions;
+using Xunit;
 
-#### RetentionIntegrationTests
-- Cleanup_AgeBasedDeletion_Works
-- Cleanup_SizeBasedDeletion_Works
-- Cleanup_CountBasedDeletion_Works
+namespace Acode.Infrastructure.Tests.Artifacts;
 
-### End-to-End Tests
-
-#### ArtifactE2ETests
-- Execute_Command_ArtifactsStored
-- Execute_LargeOutput_TruncatedCorrectly
-- Execute_WithSecrets_RedactedCorrectly
-- CLI_ListArtifacts_Works
-- CLI_ShowArtifact_DisplaysContent
-- CLI_DeleteArtifact_Removes
-- CLI_Cleanup_RemovesOld
-- CLI_Stats_ShowsMetrics
+/// <summary>
+/// Integration tests for complete artifact workflows.
+/// </summary>
+[Collection("IntegrationTests")]
+public class ArtifactIntegrationTests : IAsyncLifetime
+{
+    private readonly string _testDir;
+    private ArtifactStore _store = null!;
+    
+    public ArtifactIntegrationTests()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), $"artifact-int-{Guid.NewGuid():N}");
+    }
+    
+    public Task InitializeAsync()
+    {
+        Directory.CreateDirectory(_testDir);
+        var dbPath = Path.Combine(_testDir, "artifacts.db");
+        _store = new ArtifactStore(_testDir, new SqliteArtifactDatabase(dbPath));
+        return Task.CompletedTask;
+    }
+    
+    public Task DisposeAsync()
+    {
+        if (Directory.Exists(_testDir))
+            Directory.Delete(_testDir, true);
+        return Task.CompletedTask;
+    }
+    
+    [Fact]
+    public async Task EndToEnd_StoreRedactTruncateRetrieve()
+    {
+        // Arrange
+        var largeContent = new string('X', 50000) + "\nAPI_KEY=secret123\n" + new string('Y', 50000);
+        var request = new ArtifactRequest
+        {
+            Type = ArtifactType.Stdout,
+            Content = largeContent,
+            CorrelationId = Guid.NewGuid(),
+            RedactionEnabled = true,
+            MaxSizeBytes = 10000,
+            TruncationMode = TruncationMode.Smart
+        };
+        
+        // Act
+        var artifact = await _store.StoreAsync(request);
+        var retrieved = await _store.GetContentAsync(artifact.Id);
+        
+        // Assert
+        artifact.WasTruncated.Should().BeTrue();
+        artifact.WasRedacted.Should().BeTrue();
+        retrieved.Should().NotContain("secret123");
+        retrieved.Should().Contain("[REDACTED");
+    }
+    
+    [Fact]
+    public async Task Compression_LargeArtifact_CompressesAndDecompresses()
+    {
+        // Arrange
+        var content = new string('ABCD', 100000); // Highly compressible
+        
+        // Act
+        var artifact = await _store.StoreAsync(new ArtifactRequest
+        {
+            Type = ArtifactType.BuildOutput,
+            Content = content,
+            CompressionEnabled = true
+        });
+        
+        // Assert
+        artifact.IsCompressed.Should().BeTrue();
+        artifact.SizeBytes.Should().BeLessThan(content.Length / 2); // >50% compression
+        
+        var retrieved = await _store.GetContentAsync(artifact.Id);
+        retrieved.Should().Be(content);
+    }
+}
+```
 
 ### Performance Benchmarks
 

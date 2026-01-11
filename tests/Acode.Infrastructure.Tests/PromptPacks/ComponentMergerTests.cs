@@ -1,7 +1,6 @@
 using Acode.Domain.PromptPacks;
 using Acode.Infrastructure.PromptPacks;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.PromptPacks;
 

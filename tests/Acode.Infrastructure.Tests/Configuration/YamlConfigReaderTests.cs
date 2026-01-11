@@ -3,7 +3,6 @@ using Acode.Domain.Configuration;
 #pragma warning restore IDE0005
 using Acode.Infrastructure.Configuration;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Configuration;
 

@@ -27,7 +27,7 @@ Thank you for your interest in contributing to Acode! This document provides gui
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/your-org/acode.git
+git clone https://github.com/whitewidovv/acode.git
 cd acode
 ```
 
@@ -406,6 +406,15 @@ When adding new features, update:
 ## License
 
 By contributing, you agree that your contributions will be licensed under the same license as the project (MIT License).
+
+## Reporting Issues
+
+When reporting bugs or requesting features, please use our issue templates:
+
+- [Bug Report](.github/ISSUE_TEMPLATE/bug_report.md) - Report a bug or unexpected behavior
+- [Feature Request](.github/ISSUE_TEMPLATE/feature_request.md) - Suggest a new feature or improvement
+
+These templates help ensure we have all the information needed to address your issue quickly.
 
 ## Questions?
 

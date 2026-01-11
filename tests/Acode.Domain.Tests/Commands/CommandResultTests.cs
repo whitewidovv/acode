@@ -1,6 +1,5 @@
 using Acode.Domain.Commands;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Domain.Tests.Commands;
 

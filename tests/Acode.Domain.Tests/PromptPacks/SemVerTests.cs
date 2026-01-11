@@ -1,6 +1,5 @@
 using Acode.Domain.PromptPacks;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Domain.Tests.PromptPacks;
 
@@ -31,7 +30,7 @@ public class SemVerTests
         v.Major.Should().Be(major);
         v.Minor.Should().Be(minor);
         v.Patch.Should().Be(patch);
-        v.Prerelease.Should().Be(preRelease);
+        v.PreRelease.Should().Be(preRelease);
         v.BuildMetadata.Should().Be(buildMetadata);
     }
 

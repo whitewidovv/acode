@@ -1,5 +1,4 @@
 using Acode.Domain.PromptPacks;
-using Acode.Domain.PromptPacks.Exceptions;
 
 namespace Acode.Application.PromptPacks;
 
@@ -13,7 +12,7 @@ public interface IPromptPackRegistry
     /// </summary>
     /// <param name="packId">The pack ID.</param>
     /// <returns>The prompt pack.</returns>
-    /// <exception cref="PackNotFoundException">Thrown when the pack is not found.</exception>
+    /// <exception cref="Acode.Domain.PromptPacks.Exceptions.PackNotFoundException">Thrown when the pack is not found.</exception>
     PromptPack GetPack(string packId);
 
     /// <summary>

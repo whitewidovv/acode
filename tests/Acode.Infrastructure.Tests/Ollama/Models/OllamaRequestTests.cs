@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Acode.Infrastructure.Ollama.Models;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Ollama.Models;
 

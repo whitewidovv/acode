@@ -3,7 +3,6 @@ namespace Acode.Infrastructure.Tests.Truncation.Strategies;
 using Acode.Application.Truncation;
 using Acode.Infrastructure.Truncation.Strategies;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for HeadTailStrategy truncation.

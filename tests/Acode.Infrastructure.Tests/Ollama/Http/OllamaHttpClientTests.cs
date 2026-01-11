@@ -2,7 +2,6 @@ using System.Net;
 using Acode.Infrastructure.Ollama.Http;
 using Acode.Infrastructure.Ollama.Models;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Ollama.Http;
 

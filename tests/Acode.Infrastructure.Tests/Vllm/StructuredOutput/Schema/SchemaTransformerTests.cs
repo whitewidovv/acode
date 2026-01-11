@@ -4,7 +4,6 @@ using System.Text.Json;
 using Acode.Infrastructure.Vllm.StructuredOutput.Exceptions;
 using Acode.Infrastructure.Vllm.StructuredOutput.Schema;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for SchemaTransformer functionality.

@@ -2,7 +2,6 @@ using Acode.Domain.PromptPacks;
 using Acode.Domain.PromptPacks.Exceptions;
 using Acode.Infrastructure.PromptPacks;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.PromptPacks;
 
@@ -146,7 +145,7 @@ public class PackManifestTests
         manifest.Version.Major.Should().Be(2);
         manifest.Version.Minor.Should().Be(3);
         manifest.Version.Patch.Should().Be(4);
-        manifest.Version.Prerelease.Should().Be("beta.1");
+        manifest.Version.PreRelease.Should().Be("beta.1");
         manifest.Version.BuildMetadata.Should().Be("build.456");
     }
 

@@ -2557,176 +2557,3151 @@ public sealed class IgnorePatternDebugger
 
 ### Unit Tests
 
+#### IndexBuilderTests.cs
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Domain.Index;
+using Acode.Infrastructure.Index;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+namespace Acode.Tests.Unit.Index;
+
+public sealed class IndexBuilderTests
+{
+    private readonly Mock<IRepoFileSystem> _repoFsMock;
+    private readonly Mock<IIgnoreRuleParser> _ignoreParserMock;
+    private readonly Mock<ITokenizer> _tokenizerMock;
+    private readonly Mock<ILogger<IndexBuilder>> _loggerMock;
+    private readonly IndexBuilder _sut;
+
+    public IndexBuilderTests()
+    {
+        _repoFsMock = new Mock<IRepoFileSystem>();
+        _ignoreParserMock = new Mock<IIgnoreRuleParser>();
+        _tokenizerMock = new Mock<ITokenizer>();
+        _loggerMock = new Mock<ILogger<IndexBuilder>>();
+        
+        _sut = new IndexBuilder(
+            _repoFsMock.Object,
+            _ignoreParserMock.Object,
+            _tokenizerMock.Object,
+            _loggerMock.Object);
+    }
+
+    [Fact]
+    public async Task Should_Index_Text_File()
+    {
+        // Arrange
+        var filePath = "src/Services/UserService.cs";
+        var fileContent = "public class UserService { }";
+        var tokens = new[] { "public", "class", "user", "service" };
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerable(new[] { filePath }));
+        _repoFsMock.Setup(x => x.ReadAllTextAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fileContent);
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(filePath, 100, DateTime.UtcNow, false));
+        _ignoreParserMock.Setup(x => x.ShouldIgnore(filePath)).Returns(false);
+        _tokenizerMock.Setup(x => x.Tokenize(fileContent)).Returns(tokens);
+
+        // Act
+        var result = await _sut.BuildAsync("/repo", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(1, result.FilesIndexed);
+        Assert.Contains(filePath, result.IndexedFiles);
+    }
+
+    [Fact]
+    public async Task Should_Index_Multiple_Files()
+    {
+        // Arrange
+        var files = new[] 
+        { 
+            "src/Services/UserService.cs",
+            "src/Services/OrderService.cs",
+            "src/Controllers/UserController.cs"
+        };
+        
+        foreach (var file in files)
+        {
+            _repoFsMock.Setup(x => x.ReadAllTextAsync(file, It.IsAny<CancellationToken>()))
+                .ReturnsAsync($"// Content of {file}");
+            _repoFsMock.Setup(x => x.GetFileInfoAsync(file, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new FileMetadata(file, 50, DateTime.UtcNow, false));
+        }
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerable(files));
+        _ignoreParserMock.Setup(x => x.ShouldIgnore(It.IsAny<string>())).Returns(false);
+        _tokenizerMock.Setup(x => x.Tokenize(It.IsAny<string>())).Returns(new[] { "content" });
+
+        // Act
+        var result = await _sut.BuildAsync("/repo", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(3, result.FilesIndexed);
+    }
+
+    [Fact]
+    public async Task Should_Skip_Binary_Files()
+    {
+        // Arrange
+        var textFile = "src/app.cs";
+        var binaryFile = "assets/image.png";
+        var files = new[] { textFile, binaryFile };
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerable(files));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(textFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(textFile, 100, DateTime.UtcNow, false));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(binaryFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(binaryFile, 50000, DateTime.UtcNow, true)); // isBinary = true
+        _repoFsMock.Setup(x => x.ReadAllTextAsync(textFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("public class App { }");
+        _ignoreParserMock.Setup(x => x.ShouldIgnore(It.IsAny<string>())).Returns(false);
+        _tokenizerMock.Setup(x => x.Tokenize(It.IsAny<string>())).Returns(new[] { "public", "class", "app" });
+
+        // Act
+        var result = await _sut.BuildAsync("/repo", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, result.FilesIndexed);
+        Assert.Equal(1, result.FilesSkipped);
+        Assert.Contains(binaryFile, result.SkippedFiles.Select(s => s.Path));
+        Assert.Contains("binary", result.SkippedFiles.First(s => s.Path == binaryFile).Reason.ToLower());
+    }
+
+    [Fact]
+    public async Task Should_Skip_Ignored_Files()
+    {
+        // Arrange
+        var includedFile = "src/app.cs";
+        var ignoredFile = "node_modules/package/index.js";
+        var files = new[] { includedFile, ignoredFile };
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerable(files));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(includedFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(includedFile, 100, DateTime.UtcNow, false));
+        _repoFsMock.Setup(x => x.ReadAllTextAsync(includedFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("public class App { }");
+        _ignoreParserMock.Setup(x => x.ShouldIgnore(includedFile)).Returns(false);
+        _ignoreParserMock.Setup(x => x.ShouldIgnore(ignoredFile)).Returns(true);
+        _tokenizerMock.Setup(x => x.Tokenize(It.IsAny<string>())).Returns(new[] { "public" });
+
+        // Act
+        var result = await _sut.BuildAsync("/repo", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, result.FilesIndexed);
+        Assert.DoesNotContain(ignoredFile, result.IndexedFiles);
+    }
+
+    [Fact]
+    public async Task Should_Track_File_Metadata()
+    {
+        // Arrange
+        var filePath = "src/UserService.cs";
+        var fileSize = 2048L;
+        var lastModified = new DateTime(2024, 6, 15, 10, 30, 0, DateTimeKind.Utc);
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerable(new[] { filePath }));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(filePath, fileSize, lastModified, false));
+        _repoFsMock.Setup(x => x.ReadAllTextAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("public class UserService { }");
+        _ignoreParserMock.Setup(x => x.ShouldIgnore(filePath)).Returns(false);
+        _tokenizerMock.Setup(x => x.Tokenize(It.IsAny<string>())).Returns(new[] { "user", "service" });
+
+        // Act
+        var result = await _sut.BuildAsync("/repo", CancellationToken.None);
+        var metadata = result.FileMetadata[filePath];
+
+        // Assert
+        Assert.Equal(filePath, metadata.Path);
+        Assert.Equal(fileSize, metadata.Size);
+        Assert.Equal(lastModified, metadata.LastModified);
+    }
+
+    [Fact]
+    public async Task Should_Store_Line_Numbers()
+    {
+        // Arrange
+        var filePath = "src/UserService.cs";
+        var fileContent = "line 1\nline 2 with keyword\nline 3\nline 4 with keyword";
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerable(new[] { filePath }));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(filePath, 100, DateTime.UtcNow, false));
+        _repoFsMock.Setup(x => x.ReadAllTextAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fileContent);
+        _ignoreParserMock.Setup(x => x.ShouldIgnore(filePath)).Returns(false);
+        _tokenizerMock.Setup(x => x.TokenizeWithPositions(fileContent))
+            .Returns(new[]
+            {
+                new TokenPosition("line", 1, 0),
+                new TokenPosition("line", 2, 0),
+                new TokenPosition("keyword", 2, 13),
+                new TokenPosition("line", 3, 0),
+                new TokenPosition("line", 4, 0),
+                new TokenPosition("keyword", 4, 13)
+            });
+
+        // Act
+        var result = await _sut.BuildAsync("/repo", CancellationToken.None);
+        var keywordPositions = result.GetTermPositions("keyword", filePath);
+
+        // Assert
+        Assert.Equal(2, keywordPositions.Count());
+        Assert.Contains(keywordPositions, p => p.Line == 2);
+        Assert.Contains(keywordPositions, p => p.Line == 4);
+    }
+
+    [Fact]
+    public async Task Should_Handle_Empty_File()
+    {
+        // Arrange
+        var filePath = "src/empty.cs";
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerable(new[] { filePath }));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(filePath, 0, DateTime.UtcNow, false));
+        _repoFsMock.Setup(x => x.ReadAllTextAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(string.Empty);
+        _ignoreParserMock.Setup(x => x.ShouldIgnore(filePath)).Returns(false);
+        _tokenizerMock.Setup(x => x.Tokenize(string.Empty)).Returns(Array.Empty<string>());
+
+        // Act
+        var result = await _sut.BuildAsync("/repo", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(1, result.FilesIndexed);
+        Assert.Contains(filePath, result.IndexedFiles);
+    }
+
+    [Fact]
+    public async Task Should_Handle_Large_File_With_Size_Limit()
+    {
+        // Arrange
+        var smallFile = "src/small.cs";
+        var largeFile = "src/generated.cs";
+        var maxSizeKb = 500;
+        var options = new IndexBuildOptions { MaxFileSizeKb = maxSizeKb };
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerable(new[] { smallFile, largeFile }));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(smallFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(smallFile, 1024, DateTime.UtcNow, false)); // 1 KB
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(largeFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(largeFile, 600 * 1024, DateTime.UtcNow, false)); // 600 KB > limit
+        _repoFsMock.Setup(x => x.ReadAllTextAsync(smallFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("small content");
+        _ignoreParserMock.Setup(x => x.ShouldIgnore(It.IsAny<string>())).Returns(false);
+        _tokenizerMock.Setup(x => x.Tokenize(It.IsAny<string>())).Returns(new[] { "small" });
+
+        // Act
+        var result = await _sut.BuildAsync("/repo", options, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, result.FilesIndexed);
+        Assert.Equal(1, result.FilesSkipped);
+        Assert.Contains(largeFile, result.SkippedFiles.Select(s => s.Path));
+        Assert.Contains("size", result.SkippedFiles.First(s => s.Path == largeFile).Reason.ToLower());
+    }
+
+    [Fact]
+    public async Task Should_Handle_Unicode_Content()
+    {
+        // Arrange
+        var filePath = "src/i18n/messages.cs";
+        var unicodeContent = "// 日本語コメント\npublic string Message = \"Привет мир\"; // Chinese: 你好世界";
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(AsyncEnumerable(new[] { filePath }));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(filePath, 200, DateTime.UtcNow, false));
+        _repoFsMock.Setup(x => x.ReadAllTextAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(unicodeContent);
+        _ignoreParserMock.Setup(x => x.ShouldIgnore(filePath)).Returns(false);
+        _tokenizerMock.Setup(x => x.Tokenize(unicodeContent))
+            .Returns(new[] { "日本語コメント", "public", "string", "message", "привет", "мир", "你好世界" });
+
+        // Act
+        var result = await _sut.BuildAsync("/repo", CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(1, result.FilesIndexed);
+    }
+
+    [Fact]
+    public async Task Should_Persist_Index_To_Disk()
+    {
+        // Arrange
+        var indexPath = Path.Combine(Path.GetTempPath(), $"test_index_{Guid.NewGuid()}.db");
+        var filePath = "src/app.cs";
+        
+        try
+        {
+            _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(AsyncEnumerable(new[] { filePath }));
+            _repoFsMock.Setup(x => x.GetFileInfoAsync(filePath, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new FileMetadata(filePath, 100, DateTime.UtcNow, false));
+            _repoFsMock.Setup(x => x.ReadAllTextAsync(filePath, It.IsAny<CancellationToken>()))
+                .ReturnsAsync("public class App { }");
+            _ignoreParserMock.Setup(x => x.ShouldIgnore(filePath)).Returns(false);
+            _tokenizerMock.Setup(x => x.Tokenize(It.IsAny<string>())).Returns(new[] { "public", "class", "app" });
+
+            var options = new IndexBuildOptions { IndexPath = indexPath };
+
+            // Act
+            var result = await _sut.BuildAsync("/repo", options, CancellationToken.None);
+
+            // Assert
+            Assert.True(result.Success);
+            Assert.True(File.Exists(indexPath), "Index file should exist on disk");
+            Assert.True(new FileInfo(indexPath).Length > 0, "Index file should not be empty");
+        }
+        finally
+        {
+            if (File.Exists(indexPath)) File.Delete(indexPath);
+        }
+    }
+
+    [Fact]
+    public async Task Should_Handle_Corrupted_Index_File()
+    {
+        // Arrange
+        var indexPath = Path.Combine(Path.GetTempPath(), $"corrupted_index_{Guid.NewGuid()}.db");
+        
+        try
+        {
+            // Create a corrupted file (not valid SQLite)
+            await File.WriteAllTextAsync(indexPath, "THIS IS NOT A VALID SQLITE DATABASE FILE");
+            
+            var loader = new IndexLoader(_loggerMock.Object);
+
+            // Act
+            var loadResult = await loader.LoadAsync(indexPath, CancellationToken.None);
+
+            // Assert
+            Assert.False(loadResult.Success);
+            Assert.Equal("ACODE-IDX-004", loadResult.ErrorCode);
+            Assert.Contains("corrupt", loadResult.ErrorMessage.ToLower());
+        }
+        finally
+        {
+            if (File.Exists(indexPath)) File.Delete(indexPath);
+        }
+    }
+
+    private static async IAsyncEnumerable<string> AsyncEnumerable(IEnumerable<string> items)
+    {
+        foreach (var item in items)
+        {
+            yield return item;
+        }
+        await Task.CompletedTask;
+    }
+}
 ```
-Tests/Unit/Index/
-├── IndexBuilderTests.cs
-│   ├── Should_Index_Text_File()
-│   ├── Should_Index_Multiple_Files()
-│   ├── Should_Skip_Binary_Files()
-│   ├── Should_Skip_Ignored_Files()
-│   ├── Should_Track_File_Metadata()
-│   ├── Should_Store_Line_Numbers()
-│   ├── Should_Tokenize_Content()
-│   ├── Should_Handle_Empty_File()
-│   ├── Should_Handle_Large_File()
-│   ├── Should_Handle_Unicode_Content()
-│   ├── Should_Persist_Index_To_Disk()
-│   ├── Should_Load_Index_From_Disk()
-│   └── Should_Handle_Corrupted_Index_File()
-│
-├── SearchEngineTests.cs
-│   ├── Should_Find_Single_Word()
-│   ├── Should_Find_Multiple_Words_AND()
-│   ├── Should_Find_Multiple_Words_OR()
-│   ├── Should_Find_Exact_Phrase()
-│   ├── Should_Find_With_Wildcard_Suffix()
-│   ├── Should_Find_With_Wildcard_Prefix()
-│   ├── Should_Exclude_With_Minus()
-│   ├── Should_Handle_Case_Insensitive()
-│   ├── Should_Handle_Case_Sensitive()
-│   ├── Should_Return_Line_Numbers()
-│   ├── Should_Return_Snippets()
-│   ├── Should_Return_Relevance_Score()
-│   ├── Should_Rank_By_Relevance()
-│   ├── Should_Support_Pagination()
-│   ├── Should_Handle_No_Results()
-│   ├── Should_Handle_Empty_Query()
-│   └── Should_Handle_Invalid_Query()
-│
-├── SearchQueryParserTests.cs
-│   ├── Should_Parse_Single_Word()
-│   ├── Should_Parse_Multiple_Words()
-│   ├── Should_Parse_Quoted_Phrase()
-│   ├── Should_Parse_Wildcard()
-│   ├── Should_Parse_AND_Operator()
-│   ├── Should_Parse_OR_Operator()
-│   ├── Should_Parse_Exclusion()
-│   ├── Should_Parse_Combined_Operators()
-│   ├── Should_Handle_Special_Characters()
-│   └── Should_Handle_Unbalanced_Quotes()
-│
-├── IgnoreRulesTests.cs
-│   ├── Should_Parse_Gitignore_File()
-│   ├── Should_Parse_Empty_Gitignore()
-│   ├── Should_Parse_Comment_Lines()
-│   ├── Should_Match_Exact_Filename()
-│   ├── Should_Match_Glob_Pattern()
-│   ├── Should_Match_Directory_Pattern()
-│   ├── Should_Match_Double_Star()
-│   ├── Should_Handle_Negation_Pattern()
-│   ├── Should_Handle_Escaped_Characters()
-│   ├── Should_Apply_Order_Priority()
-│   ├── Should_Merge_Multiple_Ignore_Files()
-│   ├── Should_Apply_Custom_Ignores()
-│   └── Should_Handle_Trailing_Spaces()
-│
-├── IncrementalUpdaterTests.cs
-│   ├── Should_Detect_Modified_File()
-│   ├── Should_Detect_New_File()
-│   ├── Should_Detect_Deleted_File()
-│   ├── Should_Detect_Renamed_File()
-│   ├── Should_Update_Only_Changed()
-│   ├── Should_Remove_Deleted_From_Index()
-│   ├── Should_Add_New_To_Index()
-│   ├── Should_Handle_Concurrent_Changes()
-│   └── Should_Track_Last_Update_Timestamp()
-│
-├── FilterTests.cs
-│   ├── Should_Filter_By_Extension()
-│   ├── Should_Filter_By_Directory()
-│   ├── Should_Filter_By_Size()
-│   ├── Should_Filter_By_Date()
-│   ├── Should_Combine_Filters()
-│   └── Should_Handle_No_Filters()
-│
-└── TokenizerTests.cs
-    ├── Should_Tokenize_Code_Identifiers()
-    ├── Should_Tokenize_CamelCase()
-    ├── Should_Tokenize_Snake_Case()
-    ├── Should_Handle_Numbers()
-    ├── Should_Handle_Punctuation()
-    └── Should_Normalize_Tokens()
+
+#### TokenizerTests.cs
+
+```csharp
+using System.Linq;
+using Acode.Infrastructure.Index;
+using Xunit;
+
+namespace Acode.Tests.Unit.Index;
+
+public sealed class TokenizerTests
+{
+    private readonly CodeTokenizer _sut = new();
+
+    [Fact]
+    public void Should_Tokenize_Code_Identifiers()
+    {
+        // Arrange
+        var code = "public class UserService : IUserService";
+
+        // Act
+        var tokens = _sut.Tokenize(code).ToList();
+
+        // Assert
+        Assert.Contains("public", tokens);
+        Assert.Contains("class", tokens);
+        Assert.Contains("userservice", tokens);
+        Assert.Contains("iuserservice", tokens);
+    }
+
+    [Theory]
+    [InlineData("getUserById", new[] { "get", "user", "by", "id" })]
+    [InlineData("processHTTPRequest", new[] { "process", "http", "request" })]
+    [InlineData("XMLParser", new[] { "xml", "parser" })]
+    [InlineData("parseJSON", new[] { "parse", "json" })]
+    [InlineData("IOStream", new[] { "io", "stream" })]
+    public void Should_Tokenize_CamelCase(string identifier, string[] expected)
+    {
+        // Act
+        var tokens = _sut.Tokenize(identifier).ToList();
+
+        // Assert
+        foreach (var expectedToken in expected)
+        {
+            Assert.Contains(expectedToken, tokens);
+        }
+    }
+
+    [Theory]
+    [InlineData("get_user_by_id", new[] { "get", "user", "by", "id" })]
+    [InlineData("PROCESS_HTTP_REQUEST", new[] { "process", "http", "request" })]
+    [InlineData("xml_parser_v2", new[] { "xml", "parser", "v2" })]
+    [InlineData("__private_field", new[] { "private", "field" })]
+    public void Should_Tokenize_Snake_Case(string identifier, string[] expected)
+    {
+        // Act
+        var tokens = _sut.Tokenize(identifier).ToList();
+
+        // Assert
+        foreach (var expectedToken in expected)
+        {
+            Assert.Contains(expectedToken, tokens);
+        }
+    }
+
+    [Theory]
+    [InlineData("user123", new[] { "user", "123" })]
+    [InlineData("v2Controller", new[] { "v", "2", "controller" })]
+    [InlineData("sha256Hash", new[] { "sha", "256", "hash" })]
+    [InlineData("100percentComplete", new[] { "100", "percent", "complete" })]
+    public void Should_Handle_Numbers(string identifier, string[] expected)
+    {
+        // Act
+        var tokens = _sut.Tokenize(identifier).ToList();
+
+        // Assert
+        foreach (var expectedToken in expected)
+        {
+            Assert.Contains(expectedToken, tokens);
+        }
+    }
+
+    [Fact]
+    public void Should_Handle_Punctuation()
+    {
+        // Arrange
+        var code = "user.getName(); // Get the user's name";
+
+        // Act
+        var tokens = _sut.Tokenize(code).ToList();
+
+        // Assert
+        Assert.Contains("user", tokens);
+        Assert.Contains("get", tokens);
+        Assert.Contains("name", tokens);
+        Assert.DoesNotContain(".", tokens);
+        Assert.DoesNotContain(";", tokens);
+        Assert.DoesNotContain("//", tokens);
+        Assert.DoesNotContain("'", tokens);
+    }
+
+    [Fact]
+    public void Should_Normalize_Tokens_To_Lowercase()
+    {
+        // Arrange
+        var code = "PUBLIC CLASS USERSERVICE";
+
+        // Act
+        var tokens = _sut.Tokenize(code).ToList();
+
+        // Assert
+        Assert.All(tokens, token => Assert.Equal(token, token.ToLowerInvariant()));
+        Assert.Contains("public", tokens);
+        Assert.Contains("class", tokens);
+    }
+
+    [Fact]
+    public void Should_Remove_Stop_Words()
+    {
+        // Arrange
+        var code = "the user is a member of the group";
+
+        // Act
+        var tokens = _sut.Tokenize(code).ToList();
+
+        // Assert
+        Assert.DoesNotContain("the", tokens);
+        Assert.DoesNotContain("is", tokens);
+        Assert.DoesNotContain("a", tokens);
+        Assert.DoesNotContain("of", tokens);
+        Assert.Contains("user", tokens);
+        Assert.Contains("member", tokens);
+        Assert.Contains("group", tokens);
+    }
+
+    [Fact]
+    public void Should_Track_Token_Positions()
+    {
+        // Arrange
+        var code = "line one\nline two\nline three";
+
+        // Act
+        var positions = _sut.TokenizeWithPositions(code).ToList();
+
+        // Assert
+        var lineOnePositions = positions.Where(p => p.Line == 1).ToList();
+        var lineTwoPositions = positions.Where(p => p.Line == 2).ToList();
+        var lineThreePositions = positions.Where(p => p.Line == 3).ToList();
+        
+        Assert.Single(lineOnePositions.Where(p => p.Token == "one"));
+        Assert.Single(lineTwoPositions.Where(p => p.Token == "two"));
+        Assert.Single(lineThreePositions.Where(p => p.Token == "three"));
+    }
+}
+```
+
+#### SearchEngineTests.cs
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Domain.Index;
+using Acode.Infrastructure.Index;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+namespace Acode.Tests.Unit.Index;
+
+public sealed class SearchEngineTests
+{
+    private readonly Mock<IIndexStore> _indexStoreMock;
+    private readonly Mock<ILogger<SearchEngine>> _loggerMock;
+    private readonly SearchEngine _sut;
+
+    public SearchEngineTests()
+    {
+        _indexStoreMock = new Mock<IIndexStore>();
+        _loggerMock = new Mock<ILogger<SearchEngine>>();
+        _sut = new SearchEngine(_indexStoreMock.Object, _loggerMock.Object);
+    }
+
+    [Fact]
+    public async Task Should_Find_Single_Word()
+    {
+        // Arrange
+        var query = new SearchQuery("UserService");
+        var indexedDoc = new IndexedDocument("src/UserService.cs", new Dictionary<string, List<int>>
+        {
+            ["userservice"] = new List<int> { 1, 5, 10 }
+        });
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("userservice", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { indexedDoc });
+        _indexStoreMock.Setup(x => x.GetDocumentContentAsync("src/UserService.cs", 1, 3, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("public class UserService : IUserService");
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Single(results);
+        Assert.Equal("src/UserService.cs", results[0].FilePath);
+        Assert.Contains(1, results[0].MatchedLines);
+    }
+
+    [Fact]
+    public async Task Should_Find_Multiple_Words_AND()
+    {
+        // Arrange
+        var query = new SearchQuery("user service"); // Default is AND
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("user", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new IndexedDocument("src/UserService.cs", new Dictionary<string, List<int>> { ["user"] = new() { 1 } }),
+                new IndexedDocument("src/UserController.cs", new Dictionary<string, List<int>> { ["user"] = new() { 5 } })
+            });
+        _indexStoreMock.Setup(x => x.SearchTermAsync("service", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new IndexedDocument("src/UserService.cs", new Dictionary<string, List<int>> { ["service"] = new() { 1 } }),
+                new IndexedDocument("src/OrderService.cs", new Dictionary<string, List<int>> { ["service"] = new() { 2 } })
+            });
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Single(results);
+        Assert.Equal("src/UserService.cs", results[0].FilePath);
+    }
+
+    [Fact]
+    public async Task Should_Find_Multiple_Words_OR()
+    {
+        // Arrange
+        var query = new SearchQuery("user OR order");
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("user", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new IndexedDocument("src/UserService.cs", new Dictionary<string, List<int>> { ["user"] = new() { 1 } }) });
+        _indexStoreMock.Setup(x => x.SearchTermAsync("order", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new IndexedDocument("src/OrderService.cs", new Dictionary<string, List<int>> { ["order"] = new() { 1 } }) });
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Contains(results, r => r.FilePath == "src/UserService.cs");
+        Assert.Contains(results, r => r.FilePath == "src/OrderService.cs");
+    }
+
+    [Fact]
+    public async Task Should_Find_Exact_Phrase()
+    {
+        // Arrange
+        var query = new SearchQuery("\"public class\"");
+        
+        _indexStoreMock.Setup(x => x.SearchPhraseAsync(new[] { "public", "class" }, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new IndexedDocument("src/App.cs", new Dictionary<string, List<int>> { ["public"] = new() { 1 } }) });
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Single(results);
+        Assert.Equal("src/App.cs", results[0].FilePath);
+    }
+
+    [Fact]
+    public async Task Should_Find_With_Wildcard_Suffix()
+    {
+        // Arrange
+        var query = new SearchQuery("User*");
+        
+        _indexStoreMock.Setup(x => x.SearchPrefixAsync("user", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new IndexedDocument("src/UserService.cs", new Dictionary<string, List<int>> { ["userservice"] = new() { 1 } }),
+                new IndexedDocument("src/UserController.cs", new Dictionary<string, List<int>> { ["usercontroller"] = new() { 2 } })
+            });
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, results.Count);
+    }
+
+    [Fact]
+    public async Task Should_Find_With_Wildcard_Prefix()
+    {
+        // Arrange
+        var query = new SearchQuery("*Service");
+        
+        _indexStoreMock.Setup(x => x.SearchSuffixAsync("service", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new IndexedDocument("src/UserService.cs", new Dictionary<string, List<int>> { ["userservice"] = new() { 1 } }),
+                new IndexedDocument("src/OrderService.cs", new Dictionary<string, List<int>> { ["orderservice"] = new() { 2 } })
+            });
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, results.Count);
+    }
+
+    [Fact]
+    public async Task Should_Exclude_With_Minus()
+    {
+        // Arrange
+        var query = new SearchQuery("service -test");
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("service", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new IndexedDocument("src/UserService.cs", new Dictionary<string, List<int>> { ["service"] = new() { 1 } }),
+                new IndexedDocument("tests/UserServiceTests.cs", new Dictionary<string, List<int>> { ["service"] = new() { 5 }, ["test"] = new() { 1 } })
+            });
+        _indexStoreMock.Setup(x => x.SearchTermAsync("test", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new IndexedDocument("tests/UserServiceTests.cs", new Dictionary<string, List<int>> { ["test"] = new() { 1 } })
+            });
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Single(results);
+        Assert.Equal("src/UserService.cs", results[0].FilePath);
+    }
+
+    [Fact]
+    public async Task Should_Handle_Case_Insensitive_By_Default()
+    {
+        // Arrange
+        var query = new SearchQuery("USERSERVICE");
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("userservice", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new IndexedDocument("src/UserService.cs", new Dictionary<string, List<int>> { ["userservice"] = new() { 1 } }) });
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Single(results);
+    }
+
+    [Fact]
+    public async Task Should_Return_Line_Numbers()
+    {
+        // Arrange
+        var query = new SearchQuery("controller");
+        var indexedDoc = new IndexedDocument("src/UserController.cs", new Dictionary<string, List<int>>
+        {
+            ["controller"] = new List<int> { 5, 15, 25 }
+        });
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("controller", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { indexedDoc });
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Single(results);
+        Assert.Equal(new[] { 5, 15, 25 }, results[0].MatchedLines);
+    }
+
+    [Fact]
+    public async Task Should_Return_Snippets_With_Context()
+    {
+        // Arrange
+        var query = new SearchQuery("process");
+        var fileContent = new[]
+        {
+            "// Line 1",
+            "// Line 2",
+            "public void Process() {",  // Line 3 - match
+            "    // implementation",
+            "}"
+        };
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("process", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new IndexedDocument("src/Handler.cs", new Dictionary<string, List<int>> { ["process"] = new() { 3 } }) });
+        _indexStoreMock.Setup(x => x.GetDocumentContentAsync("src/Handler.cs", 1, 5, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(string.Join("\n", fileContent));
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Single(results);
+        Assert.NotEmpty(results[0].Snippets);
+        Assert.Contains("Process", results[0].Snippets[0].Text);
+    }
+
+    [Fact]
+    public async Task Should_Return_Relevance_Score_Between_0_And_1()
+    {
+        // Arrange
+        var query = new SearchQuery("service");
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("service", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new IndexedDocument("src/UserService.cs", new Dictionary<string, List<int>> { ["service"] = new() { 1, 5, 10 } }) });
+        _indexStoreMock.Setup(x => x.GetTotalDocumentCount()).Returns(100);
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Single(results);
+        Assert.InRange(results[0].Score, 0.0, 1.0);
+    }
+
+    [Fact]
+    public async Task Should_Rank_By_Relevance_Descending()
+    {
+        // Arrange
+        var query = new SearchQuery("user");
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("user", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new IndexedDocument("src/UserService.cs", new Dictionary<string, List<int>> { ["user"] = new() { 1, 5, 10, 15, 20 } }), // 5 occurrences
+                new IndexedDocument("src/Controller.cs", new Dictionary<string, List<int>> { ["user"] = new() { 100 } }),              // 1 occurrence
+                new IndexedDocument("src/UserManager.cs", new Dictionary<string, List<int>> { ["user"] = new() { 1, 2, 3 } })          // 3 occurrences
+            });
+        _indexStoreMock.Setup(x => x.GetTotalDocumentCount()).Returns(100);
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(3, results.Count);
+        Assert.True(results[0].Score >= results[1].Score);
+        Assert.True(results[1].Score >= results[2].Score);
+        Assert.Equal("src/UserService.cs", results[0].FilePath); // Most occurrences = highest score
+    }
+
+    [Fact]
+    public async Task Should_Support_Pagination()
+    {
+        // Arrange
+        var docs = Enumerable.Range(1, 50)
+            .Select(i => new IndexedDocument($"src/File{i}.cs", new Dictionary<string, List<int>> { ["keyword"] = new() { 1 } }))
+            .ToArray();
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("keyword", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(docs);
+        
+        var query = new SearchQuery("keyword") { Skip = 10, Take = 5 };
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(5, results.Count);
+        Assert.Equal("src/File11.cs", results[0].FilePath); // Skip 10, so start at 11
+        Assert.Equal(50, results.TotalCount); // Total should be all matches
+    }
+
+    [Fact]
+    public async Task Should_Handle_No_Results()
+    {
+        // Arrange
+        var query = new SearchQuery("nonexistentterm12345");
+        
+        _indexStoreMock.Setup(x => x.SearchTermAsync("nonexistentterm12345", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<IndexedDocument>());
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Empty(results);
+        Assert.Equal(0, results.TotalCount);
+    }
+
+    [Fact]
+    public async Task Should_Handle_Empty_Query()
+    {
+        // Arrange
+        var query = new SearchQuery("");
+
+        // Act
+        var results = await _sut.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task Should_Handle_Invalid_Query()
+    {
+        // Arrange
+        var query = new SearchQuery("\"unclosed quote");
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<SearchQueryException>(
+            () => _sut.SearchAsync(query, CancellationToken.None));
+        
+        Assert.Equal("ACODE-IDX-002", exception.ErrorCode);
+        Assert.Contains("unbalanced", exception.Message.ToLower());
+    }
+}
+```
+
+#### SearchQueryParserTests.cs
+
+```csharp
+using System.Linq;
+using Acode.Infrastructure.Index;
+using Xunit;
+
+namespace Acode.Tests.Unit.Index;
+
+public sealed class SearchQueryParserTests
+{
+    private readonly SearchQueryParser _sut = new();
+
+    [Fact]
+    public void Should_Parse_Single_Word()
+    {
+        // Arrange
+        var queryText = "UserService";
+
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Single(result.Terms);
+        Assert.Equal("userservice", result.Terms[0].Value);
+        Assert.Equal(TermType.Required, result.Terms[0].Type);
+    }
+
+    [Fact]
+    public void Should_Parse_Multiple_Words_As_AND()
+    {
+        // Arrange
+        var queryText = "user service controller";
+
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Equal(3, result.Terms.Count);
+        Assert.All(result.Terms, t => Assert.Equal(TermType.Required, t.Type));
+        Assert.Contains(result.Terms, t => t.Value == "user");
+        Assert.Contains(result.Terms, t => t.Value == "service");
+        Assert.Contains(result.Terms, t => t.Value == "controller");
+    }
+
+    [Fact]
+    public void Should_Parse_Quoted_Phrase()
+    {
+        // Arrange
+        var queryText = "\"public class UserService\"";
+
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Single(result.Phrases);
+        Assert.Equal(new[] { "public", "class", "userservice" }, result.Phrases[0].Words);
+    }
+
+    [Theory]
+    [InlineData("User*", "user", WildcardType.Suffix)]
+    [InlineData("*Service", "service", WildcardType.Prefix)]
+    [InlineData("*Controller*", "controller", WildcardType.Both)]
+    public void Should_Parse_Wildcard(string queryText, string expectedTerm, WildcardType expectedType)
+    {
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Single(result.Wildcards);
+        Assert.Equal(expectedTerm, result.Wildcards[0].Value);
+        Assert.Equal(expectedType, result.Wildcards[0].Type);
+    }
+
+    [Fact]
+    public void Should_Parse_Explicit_AND_Operator()
+    {
+        // Arrange
+        var queryText = "user AND service";
+
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Equal(2, result.Terms.Count);
+        Assert.True(result.IsConjunction);
+    }
+
+    [Fact]
+    public void Should_Parse_OR_Operator()
+    {
+        // Arrange
+        var queryText = "user OR customer OR client";
+
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Equal(3, result.Terms.Count);
+        Assert.False(result.IsConjunction);
+        Assert.True(result.IsDisjunction);
+    }
+
+    [Fact]
+    public void Should_Parse_Exclusion()
+    {
+        // Arrange
+        var queryText = "service -test -mock";
+
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Single(result.Terms.Where(t => t.Type == TermType.Required));
+        Assert.Equal(2, result.Terms.Count(t => t.Type == TermType.Excluded));
+        Assert.Contains(result.Terms, t => t.Value == "test" && t.Type == TermType.Excluded);
+        Assert.Contains(result.Terms, t => t.Value == "mock" && t.Type == TermType.Excluded);
+    }
+
+    [Fact]
+    public void Should_Parse_Combined_Operators()
+    {
+        // Arrange
+        var queryText = "\"public class\" User* -test";
+
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Single(result.Phrases);
+        Assert.Equal(new[] { "public", "class" }, result.Phrases[0].Words);
+        
+        Assert.Single(result.Wildcards);
+        Assert.Equal("user", result.Wildcards[0].Value);
+        
+        Assert.Single(result.Terms.Where(t => t.Type == TermType.Excluded));
+        Assert.Equal("test", result.Terms.First(t => t.Type == TermType.Excluded).Value);
+    }
+
+    [Fact]
+    public void Should_Handle_Special_Characters()
+    {
+        // Arrange
+        var queryText = "user@example.com path/to/file";
+
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Contains(result.Terms, t => t.Value == "user");
+        Assert.Contains(result.Terms, t => t.Value == "example");
+        Assert.Contains(result.Terms, t => t.Value == "com");
+        Assert.Contains(result.Terms, t => t.Value == "path");
+        Assert.Contains(result.Terms, t => t.Value == "file");
+    }
+
+    [Fact]
+    public void Should_Handle_Unbalanced_Quotes()
+    {
+        // Arrange
+        var queryText = "\"unclosed phrase";
+
+        // Act & Assert
+        var exception = Assert.Throws<SearchQueryParseException>(() => _sut.Parse(queryText));
+        Assert.Contains("unbalanced", exception.Message.ToLower());
+    }
+
+    [Fact]
+    public void Should_Handle_Empty_Query()
+    {
+        // Arrange
+        var queryText = "";
+
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Empty(result.Terms);
+        Assert.Empty(result.Phrases);
+        Assert.Empty(result.Wildcards);
+    }
+
+    [Fact]
+    public void Should_Handle_Whitespace_Only()
+    {
+        // Arrange
+        var queryText = "   \t\n   ";
+
+        // Act
+        var result = _sut.Parse(queryText);
+
+        // Assert
+        Assert.Empty(result.Terms);
+    }
+}
+```
+
+#### IgnoreRulesTests.cs
+
+```csharp
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Acode.Infrastructure.Index;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+namespace Acode.Tests.Unit.Index;
+
+public sealed class IgnoreRulesTests
+{
+    private readonly Mock<ILogger<IgnoreRuleParser>> _loggerMock;
+    private readonly IgnoreRuleParser _sut;
+
+    public IgnoreRulesTests()
+    {
+        _loggerMock = new Mock<ILogger<IgnoreRuleParser>>();
+        _sut = new IgnoreRuleParser(_loggerMock.Object);
+    }
+
+    [Fact]
+    public void Should_Parse_Gitignore_File()
+    {
+        // Arrange
+        var content = @"
+# Build outputs
+bin/
+obj/
+*.dll
+*.exe
+
+# IDE files
+.vs/
+*.suo
+";
+
+        // Act
+        var rules = _sut.ParseContent(content, ".gitignore");
+
+        // Assert
+        Assert.Equal(6, rules.Count());
+        Assert.Contains(rules, r => r.Pattern == "bin/");
+        Assert.Contains(rules, r => r.Pattern == "*.dll");
+        Assert.Contains(rules, r => r.Pattern == ".vs/");
+    }
+
+    [Fact]
+    public void Should_Parse_Empty_Gitignore()
+    {
+        // Arrange
+        var content = "";
+
+        // Act
+        var rules = _sut.ParseContent(content, ".gitignore");
+
+        // Assert
+        Assert.Empty(rules);
+    }
+
+    [Fact]
+    public void Should_Parse_Comment_Lines()
+    {
+        // Arrange
+        var content = @"
+# This is a comment
+*.log
+# Another comment
+*.tmp
+";
+
+        // Act
+        var rules = _sut.ParseContent(content, ".gitignore");
+
+        // Assert
+        Assert.Equal(2, rules.Count());
+        Assert.DoesNotContain(rules, r => r.Pattern.Contains("#"));
+    }
+
+    [Fact]
+    public void Should_Match_Exact_Filename()
+    {
+        // Arrange
+        var rules = _sut.ParseContent("README.md", ".gitignore");
+        var matcher = new IgnoreMatcher(rules);
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("README.md"));
+        Assert.True(matcher.IsIgnored("docs/README.md"));
+        Assert.False(matcher.IsIgnored("README.txt"));
+        Assert.False(matcher.IsIgnored("OTHER.md"));
+    }
+
+    [Fact]
+    public void Should_Match_Glob_Pattern()
+    {
+        // Arrange
+        var rules = _sut.ParseContent("*.log", ".gitignore");
+        var matcher = new IgnoreMatcher(rules);
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("error.log"));
+        Assert.True(matcher.IsIgnored("logs/debug.log"));
+        Assert.False(matcher.IsIgnored("logfile.txt"));
+        Assert.False(matcher.IsIgnored("log"));
+    }
+
+    [Fact]
+    public void Should_Match_Directory_Pattern()
+    {
+        // Arrange
+        var rules = _sut.ParseContent("node_modules/", ".gitignore");
+        var matcher = new IgnoreMatcher(rules);
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("node_modules/package/index.js"));
+        Assert.True(matcher.IsIgnored("frontend/node_modules/lodash/index.js"));
+        Assert.False(matcher.IsIgnored("node_modules_backup.zip"));
+    }
+
+    [Fact]
+    public void Should_Match_Double_Star()
+    {
+        // Arrange
+        var rules = _sut.ParseContent("**/logs/**/*.log", ".gitignore");
+        var matcher = new IgnoreMatcher(rules);
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("logs/error.log"));
+        Assert.True(matcher.IsIgnored("app/logs/2024/error.log"));
+        Assert.True(matcher.IsIgnored("src/server/logs/debug/trace.log"));
+        Assert.False(matcher.IsIgnored("logs.txt"));
+        Assert.False(matcher.IsIgnored("mylogs/file.txt"));
+    }
+
+    [Fact]
+    public void Should_Handle_Negation_Pattern()
+    {
+        // Arrange
+        var content = @"
+*.log
+!important.log
+";
+        var rules = _sut.ParseContent(content, ".gitignore");
+        var matcher = new IgnoreMatcher(rules);
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("error.log"));
+        Assert.True(matcher.IsIgnored("debug.log"));
+        Assert.False(matcher.IsIgnored("important.log"));
+    }
+
+    [Fact]
+    public void Should_Handle_Escaped_Characters()
+    {
+        // Arrange
+        var content = @"
+\#file.txt
+\!important.txt
+file\ with\ spaces.txt
+";
+        var rules = _sut.ParseContent(content, ".gitignore");
+        var matcher = new IgnoreMatcher(rules);
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("#file.txt"));
+        Assert.True(matcher.IsIgnored("!important.txt"));
+        Assert.True(matcher.IsIgnored("file with spaces.txt"));
+    }
+
+    [Fact]
+    public void Should_Apply_Order_Priority()
+    {
+        // Arrange - later rules override earlier ones
+        var content = @"
+*.txt
+!important.txt
+important.txt
+";
+        var rules = _sut.ParseContent(content, ".gitignore");
+        var matcher = new IgnoreMatcher(rules);
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("random.txt"));
+        Assert.True(matcher.IsIgnored("important.txt")); // Re-ignored by last rule
+    }
+
+    [Fact]
+    public void Should_Merge_Multiple_Ignore_Files()
+    {
+        // Arrange
+        var gitignore = "*.log\nbin/";
+        var agentignore = "*.tmp\n!important.log";
+        
+        var gitRules = _sut.ParseContent(gitignore, ".gitignore");
+        var agentRules = _sut.ParseContent(agentignore, ".agentignore");
+        var matcher = new IgnoreMatcher(gitRules.Concat(agentRules), agentignorePrecedence: true);
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("error.log"));
+        Assert.False(matcher.IsIgnored("important.log")); // .agentignore negation takes precedence
+        Assert.True(matcher.IsIgnored("temp.tmp"));
+        Assert.True(matcher.IsIgnored("bin/app.exe"));
+    }
+
+    [Fact]
+    public void Should_Apply_Custom_Ignores_From_Config()
+    {
+        // Arrange
+        var customPatterns = new[] { "*.generated.cs", "obj/**", ".vs/**" };
+        var matcher = IgnoreMatcher.FromPatterns(customPatterns);
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("Model.generated.cs"));
+        Assert.True(matcher.IsIgnored("obj/Debug/app.dll"));
+        Assert.True(matcher.IsIgnored(".vs/config/settings.json"));
+        Assert.False(matcher.IsIgnored("Model.cs"));
+    }
+
+    [Fact]
+    public void Should_Handle_Trailing_Spaces()
+    {
+        // Arrange - trailing spaces should be trimmed unless escaped
+        var content = "*.log   \nfile.txt \\ ";  // Second line has escaped trailing space
+        var rules = _sut.ParseContent(content, ".gitignore");
+        var matcher = new IgnoreMatcher(rules);
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("error.log"));
+        Assert.True(matcher.IsIgnored("file.txt ")); // With trailing space
+        Assert.False(matcher.IsIgnored("file.txt")); // Without trailing space
+    }
+
+    [Fact]
+    public void Should_Handle_Rooted_Pattern()
+    {
+        // Arrange - pattern starting with / is anchored to root
+        var rules = _sut.ParseContent("/build/", ".gitignore");
+        var matcher = new IgnoreMatcher(rules, rootPath: "/repo");
+
+        // Act & Assert
+        Assert.True(matcher.IsIgnored("/repo/build/output.dll"));
+        Assert.False(matcher.IsIgnored("/repo/src/build/temp.txt")); // Not at root
+    }
+}
+```
+
+#### IncrementalUpdaterTests.cs
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Domain.Index;
+using Acode.Infrastructure.Index;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+namespace Acode.Tests.Unit.Index;
+
+public sealed class IncrementalUpdaterTests
+{
+    private readonly Mock<IRepoFileSystem> _repoFsMock;
+    private readonly Mock<IIndexStore> _indexStoreMock;
+    private readonly Mock<IIndexBuilder> _builderMock;
+    private readonly Mock<ILogger<IncrementalUpdater>> _loggerMock;
+    private readonly IncrementalUpdater _sut;
+
+    public IncrementalUpdaterTests()
+    {
+        _repoFsMock = new Mock<IRepoFileSystem>();
+        _indexStoreMock = new Mock<IIndexStore>();
+        _builderMock = new Mock<IIndexBuilder>();
+        _loggerMock = new Mock<ILogger<IncrementalUpdater>>();
+        
+        _sut = new IncrementalUpdater(
+            _repoFsMock.Object,
+            _indexStoreMock.Object,
+            _builderMock.Object,
+            _loggerMock.Object);
+    }
+
+    [Fact]
+    public async Task Should_Detect_Modified_File_By_Mtime()
+    {
+        // Arrange
+        var filePath = "src/UserService.cs";
+        var oldMtime = new DateTime(2024, 1, 1, 10, 0, 0, DateTimeKind.Utc);
+        var newMtime = new DateTime(2024, 1, 2, 10, 0, 0, DateTimeKind.Utc);
+        
+        _indexStoreMock.Setup(x => x.GetFileMetadataAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StoredFileMetadata(filePath, 1000, oldMtime));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(filePath, 1000, newMtime, false));
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(new[] { filePath }));
+        _indexStoreMock.Setup(x => x.GetAllFilePathsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { filePath });
+
+        // Act
+        var changes = await _sut.DetectChangesAsync("/repo", CancellationToken.None);
+
+        // Assert
+        Assert.Single(changes.Modified);
+        Assert.Equal(filePath, changes.Modified[0]);
+    }
+
+    [Fact]
+    public async Task Should_Detect_New_File()
+    {
+        // Arrange
+        var existingFile = "src/UserService.cs";
+        var newFile = "src/OrderService.cs";
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(new[] { existingFile, newFile }));
+        _indexStoreMock.Setup(x => x.GetAllFilePathsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { existingFile }); // Only existing file in index
+        _indexStoreMock.Setup(x => x.GetFileMetadataAsync(existingFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StoredFileMetadata(existingFile, 1000, DateTime.UtcNow));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string path, CancellationToken _) => new FileMetadata(path, 1000, DateTime.UtcNow, false));
+
+        // Act
+        var changes = await _sut.DetectChangesAsync("/repo", CancellationToken.None);
+
+        // Assert
+        Assert.Single(changes.Added);
+        Assert.Equal(newFile, changes.Added[0]);
+    }
+
+    [Fact]
+    public async Task Should_Detect_Deleted_File()
+    {
+        // Arrange
+        var existingFile = "src/UserService.cs";
+        var deletedFile = "src/OldService.cs";
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(new[] { existingFile })); // deletedFile not on disk
+        _indexStoreMock.Setup(x => x.GetAllFilePathsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { existingFile, deletedFile }); // Both in index
+        _indexStoreMock.Setup(x => x.GetFileMetadataAsync(existingFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StoredFileMetadata(existingFile, 1000, DateTime.UtcNow));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(existingFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(existingFile, 1000, DateTime.UtcNow, false));
+
+        // Act
+        var changes = await _sut.DetectChangesAsync("/repo", CancellationToken.None);
+
+        // Assert
+        Assert.Single(changes.Deleted);
+        Assert.Equal(deletedFile, changes.Deleted[0]);
+    }
+
+    [Fact]
+    public async Task Should_Detect_Renamed_File()
+    {
+        // Arrange
+        var oldPath = "src/UserService.cs";
+        var newPath = "src/Services/UserService.cs";
+        var contentHash = "abc123hash";
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(new[] { newPath }));
+        _indexStoreMock.Setup(x => x.GetAllFilePathsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { oldPath });
+        _indexStoreMock.Setup(x => x.GetFileMetadataAsync(oldPath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StoredFileMetadata(oldPath, 1000, DateTime.UtcNow, contentHash));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(newPath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(newPath, 1000, DateTime.UtcNow, false));
+        _repoFsMock.Setup(x => x.ComputeHashAsync(newPath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contentHash); // Same hash = renamed
+
+        // Act
+        var changes = await _sut.DetectChangesAsync("/repo", CancellationToken.None);
+
+        // Assert
+        Assert.Single(changes.Renamed);
+        Assert.Equal(oldPath, changes.Renamed[0].OldPath);
+        Assert.Equal(newPath, changes.Renamed[0].NewPath);
+    }
+
+    [Fact]
+    public async Task Should_Update_Only_Changed_Files()
+    {
+        // Arrange
+        var unchangedFile = "src/Unchanged.cs";
+        var modifiedFile = "src/Modified.cs";
+        var now = DateTime.UtcNow;
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(new[] { unchangedFile, modifiedFile }));
+        _indexStoreMock.Setup(x => x.GetAllFilePathsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { unchangedFile, modifiedFile });
+        _indexStoreMock.Setup(x => x.GetFileMetadataAsync(unchangedFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StoredFileMetadata(unchangedFile, 100, now)); // Same mtime
+        _indexStoreMock.Setup(x => x.GetFileMetadataAsync(modifiedFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StoredFileMetadata(modifiedFile, 100, now.AddHours(-1))); // Older mtime
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(unchangedFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(unchangedFile, 100, now, false));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(modifiedFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(modifiedFile, 100, now, false)); // Newer mtime
+
+        // Act
+        var result = await _sut.UpdateAsync("/repo", CancellationToken.None);
+
+        // Assert
+        _builderMock.Verify(x => x.IndexFileAsync(modifiedFile, It.IsAny<CancellationToken>()), Times.Once);
+        _builderMock.Verify(x => x.IndexFileAsync(unchangedFile, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Should_Remove_Deleted_From_Index()
+    {
+        // Arrange
+        var deletedFile = "src/Deleted.cs";
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(Array.Empty<string>()));
+        _indexStoreMock.Setup(x => x.GetAllFilePathsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { deletedFile });
+
+        // Act
+        await _sut.UpdateAsync("/repo", CancellationToken.None);
+
+        // Assert
+        _indexStoreMock.Verify(x => x.RemoveFileAsync(deletedFile, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Should_Add_New_To_Index()
+    {
+        // Arrange
+        var newFile = "src/NewFile.cs";
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(new[] { newFile }));
+        _repoFsMock.Setup(x => x.GetFileInfoAsync(newFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileMetadata(newFile, 100, DateTime.UtcNow, false));
+        _indexStoreMock.Setup(x => x.GetAllFilePathsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<string>());
+
+        // Act
+        await _sut.UpdateAsync("/repo", CancellationToken.None);
+
+        // Assert
+        _builderMock.Verify(x => x.IndexFileAsync(newFile, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Should_Track_Last_Update_Timestamp()
+    {
+        // Arrange
+        var beforeUpdate = DateTime.UtcNow;
+        
+        _repoFsMock.Setup(x => x.EnumerateFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(Array.Empty<string>()));
+        _indexStoreMock.Setup(x => x.GetAllFilePathsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<string>());
+
+        // Act
+        var result = await _sut.UpdateAsync("/repo", CancellationToken.None);
+        var afterUpdate = DateTime.UtcNow;
+
+        // Assert
+        Assert.InRange(result.LastUpdated, beforeUpdate, afterUpdate);
+        _indexStoreMock.Verify(x => x.SetLastUpdatedAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private static async IAsyncEnumerable<string> ToAsyncEnumerable(IEnumerable<string> items)
+    {
+        foreach (var item in items)
+        {
+            yield return item;
+        }
+        await Task.CompletedTask;
+    }
+}
+```
+
+#### FilterTests.cs
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Acode.Domain.Index;
+using Acode.Infrastructure.Index;
+using Xunit;
+
+namespace Acode.Tests.Unit.Index;
+
+public sealed class FilterTests
+{
+    [Fact]
+    public void Should_Filter_By_Extension()
+    {
+        // Arrange
+        var files = new[]
+        {
+            new FileInfo("src/App.cs", 100, DateTime.UtcNow),
+            new FileInfo("src/App.ts", 100, DateTime.UtcNow),
+            new FileInfo("src/App.js", 100, DateTime.UtcNow),
+            new FileInfo("docs/README.md", 100, DateTime.UtcNow)
+        };
+        var filter = new SearchFilter { Extensions = new[] { ".cs", ".ts" } };
+
+        // Act
+        var result = SearchFilterApplier.Apply(files, filter).ToList();
+
+        // Assert
+        Assert.Equal(2, result.Count);
+        Assert.All(result, f => Assert.True(f.Path.EndsWith(".cs") || f.Path.EndsWith(".ts")));
+    }
+
+    [Fact]
+    public void Should_Filter_By_Directory()
+    {
+        // Arrange
+        var files = new[]
+        {
+            new FileInfo("src/Services/UserService.cs", 100, DateTime.UtcNow),
+            new FileInfo("src/Controllers/UserController.cs", 100, DateTime.UtcNow),
+            new FileInfo("tests/UserServiceTests.cs", 100, DateTime.UtcNow)
+        };
+        var filter = new SearchFilter { Directory = "src/Services" };
+
+        // Act
+        var result = SearchFilterApplier.Apply(files, filter).ToList();
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal("src/Services/UserService.cs", result[0].Path);
+    }
+
+    [Fact]
+    public void Should_Filter_By_Directory_Recursively()
+    {
+        // Arrange
+        var files = new[]
+        {
+            new FileInfo("src/Services/UserService.cs", 100, DateTime.UtcNow),
+            new FileInfo("src/Services/Orders/OrderService.cs", 100, DateTime.UtcNow),
+            new FileInfo("tests/UserServiceTests.cs", 100, DateTime.UtcNow)
+        };
+        var filter = new SearchFilter { Directory = "src/Services", Recursive = true };
+
+        // Act
+        var result = SearchFilterApplier.Apply(files, filter).ToList();
+
+        // Assert
+        Assert.Equal(2, result.Count);
+        Assert.All(result, f => Assert.StartsWith("src/Services", f.Path));
+    }
+
+    [Fact]
+    public void Should_Filter_By_Size()
+    {
+        // Arrange
+        var files = new[]
+        {
+            new FileInfo("small.txt", 500, DateTime.UtcNow),           // 500 bytes
+            new FileInfo("medium.txt", 5 * 1024, DateTime.UtcNow),     // 5 KB
+            new FileInfo("large.txt", 500 * 1024, DateTime.UtcNow)     // 500 KB
+        };
+        var filter = new SearchFilter { MinSizeBytes = 1024, MaxSizeBytes = 100 * 1024 };
+
+        // Act
+        var result = SearchFilterApplier.Apply(files, filter).ToList();
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal("medium.txt", result[0].Path);
+    }
+
+    [Fact]
+    public void Should_Filter_By_Date()
+    {
+        // Arrange
+        var now = DateTime.UtcNow;
+        var files = new[]
+        {
+            new FileInfo("old.txt", 100, now.AddDays(-30)),
+            new FileInfo("recent.txt", 100, now.AddDays(-5)),
+            new FileInfo("new.txt", 100, now.AddDays(-1))
+        };
+        var filter = new SearchFilter { ModifiedSince = now.AddDays(-7) };
+
+        // Act
+        var result = SearchFilterApplier.Apply(files, filter).ToList();
+
+        // Assert
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, f => f.Path == "recent.txt");
+        Assert.Contains(result, f => f.Path == "new.txt");
+        Assert.DoesNotContain(result, f => f.Path == "old.txt");
+    }
+
+    [Fact]
+    public void Should_Combine_Filters()
+    {
+        // Arrange
+        var now = DateTime.UtcNow;
+        var files = new[]
+        {
+            new FileInfo("src/UserService.cs", 5 * 1024, now.AddDays(-1)),        // Matches all
+            new FileInfo("src/OldService.cs", 5 * 1024, now.AddDays(-30)),        // Too old
+            new FileInfo("tests/UserServiceTests.cs", 5 * 1024, now.AddDays(-1)), // Wrong dir
+            new FileInfo("src/UserService.ts", 5 * 1024, now.AddDays(-1)),        // Wrong ext
+            new FileInfo("src/TinyService.cs", 100, now.AddDays(-1))              // Too small
+        };
+        var filter = new SearchFilter
+        {
+            Directory = "src",
+            Extensions = new[] { ".cs" },
+            MinSizeBytes = 1024,
+            ModifiedSince = now.AddDays(-7)
+        };
+
+        // Act
+        var result = SearchFilterApplier.Apply(files, filter).ToList();
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal("src/UserService.cs", result[0].Path);
+    }
+
+    [Fact]
+    public void Should_Handle_No_Filters()
+    {
+        // Arrange
+        var files = new[]
+        {
+            new FileInfo("file1.cs", 100, DateTime.UtcNow),
+            new FileInfo("file2.ts", 200, DateTime.UtcNow),
+            new FileInfo("file3.md", 300, DateTime.UtcNow)
+        };
+        var filter = new SearchFilter(); // No filters
+
+        // Act
+        var result = SearchFilterApplier.Apply(files, filter).ToList();
+
+        // Assert
+        Assert.Equal(3, result.Count);
+    }
+
+    [Fact]
+    public void Should_Handle_Exclude_Patterns()
+    {
+        // Arrange
+        var files = new[]
+        {
+            new FileInfo("src/UserService.cs", 100, DateTime.UtcNow),
+            new FileInfo("src/UserService.generated.cs", 100, DateTime.UtcNow),
+            new FileInfo("tests/UserServiceTests.cs", 100, DateTime.UtcNow)
+        };
+        var filter = new SearchFilter { ExcludePatterns = new[] { "*.generated.cs", "tests/**" } };
+
+        // Act
+        var result = SearchFilterApplier.Apply(files, filter).ToList();
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal("src/UserService.cs", result[0].Path);
+    }
+}
+
+public record FileInfo(string Path, long Size, DateTime LastModified);
 ```
 
 ### Integration Tests
 
+#### IndexBuildIntegrationTests.cs
+
+```csharp
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Domain.Index;
+using Acode.Infrastructure.Index;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Xunit;
+
+namespace Acode.Tests.Integration.Index;
+
+public sealed class IndexBuildIntegrationTests : IDisposable
+{
+    private readonly string _testRepoPath;
+    private readonly ServiceProvider _serviceProvider;
+    private readonly IIndexService _indexService;
+
+    public IndexBuildIntegrationTests()
+    {
+        _testRepoPath = Path.Combine(Path.GetTempPath(), $"test_repo_{Guid.NewGuid()}");
+        Directory.CreateDirectory(_testRepoPath);
+        
+        var services = new ServiceCollection();
+        services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        services.AddSingleton<IIndexService, IndexService>();
+        services.AddSingleton<IIndexBuilder, IndexBuilder>();
+        services.AddSingleton<ISearchEngine, SearchEngine>();
+        services.AddSingleton<IIgnoreRuleParser, IgnoreRuleParser>();
+        services.AddSingleton<ITokenizer, CodeTokenizer>();
+        
+        _serviceProvider = services.BuildServiceProvider();
+        _indexService = _serviceProvider.GetRequiredService<IIndexService>();
+    }
+
+    [Fact]
+    public async Task Should_Build_Index_For_Small_Repo()
+    {
+        // Arrange
+        CreateTestFiles(100);
+        var options = new IndexBuildOptions { RootPath = _testRepoPath };
+
+        // Act
+        var startTime = DateTime.UtcNow;
+        var result = await _indexService.BuildAsync(options, CancellationToken.None);
+        var duration = DateTime.UtcNow - startTime;
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(100, result.FilesIndexed);
+        Assert.True(duration.TotalSeconds < 5, $"Build took {duration.TotalSeconds}s, expected < 5s");
+    }
+
+    [Fact]
+    public async Task Should_Build_Index_For_Large_Repo()
+    {
+        // Arrange
+        CreateTestFiles(1000);
+        var options = new IndexBuildOptions { RootPath = _testRepoPath };
+
+        // Act
+        var startTime = DateTime.UtcNow;
+        var result = await _indexService.BuildAsync(options, CancellationToken.None);
+        var duration = DateTime.UtcNow - startTime;
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(1000, result.FilesIndexed);
+        Assert.True(duration.TotalSeconds < 30, $"Build took {duration.TotalSeconds}s, expected < 30s");
+    }
+
+    [Fact]
+    public async Task Should_Respect_Gitignore()
+    {
+        // Arrange
+        CreateTestFiles(50);
+        Directory.CreateDirectory(Path.Combine(_testRepoPath, "node_modules"));
+        for (int i = 0; i < 20; i++)
+        {
+            File.WriteAllText(
+                Path.Combine(_testRepoPath, "node_modules", $"package{i}.js"),
+                $"// Package {i}");
+        }
+        File.WriteAllText(Path.Combine(_testRepoPath, ".gitignore"), "node_modules/\n*.log");
+        
+        var options = new IndexBuildOptions { RootPath = _testRepoPath };
+
+        // Act
+        var result = await _indexService.BuildAsync(options, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(50, result.FilesIndexed); // Only the 50 test files, not node_modules
+        Assert.DoesNotContain(result.IndexedFiles, f => f.Contains("node_modules"));
+    }
+
+    [Fact]
+    public async Task Should_Handle_Nested_Gitignores()
+    {
+        // Arrange
+        CreateTestFiles(30);
+        Directory.CreateDirectory(Path.Combine(_testRepoPath, "subproject"));
+        File.WriteAllText(Path.Combine(_testRepoPath, ".gitignore"), "*.log");
+        File.WriteAllText(Path.Combine(_testRepoPath, "subproject", ".gitignore"), "*.tmp\n!important.tmp");
+        
+        File.WriteAllText(Path.Combine(_testRepoPath, "subproject", "test.tmp"), "ignored");
+        File.WriteAllText(Path.Combine(_testRepoPath, "subproject", "important.tmp"), "not ignored");
+        
+        var options = new IndexBuildOptions { RootPath = _testRepoPath };
+
+        // Act
+        var result = await _indexService.BuildAsync(options, CancellationToken.None);
+
+        // Assert
+        Assert.DoesNotContain(result.IndexedFiles, f => f.EndsWith("test.tmp"));
+        Assert.Contains(result.IndexedFiles, f => f.EndsWith("important.tmp"));
+    }
+
+    [Fact]
+    public async Task Should_Handle_Symlinks()
+    {
+        // Arrange - only run on systems that support symlinks
+        if (!OperatingSystem.IsWindows() || IsRunningAsAdmin())
+        {
+            CreateTestFiles(10);
+            var targetDir = Path.Combine(_testRepoPath, "target");
+            var linkDir = Path.Combine(_testRepoPath, "link");
+            Directory.CreateDirectory(targetDir);
+            File.WriteAllText(Path.Combine(targetDir, "real.cs"), "public class Real { }");
+            
+            try
+            {
+                Directory.CreateSymbolicLink(linkDir, targetDir);
+            }
+            catch (IOException)
+            {
+                // Symlinks not supported, skip test
+                return;
+            }
+            
+            var options = new IndexBuildOptions { RootPath = _testRepoPath, FollowSymlinks = false };
+
+            // Act
+            var result = await _indexService.BuildAsync(options, CancellationToken.None);
+
+            // Assert
+            Assert.Contains(result.IndexedFiles, f => f.Contains("target") && f.EndsWith("real.cs"));
+            Assert.DoesNotContain(result.IndexedFiles, f => f.Contains("link"));
+        }
+    }
+
+    private void CreateTestFiles(int count)
+    {
+        var srcDir = Path.Combine(_testRepoPath, "src");
+        Directory.CreateDirectory(srcDir);
+        
+        for (int i = 0; i < count; i++)
+        {
+            File.WriteAllText(
+                Path.Combine(srcDir, $"File{i}.cs"),
+                $"// File {i}\npublic class Class{i} {{\n    public void Method{i}() {{ }}\n}}");
+        }
+    }
+
+    private static bool IsRunningAsAdmin()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var principal = new System.Security.Principal.WindowsPrincipal(identity);
+            return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        return false;
+    }
+
+    public void Dispose()
+    {
+        _serviceProvider.Dispose();
+        if (Directory.Exists(_testRepoPath))
+        {
+            Directory.Delete(_testRepoPath, recursive: true);
+        }
+    }
+}
 ```
-Tests/Integration/Index/
-├── IndexBuildIntegrationTests.cs
-│   ├── Should_Build_Index_For_Small_Repo()
-│   ├── Should_Build_Index_For_Large_Repo()
-│   ├── Should_Respect_Gitignore()
-│   ├── Should_Handle_Nested_Gitignores()
-│   └── Should_Handle_Symlinks()
-│
-├── SearchIntegrationTests.cs
-│   ├── Should_Search_Real_Codebase()
-│   ├── Should_Return_Correct_Line_Numbers()
-│   ├── Should_Handle_Concurrent_Searches()
-│   └── Should_Search_During_Update()
-│
-├── IncrementalIntegrationTests.cs
-│   ├── Should_Update_After_File_Edit()
-│   ├── Should_Update_After_File_Create()
-│   ├── Should_Update_After_File_Delete()
-│   └── Should_Handle_Many_Simultaneous_Changes()
-│
-└── PersistenceIntegrationTests.cs
-    ├── Should_Survive_Restart()
-    ├── Should_Recover_From_Corruption()
-    └── Should_Handle_Disk_Full()
+
+#### SearchIntegrationTests.cs
+
+```csharp
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Domain.Index;
+using Acode.Infrastructure.Index;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Xunit;
+
+namespace Acode.Tests.Integration.Index;
+
+public sealed class SearchIntegrationTests : IAsyncLifetime
+{
+    private readonly string _testRepoPath;
+    private readonly ServiceProvider _serviceProvider;
+    private readonly IIndexService _indexService;
+
+    public SearchIntegrationTests()
+    {
+        _testRepoPath = Path.Combine(Path.GetTempPath(), $"search_test_{Guid.NewGuid()}");
+        Directory.CreateDirectory(_testRepoPath);
+        
+        var services = new ServiceCollection();
+        services.AddLogging(builder => builder.AddConsole());
+        services.AddSingleton<IIndexService, IndexService>();
+        services.AddSingleton<IIndexBuilder, IndexBuilder>();
+        services.AddSingleton<ISearchEngine, SearchEngine>();
+        services.AddSingleton<IIgnoreRuleParser, IgnoreRuleParser>();
+        services.AddSingleton<ITokenizer, CodeTokenizer>();
+        
+        _serviceProvider = services.BuildServiceProvider();
+        _indexService = _serviceProvider.GetRequiredService<IIndexService>();
+    }
+
+    public async Task InitializeAsync()
+    {
+        // Create test files
+        var srcDir = Path.Combine(_testRepoPath, "src");
+        Directory.CreateDirectory(srcDir);
+        
+        File.WriteAllText(Path.Combine(srcDir, "UserService.cs"), @"
+using System;
+namespace App.Services
+{
+    public class UserService : IUserService
+    {
+        private readonly IUserRepository _repository;
+        
+        public UserService(IUserRepository repository)
+        {
+            _repository = repository;
+        }
+        
+        public async Task<User> GetUserByIdAsync(int userId)
+        {
+            return await _repository.FindByIdAsync(userId);
+        }
+        
+        public async Task<User> CreateUserAsync(CreateUserRequest request)
+        {
+            var user = new User(request.Name, request.Email);
+            return await _repository.SaveAsync(user);
+        }
+    }
+}");
+        
+        File.WriteAllText(Path.Combine(srcDir, "OrderService.cs"), @"
+using System;
+namespace App.Services
+{
+    public class OrderService
+    {
+        public async Task<Order> ProcessOrderAsync(OrderRequest request)
+        {
+            // Process the order
+            return new Order();
+        }
+    }
+}");
+        
+        // Build index
+        var options = new IndexBuildOptions { RootPath = _testRepoPath };
+        await _indexService.BuildAsync(options, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Should_Search_Real_Codebase()
+    {
+        // Arrange
+        var query = new SearchQuery("UserService");
+
+        // Act
+        var results = await _indexService.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.NotEmpty(results);
+        Assert.Contains(results, r => r.FilePath.EndsWith("UserService.cs"));
+    }
+
+    [Fact]
+    public async Task Should_Return_Correct_Line_Numbers()
+    {
+        // Arrange
+        var query = new SearchQuery("GetUserByIdAsync");
+
+        // Act
+        var results = await _indexService.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.Single(results);
+        var result = results[0];
+        Assert.Contains(14, result.MatchedLines); // Line 14 in UserService.cs
+    }
+
+    [Fact]
+    public async Task Should_Handle_Concurrent_Searches()
+    {
+        // Arrange
+        var queries = new[]
+        {
+            new SearchQuery("UserService"),
+            new SearchQuery("OrderService"),
+            new SearchQuery("repository"),
+            new SearchQuery("async"),
+            new SearchQuery("CreateUserAsync")
+        };
+
+        // Act
+        var tasks = queries.Select(q => _indexService.SearchAsync(q, CancellationToken.None));
+        var allResults = await Task.WhenAll(tasks);
+
+        // Assert
+        Assert.All(allResults, results => Assert.NotNull(results));
+        Assert.Contains(allResults[0], r => r.FilePath.Contains("UserService"));
+        Assert.Contains(allResults[1], r => r.FilePath.Contains("OrderService"));
+    }
+
+    [Fact]
+    public async Task Should_Search_During_Update()
+    {
+        // Arrange
+        var searchQuery = new SearchQuery("UserService");
+        
+        // Add a new file
+        var newFilePath = Path.Combine(_testRepoPath, "src", "NewService.cs");
+        File.WriteAllText(newFilePath, "public class NewService { }");
+
+        // Act - search while update is happening
+        var updateTask = _indexService.UpdateAsync(CancellationToken.None);
+        var searchTask = _indexService.SearchAsync(searchQuery, CancellationToken.None);
+        
+        await Task.WhenAll(updateTask, searchTask);
+        var searchResults = searchTask.Result;
+
+        // Assert
+        Assert.NotEmpty(searchResults); // Search should still return results during update
+    }
+
+    public async Task DisposeAsync()
+    {
+        _serviceProvider.Dispose();
+        if (Directory.Exists(_testRepoPath))
+        {
+            await Task.Delay(100); // Allow file handles to be released
+            Directory.Delete(_testRepoPath, recursive: true);
+        }
+    }
+}
+```
+
+#### PersistenceIntegrationTests.cs
+
+```csharp
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Domain.Index;
+using Acode.Infrastructure.Index;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Xunit;
+
+namespace Acode.Tests.Integration.Index;
+
+public sealed class PersistenceIntegrationTests : IDisposable
+{
+    private readonly string _testRepoPath;
+    private readonly string _indexPath;
+
+    public PersistenceIntegrationTests()
+    {
+        _testRepoPath = Path.Combine(Path.GetTempPath(), $"persist_test_{Guid.NewGuid()}");
+        _indexPath = Path.Combine(_testRepoPath, ".agent", "index.db");
+        Directory.CreateDirectory(_testRepoPath);
+    }
+
+    [Fact]
+    public async Task Should_Survive_Restart()
+    {
+        // Arrange - Build index with first service instance
+        CreateTestFiles(50);
+        
+        using (var sp1 = CreateServiceProvider())
+        {
+            var indexService1 = sp1.GetRequiredService<IIndexService>();
+            var options = new IndexBuildOptions { RootPath = _testRepoPath, IndexPath = _indexPath };
+            await indexService1.BuildAsync(options, CancellationToken.None);
+        }
+
+        // Act - Create new service instance (simulating restart)
+        using var sp2 = CreateServiceProvider();
+        var indexService2 = sp2.GetRequiredService<IIndexService>();
+        await indexService2.LoadAsync(_indexPath, CancellationToken.None);
+        
+        var query = new SearchQuery("Class25");
+        var results = await indexService2.SearchAsync(query, CancellationToken.None);
+
+        // Assert
+        Assert.NotEmpty(results);
+        Assert.Contains(results, r => r.FilePath.Contains("File25"));
+    }
+
+    [Fact]
+    public async Task Should_Recover_From_Corruption()
+    {
+        // Arrange
+        CreateTestFiles(20);
+        
+        using var sp = CreateServiceProvider();
+        var indexService = sp.GetRequiredService<IIndexService>();
+        var options = new IndexBuildOptions { RootPath = _testRepoPath, IndexPath = _indexPath };
+        await indexService.BuildAsync(options, CancellationToken.None);
+        
+        // Corrupt the index file
+        Directory.CreateDirectory(Path.GetDirectoryName(_indexPath)!);
+        await File.WriteAllTextAsync(_indexPath, "CORRUPTED DATA - NOT VALID SQLITE");
+
+        // Act
+        var loadResult = await indexService.LoadAsync(_indexPath, CancellationToken.None);
+
+        // Assert
+        Assert.False(loadResult.Success);
+        Assert.Equal("ACODE-IDX-004", loadResult.ErrorCode);
+        
+        // Should be able to rebuild
+        var rebuildResult = await indexService.RebuildAsync(options, CancellationToken.None);
+        Assert.True(rebuildResult.Success);
+        Assert.Equal(20, rebuildResult.FilesIndexed);
+    }
+
+    [Fact]
+    public async Task Should_Handle_Disk_Full_Gracefully()
+    {
+        // This test simulates disk full by using a very small memory-mapped file
+        // In real scenarios, we catch IOException and return appropriate error
+        
+        // Arrange
+        CreateTestFiles(10);
+        
+        using var sp = CreateServiceProvider();
+        var indexService = sp.GetRequiredService<IIndexService>();
+        
+        // Create a read-only directory to simulate disk full
+        var readOnlyIndexPath = Path.Combine(_testRepoPath, "readonly", "index.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(readOnlyIndexPath)!);
+        
+        if (OperatingSystem.IsWindows())
+        {
+            var dirInfo = new DirectoryInfo(Path.GetDirectoryName(readOnlyIndexPath)!);
+            dirInfo.Attributes = FileAttributes.ReadOnly;
+        }
+        
+        var options = new IndexBuildOptions { RootPath = _testRepoPath, IndexPath = readOnlyIndexPath };
+
+        // Act
+        var result = await indexService.BuildAsync(options, CancellationToken.None);
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Contains("disk", result.ErrorMessage.ToLower() + result.ErrorCode.ToLower());
+    }
+
+    private void CreateTestFiles(int count)
+    {
+        var srcDir = Path.Combine(_testRepoPath, "src");
+        Directory.CreateDirectory(srcDir);
+        
+        for (int i = 0; i < count; i++)
+        {
+            File.WriteAllText(
+                Path.Combine(srcDir, $"File{i}.cs"),
+                $"public class Class{i} {{ public void Method{i}() {{ }} }}");
+        }
+    }
+
+    private ServiceProvider CreateServiceProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging(builder => builder.AddConsole());
+        services.AddSingleton<IIndexService, IndexService>();
+        services.AddSingleton<IIndexBuilder, IndexBuilder>();
+        services.AddSingleton<ISearchEngine, SearchEngine>();
+        services.AddSingleton<IIgnoreRuleParser, IgnoreRuleParser>();
+        services.AddSingleton<ITokenizer, CodeTokenizer>();
+        return services.BuildServiceProvider();
+    }
+
+    public void Dispose()
+    {
+        // Reset read-only attribute if set
+        if (Directory.Exists(Path.Combine(_testRepoPath, "readonly")))
+        {
+            var dirInfo = new DirectoryInfo(Path.Combine(_testRepoPath, "readonly"));
+            dirInfo.Attributes = FileAttributes.Normal;
+        }
+        
+        if (Directory.Exists(_testRepoPath))
+        {
+            Directory.Delete(_testRepoPath, recursive: true);
+        }
+    }
+}
 ```
 
 ### E2E Tests
 
-```
-Tests/E2E/Index/
-├── IndexE2ETests.cs
-│   ├── Should_Build_Index_Via_CLI()
-│   ├── Should_Search_Via_CLI()
-│   ├── Should_Update_Index_Via_CLI()
-│   ├── Should_Rebuild_Index_Via_CLI()
-│   ├── Should_Show_Index_Status_Via_CLI()
-│   ├── Should_Work_With_Agent_Search_Tool()
-│   └── Should_Provide_Context_To_Agent()
+#### IndexE2ETests.cs
+
+```csharp
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Xunit;
+
+namespace Acode.Tests.E2E.Index;
+
+public sealed class IndexE2ETests : IDisposable
+{
+    private readonly string _testRepoPath;
+    private readonly string _acodePath;
+
+    public IndexE2ETests()
+    {
+        _testRepoPath = Path.Combine(Path.GetTempPath(), $"e2e_index_{Guid.NewGuid()}");
+        Directory.CreateDirectory(_testRepoPath);
+        CreateTestRepository();
+        
+        // Locate acode CLI
+        _acodePath = Path.Combine(AppContext.BaseDirectory, "acode");
+        if (OperatingSystem.IsWindows())
+        {
+            _acodePath += ".exe";
+        }
+    }
+
+    [Fact]
+    public async Task Should_Build_Index_Via_CLI()
+    {
+        // Act
+        var result = await RunAcodeAsync("index", "build");
+
+        // Assert
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Building index", result.StdOut);
+        Assert.Contains("Index built", result.StdOut);
+        Assert.True(File.Exists(Path.Combine(_testRepoPath, ".agent", "index.db")));
+    }
+
+    [Fact]
+    public async Task Should_Search_Via_CLI()
+    {
+        // Arrange
+        await RunAcodeAsync("index", "build");
+
+        // Act
+        var result = await RunAcodeAsync("search", "UserService");
+
+        // Assert
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("UserService.cs", result.StdOut);
+        Assert.Contains("score:", result.StdOut.ToLower());
+    }
+
+    [Fact]
+    public async Task Should_Search_With_JSON_Output()
+    {
+        // Arrange
+        await RunAcodeAsync("index", "build");
+
+        // Act
+        var result = await RunAcodeAsync("search", "--json", "UserService");
+
+        // Assert
+        Assert.Equal(0, result.ExitCode);
+        
+        var lines = result.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.NotEmpty(lines);
+        
+        foreach (var line in lines)
+        {
+            var json = JsonDocument.Parse(line);
+            Assert.True(json.RootElement.TryGetProperty("filePath", out _));
+            Assert.True(json.RootElement.TryGetProperty("score", out _));
+        }
+    }
+
+    [Fact]
+    public async Task Should_Update_Index_Via_CLI()
+    {
+        // Arrange
+        await RunAcodeAsync("index", "build");
+        
+        // Add a new file
+        File.WriteAllText(
+            Path.Combine(_testRepoPath, "src", "NewService.cs"),
+            "public class NewService { }");
+
+        // Act
+        var result = await RunAcodeAsync("index", "update");
+
+        // Assert
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Updating index", result.StdOut);
+        Assert.Contains("New: 1", result.StdOut);
+    }
+
+    [Fact]
+    public async Task Should_Rebuild_Index_Via_CLI()
+    {
+        // Arrange
+        await RunAcodeAsync("index", "build");
+
+        // Act
+        var result = await RunAcodeAsync("index", "rebuild");
+
+        // Assert
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Rebuilding index", result.StdOut);
+        Assert.Contains("Index rebuilt", result.StdOut);
+    }
+
+    [Fact]
+    public async Task Should_Show_Index_Status_Via_CLI()
+    {
+        // Arrange
+        await RunAcodeAsync("index", "build");
+
+        // Act
+        var result = await RunAcodeAsync("index", "status");
+
+        // Assert
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Files indexed:", result.StdOut);
+        Assert.Contains("Index size:", result.StdOut);
+        Assert.Contains("Last updated:", result.StdOut);
+    }
+
+    [Fact]
+    public async Task Should_Show_Help_For_Commands()
+    {
+        // Act
+        var indexHelp = await RunAcodeAsync("index", "--help");
+        var searchHelp = await RunAcodeAsync("search", "--help");
+
+        // Assert
+        Assert.Equal(0, indexHelp.ExitCode);
+        Assert.Contains("build", indexHelp.StdOut);
+        Assert.Contains("update", indexHelp.StdOut);
+        Assert.Contains("rebuild", indexHelp.StdOut);
+        Assert.Contains("status", indexHelp.StdOut);
+        
+        Assert.Equal(0, searchHelp.ExitCode);
+        Assert.Contains("--ext", searchHelp.StdOut);
+        Assert.Contains("--dir", searchHelp.StdOut);
+    }
+
+    private void CreateTestRepository()
+    {
+        var srcDir = Path.Combine(_testRepoPath, "src");
+        Directory.CreateDirectory(srcDir);
+        
+        File.WriteAllText(Path.Combine(srcDir, "UserService.cs"), @"
+public class UserService : IUserService
+{
+    public async Task<User> GetUserAsync(int id)
+    {
+        return await _repository.FindAsync(id);
+    }
+}");
+        
+        File.WriteAllText(Path.Combine(srcDir, "OrderService.cs"), @"
+public class OrderService
+{
+    public async Task<Order> ProcessOrderAsync(OrderRequest request)
+    {
+        return new Order();
+    }
+}");
+        
+        File.WriteAllText(Path.Combine(_testRepoPath, ".gitignore"), "bin/\nobj/\n*.log");
+    }
+
+    private async Task<(int ExitCode, string StdOut, string StdErr)> RunAcodeAsync(params string[] args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = _acodePath,
+            WorkingDirectory = _testRepoPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        
+        foreach (var arg in args)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+        
+        using var process = Process.Start(psi)!;
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        var stderr = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        
+        return (process.ExitCode, stdout, stderr);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_testRepoPath))
+        {
+            Directory.Delete(_testRepoPath, recursive: true);
+        }
+    }
+}
 ```
 
 ### Performance Benchmarks
 
-| Benchmark | Target | Maximum |
-|-----------|--------|---------|
-| Index 1K files | 3s | 5s |
-| Index 10K files | 20s | 30s |
-| Search | 50ms | 100ms |
-| Incremental | 2s | 5s |
+```csharp
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Domain.Index;
+using Acode.Infrastructure.Index;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Running;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Tests.Benchmarks.Index;
+
+[MemoryDiagnoser]
+[SimpleJob(warmupCount: 2, iterationCount: 5)]
+public class IndexBenchmarks
+{
+    private string _testRepoPath = null!;
+    private ServiceProvider _serviceProvider = null!;
+    private IIndexService _indexService = null!;
+
+    [Params(1000, 10000)]
+    public int FileCount { get; set; }
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _testRepoPath = Path.Combine(Path.GetTempPath(), $"bench_{Guid.NewGuid()}");
+        Directory.CreateDirectory(_testRepoPath);
+        
+        var srcDir = Path.Combine(_testRepoPath, "src");
+        Directory.CreateDirectory(srcDir);
+        
+        for (int i = 0; i < FileCount; i++)
+        {
+            var content = $@"
+namespace App.Generated
+{{
+    public class GeneratedClass{i}
+    {{
+        public void Method{i}() {{ }}
+        public string Property{i} {{ get; set; }}
+    }}
+}}";
+            File.WriteAllText(Path.Combine(srcDir, $"File{i}.cs"), content);
+        }
+        
+        var services = new ServiceCollection();
+        services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Warning));
+        services.AddSingleton<IIndexService, IndexService>();
+        services.AddSingleton<IIndexBuilder, IndexBuilder>();
+        services.AddSingleton<ISearchEngine, SearchEngine>();
+        services.AddSingleton<IIgnoreRuleParser, IgnoreRuleParser>();
+        services.AddSingleton<ITokenizer, CodeTokenizer>();
+        
+        _serviceProvider = services.BuildServiceProvider();
+        _indexService = _serviceProvider.GetRequiredService<IIndexService>();
+    }
+
+    [Benchmark(Description = "Index Build")]
+    public async Task<IndexBuildResult> BuildIndex()
+    {
+        var options = new IndexBuildOptions { RootPath = _testRepoPath };
+        return await _indexService.BuildAsync(options, CancellationToken.None);
+    }
+
+    [Benchmark(Description = "Simple Search")]
+    public async Task<IReadOnlyList<SearchResult>> SimpleSearch()
+    {
+        var query = new SearchQuery("GeneratedClass500");
+        return await _indexService.SearchAsync(query, CancellationToken.None);
+    }
+
+    [Benchmark(Description = "Complex Search")]
+    public async Task<IReadOnlyList<SearchResult>> ComplexSearch()
+    {
+        var query = new SearchQuery("Generated* Method -test --ext cs");
+        return await _indexService.SearchAsync(query, CancellationToken.None);
+    }
+
+    [Benchmark(Description = "Incremental Update (10 files)")]
+    public async Task<UpdateResult> IncrementalUpdate()
+    {
+        // Modify 10 files
+        for (int i = 0; i < 10; i++)
+        {
+            var path = Path.Combine(_testRepoPath, "src", $"File{i}.cs");
+            File.AppendAllText(path, $"\n// Updated at {DateTime.UtcNow}");
+        }
+        
+        return await _indexService.UpdateAsync(CancellationToken.None);
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _serviceProvider?.Dispose();
+        if (Directory.Exists(_testRepoPath))
+        {
+            Directory.Delete(_testRepoPath, recursive: true);
+        }
+    }
+}
+
+// Expected benchmark targets:
+// | Benchmark | FileCount | Target | Maximum |
+// |-----------|-----------|--------|---------|
+// | Index Build | 1,000 | 3s | 5s |
+// | Index Build | 10,000 | 20s | 30s |
+// | Simple Search | any | 50ms | 100ms |
+// | Complex Search | any | 80ms | 150ms |
+// | Incremental Update | 10 files | 2s | 5s |
+```
 
 ---
 
 ## User Verification Steps
 
-### Scenario 1: Build Index
+### Scenario 1: Initial Index Build
 
-1. Run `acode index build`
-2. Verify: Index file created
-3. Verify: Stats accurate
+**Objective:** Verify that the index builds successfully and reports accurate statistics.
 
-### Scenario 2: Search
+**Prerequisites:**
+- Repository with at least 100 source files
+- No existing index file
 
-1. Search for known term
-2. Verify: Results found
-3. Verify: Correct files
+**Steps:**
 
-### Scenario 3: Ignore
+```bash
+# Step 1: Navigate to repository root
+cd /path/to/your/repository
 
-1. Add ignore pattern
-2. Rebuild index
-3. Verify: Pattern excluded
+# Step 2: Verify no index exists
+ls -la .agent/
+# Expected: Directory does not exist or no index.db file
 
-### Scenario 4: Update
+# Step 3: Build the index
+acode index build
 
-1. Modify file
-2. Run update
-3. Verify: Changes indexed
+# Expected output:
+# Building index...
+#   Scanning files...
+#   Found: 1,234 files
+#   Ignored: 456 files (gitignore)
+#   Indexing: 1,234 files
+#     [====================] 100%
+# 
+# Index built:
+#   Files: 1,234
+#   Size: 2.3 MB
+#   Time: 8.5s
+
+# Step 4: Verify index file created
+ls -la .agent/index.db
+# Expected: File exists with size > 0
+
+# Step 5: Verify checksum file created
+cat .agent/index.checksum
+# Expected: 64-character hex string (SHA-256)
+
+# Step 6: Check index status
+acode index status
+# Expected output:
+# Index Status
+# ────────────────────
+# Files indexed: 1,234
+# Index size: 2.3 MB
+# Last updated: 2024-01-20 14:30:00
+# Pending updates: 0 files
+```
+
+**Verification Criteria:**
+- [ ] Exit code is 0
+- [ ] Progress bar shows 100%
+- [ ] File count matches visible source files
+- [ ] Index file exists at `.agent/index.db`
+- [ ] Checksum file exists at `.agent/index.checksum`
+- [ ] Build completes in < 30 seconds for 1,000 files
+
+---
+
+### Scenario 2: Basic Search Functionality
+
+**Objective:** Verify that search returns accurate results with correct line numbers and snippets.
+
+**Prerequisites:**
+- Index built (Scenario 1 complete)
+- Known file with known content (e.g., `UserService.cs` containing `GetUserByIdAsync`)
+
+**Steps:**
+
+```bash
+# Step 1: Search for a specific method name
+acode search "GetUserByIdAsync"
+
+# Expected output:
+# Found 3 results:
+# 
+# 1. [src/Services/UserService.cs] (score: 0.95)
+#    Line 45: public async Task<User> GetUserByIdAsync(int userId)
+#    Line 46: {
+#    Line 47:     return await _repository.FindByIdAsync(userId);
+# 
+# 2. [tests/UserServiceTests.cs] (score: 0.72)
+#    Line 23: var user = await _sut.GetUserByIdAsync(testUserId);
+
+# Step 2: Verify line numbers are correct
+# Open the file and check line 45 contains the method
+
+# Step 3: Search with multiple terms (AND)
+acode search "user create async"
+
+# Expected: Only files containing ALL three terms
+
+# Step 4: Search with OR operator
+acode search "user OR customer"
+
+# Expected: Files containing either "user" OR "customer"
+
+# Step 5: Search with exclusion
+acode search "service -test"
+
+# Expected: Service files but NOT test files
+
+# Step 6: Search with phrase
+acode search '"public class"'
+
+# Expected: Only exact phrase matches
+```
+
+**Verification Criteria:**
+- [ ] Results contain expected files
+- [ ] Line numbers are accurate (verified by opening file)
+- [ ] Snippets show surrounding context
+- [ ] Relevance scores are between 0 and 1
+- [ ] Results are sorted by relevance (highest first)
+- [ ] Search completes in < 100ms
+
+---
+
+### Scenario 3: Search with Filters
+
+**Objective:** Verify that search filters correctly limit results by extension, directory, and size.
+
+**Prerequisites:**
+- Index built with files of different types (.cs, .ts, .js, .md)
+- Files in different directories
+
+**Steps:**
+
+```bash
+# Step 1: Filter by extension
+acode search "controller" --ext cs
+
+# Expected: Only .cs files in results
+# Verify: No .ts, .js, or other files appear
+
+# Step 2: Filter by multiple extensions
+acode search "service" --ext cs,ts
+
+# Expected: Only .cs and .ts files
+
+# Step 3: Filter by directory
+acode search "handler" --dir src/Controllers
+
+# Expected: Only files under src/Controllers/
+
+# Step 4: Filter by directory recursively (default)
+acode search "model" --dir src
+
+# Expected: Files in src/ and all subdirectories
+
+# Step 5: Combine filters
+acode search "async" --ext cs --dir src/Services
+
+# Expected: Only .cs files under src/Services/
+
+# Step 6: Verify filter efficiency
+time acode search "common_term" --ext cs
+time acode search "common_term"
+
+# Expected: Filtered search is faster or equal
+```
+
+**Verification Criteria:**
+- [ ] Extension filter excludes non-matching files
+- [ ] Directory filter scopes to correct path
+- [ ] Multiple extensions work with comma separation
+- [ ] Combined filters apply correctly (AND logic)
+- [ ] Filtered search is not slower than unfiltered
+
+---
+
+### Scenario 4: Ignore Rules Verification
+
+**Objective:** Verify that .gitignore and .agentignore patterns are correctly applied.
+
+**Prerequisites:**
+- Repository with .gitignore file
+- node_modules directory with JavaScript files
+- Build output directories (bin/, obj/)
+
+**Steps:**
+
+```bash
+# Step 1: Check current gitignore
+cat .gitignore
+# Expected: Contains node_modules/, bin/, obj/, *.log, etc.
+
+# Step 2: Build index
+acode index build
+
+# Step 3: Verify ignored directories are excluded
+acode search "package" --dir node_modules
+
+# Expected: No results (node_modules is ignored)
+
+# Step 4: Create .agentignore with custom patterns
+echo "*.generated.cs" > .agentignore
+echo "!important.generated.cs" >> .agentignore
+
+# Step 5: Rebuild index
+acode index rebuild
+
+# Step 6: Verify .agentignore precedence
+acode search "generated"
+
+# Expected: 
+# - *.generated.cs files are excluded
+# - important.generated.cs is included (negation)
+
+# Step 7: Test ignore check command
+acode ignore check node_modules/lodash/index.js
+
+# Expected output:
+# File: node_modules/lodash/index.js
+# Status: IGNORED
+# Pattern: node_modules/
+# Source: .gitignore:5
+```
+
+**Verification Criteria:**
+- [ ] .gitignore patterns are respected
+- [ ] .agentignore patterns override .gitignore
+- [ ] Negation patterns work correctly
+- [ ] Nested .gitignore files in subdirectories work
+- [ ] `acode ignore check` reports correct status
+
+---
+
+### Scenario 5: Incremental Update Detection
+
+**Objective:** Verify that incremental updates correctly detect and index only changed files.
+
+**Prerequisites:**
+- Index built
+- Ability to modify files
+
+**Steps:**
+
+```bash
+# Step 1: Check current index status
+acode index status
+# Note the "Last updated" timestamp
+
+# Step 2: Modify an existing file
+echo "// Modified" >> src/UserService.cs
+
+# Step 3: Create a new file
+echo "public class NewService { }" > src/NewService.cs
+
+# Step 4: Delete a file (move to backup)
+mv src/OldService.cs src/OldService.cs.bak
+
+# Step 5: Run incremental update
+acode index update
+
+# Expected output:
+# Updating index...
+#   Changed: 1 files
+#   New: 1 files
+#   Deleted: 1 files
+# 
+# Index updated.
+
+# Step 6: Verify new file is searchable
+acode search "NewService"
+# Expected: src/NewService.cs appears in results
+
+# Step 7: Verify deleted file is not searchable
+acode search "OldService"
+# Expected: src/OldService.cs does NOT appear
+
+# Step 8: Verify update was incremental (fast)
+# Update should complete in < 2 seconds for small changes
+```
+
+**Verification Criteria:**
+- [ ] Modified files are detected
+- [ ] New files are added to index
+- [ ] Deleted files are removed from index
+- [ ] Update is faster than full rebuild
+- [ ] Unchanged files are not re-indexed
+
+---
+
+### Scenario 6: Search Performance Validation
+
+**Objective:** Verify that search meets performance requirements.
+
+**Prerequisites:**
+- Large index (10,000+ files recommended)
+- Timer utility available
+
+**Steps:**
+
+```bash
+# Step 1: Build index for large repository
+acode index build
+# Note: Should complete in < 30 seconds for 10K files
+
+# Step 2: Time simple search
+time acode search "function"
+# Expected: < 100ms total (including output)
+
+# Step 3: Time complex search
+time acode search '"public async" User* -test --ext cs'
+# Expected: < 150ms total
+
+# Step 4: Time wildcard search
+time acode search "Get*Async"
+# Expected: < 200ms total
+
+# Step 5: Run multiple searches in sequence
+for i in {1..10}; do
+  time acode search "term$i" > /dev/null
+done
+# Expected: Each search < 100ms
+
+# Step 6: Test search with pagination
+acode search "the" --skip 0 --take 10
+acode search "the" --skip 10 --take 10
+acode search "the" --skip 20 --take 10
+# Expected: Different results on each page, consistent total count
+```
+
+**Verification Criteria:**
+- [ ] Simple search completes in < 50ms
+- [ ] Complex search completes in < 100ms
+- [ ] Wildcard search completes in < 200ms
+- [ ] Pagination returns consistent results
+- [ ] Total count is accurate across pages
+
+---
+
+### Scenario 7: Index Persistence and Recovery
+
+**Objective:** Verify that the index persists across restarts and recovers from corruption.
+
+**Prerequisites:**
+- Built index
+
+**Steps:**
+
+```bash
+# Step 1: Build index and note stats
+acode index build
+acode index status
+# Note file count
+
+# Step 2: Simulate application restart
+# (Close and reopen terminal, or wait)
+
+# Step 3: Verify index loads on startup
+acode search "test"
+# Expected: Works immediately without rebuild
+
+# Step 4: Verify stats are preserved
+acode index status
+# Expected: Same file count as before
+
+# Step 5: Corrupt the index intentionally
+echo "CORRUPTED" > .agent/index.db
+
+# Step 6: Attempt to use corrupted index
+acode search "test"
+
+# Expected output:
+# Error: Index file corrupted (ACODE-IDX-004)
+# Checksum mismatch detected.
+# Run 'acode index rebuild' to fix.
+
+# Step 7: Rebuild after corruption
+acode index rebuild
+# Expected: Rebuilds successfully
+
+# Step 8: Verify recovery
+acode search "test"
+# Expected: Works normally
+```
+
+**Verification Criteria:**
+- [ ] Index persists across restarts
+- [ ] Corruption is detected (checksum mismatch)
+- [ ] Clear error message with recovery instructions
+- [ ] Rebuild recovers from corruption
+- [ ] No data loss after recovery
+
+---
+
+### Scenario 8: Concurrent Access Safety
+
+**Objective:** Verify that concurrent searches and updates are handled safely.
+
+**Prerequisites:**
+- Built index
+- Ability to run parallel commands
+
+**Steps:**
+
+```bash
+# Step 1: Run multiple concurrent searches
+for i in {1..5}; do
+  acode search "term$i" &
+done
+wait
+# Expected: All searches complete without error
+
+# Step 2: Search while update is running
+acode index update &
+UPDATE_PID=$!
+acode search "controller"
+wait $UPDATE_PID
+# Expected: Search returns results, update completes
+
+# Step 3: Attempt concurrent updates (should be blocked)
+acode index update &
+acode index update
+# Expected: Second update waits or reports lock held
+
+# Step 4: Verify no corruption after concurrent operations
+acode index status
+# Expected: Stats are consistent
+```
+
+**Verification Criteria:**
+- [ ] Concurrent searches work correctly
+- [ ] Search during update returns consistent results
+- [ ] Concurrent updates are serialized (locked)
+- [ ] No corruption after concurrent operations
+
+---
+
+### Scenario 9: JSON Output Mode
+
+**Objective:** Verify that JSON output mode produces parseable, structured output.
+
+**Prerequisites:**
+- Built index
+- jq installed (for JSON parsing)
+
+**Steps:**
+
+```bash
+# Step 1: Search with JSON output
+acode search --json "UserService"
+
+# Expected output (one JSON object per line):
+# {"filePath":"src/Services/UserService.cs","score":0.95,"matchedLines":[1,5,10],...}
+# {"filePath":"tests/UserServiceTests.cs","score":0.72,"matchedLines":[23],...}
+
+# Step 2: Parse with jq
+acode search --json "controller" | jq -r '.filePath'
+# Expected: List of file paths, one per line
+
+# Step 3: Filter by score
+acode search --json "service" | jq 'select(.score > 0.8)'
+# Expected: Only high-relevance results
+
+# Step 4: Count results
+acode search --json "async" | wc -l
+# Expected: Number of matching files
+
+# Step 5: Get specific fields
+acode search --json "handler" | jq '{path: .filePath, lines: .matchedLines}'
+# Expected: Simplified JSON with only requested fields
+
+# Step 6: Index status in JSON
+acode index status --json | jq '.'
+# Expected: {"filesIndexed":1234,"indexSize":2400000,"lastUpdated":"..."}
+```
+
+**Verification Criteria:**
+- [ ] Each line is valid JSON
+- [ ] JSON contains filePath, score, matchedLines
+- [ ] Output is parseable by jq
+- [ ] JSON mode works for all commands
+
+---
+
+### Scenario 10: Error Handling and Edge Cases
+
+**Objective:** Verify that errors are handled gracefully with clear messages.
+
+**Prerequisites:**
+- Access to repository
+
+**Steps:**
+
+```bash
+# Step 1: Search with invalid query
+acode search '"unclosed quote'
+# Expected: Error with ACODE-IDX-002, clear message about unbalanced quotes
+# Exit code: Non-zero
+
+# Step 2: Build index in non-existent directory
+acode index build --path /nonexistent/path
+# Expected: Error message, exit code non-zero
+
+# Step 3: Search before index exists
+rm -rf .agent/
+acode search "test"
+# Expected: Error message suggesting 'acode index build'
+# Error code: ACODE-IDX-001 or similar
+
+# Step 4: Handle permission denied
+chmod 000 .agent/index.db
+acode search "test"
+# Expected: Error about access denied
+# Restore: chmod 644 .agent/index.db
+
+# Step 5: Handle very long query
+acode search "$(printf 'a%.0s' {1..10000})"
+# Expected: Error about query too long, or truncation warning
+
+# Step 6: Search with no matches
+acode search "xyznonexistentterm12345"
+# Expected: "No results found" (not an error)
+# Exit code: 0
+
+# Step 7: Verify help is available
+acode index --help
+acode search --help
+# Expected: Usage information displayed
+```
+
+**Verification Criteria:**
+- [ ] Invalid queries return clear error messages
+- [ ] Error codes are included (ACODE-IDX-XXX)
+- [ ] Non-zero exit codes on errors
+- [ ] Zero exit code for "no results" (not an error)
+- [ ] Help text is available for all commands
 
 ---
 
@@ -2735,70 +5710,1187 @@ Tests/E2E/Index/
 ### File Structure
 
 ```
-src/AgenticCoder.Domain/
+src/Acode.Domain/
 ├── Index/
 │   ├── IIndexService.cs
-│   ├── SearchResult.cs
+│   ├── ISearchEngine.cs
+│   ├── IIgnoreRuleParser.cs
+│   ├── ITokenizer.cs
 │   ├── SearchQuery.cs
-│   └── IndexStats.cs
+│   ├── SearchResult.cs
+│   ├── SearchFilter.cs
+│   ├── IndexStats.cs
+│   ├── IndexBuildResult.cs
+│   └── Exceptions/
+│       ├── IndexException.cs
+│       ├── SearchQueryException.cs
+│       └── IndexCorruptedException.cs
 │
-src/AgenticCoder.Infrastructure/
+src/Acode.Infrastructure/
 ├── Index/
 │   ├── IndexService.cs
 │   ├── IndexBuilder.cs
 │   ├── SearchEngine.cs
+│   ├── SearchQueryParser.cs
 │   ├── IgnoreRuleParser.cs
-│   └── IncrementalUpdater.cs
+│   ├── IgnoreMatcher.cs
+│   ├── IncrementalUpdater.cs
+│   ├── CodeTokenizer.cs
+│   ├── IndexStore.cs
+│   ├── IndexIntegrityVerifier.cs
+│   └── BM25Ranker.cs
 │
-src/AgenticCoder.CLI/
+src/Acode.Cli/
 └── Commands/
     ├── IndexCommand.cs
-    └── SearchCommand.cs
+    ├── SearchCommand.cs
+    └── IgnoreCommand.cs
 ```
 
-### IIndexService Interface
+---
+
+### Domain Models
+
+#### SearchQuery.cs
 
 ```csharp
-namespace AgenticCoder.Domain.Index;
+using System;
+using System.Collections.Generic;
 
-public interface IIndexService
+namespace Acode.Domain.Index;
+
+/// <summary>
+/// Represents a search query with terms, filters, and pagination options.
+/// </summary>
+public sealed class SearchQuery
 {
-    Task BuildAsync(CancellationToken ct);
-    Task UpdateAsync(CancellationToken ct);
-    Task RebuildAsync(CancellationToken ct);
-    Task<IReadOnlyList<SearchResult>> SearchAsync(SearchQuery query, CancellationToken ct);
-    Task<IndexStats> GetStatsAsync(CancellationToken ct);
+    /// <summary>
+    /// The raw query text entered by the user.
+    /// </summary>
+    public string Text { get; }
+    
+    /// <summary>
+    /// Parsed required terms (AND logic).
+    /// </summary>
+    public IReadOnlyList<string> RequiredTerms { get; init; } = Array.Empty<string>();
+    
+    /// <summary>
+    /// Parsed optional terms (OR logic).
+    /// </summary>
+    public IReadOnlyList<string> OptionalTerms { get; init; } = Array.Empty<string>();
+    
+    /// <summary>
+    /// Terms to exclude from results.
+    /// </summary>
+    public IReadOnlyList<string> ExcludedTerms { get; init; } = Array.Empty<string>();
+    
+    /// <summary>
+    /// Exact phrases to match (quoted strings).
+    /// </summary>
+    public IReadOnlyList<string[]> Phrases { get; init; } = Array.Empty<string[]>();
+    
+    /// <summary>
+    /// Wildcard patterns (prefix*, *suffix, *contains*).
+    /// </summary>
+    public IReadOnlyList<WildcardTerm> Wildcards { get; init; } = Array.Empty<WildcardTerm>();
+    
+    /// <summary>
+    /// Filter to apply to search results.
+    /// </summary>
+    public SearchFilter? Filter { get; init; }
+    
+    /// <summary>
+    /// Number of results to skip (pagination).
+    /// </summary>
+    public int Skip { get; init; } = 0;
+    
+    /// <summary>
+    /// Maximum number of results to return.
+    /// </summary>
+    public int Take { get; init; } = 50;
+    
+    /// <summary>
+    /// Whether search is case-sensitive.
+    /// </summary>
+    public bool CaseSensitive { get; init; } = false;
+    
+    public SearchQuery(string text)
+    {
+        Text = text ?? throw new ArgumentNullException(nameof(text));
+    }
+}
+
+public sealed record WildcardTerm(string Value, WildcardType Type);
+
+public enum WildcardType
+{
+    Prefix,   // *suffix
+    Suffix,   // prefix*
+    Both      // *contains*
 }
 ```
 
+#### SearchResult.cs
+
+```csharp
+using System;
+using System.Collections.Generic;
+
+namespace Acode.Domain.Index;
+
+/// <summary>
+/// Represents a search result with matched file, lines, snippets, and relevance score.
+/// </summary>
+public sealed class SearchResult
+{
+    /// <summary>
+    /// Path to the matched file (relative to repository root).
+    /// </summary>
+    public string FilePath { get; init; } = string.Empty;
+    
+    /// <summary>
+    /// Line numbers where matches were found (1-based).
+    /// </summary>
+    public IReadOnlyList<int> MatchedLines { get; init; } = Array.Empty<int>();
+    
+    /// <summary>
+    /// Context snippets showing matched content with surrounding lines.
+    /// </summary>
+    public IReadOnlyList<Snippet> Snippets { get; init; } = Array.Empty<Snippet>();
+    
+    /// <summary>
+    /// Relevance score (0.0 to 1.0) based on BM25 ranking.
+    /// </summary>
+    public double Score { get; init; }
+    
+    /// <summary>
+    /// File size in bytes.
+    /// </summary>
+    public long FileSize { get; init; }
+    
+    /// <summary>
+    /// Last modification time of the file.
+    /// </summary>
+    public DateTime LastModified { get; init; }
+}
+
+/// <summary>
+/// A code snippet showing matched content with context.
+/// </summary>
+public sealed class Snippet
+{
+    /// <summary>
+    /// The text content of the snippet.
+    /// </summary>
+    public string Text { get; init; } = string.Empty;
+    
+    /// <summary>
+    /// Starting line number of the snippet (1-based).
+    /// </summary>
+    public int StartLine { get; init; }
+    
+    /// <summary>
+    /// Ending line number of the snippet (1-based).
+    /// </summary>
+    public int EndLine { get; init; }
+    
+    /// <summary>
+    /// Highlighted ranges within the text (character offsets).
+    /// </summary>
+    public IReadOnlyList<HighlightRange> Highlights { get; init; } = Array.Empty<HighlightRange>();
+}
+
+public sealed record HighlightRange(int Start, int Length);
+```
+
+#### SearchFilter.cs
+
+```csharp
+using System;
+using System.Collections.Generic;
+
+namespace Acode.Domain.Index;
+
+/// <summary>
+/// Filter options to narrow search results.
+/// </summary>
+public sealed class SearchFilter
+{
+    /// <summary>
+    /// File extensions to include (e.g., ".cs", ".ts").
+    /// </summary>
+    public IReadOnlyList<string>? Extensions { get; init; }
+    
+    /// <summary>
+    /// Directory to search within (relative path).
+    /// </summary>
+    public string? Directory { get; init; }
+    
+    /// <summary>
+    /// Whether to search recursively in subdirectories.
+    /// </summary>
+    public bool Recursive { get; init; } = true;
+    
+    /// <summary>
+    /// Minimum file size in bytes.
+    /// </summary>
+    public long? MinSizeBytes { get; init; }
+    
+    /// <summary>
+    /// Maximum file size in bytes.
+    /// </summary>
+    public long? MaxSizeBytes { get; init; }
+    
+    /// <summary>
+    /// Only include files modified since this date.
+    /// </summary>
+    public DateTime? ModifiedSince { get; init; }
+    
+    /// <summary>
+    /// Only include files modified before this date.
+    /// </summary>
+    public DateTime? ModifiedBefore { get; init; }
+    
+    /// <summary>
+    /// Glob patterns to exclude from results.
+    /// </summary>
+    public IReadOnlyList<string>? ExcludePatterns { get; init; }
+}
+```
+
+#### IndexStats.cs
+
+```csharp
+using System;
+
+namespace Acode.Domain.Index;
+
+/// <summary>
+/// Statistics about the current index state.
+/// </summary>
+public sealed class IndexStats
+{
+    /// <summary>
+    /// Number of files in the index.
+    /// </summary>
+    public int FileCount { get; init; }
+    
+    /// <summary>
+    /// Total number of unique terms in the index.
+    /// </summary>
+    public int TermCount { get; init; }
+    
+    /// <summary>
+    /// Size of the index file in bytes.
+    /// </summary>
+    public long IndexSizeBytes { get; init; }
+    
+    /// <summary>
+    /// Timestamp of last index update.
+    /// </summary>
+    public DateTime LastUpdated { get; init; }
+    
+    /// <summary>
+    /// Number of files with pending changes (not yet indexed).
+    /// </summary>
+    public int PendingChanges { get; init; }
+    
+    /// <summary>
+    /// Index format version.
+    /// </summary>
+    public int Version { get; init; }
+    
+    /// <summary>
+    /// Path to the index file.
+    /// </summary>
+    public string IndexPath { get; init; } = string.Empty;
+}
+```
+
+---
+
+### Domain Interfaces
+
+#### IIndexService.cs
+
+```csharp
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Acode.Domain.Index;
+
+/// <summary>
+/// Primary interface for index operations: build, update, search, and status.
+/// </summary>
+public interface IIndexService
+{
+    /// <summary>
+    /// Builds the index from scratch, scanning all files in the repository.
+    /// </summary>
+    /// <param name="options">Build options including root path and configuration.</param>
+    /// <param name="progress">Progress reporter for UI updates.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Build result with statistics.</returns>
+    Task<IndexBuildResult> BuildAsync(
+        IndexBuildOptions options,
+        IProgress<IndexProgress>? progress = null,
+        CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Performs an incremental update, indexing only changed files.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Update result with change statistics.</returns>
+    Task<IndexUpdateResult> UpdateAsync(CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Rebuilds the index from scratch, clearing existing data.
+    /// </summary>
+    /// <param name="options">Build options.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Build result with statistics.</returns>
+    Task<IndexBuildResult> RebuildAsync(
+        IndexBuildOptions options,
+        CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Searches the index for matching files.
+    /// </summary>
+    /// <param name="query">Search query with terms and filters.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of search results ranked by relevance.</returns>
+    Task<SearchResultList> SearchAsync(
+        SearchQuery query,
+        CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Gets current index statistics.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Index statistics.</returns>
+    Task<IndexStats> GetStatsAsync(CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Loads an existing index from disk.
+    /// </summary>
+    /// <param name="indexPath">Path to the index file.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Load result indicating success or failure.</returns>
+    Task<IndexLoadResult> LoadAsync(
+        string indexPath,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed record IndexBuildOptions
+{
+    public string RootPath { get; init; } = ".";
+    public string IndexPath { get; init; } = ".agent/index.db";
+    public int MaxFileSizeKb { get; init; } = 500;
+    public bool FollowSymlinks { get; init; } = false;
+    public IReadOnlyList<string>? IncludeExtensions { get; init; }
+    public IReadOnlyList<string>? AdditionalIgnorePatterns { get; init; }
+}
+
+public sealed record IndexProgress(int FilesProcessed, int TotalFiles, string CurrentFile);
+
+public sealed record IndexBuildResult(
+    bool Success,
+    int FilesIndexed,
+    int FilesSkipped,
+    TimeSpan Duration,
+    IReadOnlyList<string> IndexedFiles,
+    IReadOnlyList<SkippedFile> SkippedFiles,
+    string? ErrorCode = null,
+    string? ErrorMessage = null);
+
+public sealed record IndexUpdateResult(
+    bool Success,
+    int FilesAdded,
+    int FilesModified,
+    int FilesDeleted,
+    DateTime LastUpdated,
+    string? ErrorCode = null,
+    string? ErrorMessage = null);
+
+public sealed record IndexLoadResult(
+    bool Success,
+    string? ErrorCode = null,
+    string? ErrorMessage = null);
+
+public sealed record SkippedFile(string Path, string Reason);
+```
+
+#### ITokenizer.cs
+
+```csharp
+using System.Collections.Generic;
+
+namespace Acode.Domain.Index;
+
+/// <summary>
+/// Tokenizes source code content into searchable terms.
+/// </summary>
+public interface ITokenizer
+{
+    /// <summary>
+    /// Tokenizes content into a list of normalized terms.
+    /// </summary>
+    /// <param name="content">Source code content.</param>
+    /// <returns>List of tokens in lowercase.</returns>
+    IReadOnlyList<string> Tokenize(string content);
+    
+    /// <summary>
+    /// Tokenizes content with position tracking for line number mapping.
+    /// </summary>
+    /// <param name="content">Source code content.</param>
+    /// <returns>List of tokens with line and column positions.</returns>
+    IReadOnlyList<TokenPosition> TokenizeWithPositions(string content);
+}
+
+public sealed record TokenPosition(string Token, int Line, int Column);
+```
+
+---
+
+### Infrastructure Implementations
+
+#### IndexService.cs
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Domain.Index;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Index;
+
+/// <summary>
+/// Primary implementation of the index service.
+/// </summary>
+public sealed class IndexService : IIndexService
+{
+    private readonly IIndexBuilder _builder;
+    private readonly ISearchEngine _searchEngine;
+    private readonly IIncrementalUpdater _updater;
+    private readonly IIndexStore _store;
+    private readonly IIndexIntegrityVerifier _integrityVerifier;
+    private readonly ILogger<IndexService> _logger;
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+    public IndexService(
+        IIndexBuilder builder,
+        ISearchEngine searchEngine,
+        IIncrementalUpdater updater,
+        IIndexStore store,
+        IIndexIntegrityVerifier integrityVerifier,
+        ILogger<IndexService> logger)
+    {
+        _builder = builder ?? throw new ArgumentNullException(nameof(builder));
+        _searchEngine = searchEngine ?? throw new ArgumentNullException(nameof(searchEngine));
+        _updater = updater ?? throw new ArgumentNullException(nameof(updater));
+        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _integrityVerifier = integrityVerifier ?? throw new ArgumentNullException(nameof(integrityVerifier));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    public async Task<IndexBuildResult> BuildAsync(
+        IndexBuildOptions options,
+        IProgress<IndexProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            _logger.LogInformation("Starting index build for {RootPath}", options.RootPath);
+            var startTime = DateTime.UtcNow;
+
+            var result = await _builder.BuildAsync(options, progress, cancellationToken);
+
+            if (result.Success)
+            {
+                await _store.SaveAsync(options.IndexPath, cancellationToken);
+                _integrityVerifier.UpdateChecksum(options.IndexPath);
+                
+                _logger.LogInformation(
+                    "Index build completed: {FileCount} files in {Duration}",
+                    result.FilesIndexed,
+                    DateTime.UtcNow - startTime);
+            }
+
+            return result;
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    public async Task<IndexUpdateResult> UpdateAsync(CancellationToken cancellationToken = default)
+    {
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            _logger.LogInformation("Starting incremental update");
+            return await _updater.UpdateAsync(cancellationToken);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    public async Task<IndexBuildResult> RebuildAsync(
+        IndexBuildOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            _logger.LogInformation("Rebuilding index from scratch");
+            await _store.ClearAsync(cancellationToken);
+            return await _builder.BuildAsync(options, null, cancellationToken);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
+    }
+
+    public async Task<SearchResultList> SearchAsync(
+        SearchQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        // Searches do not require write lock (read-only)
+        _logger.LogDebug("Searching for: {Query}", query.Text);
+        return await _searchEngine.SearchAsync(query, cancellationToken);
+    }
+
+    public async Task<IndexStats> GetStatsAsync(CancellationToken cancellationToken = default)
+    {
+        return await _store.GetStatsAsync(cancellationToken);
+    }
+
+    public async Task<IndexLoadResult> LoadAsync(
+        string indexPath,
+        CancellationToken cancellationToken = default)
+    {
+        var verifyResult = _integrityVerifier.VerifyIndex(indexPath);
+        if (!verifyResult.IsValid)
+        {
+            _logger.LogError("Index verification failed: {Error}", verifyResult.ErrorMessage);
+            return new IndexLoadResult(false, "ACODE-IDX-004", verifyResult.ErrorMessage);
+        }
+
+        try
+        {
+            await _store.LoadAsync(indexPath, cancellationToken);
+            _logger.LogInformation("Index loaded successfully from {Path}", indexPath);
+            return new IndexLoadResult(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load index from {Path}", indexPath);
+            return new IndexLoadResult(false, "ACODE-IDX-004", ex.Message);
+        }
+    }
+}
+```
+
+#### CodeTokenizer.cs
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Text.RegularExpressions;
+using Acode.Domain.Index;
+
+namespace Acode.Infrastructure.Index;
+
+/// <summary>
+/// Code-aware tokenizer that handles camelCase, snake_case, and code identifiers.
+/// </summary>
+public sealed class CodeTokenizer : ITokenizer
+{
+    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "must", "shall", "can", "need", "dare",
+        "and", "or", "but", "if", "then", "else", "when", "at", "by", "for",
+        "with", "about", "against", "between", "into", "through", "during",
+        "before", "after", "above", "below", "to", "from", "up", "down",
+        "in", "out", "on", "off", "over", "under", "again", "further",
+        "once", "here", "there", "where", "why", "how", "all", "each",
+        "few", "more", "most", "other", "some", "such", "no", "nor", "not",
+        "only", "own", "same", "so", "than", "too", "very", "just"
+    };
+
+    private static readonly Regex CamelCasePattern = new(
+        @"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])",
+        RegexOptions.Compiled);
+
+    private static readonly Regex WordPattern = new(
+        @"[a-zA-Z]+|[0-9]+",
+        RegexOptions.Compiled);
+
+    public IReadOnlyList<string> Tokenize(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return Array.Empty<string>();
+        }
+
+        var tokens = new List<string>();
+        
+        // Split on whitespace and punctuation first
+        var words = WordPattern.Matches(content);
+        
+        foreach (Match match in words)
+        {
+            var word = match.Value;
+            
+            // Split camelCase and PascalCase
+            var subWords = CamelCasePattern.Split(word);
+            
+            foreach (var subWord in subWords)
+            {
+                if (string.IsNullOrWhiteSpace(subWord) || subWord.Length < 2)
+                {
+                    continue;
+                }
+                
+                var normalized = subWord.ToLowerInvariant();
+                
+                // Skip stop words
+                if (StopWords.Contains(normalized))
+                {
+                    continue;
+                }
+                
+                tokens.Add(normalized);
+            }
+        }
+
+        return tokens;
+    }
+
+    public IReadOnlyList<TokenPosition> TokenizeWithPositions(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return Array.Empty<TokenPosition>();
+        }
+
+        var positions = new List<TokenPosition>();
+        var lines = content.Split('\n');
+        
+        for (int lineNum = 0; lineNum < lines.Length; lineNum++)
+        {
+            var line = lines[lineNum];
+            var words = WordPattern.Matches(line);
+            
+            foreach (Match match in words)
+            {
+                var word = match.Value;
+                var column = match.Index;
+                var subWords = CamelCasePattern.Split(word);
+                
+                foreach (var subWord in subWords)
+                {
+                    if (string.IsNullOrWhiteSpace(subWord) || subWord.Length < 2)
+                    {
+                        continue;
+                    }
+                    
+                    var normalized = subWord.ToLowerInvariant();
+                    
+                    if (StopWords.Contains(normalized))
+                    {
+                        continue;
+                    }
+                    
+                    positions.Add(new TokenPosition(normalized, lineNum + 1, column));
+                }
+            }
+        }
+
+        return positions;
+    }
+}
+```
+
+#### BM25Ranker.cs
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Acode.Domain.Index;
+
+namespace Acode.Infrastructure.Index;
+
+/// <summary>
+/// BM25 (Best Matching 25) ranking algorithm implementation.
+/// </summary>
+public sealed class BM25Ranker
+{
+    private const double K1 = 1.2;  // Term frequency saturation parameter
+    private const double B = 0.75;  // Length normalization parameter
+
+    /// <summary>
+    /// Calculates BM25 score for a document against a query.
+    /// </summary>
+    /// <param name="queryTerms">Parsed query terms.</param>
+    /// <param name="document">Document to score.</param>
+    /// <param name="documentFrequencies">Document frequency for each term.</param>
+    /// <param name="totalDocuments">Total number of documents in index.</param>
+    /// <param name="averageDocumentLength">Average document length in tokens.</param>
+    /// <returns>BM25 relevance score.</returns>
+    public double CalculateScore(
+        IReadOnlyList<string> queryTerms,
+        IndexedDocument document,
+        Dictionary<string, int> documentFrequencies,
+        int totalDocuments,
+        double averageDocumentLength)
+    {
+        double score = 0.0;
+        var documentLength = document.TokenCount;
+
+        foreach (var term in queryTerms)
+        {
+            if (!document.TermFrequencies.TryGetValue(term, out var termFrequency))
+            {
+                continue;
+            }
+
+            var df = documentFrequencies.GetValueOrDefault(term, 1);
+            
+            // IDF (Inverse Document Frequency)
+            var idf = Math.Log((totalDocuments - df + 0.5) / (df + 0.5) + 1.0);
+            
+            // Term frequency component with saturation
+            var tfComponent = (termFrequency * (K1 + 1)) /
+                             (termFrequency + K1 * (1 - B + B * (documentLength / averageDocumentLength)));
+            
+            score += idf * tfComponent;
+        }
+
+        return score;
+    }
+
+    /// <summary>
+    /// Ranks a list of documents by BM25 score.
+    /// </summary>
+    public IReadOnlyList<ScoredDocument> RankDocuments(
+        IReadOnlyList<string> queryTerms,
+        IReadOnlyList<IndexedDocument> documents,
+        IIndexStore indexStore)
+    {
+        var totalDocs = indexStore.GetTotalDocumentCount();
+        var avgLength = indexStore.GetAverageDocumentLength();
+        var docFreqs = indexStore.GetDocumentFrequencies(queryTerms);
+
+        var scored = documents
+            .Select(doc => new ScoredDocument(
+                doc,
+                CalculateScore(queryTerms, doc, docFreqs, totalDocs, avgLength)))
+            .OrderByDescending(sd => sd.Score)
+            .ToList();
+
+        // Normalize scores to 0-1 range
+        if (scored.Count > 0)
+        {
+            var maxScore = scored[0].Score;
+            if (maxScore > 0)
+            {
+                return scored
+                    .Select(sd => sd with { Score = sd.Score / maxScore })
+                    .ToList();
+            }
+        }
+
+        return scored;
+    }
+}
+
+public sealed record ScoredDocument(IndexedDocument Document, double Score);
+```
+
+---
+
+### CLI Commands
+
+#### IndexCommand.cs
+
+```csharp
+using System;
+using System.CommandLine;
+using System.CommandLine.Invocation;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Domain.Index;
+using Microsoft.Extensions.DependencyInjection;
+using Spectre.Console;
+
+namespace Acode.Cli.Commands;
+
+public sealed class IndexCommand : Command
+{
+    public IndexCommand() : base("index", "Manage the code search index")
+    {
+        AddCommand(new BuildCommand());
+        AddCommand(new UpdateCommand());
+        AddCommand(new RebuildCommand());
+        AddCommand(new StatusCommand());
+    }
+
+    private sealed class BuildCommand : Command
+    {
+        public BuildCommand() : base("build", "Build the index from scratch")
+        {
+            var pathOption = new Option<string>(
+                "--path",
+                () => ".",
+                "Path to the repository root");
+            AddOption(pathOption);
+
+            this.SetHandler(async (InvocationContext ctx) =>
+            {
+                var path = ctx.ParseResult.GetValueForOption(pathOption)!;
+                var indexService = ctx.BindingContext.GetRequiredService<IIndexService>();
+                var ct = ctx.GetCancellationToken();
+
+                await AnsiConsole.Progress()
+                    .StartAsync(async progressCtx =>
+                    {
+                        var task = progressCtx.AddTask("Building index...");
+                        
+                        var progress = new Progress<IndexProgress>(p =>
+                        {
+                            task.Value = (double)p.FilesProcessed / p.TotalFiles * 100;
+                            task.Description = $"Indexing: {p.CurrentFile}";
+                        });
+
+                        var options = new IndexBuildOptions { RootPath = path };
+                        var result = await indexService.BuildAsync(options, progress, ct);
+
+                        if (result.Success)
+                        {
+                            AnsiConsole.MarkupLine($"[green]Index built successfully![/]");
+                            AnsiConsole.MarkupLine($"  Files indexed: [bold]{result.FilesIndexed}[/]");
+                            AnsiConsole.MarkupLine($"  Files skipped: [bold]{result.FilesSkipped}[/]");
+                            AnsiConsole.MarkupLine($"  Duration: [bold]{result.Duration.TotalSeconds:F1}s[/]");
+                        }
+                        else
+                        {
+                            AnsiConsole.MarkupLine($"[red]Index build failed: {result.ErrorMessage}[/]");
+                            ctx.ExitCode = 1;
+                        }
+                    });
+            });
+        }
+    }
+
+    private sealed class UpdateCommand : Command
+    {
+        public UpdateCommand() : base("update", "Update the index incrementally")
+        {
+            this.SetHandler(async (InvocationContext ctx) =>
+            {
+                var indexService = ctx.BindingContext.GetRequiredService<IIndexService>();
+                var ct = ctx.GetCancellationToken();
+
+                AnsiConsole.MarkupLine("[yellow]Updating index...[/]");
+                
+                var result = await indexService.UpdateAsync(ct);
+
+                if (result.Success)
+                {
+                    AnsiConsole.MarkupLine($"[green]Index updated![/]");
+                    AnsiConsole.MarkupLine($"  Added: [bold]{result.FilesAdded}[/]");
+                    AnsiConsole.MarkupLine($"  Modified: [bold]{result.FilesModified}[/]");
+                    AnsiConsole.MarkupLine($"  Deleted: [bold]{result.FilesDeleted}[/]");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"[red]Update failed: {result.ErrorMessage}[/]");
+                    ctx.ExitCode = 1;
+                }
+            });
+        }
+    }
+
+    private sealed class RebuildCommand : Command
+    {
+        public RebuildCommand() : base("rebuild", "Rebuild the index from scratch")
+        {
+            this.SetHandler(async (InvocationContext ctx) =>
+            {
+                var indexService = ctx.BindingContext.GetRequiredService<IIndexService>();
+                var ct = ctx.GetCancellationToken();
+
+                AnsiConsole.MarkupLine("[yellow]Rebuilding index...[/]");
+                
+                var options = new IndexBuildOptions();
+                var result = await indexService.RebuildAsync(options, ct);
+
+                if (result.Success)
+                {
+                    AnsiConsole.MarkupLine($"[green]Index rebuilt![/]");
+                    AnsiConsole.MarkupLine($"  Files: [bold]{result.FilesIndexed}[/]");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"[red]Rebuild failed: {result.ErrorMessage}[/]");
+                    ctx.ExitCode = 1;
+                }
+            });
+        }
+    }
+
+    private sealed class StatusCommand : Command
+    {
+        public StatusCommand() : base("status", "Show index status")
+        {
+            var jsonOption = new Option<bool>("--json", "Output as JSON");
+            AddOption(jsonOption);
+
+            this.SetHandler(async (InvocationContext ctx) =>
+            {
+                var json = ctx.ParseResult.GetValueForOption(jsonOption);
+                var indexService = ctx.BindingContext.GetRequiredService<IIndexService>();
+                var ct = ctx.GetCancellationToken();
+
+                var stats = await indexService.GetStatsAsync(ct);
+
+                if (json)
+                {
+                    var jsonOutput = System.Text.Json.JsonSerializer.Serialize(stats);
+                    Console.WriteLine(jsonOutput);
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[bold]Index Status[/]");
+                    AnsiConsole.MarkupLine("────────────────────");
+                    AnsiConsole.MarkupLine($"Files indexed: [bold]{stats.FileCount}[/]");
+                    AnsiConsole.MarkupLine($"Index size: [bold]{FormatSize(stats.IndexSizeBytes)}[/]");
+                    AnsiConsole.MarkupLine($"Last updated: [bold]{stats.LastUpdated:yyyy-MM-dd HH:mm:ss}[/]");
+                    AnsiConsole.MarkupLine($"Pending updates: [bold]{stats.PendingChanges}[/] files");
+                }
+            });
+        }
+
+        private static string FormatSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB" };
+            double len = bytes;
+            int order = 0;
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len /= 1024;
+            }
+            return $"{len:0.#} {sizes[order]}";
+        }
+    }
+}
+```
+
+#### SearchCommand.cs
+
+```csharp
+using System;
+using System.CommandLine;
+using System.CommandLine.Invocation;
+using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Acode.Domain.Index;
+using Microsoft.Extensions.DependencyInjection;
+using Spectre.Console;
+
+namespace Acode.Cli.Commands;
+
+public sealed class SearchCommand : Command
+{
+    public SearchCommand() : base("search", "Search the codebase")
+    {
+        var queryArg = new Argument<string>("query", "Search query");
+        AddArgument(queryArg);
+
+        var extOption = new Option<string?>("--ext", "Filter by file extension(s), comma-separated");
+        var dirOption = new Option<string?>("--dir", "Filter by directory");
+        var skipOption = new Option<int>("--skip", () => 0, "Number of results to skip");
+        var takeOption = new Option<int>("--take", () => 20, "Number of results to return");
+        var jsonOption = new Option<bool>("--json", "Output as JSONL");
+        
+        AddOption(extOption);
+        AddOption(dirOption);
+        AddOption(skipOption);
+        AddOption(takeOption);
+        AddOption(jsonOption);
+
+        this.SetHandler(async (InvocationContext ctx) =>
+        {
+            var queryText = ctx.ParseResult.GetValueForArgument(queryArg);
+            var ext = ctx.ParseResult.GetValueForOption(extOption);
+            var dir = ctx.ParseResult.GetValueForOption(dirOption);
+            var skip = ctx.ParseResult.GetValueForOption(skipOption);
+            var take = ctx.ParseResult.GetValueForOption(takeOption);
+            var json = ctx.ParseResult.GetValueForOption(jsonOption);
+            
+            var indexService = ctx.BindingContext.GetRequiredService<IIndexService>();
+            var ct = ctx.GetCancellationToken();
+
+            var filter = new SearchFilter
+            {
+                Extensions = ext?.Split(',').Select(e => e.Trim()).ToArray(),
+                Directory = dir
+            };
+
+            var query = new SearchQuery(queryText)
+            {
+                Filter = filter,
+                Skip = skip,
+                Take = take
+            };
+
+            try
+            {
+                var results = await indexService.SearchAsync(query, ct);
+
+                if (json)
+                {
+                    foreach (var result in results)
+                    {
+                        var jsonLine = JsonSerializer.Serialize(new
+                        {
+                            filePath = result.FilePath,
+                            score = Math.Round(result.Score, 3),
+                            matchedLines = result.MatchedLines,
+                            snippets = result.Snippets.Select(s => s.Text).ToArray()
+                        });
+                        Console.WriteLine(jsonLine);
+                    }
+                }
+                else
+                {
+                    if (results.Count == 0)
+                    {
+                        AnsiConsole.MarkupLine("[yellow]No results found.[/]");
+                        return;
+                    }
+
+                    AnsiConsole.MarkupLine($"[bold]Found {results.TotalCount} results:[/]\n");
+
+                    var displayCount = 1;
+                    foreach (var result in results)
+                    {
+                        AnsiConsole.MarkupLine(
+                            $"[bold]{displayCount}.[/] [[{result.FilePath}]] [dim](score: {result.Score:F2})[/]");
+                        
+                        foreach (var snippet in result.Snippets.Take(2))
+                        {
+                            AnsiConsole.MarkupLine($"   [dim]Line {snippet.StartLine}:[/] {EscapeMarkup(snippet.Text.Trim())}");
+                        }
+                        
+                        AnsiConsole.WriteLine();
+                        displayCount++;
+                    }
+
+                    if (results.TotalCount > results.Count)
+                    {
+                        AnsiConsole.MarkupLine(
+                            $"[dim]Showing {results.Count} of {results.TotalCount} results. Use --skip and --take for pagination.[/]");
+                    }
+                }
+            }
+            catch (SearchQueryException ex)
+            {
+                AnsiConsole.MarkupLine($"[red]Search error ({ex.ErrorCode}): {ex.Message}[/]");
+                ctx.ExitCode = 1;
+            }
+        });
+    }
+
+    private static string EscapeMarkup(string text)
+    {
+        return text.Replace("[", "[[").Replace("]", "]]");
+    }
+}
+```
+
+---
+
 ### Error Codes
 
-| Code | Meaning |
-|------|---------|
-| ACODE-IDX-001 | Build failed |
-| ACODE-IDX-002 | Search failed |
-| ACODE-IDX-003 | Update failed |
-| ACODE-IDX-004 | Corrupt index |
-| ACODE-IDX-005 | Parse error |
+| Code | Meaning | User Message |
+|------|---------|--------------|
+| ACODE-IDX-001 | Index build failed | Index build failed. Check file permissions and disk space. |
+| ACODE-IDX-002 | Search query parse error | Invalid search query. Check for unbalanced quotes or invalid operators. |
+| ACODE-IDX-003 | Incremental update failed | Index update failed. Try rebuilding with `acode index rebuild`. |
+| ACODE-IDX-004 | Index file corrupted | Index file is corrupted. Run `acode index rebuild` to fix. |
+| ACODE-IDX-005 | Ignore pattern parse error | Invalid ignore pattern. Check .gitignore and .agentignore syntax. |
+| ACODE-IDX-006 | Index not found | No index found. Run `acode index build` first. |
+| ACODE-IDX-007 | Index version mismatch | Index was created with a different version. Rebuilding... |
+| ACODE-IDX-008 | Search timeout | Search timed out. Try a more specific query or add filters. |
+
+---
 
 ### Implementation Checklist
 
-1. [ ] Create index service
-2. [ ] Implement builder
-3. [ ] Implement search
-4. [ ] Implement ignores
-5. [ ] Implement updates
-6. [ ] Add persistence
-7. [ ] Add CLI commands
-8. [ ] Write tests
+1. [ ] Create domain models (SearchQuery, SearchResult, SearchFilter, IndexStats)
+2. [ ] Create domain interfaces (IIndexService, ITokenizer, ISearchEngine)
+3. [ ] Implement CodeTokenizer with camelCase/snake_case splitting
+4. [ ] Implement IgnoreRuleParser with Git specification compliance
+5. [ ] Implement IgnoreMatcher with pattern matching and negation
+6. [ ] Implement IndexBuilder with file enumeration and tokenization
+7. [ ] Implement IndexStore with SQLite FTS5 backend
+8. [ ] Implement SearchEngine with BM25 ranking
+9. [ ] Implement SearchQueryParser with operators and wildcards
+10. [ ] Implement IncrementalUpdater with change detection
+11. [ ] Implement IndexIntegrityVerifier with checksum validation
+12. [ ] Implement IndexService facade with write locking
+13. [ ] Create IndexCommand CLI with build/update/rebuild/status
+14. [ ] Create SearchCommand CLI with filters and JSON output
+15. [ ] Register services in DI container
+16. [ ] Write unit tests for all components
+17. [ ] Write integration tests for end-to-end flows
+18. [ ] Write performance benchmarks
+
+---
+
+### Validation Checklist
+
+| Requirement | Validation |
+|-------------|------------|
+| Index 1K files < 5s | Run benchmark with 1,000 test files |
+| Search < 100ms | Measure search latency with Stopwatch |
+| Incremental update 10 files < 2s | Modify 10 files and measure update time |
+| BM25 ranking accurate | Compare rankings with expected relevance |
+| Ignore patterns respect .gitignore | Test with node_modules and build outputs |
+| Checksum validates integrity | Corrupt index and verify detection |
+| Concurrent searches safe | Run parallel search load test |
+| JSON output valid | Parse output with System.Text.Json |
+
+---
 
 ### Rollout Plan
 
-1. **Phase 1:** Index building
-2. **Phase 2:** Search
-3. **Phase 3:** Ignores
-4. **Phase 4:** Incremental
-5. **Phase 5:** CLI
+| Phase | Description | Duration |
+|-------|-------------|----------|
+| 1 | Domain models and interfaces | 1 day |
+| 2 | Tokenizer and ignore rules | 2 days |
+| 3 | Index builder with SQLite FTS5 | 3 days |
+| 4 | Search engine with BM25 | 2 days |
+| 5 | Incremental updater | 2 days |
+| 6 | CLI commands | 1 day |
+| 7 | Integration and E2E testing | 2 days |
+| 8 | Performance optimization | 1 day |
 
 ---
 

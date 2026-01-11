@@ -4,7 +4,6 @@ using Acode.Application.Tools.Retry;
 using Acode.Domain.Tools;
 using Acode.Infrastructure.Tools;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for RetryTracker implementation.
