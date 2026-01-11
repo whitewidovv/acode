@@ -438,7 +438,7 @@ For task 002c, focus on:
 ---
 
 ### Gap #13: Documentation - Update User Manual
-**Status**: [ ]
+**Status**: [✅]
 **File to Update**: Update README or create user guide based on spec lines 363-603
 **Why Needed**: Users need documentation on command group configuration
 
@@ -455,7 +455,12 @@ For task 002c, focus on:
 10. Troubleshooting (lines 544-602)
 
 **Success Criteria**: Documentation complete, examples accurate, troubleshooting comprehensive
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- Created `docs/USER-MANUAL-COMMANDS.md` with comprehensive command groups documentation
+- All 10 required sections included (Overview, Syntax, Properties, Platform-Specific, Environment Variables, Timeouts/Retries, Exit Codes, CLI Usage, Best Practices, Troubleshooting)
+- Added FAQ section with 7 common questions
+- Included 3 complete examples (minimal, full-featured, cross-platform)
+- Total: ~850 lines of comprehensive user documentation
 
 ---
 
@@ -485,9 +490,9 @@ Follow TDD strictly - write tests first for each gap:
 ## Completion Criteria
 
 Task 002c is complete when:
-- [ ] All 13 gaps filled
-- [ ] All tests passing (`dotnet test`)
-- [ ] Build succeeds with no warnings
-- [ ] Documentation complete
+- [✅] All 13 gaps filled
+- [✅] All tests passing (`dotnet test`)
+- [✅] Build succeeds with no warnings
+- [✅] Documentation complete
 - [ ] Security audit passed per `docs/AUDIT-GUIDELINES.md`
 - [ ] PR created and ready for review
