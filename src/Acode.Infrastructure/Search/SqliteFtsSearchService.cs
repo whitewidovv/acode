@@ -238,6 +238,46 @@ public sealed class SqliteFtsSearchService : ISearchService
     /// <inheritdoc />
     public async Task<IndexStatus> GetIndexStatusAsync(CancellationToken cancellationToken)
     {
+        // P4.6: Check if conversation_search table exists (AC-126)
+        using (var checkTableCmd = _connection.CreateCommand())
+        {
+            checkTableCmd.CommandText = @"
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type='table' AND name='conversation_search'
+            ";
+
+            var tableExists = Convert.ToInt32(await checkTableCmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+            if (tableExists == 0)
+            {
+                throw new SearchException(
+                    SearchErrorCodes.IndexNotInitialized,
+                    "Search index has not been initialized. The conversation_search table does not exist.",
+                    "Run 'acode search rebuild' to initialize the search index");
+            }
+        }
+
+        // P4.5: Check FTS5 index integrity (AC-125)
+        using (var integrityCmd = _connection.CreateCommand())
+        {
+            integrityCmd.CommandText = "INSERT INTO conversation_search(conversation_search) VALUES('integrity-check')";
+
+            try
+            {
+                await integrityCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            // SQLITE_CORRUPT = 11
+            catch (SqliteException ex) when (ex.SqliteErrorCode == 11)
+            {
+                throw new SearchException(
+                    SearchErrorCodes.IndexCorruption,
+                    "Search index is corrupted and cannot be used.",
+                    "Run 'acode search rebuild' to rebuild the corrupted index");
+            }
+        }
+
+        // Get index statistics
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = @"
             SELECT
