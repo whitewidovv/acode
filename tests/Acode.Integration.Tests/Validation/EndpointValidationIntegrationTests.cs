@@ -11,7 +11,7 @@ namespace Acode.Integration.Tests.Validation;
 /// </summary>
 public class EndpointValidationIntegrationTests
 {
-    [Fact]
+    [SkippableFact]
     public void Integration_LoadDenylistFromFile_AndValidateOpenAi()
     {
         // Arrange
@@ -26,11 +26,9 @@ public class EndpointValidationIntegrationTests
             "data",
             "denylist.json");
 
-        // Skip if file doesn't exist
-        if (!File.Exists(denylistPath))
-        {
-            return;
-        }
+        // Skip test if denylist file doesn't exist (e.g., in certain CI/CD environments)
+        // This provides better visibility in test reports compared to silent return
+        Skip.IfNot(File.Exists(denylistPath), $"Denylist file not found at: {denylistPath}");
 
         var patterns = denylistProvider.LoadFromFile(denylistPath);
         var validator = new EndpointValidator();
