@@ -9,36 +9,37 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "enum": ["1.0.0"],
-      "description": "Schema version following semantic versioning (semver). Only 1.0.0 is currently supported.",
-      "default": "1.0.0"
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Schema version (semver)",
+      "default": "1.0.0",
+      "examples": ["1.0.0", "1.1.0", "2.0.0"]
     },
     "project": {
-      "$ref": "#/definitions/project"
+      "$ref": "#/$defs/project"
     },
     "mode": {
-      "$ref": "#/definitions/mode"
+      "$ref": "#/$defs/mode"
     },
     "model": {
-      "$ref": "#/definitions/model"
+      "$ref": "#/$defs/model"
     },
     "commands": {
-      "$ref": "#/definitions/commands"
+      "$ref": "#/$defs/commands"
     },
     "paths": {
-      "$ref": "#/definitions/paths"
+      "$ref": "#/$defs/paths"
     },
     "ignore": {
-      "$ref": "#/definitions/ignore"
+      "$ref": "#/$defs/ignore"
     },
     "network": {
-      "$ref": "#/definitions/network"
+      "$ref": "#/$defs/network"
     },
     "storage": {
-      "$ref": "#/definitions/storage"
+      "$ref": "#/$defs/storage"
     }
   },
-  "definitions": {
+  "$defs": {
     "project": {
       "type": "object",
       "description": "Project metadata and identification",
@@ -116,7 +117,7 @@
           "examples": ["http://localhost:11434", "http://127.0.0.1:1234"]
         },
         "parameters": {
-          "$ref": "#/definitions/model_parameters"
+          "$ref": "#/$defs/model_parameters"
         },
         "timeout_seconds": {
           "type": "integer",
@@ -163,27 +164,27 @@
       "description": "Command groups for project lifecycle operations",
       "properties": {
         "setup": {
-          "$ref": "#/definitions/command",
+          "$ref": "#/$defs/command",
           "description": "Initialize development environment (install dependencies)"
         },
         "build": {
-          "$ref": "#/definitions/command",
+          "$ref": "#/$defs/command",
           "description": "Compile or bundle the project"
         },
         "test": {
-          "$ref": "#/definitions/command",
+          "$ref": "#/$defs/command",
           "description": "Run test suite"
         },
         "lint": {
-          "$ref": "#/definitions/command",
+          "$ref": "#/$defs/command",
           "description": "Check code quality and style (read-only)"
         },
         "format": {
-          "$ref": "#/definitions/command",
+          "$ref": "#/$defs/command",
           "description": "Auto-format source code (modifies files)"
         },
         "start": {
-          "$ref": "#/definitions/command",
+          "$ref": "#/$defs/command",
           "description": "Run the application"
         }
       },
@@ -204,14 +205,14 @@
                 "type": "string"
               },
               {
-                "$ref": "#/definitions/command_object"
+                "$ref": "#/$defs/command_object"
               }
             ]
           },
           "description": "Array of commands executed in sequence"
         },
         {
-          "$ref": "#/definitions/command_object"
+          "$ref": "#/$defs/command_object"
         }
       ]
     },

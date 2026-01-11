@@ -1,0 +1,7 @@
+# JSON Schema validation dependencies for task-002a
+# Pinned to specific versions to prevent supply-chain attacks
+# Update through controlled dependency management process
+jsonschema==4.21.1  # Draft 2020-12 support (vetted 2024-02)
+pyyaml==6.0.1       # YAML parsing (vetted 2023-07)
+referencing==0.32.1 # Required by jsonschema for $ref resolution (vetted 2024-01)
+pytest==8.0.0       # Test framework (vetted 2024-01)
