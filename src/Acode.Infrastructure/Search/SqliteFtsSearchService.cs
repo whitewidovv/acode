@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Acode.Application.Interfaces;
+using Acode.Domain.Configuration;
 using Acode.Domain.Conversation;
 using Acode.Domain.Models.Inference;
 using Acode.Domain.Search;
@@ -16,16 +17,19 @@ public sealed class SqliteFtsSearchService : ISearchService
     private readonly BM25Ranker _ranker;
     private readonly SnippetGenerator _snippetGenerator;
     private readonly SafeQueryParser _queryParser;
+    private readonly SearchSettings _settings;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqliteFtsSearchService"/> class.
     /// </summary>
     /// <param name="connection">The SQLite database connection.</param>
-    public SqliteFtsSearchService(SqliteConnection connection)
+    /// <param name="settings">Search settings for configurable behavior (optional, defaults applied if null).</param>
+    public SqliteFtsSearchService(SqliteConnection connection, SearchSettings? settings = null)
     {
         _connection = connection ?? throw new ArgumentNullException(nameof(connection));
-        _ranker = new BM25Ranker();
-        _snippetGenerator = new SnippetGenerator();
+        _settings = settings ?? new SearchSettings();
+        _ranker = new BM25Ranker(_settings);
+        _snippetGenerator = new SnippetGenerator(_settings);
         _queryParser = new SafeQueryParser();
     }
 

@@ -1,3 +1,4 @@
+using Acode.Domain.Configuration;
 using Acode.Domain.Search;
 
 namespace Acode.Infrastructure.Search;
@@ -10,6 +11,17 @@ public sealed class BM25Ranker
     private const double K1 = 1.2; // Term frequency saturation parameter
     private const double B = 0.75; // Length normalization parameter
     private const double AvgDocLength = 500; // Average document length estimate
+
+    private readonly SearchSettings _settings;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BM25Ranker"/> class.
+    /// </summary>
+    /// <param name="settings">Search settings for configurable ranking behavior.</param>
+    public BM25Ranker(SearchSettings? settings = null)
+    {
+        _settings = settings ?? new SearchSettings();
+    }
 
     /// <summary>
     /// Calculates BM25 score for a document given a query, with recency boost.
@@ -81,31 +93,6 @@ public sealed class BM25Ranker
     }
 
     /// <summary>
-    /// Calculates recency boost factor based on message age.
-    /// - Less than 24 hours: 1.5x boost.
-    /// - 1-7 days: 1.2x boost.
-    /// - More than 7 days: 1.0x (no boost, no penalty).
-    /// </summary>
-    /// <param name="createdAt">The message creation timestamp.</param>
-    /// <returns>The recency boost multiplier.</returns>
-    private static double CalculateRecencyBoost(DateTime createdAt)
-    {
-        var age = DateTime.UtcNow - createdAt;
-
-        if (age.TotalHours < 24)
-        {
-            return 1.5;
-        }
-
-        if (age.TotalDays <= 7)
-        {
-            return 1.2;
-        }
-
-        return 1.0; // No boost or penalty for older messages
-    }
-
-    /// <summary>
     /// Tokenizes text into lowercase terms, splitting on whitespace and punctuation.
     /// </summary>
     /// <param name="text">The text to tokenize.</param>
@@ -140,5 +127,35 @@ public sealed class BM25Ranker
         }
 
         return terms;
+    }
+
+    /// <summary>
+    /// Calculates recency boost factor based on message age.
+    /// Uses configurable boost multipliers from SearchSettings (AC-054, AC-055).
+    /// </summary>
+    /// <param name="createdAt">The message creation timestamp.</param>
+    /// <returns>The recency boost multiplier.</returns>
+    private double CalculateRecencyBoost(DateTime createdAt)
+    {
+        // AC-055: Check if recency boost is enabled
+        if (!_settings.RecencyBoostEnabled)
+        {
+            return 1.0;
+        }
+
+        var age = DateTime.UtcNow - createdAt;
+
+        // AC-054: Use configured boost multipliers
+        if (age.TotalHours < 24)
+        {
+            return _settings.RecencyBoost24Hours;
+        }
+
+        if (age.TotalDays <= 7)
+        {
+            return _settings.RecencyBoost7Days;
+        }
+
+        return _settings.RecencyBoostDefault;
     }
 }

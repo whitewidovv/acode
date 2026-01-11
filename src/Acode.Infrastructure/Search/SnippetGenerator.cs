@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Acode.Domain.Configuration;
 
 namespace Acode.Infrastructure.Search;
 
@@ -7,8 +8,33 @@ namespace Acode.Infrastructure.Search;
 /// </summary>
 public sealed class SnippetGenerator
 {
-    private const int MaxSnippetLength = 150;
     private const int ContextChars = 80;
+
+    private readonly SearchSettings _settings;
+    private readonly int _maxSnippetLength;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SnippetGenerator"/> class.
+    /// </summary>
+    /// <param name="settings">Search settings for configurable snippet generation.</param>
+    public SnippetGenerator(SearchSettings? settings = null)
+    {
+        _settings = settings ?? new SearchSettings();
+
+        // AC-059: Validate snippet length is within bounds (50-500)
+        var maxLength = _settings.SnippetMaxLength;
+        if (maxLength < _settings.SnippetMinLength)
+        {
+            maxLength = _settings.SnippetMinLength;
+        }
+
+        if (maxLength > _settings.SnippetMaxLengthLimit)
+        {
+            maxLength = _settings.SnippetMaxLengthLimit;
+        }
+
+        _maxSnippetLength = maxLength;
+    }
 
     /// <summary>
     /// Generates a snippet from content with search terms highlighted.
@@ -45,7 +71,7 @@ public sealed class SnippetGenerator
 
         // Extract snippet centered around first match
         var snippetStart = Math.Max(0, firstMatchIndex - ContextChars);
-        var snippetEnd = Math.Min(content.Length, firstMatchIndex + MaxSnippetLength - ContextChars);
+        var snippetEnd = Math.Min(content.Length, firstMatchIndex + _maxSnippetLength - ContextChars);
         var snippet = content.Substring(snippetStart, snippetEnd - snippetStart);
 
         // Highlight all matching terms
@@ -110,12 +136,15 @@ public sealed class SnippetGenerator
     }
 
     /// <summary>
-    /// Highlights query terms in the snippet by wrapping them in mark tags.
+    /// Highlights query terms in the snippet using configurable tags.
     /// </summary>
     /// <param name="snippet">The snippet text.</param>
     /// <param name="queryTerms">The terms to highlight.</param>
     /// <returns>Snippet with highlighted terms.</returns>
-    private static string HighlightTerms(string snippet, List<string> queryTerms)
+    /// <remarks>
+    /// AC-065: Highlight tags are configurable (supports HTML, ANSI, or custom tags).
+    /// </remarks>
+    private string HighlightTerms(string snippet, List<string> queryTerms)
     {
         var result = snippet;
 
@@ -123,7 +152,8 @@ public sealed class SnippetGenerator
         {
             // Use word boundary to match whole words only, case-insensitive
             var pattern = $@"\b({Regex.Escape(term)})\b";
-            result = Regex.Replace(result, pattern, "<mark>$1</mark>", RegexOptions.IgnoreCase);
+            var replacement = $"{_settings.HighlightOpenTag}$1{_settings.HighlightCloseTag}";
+            result = Regex.Replace(result, pattern, replacement, RegexOptions.IgnoreCase);
         }
 
         return result;
@@ -135,14 +165,14 @@ public sealed class SnippetGenerator
     /// <param name="content">The content to truncate.</param>
     /// <param name="startIndex">The starting index.</param>
     /// <returns>Truncated content.</returns>
-    private static string TruncateToMaxLength(string content, int startIndex)
+    private string TruncateToMaxLength(string content, int startIndex)
     {
-        if (content.Length - startIndex <= MaxSnippetLength)
+        if (content.Length - startIndex <= _maxSnippetLength)
         {
             return content.Substring(startIndex);
         }
 
-        var truncated = content.Substring(startIndex, MaxSnippetLength);
+        var truncated = content.Substring(startIndex, _maxSnippetLength);
         return truncated + "...";
     }
 }

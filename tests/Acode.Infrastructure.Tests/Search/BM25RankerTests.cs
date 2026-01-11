@@ -1,3 +1,4 @@
+using Acode.Domain.Configuration;
 using Acode.Domain.Conversation;
 using Acode.Domain.Models.Inference;
 using Acode.Domain.Search;
@@ -262,5 +263,61 @@ public class BM25RankerTests
 
         // Assert
         ranked.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void CalculateScore_WithCustomRecencyBoostSettings_UsesConfiguredValues()
+    {
+        // Arrange - AC-054: Custom boost multipliers
+        var customSettings = new SearchSettings
+        {
+            RecencyBoostEnabled = true,
+            RecencyBoost24Hours = 2.0,  // Custom: 2.0x boost (vs default 1.5x)
+            RecencyBoost7Days = 1.5,    // Custom: 1.5x boost (vs default 1.2x)
+            RecencyBoostDefault = 1.0
+        };
+        var ranker = new BM25Ranker(customSettings);
+        var query = "test";
+        var content = "test content";
+        var veryRecentDate = DateTime.UtcNow.AddHours(-12); // <24 hours
+        var weekOldDate = DateTime.UtcNow.AddDays(-5); // ≤7 days
+        var oldDate = DateTime.UtcNow.AddDays(-30); // >7 days
+
+        // Act
+        var veryRecentScore = ranker.CalculateScore(query, content, veryRecentDate);
+        var weekOldScore = ranker.CalculateScore(query, content, weekOldDate);
+        var oldScore = ranker.CalculateScore(query, content, oldDate);
+
+        // Assert - Custom multipliers applied
+        (veryRecentScore / oldScore).Should().BeApproximately(2.0, 0.1);
+        (weekOldScore / oldScore).Should().BeApproximately(1.5, 0.1);
+    }
+
+    [Fact]
+    public void CalculateScore_WithRecencyBoostDisabled_ReturnsBaseScoreWithoutBoost()
+    {
+        // Arrange - AC-055: Recency boost can be disabled
+        var disabledSettings = new SearchSettings
+        {
+            RecencyBoostEnabled = false,
+            RecencyBoost24Hours = 1.5,
+            RecencyBoost7Days = 1.2,
+            RecencyBoostDefault = 1.0
+        };
+        var ranker = new BM25Ranker(disabledSettings);
+        var query = "test";
+        var content = "test content";
+        var veryRecentDate = DateTime.UtcNow.AddHours(-12); // <24 hours
+        var weekOldDate = DateTime.UtcNow.AddDays(-5); // ≤7 days
+        var oldDate = DateTime.UtcNow.AddDays(-30); // >7 days
+
+        // Act
+        var veryRecentScore = ranker.CalculateScore(query, content, veryRecentDate);
+        var weekOldScore = ranker.CalculateScore(query, content, weekOldDate);
+        var oldScore = ranker.CalculateScore(query, content, oldDate);
+
+        // Assert - All scores identical (no recency boost applied)
+        veryRecentScore.Should().BeApproximately(weekOldScore, 0.01);
+        weekOldScore.Should().BeApproximately(oldScore, 0.01);
     }
 }
