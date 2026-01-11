@@ -13,6 +13,7 @@ public sealed class ConfigCommand : ICommand
 {
     private readonly IConfigLoader _loader;
     private readonly IConfigValidator _validator;
+    private readonly ConfigRedactor _redactor;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigCommand"/> class.
@@ -23,6 +24,7 @@ public sealed class ConfigCommand : ICommand
     {
         _loader = loader ?? throw new ArgumentNullException(nameof(loader));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
+        _redactor = new ConfigRedactor();
     }
 
     /// <inheritdoc/>
@@ -165,6 +167,9 @@ Examples:
 
             var config = await _loader.LoadAsync(repositoryRoot, context.CancellationToken).ConfigureAwait(false);
 
+            // Redact sensitive fields per NFR-002b-06
+            var redactedConfig = _redactor.Redact(config);
+
             if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
             {
                 var options = new JsonSerializerOptions
@@ -174,7 +179,7 @@ Examples:
                     PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
                 };
 
-                var json = JsonSerializer.Serialize(config, options);
+                var json = JsonSerializer.Serialize(redactedConfig, options);
                 await context.Output.WriteLineAsync(json).ConfigureAwait(false);
             }
             else
@@ -184,7 +189,7 @@ Examples:
                     .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
                     .Build();
 
-                var yaml = serializer.Serialize(config);
+                var yaml = serializer.Serialize(redactedConfig);
                 await context.Output.WriteLineAsync(yaml).ConfigureAwait(false);
             }
 

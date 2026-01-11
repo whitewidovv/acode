@@ -267,4 +267,93 @@ public class ConfigCommandTests
         exitCode.Should().Be(ExitCode.InvalidArguments, "unknown subcommand should return invalid arguments");
         output.ToString().Should().Contain("Unknown subcommand", "error message should be shown");
     }
+
+    [Fact]
+    public async Task ExecuteAsync_ShowWithSensitiveData_RedactsSecrets()
+    {
+        // Arrange - NFR-002b-06: Config logging MUST redact sensitive fields
+        var command = new ConfigCommand(_mockLoader, _mockValidator);
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Project = new ProjectConfig { Name = "test-project" },
+            Storage = new StorageConfig
+            {
+                Remote = new StorageRemoteConfig
+                {
+                    Postgres = new StoragePostgresConfig
+                    {
+                        Dsn = "postgresql://user:password@localhost:5432/db"
+                    }
+                }
+            }
+        };
+
+        _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(config);
+
+        var output = new StringWriter();
+        var context = new CommandContext
+        {
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "show" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
+
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+        // Assert
+        exitCode.Should().Be(ExitCode.Success, "show should succeed");
+        var outputText = output.ToString();
+        outputText.Should().Contain("[REDACTED:dsn]", "DSN should be redacted per NFR-002b-08");
+        outputText.Should().NotContain("password", "actual password should not be shown");
+        outputText.Should().Contain("test-project", "non-sensitive fields should be shown");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShowWithSensitiveDataInJson_RedactsSecrets()
+    {
+        // Arrange - NFR-002b-06: Config logging MUST redact sensitive fields
+        var command = new ConfigCommand(_mockLoader, _mockValidator);
+        var config = new AcodeConfig
+        {
+            SchemaVersion = "1.0.0",
+            Storage = new StorageConfig
+            {
+                Remote = new StorageRemoteConfig
+                {
+                    Postgres = new StoragePostgresConfig
+                    {
+                        Dsn = "postgresql://admin:secret123@db.example.com:5432/mydb"
+                    }
+                }
+            }
+        };
+
+        _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(config);
+
+        var output = new StringWriter();
+        var context = new CommandContext
+        {
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "show", "--format", "json" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
+
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+        // Assert
+        exitCode.Should().Be(ExitCode.Success, "show should succeed");
+        var outputText = output.ToString();
+        outputText.Should().Contain("[REDACTED:dsn]", "DSN should be redacted in JSON output");
+        outputText.Should().NotContain("secret123", "actual password should not be in JSON");
+        outputText.Should().NotContain("admin", "actual username should not be in JSON");
+    }
 }
