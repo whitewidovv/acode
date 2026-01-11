@@ -173,4 +173,98 @@ public class EnvironmentInterpolatorTests
         Environment.SetEnvironmentVariable("TestVar", null);
         Environment.SetEnvironmentVariable("TESTVAR", null);
     }
+
+    [Fact]
+    public void Interpolate_WithMaximumReplacements_ShouldHandleLimit()
+    {
+        // Arrange - Test with many variable replacements
+        Environment.SetEnvironmentVariable("VAR1", "value1");
+        Environment.SetEnvironmentVariable("VAR2", "value2");
+        Environment.SetEnvironmentVariable("VAR3", "value3");
+        var interpolator = new EnvironmentInterpolator();
+
+        // Act - Multiple replacements in one string
+        var result = interpolator.Interpolate("${VAR1}-${VAR2}-${VAR3}-${VAR1}");
+
+        // Assert
+        result.Should().Be("value1-value2-value3-value1");
+
+        // Cleanup
+        Environment.SetEnvironmentVariable("VAR1", null);
+        Environment.SetEnvironmentVariable("VAR2", null);
+        Environment.SetEnvironmentVariable("VAR3", null);
+    }
+
+    [Fact]
+    public void Interpolate_WithSpecialCharactersInValue_ShouldPreserveSpecialChars()
+    {
+        // Arrange - Environment variable with special characters
+        Environment.SetEnvironmentVariable("SPECIAL_VAR", "value-with-special:chars@123!#$%");
+        var interpolator = new EnvironmentInterpolator();
+
+        // Act
+        var result = interpolator.Interpolate("prefix-${SPECIAL_VAR}-suffix");
+
+        // Assert
+        result.Should().Be("prefix-value-with-special:chars@123!#$%-suffix");
+
+        // Cleanup
+        Environment.SetEnvironmentVariable("SPECIAL_VAR", null);
+    }
+
+    [Fact]
+    public void Interpolate_WithNestedBraces_ShouldHandleCorrectly()
+    {
+        // Arrange - Test variable name extraction with complex patterns
+        Environment.SetEnvironmentVariable("NESTED", "correct");
+        var interpolator = new EnvironmentInterpolator();
+
+        // Act - ${NESTED} should be extracted correctly
+        var result = interpolator.Interpolate("prefix-${NESTED}-suffix");
+
+        // Assert
+        result.Should().Be("prefix-correct-suffix");
+
+        // Cleanup
+        Environment.SetEnvironmentVariable("NESTED", null);
+    }
+
+    [Fact]
+    public void Interpolate_WithManyVariables_ShouldPerformWell()
+    {
+        // Arrange - Performance test with 20 different variables
+        for (int i = 0; i < 20; i++)
+        {
+            Environment.SetEnvironmentVariable($"PERF_VAR_{i}", $"value_{i}");
+        }
+
+        var interpolator = new EnvironmentInterpolator();
+        var input = string.Join("-", Enumerable.Range(0, 20).Select(i => $"${{PERF_VAR_{i}}}"));
+
+        // Act
+        var result = interpolator.Interpolate(input);
+
+        // Assert
+        var expected = string.Join("-", Enumerable.Range(0, 20).Select(i => $"value_{i}"));
+        result.Should().Be(expected);
+
+        // Cleanup
+        for (int i = 0; i < 20; i++)
+        {
+            Environment.SetEnvironmentVariable($"PERF_VAR_{i}", null);
+        }
+    }
+
+    [Fact]
+    public void Interpolate_WithDefaultValueContainingSpecialChars_ShouldUseDefault()
+    {
+        // Arrange - Default value with special characters
+        var interpolator = new EnvironmentInterpolator();
+
+        // Act - Variable doesn't exist, should use default with special chars
+        var result = interpolator.Interpolate("${NONEXISTENT_VAR:-default:value@123}");
+
+        // Assert
+        result.Should().Be("default:value@123");
+    }
 }
