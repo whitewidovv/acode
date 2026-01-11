@@ -152,8 +152,8 @@ public interface IPathMatcher
 ---
 
 ### Gap #5: GlobMatcher Implementation with Linear-Time Algorithm
-**Status**: [ ]
-**File to Create**: `src/Acode.Domain/Security/PathProtection/GlobMatcher.cs`
+**Status**: [✅]
+**File Created**: `src/Acode.Domain/Security/PathProtection/GlobMatcher.cs`
 **Why Needed**: Spec lines 4637, 4869-4902 require linear-time glob matcher (SECURITY CRITICAL: must not use backtracking regex)
 **Required Features**:
 - Exact path matching
@@ -199,7 +199,7 @@ public sealed class GlobMatcher : IPathMatcher
 ```
 
 **Success Criteria**: All Gap #4 tests pass, including ReDoS protection test (Should_Not_Backtrack)
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Created 305-line GlobMatcher.cs with full linear-time algorithm. All 52 PathMatcherTests pass in 115ms (includes ReDoS protection test passing in <100ms). Fixed infinite loop in ** handling. Commits: feat(task-003b): create GlobMatcher, fix(task-003b): prevent infinite loop. Gap #5 COMPLETE (TDD GREEN phase)
 
 ---
 
