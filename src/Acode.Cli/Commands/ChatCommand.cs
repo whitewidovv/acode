@@ -4,8 +4,10 @@ namespace Acode.Cli.Commands;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Acode.Application.Concurrency;
 using Acode.Application.Conversation.Persistence;
 using Acode.Application.Conversation.Session;
+using Acode.Domain.Worktree;
 
 /// <summary>
 /// Implements chat management CLI commands (CRUSD operations).
@@ -17,6 +19,7 @@ public sealed class ChatCommand : ICommand
     private readonly IRunRepository _runRepository;
     private readonly IMessageRepository _messageRepository;
     private readonly ISessionManager _sessionManager;
+    private readonly IBindingService _bindingService;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatCommand"/> class.
@@ -25,16 +28,19 @@ public sealed class ChatCommand : ICommand
     /// <param name="runRepository">Run repository.</param>
     /// <param name="messageRepository">Message repository.</param>
     /// <param name="sessionManager">Session manager.</param>
+    /// <param name="bindingService">Binding service.</param>
     public ChatCommand(
         IChatRepository chatRepository,
         IRunRepository runRepository,
         IMessageRepository messageRepository,
-        ISessionManager sessionManager)
+        ISessionManager sessionManager,
+        IBindingService bindingService)
     {
         _chatRepository = chatRepository ?? throw new ArgumentNullException(nameof(chatRepository));
         _runRepository = runRepository ?? throw new ArgumentNullException(nameof(runRepository));
         _messageRepository = messageRepository ?? throw new ArgumentNullException(nameof(messageRepository));
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
+        _bindingService = bindingService ?? throw new ArgumentNullException(nameof(bindingService));
     }
 
     /// <inheritdoc/>
@@ -71,6 +77,9 @@ public sealed class ChatCommand : ICommand
             "restore" => await RestoreAsync(context).ConfigureAwait(false),
             "purge" => await PurgeAsync(context).ConfigureAwait(false),
             "status" => await StatusAsync(context).ConfigureAwait(false),
+            "bind" => await BindAsync(context).ConfigureAwait(false),
+            "unbind" => await UnbindAsync(context).ConfigureAwait(false),
+            "bindings" => await BindingsAsync(context).ConfigureAwait(false),
             "--help" or "-h" or "help" => await WriteHelpAsync(context).ConfigureAwait(false),
             _ => await WriteUnknownSubcommandAsync(context, subcommand).ConfigureAwait(false),
         };
@@ -735,6 +744,146 @@ Examples:
             await context.Output.WriteLineAsync($"Last Activity: {chat.UpdatedAt:yyyy-MM-dd HH:mm:ss} UTC").ConfigureAwait(false);
 
             // AC-101: Exit code 0 when chat is active
+            return ExitCode.Success;
+        }
+        catch (Exception ex)
+        {
+            await context.Output.WriteLineAsync($"Error: {ex.Message}").ConfigureAwait(false);
+            return ExitCode.RuntimeError;
+        }
+    }
+
+    /// <summary>
+    /// Binds the specified chat to the current worktree.
+    /// </summary>
+    /// <param name="context">Command context.</param>
+    /// <returns>Exit code indicating success or failure.</returns>
+    private async Task<ExitCode> BindAsync(CommandContext context)
+    {
+        try
+        {
+            if (context.Args.Length < 2)
+            {
+                await context.Output.WriteLineAsync("Error: Missing chat ID.").ConfigureAwait(false);
+                await context.Output.WriteLineAsync("Usage: acode chat bind <chat-id>").ConfigureAwait(false);
+                return ExitCode.InvalidArguments;
+            }
+
+            var chatIdValue = context.Args[1];
+            var chatId = Domain.Conversation.ChatId.From(chatIdValue);
+
+            // Verify chat exists
+            var chat = await _chatRepository.GetByIdAsync(chatId, includeRuns: false, context.CancellationToken).ConfigureAwait(false);
+            if (chat is null || chat.IsDeleted)
+            {
+                await context.Output.WriteLineAsync($"Error: Chat '{chatIdValue}' not found.").ConfigureAwait(false);
+                return ExitCode.GeneralError;
+            }
+
+            // Get current worktree
+            if (!context.Configuration.TryGetValue("CurrentWorktree", out var worktreeObj) || worktreeObj is not WorktreeId worktreeId)
+            {
+                await context.Output.WriteLineAsync("Error: Not in a worktree. Bindings only work within Git worktrees.").ConfigureAwait(false);
+                return ExitCode.GeneralError;
+            }
+
+            // Create binding
+            await _bindingService.CreateBindingAsync(worktreeId, chatId, context.CancellationToken).ConfigureAwait(false);
+
+            await context.Output.WriteLineAsync($"Bound chat '{chat.Title}' to worktree '{worktreeId.Value}'.").ConfigureAwait(false);
+            return ExitCode.Success;
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("already bound", StringComparison.OrdinalIgnoreCase))
+        {
+            await context.Output.WriteLineAsync($"Error: {ex.Message}").ConfigureAwait(false);
+            return ExitCode.GeneralError;
+        }
+        catch (Exception ex)
+        {
+            await context.Output.WriteLineAsync($"Error: {ex.Message}").ConfigureAwait(false);
+            return ExitCode.RuntimeError;
+        }
+    }
+
+    /// <summary>
+    /// Unbinds the current worktree from its associated chat.
+    /// </summary>
+    /// <param name="context">Command context.</param>
+    /// <returns>Exit code indicating success or failure.</returns>
+    private async Task<ExitCode> UnbindAsync(CommandContext context)
+    {
+        try
+        {
+            // Get current worktree
+            if (!context.Configuration.TryGetValue("CurrentWorktree", out var worktreeObj) || worktreeObj is not WorktreeId worktreeId)
+            {
+                await context.Output.WriteLineAsync("Error: Not in a worktree. Bindings only work within Git worktrees.").ConfigureAwait(false);
+                return ExitCode.GeneralError;
+            }
+
+            // Check if bound
+            var boundChatId = await _bindingService.GetBoundChatAsync(worktreeId, context.CancellationToken).ConfigureAwait(false);
+            if (boundChatId is null)
+            {
+                await context.Output.WriteLineAsync($"Error: Worktree '{worktreeId.Value}' is not bound to any chat.").ConfigureAwait(false);
+                return ExitCode.GeneralError;
+            }
+
+            // Check for --force flag
+            var hasForceFlag = context.Args.Any(arg => arg.Equals("--force", StringComparison.OrdinalIgnoreCase) || arg.Equals("-f", StringComparison.OrdinalIgnoreCase));
+
+            if (!hasForceFlag)
+            {
+                await context.Output.WriteLineAsync("Error: Use --force to unbind without confirmation.").ConfigureAwait(false);
+                await context.Output.WriteLineAsync("Usage: acode chat unbind --force").ConfigureAwait(false);
+                return ExitCode.InvalidArguments;
+            }
+
+            // Unbind
+            await _bindingService.DeleteBindingAsync(worktreeId, context.CancellationToken).ConfigureAwait(false);
+
+            await context.Output.WriteLineAsync($"Unbound worktree '{worktreeId.Value}' from chat.").ConfigureAwait(false);
+            return ExitCode.Success;
+        }
+        catch (Exception ex)
+        {
+            await context.Output.WriteLineAsync($"Error: {ex.Message}").ConfigureAwait(false);
+            return ExitCode.RuntimeError;
+        }
+    }
+
+    /// <summary>
+    /// Lists all worktree-to-chat bindings.
+    /// </summary>
+    /// <param name="context">Command context.</param>
+    /// <returns>Exit code indicating success or failure.</returns>
+    private async Task<ExitCode> BindingsAsync(CommandContext context)
+    {
+        try
+        {
+            var bindings = await _bindingService.ListAllBindingsAsync(context.CancellationToken).ConfigureAwait(false);
+
+            if (bindings.Count == 0)
+            {
+                await context.Output.WriteLineAsync("No bindings found.").ConfigureAwait(false);
+                return ExitCode.Success;
+            }
+
+            await context.Output.WriteLineAsync($"Worktree Bindings ({bindings.Count}):").ConfigureAwait(false);
+            await context.Output.WriteLineAsync(string.Empty).ConfigureAwait(false);
+
+            foreach (var binding in bindings)
+            {
+                // Get chat title
+                var chat = await _chatRepository.GetByIdAsync(binding.ChatId, includeRuns: false, context.CancellationToken).ConfigureAwait(false);
+                var chatTitle = chat?.Title ?? "(deleted)";
+
+                await context.Output.WriteLineAsync($"  {binding.WorktreeId.Value}").ConfigureAwait(false);
+                await context.Output.WriteLineAsync($"    -> Chat: {chatTitle} ({binding.ChatId.Value})").ConfigureAwait(false);
+                await context.Output.WriteLineAsync($"    -> Created: {binding.CreatedAt:yyyy-MM-dd HH:mm:ss} UTC").ConfigureAwait(false);
+                await context.Output.WriteLineAsync(string.Empty).ConfigureAwait(false);
+            }
+
             return ExitCode.Success;
         }
         catch (Exception ex)

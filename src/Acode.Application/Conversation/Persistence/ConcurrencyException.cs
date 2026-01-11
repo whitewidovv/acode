@@ -15,6 +15,7 @@ public sealed class ConcurrencyException : Exception
     public ConcurrencyException()
         : base("A concurrency conflict occurred. The entity was modified by another process.")
     {
+        ErrorCode = "ACODE-CONV-DATA-006";
     }
 
     /// <summary>
@@ -24,6 +25,7 @@ public sealed class ConcurrencyException : Exception
     public ConcurrencyException(string message)
         : base(message)
     {
+        ErrorCode = "ACODE-CONV-DATA-006";
     }
 
     /// <summary>
@@ -34,5 +36,11 @@ public sealed class ConcurrencyException : Exception
     public ConcurrencyException(string message, Exception innerException)
         : base(message, innerException)
     {
+        ErrorCode = "ACODE-CONV-DATA-006";
     }
+
+    /// <summary>
+    /// Gets the error code for this exception.
+    /// </summary>
+    public string ErrorCode { get; }
 }

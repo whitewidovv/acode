@@ -405,7 +405,7 @@ public sealed class SqliteRunRepositoryTests : IDisposable
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO chats (id, title, tags, worktree_id, is_deleted, deleted_at,
+            INSERT INTO conv_chats (id, title, tags, worktree_id, is_deleted, deleted_at,
                               sync_status, version, created_at, updated_at)
             VALUES (@Id, @Title, '[]', NULL, 0, NULL, 'Pending', 1, @CreatedAt, @UpdatedAt)";
 

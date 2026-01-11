@@ -132,7 +132,7 @@ public sealed class SqliteChatRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE chats SET version = 2 WHERE id = @id";
+            command.CommandText = "UPDATE conv_chats SET version = 2 WHERE id = @id";
             command.Parameters.AddWithValue("@id", chat.Id.Value);
             await command.ExecuteNonQueryAsync();
         }
@@ -385,7 +385,7 @@ public sealed class SqliteChatRepositoryTests : IDisposable
             await connection.OpenAsync();
             using var command = connection.CreateCommand();
             command.CommandText = @"
-                UPDATE chats
+                UPDATE conv_chats
                 SET is_deleted = 1, deleted_at = @OldDate
                 WHERE id = @OldId";
             command.Parameters.AddWithValue("@OldId", oldChat.Id.Value);

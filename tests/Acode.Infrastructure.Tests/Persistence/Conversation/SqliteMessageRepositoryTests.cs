@@ -2,6 +2,7 @@
 namespace Acode.Infrastructure.Tests.Persistence.Conversation;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -298,6 +299,110 @@ public sealed class SqliteMessageRepositoryTests : IDisposable
         retrieved!.SyncStatus.Should().Be(SyncStatus.Conflict);
     }
 
+    [Fact]
+    public async Task AppendAsync_AddsMessageToRun()
+    {
+        // Arrange
+        var (chatId, runId) = await CreateTestChatAndRunAsync();
+        var message = Message.Create(runId, "user", "Test message");
+
+        // Act
+        await _repository.AppendAsync(runId, message, CancellationToken.None);
+
+        // Assert
+        var retrieved = await _repository.GetByIdAsync(message.Id, CancellationToken.None);
+        retrieved.Should().NotBeNull();
+        retrieved!.Id.Should().Be(message.Id);
+        retrieved.RunId.Should().Be(runId);
+        retrieved.Role.ToString().Should().Be("user");
+        retrieved.Content.Should().Be("Test message");
+        retrieved.SequenceNumber.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AppendAsync_AutoAssignsSequenceNumber()
+    {
+        // Arrange
+        var (chatId, runId) = await CreateTestChatAndRunAsync();
+        var message1 = Message.Create(runId, "user", "First message");
+        var message2 = Message.Create(runId, "assistant", "Second message");
+        var message3 = Message.Create(runId, "user", "Third message");
+
+        // Act
+        await _repository.AppendAsync(runId, message1, CancellationToken.None);
+        await _repository.AppendAsync(runId, message2, CancellationToken.None);
+        await _repository.AppendAsync(runId, message3, CancellationToken.None);
+
+        // Assert
+        var messages = await _repository.ListByRunAsync(runId, CancellationToken.None);
+        messages.Should().HaveCount(3);
+        messages[0].SequenceNumber.Should().Be(1);
+        messages[1].SequenceNumber.Should().Be(2);
+        messages[2].SequenceNumber.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task BulkCreateAsync_InsertsMultipleMessages()
+    {
+        // Arrange
+        var (chatId, runId) = await CreateTestChatAndRunAsync();
+        var messages = new List<Message>
+        {
+            Message.Create(runId, "user", "Message 1"),
+            Message.Create(runId, "assistant", "Message 2"),
+            Message.Create(runId, "user", "Message 3"),
+            Message.Create(runId, "assistant", "Message 4"),
+            Message.Create(runId, "user", "Message 5")
+        };
+
+        // Act
+        await _repository.BulkCreateAsync(messages, CancellationToken.None);
+
+        // Assert
+        var retrieved = await _repository.ListByRunAsync(runId, CancellationToken.None);
+        retrieved.Should().HaveCount(5);
+        retrieved[0].Content.Should().Be("Message 1");
+        retrieved[1].Content.Should().Be("Message 2");
+        retrieved[2].Content.Should().Be("Message 3");
+        retrieved[3].Content.Should().Be("Message 4");
+        retrieved[4].Content.Should().Be("Message 5");
+    }
+
+    [Fact]
+    public async Task BulkCreateAsync_AssignsSequenceNumbersCorrectly()
+    {
+        // Arrange
+        var (chatId, runId) = await CreateTestChatAndRunAsync();
+        var messages = new List<Message>
+        {
+            Message.Create(runId, "user", "Message 1"),
+            Message.Create(runId, "assistant", "Message 2"),
+            Message.Create(runId, "user", "Message 3")
+        };
+
+        // Act
+        await _repository.BulkCreateAsync(messages, CancellationToken.None);
+
+        // Assert
+        var retrieved = await _repository.ListByRunAsync(runId, CancellationToken.None);
+        retrieved.Should().HaveCount(3);
+        retrieved[0].SequenceNumber.Should().Be(1);
+        retrieved[1].SequenceNumber.Should().Be(2);
+        retrieved[2].SequenceNumber.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task BulkCreateAsync_WithEmptyList_DoesNothing()
+    {
+        // Arrange
+        var emptyList = new List<Message>();
+
+        // Act
+        await _repository.BulkCreateAsync(emptyList, CancellationToken.None);
+
+        // Assert - should not throw
+    }
+
     private async Task<(ChatId ChatId, RunId RunId)> CreateTestChatAndRunAsync()
     {
         var chatId = ChatId.NewId();
@@ -309,7 +414,7 @@ public sealed class SqliteMessageRepositoryTests : IDisposable
         // Create chat
         using var chatCmd = conn.CreateCommand();
         chatCmd.CommandText = @"
-            INSERT INTO chats (id, title, tags, worktree_id, is_deleted, deleted_at,
+            INSERT INTO conv_chats (id, title, tags, worktree_id, is_deleted, deleted_at,
                               sync_status, version, created_at, updated_at)
             VALUES (@Id, @Title, '[]', NULL, 0, NULL, 'Pending', 1, @CreatedAt, @UpdatedAt)";
         chatCmd.Parameters.AddWithValue("@Id", chatId.Value);
@@ -321,7 +426,7 @@ public sealed class SqliteMessageRepositoryTests : IDisposable
         // Create run
         using var runCmd = conn.CreateCommand();
         runCmd.CommandText = @"
-            INSERT INTO runs (id, chat_id, model_id, status, started_at, completed_at,
+            INSERT INTO conv_runs (id, chat_id, model_id, status, started_at, completed_at,
                              tokens_in, tokens_out, sequence_number, error_message, sync_status)
             VALUES (@Id, @ChatId, @ModelId, @Status, @StartedAt, NULL, 0, 0, 1, NULL, 'Pending')";
         runCmd.Parameters.AddWithValue("@Id", runId.Value);

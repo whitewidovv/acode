@@ -1,0 +1,34 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+
+    <!-- Suppress CA2007 for benchmark projects - BenchmarkDotNet handles context correctly -->
+    <!-- Suppress CS1591 (XML comments), SA1615 (return documentation), SA1629 (period) for benchmark methods -->
+    <NoWarn>CA2007;CS1591;SA1615;SA1629</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="System.Data.SQLite.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Acode.Domain\Acode.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Acode.Application\Acode.Application.csproj" />
+    <ProjectReference Include="..\..\src\Acode.Infrastructure\Acode.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\src\Acode.Infrastructure\Persistence\Conversation\Migrations\*.sql">
+      <Link>Migrations\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
