@@ -297,14 +297,21 @@ schema_version: ""2.0.0""
         try
         {
             // Create YAML with 21 levels of nesting (exceeds limit of 20)
-            var deeplyNestedYaml = "schema_version: \"1.0.0\"\n";
+            var deeplyNestedYamlBuilder = new System.Text.StringBuilder("schema_version: \"1.0.0\"\n");
             for (var i = 0; i < 21; i++)
             {
-                deeplyNestedYaml += new string(' ', i * 2) + $"level{i}:\n";
+                deeplyNestedYamlBuilder
+                    .Append(new string(' ', i * 2))
+                    .Append("level")
+                    .Append(i)
+                    .Append(":\n");
             }
 
-            deeplyNestedYaml += new string(' ', 21 * 2) + "value: \"too deep\"";
+            deeplyNestedYamlBuilder
+                .Append(new string(' ', 21 * 2))
+                .Append("value: \"too deep\"");
 
+            var deeplyNestedYaml = deeplyNestedYamlBuilder.ToString();
             await File.WriteAllTextAsync(tempFile, deeplyNestedYaml).ConfigureAwait(true);
 
             // Act & Assert
