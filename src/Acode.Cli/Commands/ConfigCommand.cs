@@ -54,6 +54,7 @@ public sealed class ConfigCommand : ICommand
         {
             "validate" => await ValidateAsync(context, repositoryRoot).ConfigureAwait(false),
             "show" => await ShowAsync(context, repositoryRoot).ConfigureAwait(false),
+            "init" => await InitAsync(context, repositoryRoot).ConfigureAwait(false),
             _ => await WriteUnknownSubcommandAsync(context, subcommand).ConfigureAwait(false),
         };
     }
@@ -64,10 +65,12 @@ public sealed class ConfigCommand : ICommand
         return @"Usage: acode config <subcommand> [options]
 
 Subcommands:
+  init        Create a minimal configuration file
   validate    Validate the configuration file
   show        Display the configuration file
 
 Examples:
+  acode config init
   acode config validate
   acode config show
   acode config show --format json";
@@ -209,6 +212,59 @@ Examples:
         catch (Exception ex)
         {
             await context.Output.WriteLineAsync($"Error: {ex.Message}").ConfigureAwait(false);
+            return ExitCode.RuntimeError;
+        }
+    }
+
+    private async Task<ExitCode> InitAsync(CommandContext context, string repositoryRoot)
+    {
+        try
+        {
+            var agentDir = Path.Combine(repositoryRoot, ".agent");
+            var configPath = Path.Combine(agentDir, "config.yml");
+
+            // Check if config already exists
+            if (File.Exists(configPath))
+            {
+                await context.Output.WriteLineAsync("Error: Configuration file already exists at .agent/config.yml").ConfigureAwait(false);
+                return ExitCode.GeneralError;
+            }
+
+            // Create .agent directory if it doesn't exist
+            if (!Directory.Exists(agentDir))
+            {
+                Directory.CreateDirectory(agentDir);
+            }
+
+            // Create minimal configuration
+            var minimalConfig = @"schema_version: ""1.0.0""
+
+# This is a minimal Acode configuration file.
+# For full configuration options, see: https://github.com/whitewidovv/acode
+
+# project:
+#   name: my-project
+#   type: dotnet
+
+# mode:
+#   default: local-only
+#   allow_burst: false
+
+# model:
+#   provider: ollama
+#   name: codellama:7b
+";
+
+            await File.WriteAllTextAsync(configPath, minimalConfig).ConfigureAwait(false);
+
+            await context.Output.WriteLineAsync("Created .agent/config.yml with minimal configuration").ConfigureAwait(false);
+            await context.Output.WriteLineAsync("Edit the file to customize settings for your project.").ConfigureAwait(false);
+
+            return ExitCode.Success;
+        }
+        catch (Exception ex)
+        {
+            await context.Output.WriteLineAsync($"Error: Failed to create configuration file: {ex.Message}").ConfigureAwait(false);
             return ExitCode.RuntimeError;
         }
     }

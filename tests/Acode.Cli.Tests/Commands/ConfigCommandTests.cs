@@ -356,4 +356,92 @@ public class ConfigCommandTests
         outputText.Should().NotContain("secret123", "actual password should not be in JSON");
         outputText.Should().NotContain("admin", "actual username should not be in JSON");
     }
+
+    [Fact]
+    public async Task ExecuteAsync_Init_CreatesMinimalConfig()
+    {
+        // Arrange
+        var command = new ConfigCommand(_mockLoader, _mockValidator);
+        var output = new StringWriter();
+        var tempDir = Path.Combine(Path.GetTempPath(), $"acode-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(tempDir);
+        var originalDir = Directory.GetCurrentDirectory();
+
+        try
+        {
+            Directory.SetCurrentDirectory(tempDir);
+
+            var context = new CommandContext
+            {
+                Configuration = new Dictionary<string, object>(),
+                Args = new[] { "init" },
+                Formatter = new ConsoleFormatter(output, enableColors: false),
+                Output = output,
+                CancellationToken = CancellationToken.None,
+            };
+
+            // Act
+            var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+            // Assert
+            exitCode.Should().Be(ExitCode.Success, "init should succeed");
+            var configPath = Path.Combine(tempDir, ".agent", "config.yml");
+            File.Exists(configPath).Should().BeTrue("config file should be created");
+
+            var content = await File.ReadAllTextAsync(configPath).ConfigureAwait(true);
+            content.Should().Contain("schema_version:", "minimal config should include schema version");
+            output.ToString().Should().Contain("Created", "success message should be shown");
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(originalDir);
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_InitWhenConfigExists_ReturnsError()
+    {
+        // Arrange
+        var command = new ConfigCommand(_mockLoader, _mockValidator);
+        var output = new StringWriter();
+        var tempDir = Path.Combine(Path.GetTempPath(), $"acode-test-{Guid.NewGuid()}");
+        var agentDir = Path.Combine(tempDir, ".agent");
+        Directory.CreateDirectory(agentDir);
+        var configPath = Path.Combine(agentDir, "config.yml");
+        await File.WriteAllTextAsync(configPath, "schema_version: \"1.0.0\"").ConfigureAwait(true);
+        var originalDir = Directory.GetCurrentDirectory();
+
+        try
+        {
+            Directory.SetCurrentDirectory(tempDir);
+
+            var context = new CommandContext
+            {
+                Configuration = new Dictionary<string, object>(),
+                Args = new[] { "init" },
+                Formatter = new ConsoleFormatter(output, enableColors: false),
+                Output = output,
+                CancellationToken = CancellationToken.None,
+            };
+
+            // Act
+            var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+            // Assert
+            exitCode.Should().Be(ExitCode.GeneralError, "init should fail when config already exists");
+            output.ToString().Should().Contain("already exists", "error message should indicate file exists");
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(originalDir);
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
 }
