@@ -792,6 +792,150 @@ public sealed class SearchE2ETests : IAsyncLifetime
         results.Should().NotBeNull();
     }
 
+    // P7.4: EDGE CASE TESTS FOR QUERY HANDLING (AC-026 to AC-031)
+    [Fact]
+    public async Task Should_Search_MultiTerm_WithImplicitOR()
+    {
+        // Arrange - AC-026: Multi-term search returns messages containing any term (OR default)
+        var chat = Chat.Create("Query Test");
+        await _chatRepository!.CreateAsync(chat, CancellationToken.None).ConfigureAwait(true);
+
+        var run = Run.Create(chat.Id, "llama3");
+        await _runRepository!.CreateAsync(run, CancellationToken.None).ConfigureAwait(true);
+
+        var message1 = Message.Create(run.Id, "user", "JWT only", 1);
+        var message2 = Message.Create(run.Id, "user", "validation only", 2);
+        var message3 = Message.Create(run.Id, "user", "JWT and validation together", 3);
+
+        await _messageRepository!.CreateAsync(message1, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message2, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message3, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search with multiple terms (implicit OR)
+        var query = new SearchQuery
+        {
+            QueryText = "JWT validation",
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - All 3 messages returned (OR logic)
+        results.Results.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task Should_Search_PhraseWithQuotes_ExactMatch()
+    {
+        // Arrange - AC-027: Phrase search with quotes returns exact phrase matches only
+        var chat = Chat.Create("Phrase Test");
+        await _chatRepository!.CreateAsync(chat, CancellationToken.None).ConfigureAwait(true);
+
+        var run = Run.Create(chat.Id, "llama3");
+        await _runRepository!.CreateAsync(run, CancellationToken.None).ConfigureAwait(true);
+
+        var message1 = Message.Create(run.Id, "user", "JWT token validation is important", 1);
+        var message2 = Message.Create(run.Id, "user", "token JWT validation separately", 2);
+
+        await _messageRepository!.CreateAsync(message1, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message2, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search with exact phrase
+        var query = new SearchQuery
+        {
+            QueryText = "\"JWT token\"",
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - Only exact phrase match returned
+        results.Results.Should().HaveCount(1);
+        results.Results[0].Snippet.Should().Contain("JWT token validation");
+    }
+
+    [Fact]
+    public async Task Should_Search_CaseInsensitive()
+    {
+        // Arrange - AC-028: Case-insensitive search (searching "JWT" finds "jwt")
+        var chat = Chat.Create("Case Test");
+        await _chatRepository!.CreateAsync(chat, CancellationToken.None).ConfigureAwait(true);
+
+        var run = Run.Create(chat.Id, "llama3");
+        await _runRepository!.CreateAsync(run, CancellationToken.None).ConfigureAwait(true);
+
+        var message1 = Message.Create(run.Id, "user", "jwt authentication lowercase", 1);
+        var message2 = Message.Create(run.Id, "user", "JWT authentication uppercase", 2);
+        var message3 = Message.Create(run.Id, "user", "Jwt authentication mixed", 3);
+
+        await _messageRepository!.CreateAsync(message1, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message2, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message3, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search with uppercase
+        var query = new SearchQuery
+        {
+            QueryText = "JWT",
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - All 3 messages returned regardless of case
+        results.Results.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task Should_Search_WithStemming()
+    {
+        // Arrange - AC-029: Stemmed search (searching "authenticate" finds "authenticated")
+        var chat = Chat.Create("Stemming Test");
+        await _chatRepository!.CreateAsync(chat, CancellationToken.None).ConfigureAwait(true);
+
+        var run = Run.Create(chat.Id, "llama3");
+        await _runRepository!.CreateAsync(run, CancellationToken.None).ConfigureAwait(true);
+
+        var message = Message.Create(run.Id, "user", "User authenticated successfully", 1);
+        await _messageRepository!.CreateAsync(message, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search with base form "authenticate"
+        var query = new SearchQuery
+        {
+            QueryText = "authenticate",
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - Message with "authenticated" returned (stem match via porter stemmer)
+        results.Results.Should().HaveCount(1);
+        results.Results[0].Snippet.Should().Contain("authenticated");
+    }
+
+    [Fact]
+    public async Task Should_ReturnError_ForEmptyQuery()
+    {
+        // Arrange - AC-031: Empty query returns error with helpful message
+        var query = new SearchQuery
+        {
+            QueryText = string.Empty,
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        // Act & Assert - Empty query throws ArgumentException
+        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+        {
+            await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+        }).ConfigureAwait(true);
+
+        exception.Message.Should().Contain("empty");
+    }
+
     private async Task ApplySchemaAsync()
     {
         // Apply minimal schema needed for testing
