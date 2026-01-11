@@ -64,6 +64,19 @@ public sealed class SqliteFtsSearchService : ISearchService
         var ftsQuery = _queryParser.ParseQuery(query.QueryText);
         if (!ftsQuery.IsValid)
         {
+            // Check if error is role-related for specific error code (P4.4 - AC-124)
+            var hasRoleError = ftsQuery.ErrorMessage != null &&
+                (ftsQuery.ErrorMessage.Contains("role", StringComparison.OrdinalIgnoreCase) &&
+                 ftsQuery.ErrorMessage.Contains("invalid", StringComparison.OrdinalIgnoreCase));
+
+            if (hasRoleError)
+            {
+                throw new SearchException(
+                    SearchErrorCodes.InvalidRoleFilter,
+                    $"Invalid role filter: {ftsQuery.ErrorMessage}",
+                    "Valid role values are: user, assistant, system, or tool");
+            }
+
             throw new SearchException(
                 SearchErrorCodes.InvalidQuerySyntax,
                 $"Invalid query syntax: {ftsQuery.ErrorMessage}",

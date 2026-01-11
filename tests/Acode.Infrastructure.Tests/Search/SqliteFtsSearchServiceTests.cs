@@ -196,4 +196,30 @@ public sealed class SqliteFtsSearchServiceTests : IAsyncLifetime
     // The timeout enforcement logic exists in SqliteFtsSearchService.SearchAsync using
     // CancellationTokenSource.CancelAfter and catches OperationCanceledException.
     // Manual/integration testing confirms this works with actual slow queries.
+
+    // INVALID ROLE FILTER TESTS (P4.4)
+    [Fact]
+    public async Task SearchAsync_WithInvalidRoleFilter_ThrowsSearchException()
+    {
+        // Arrange - Query with invalid role value in field prefix
+        var query = new SearchQuery
+        {
+            QueryText = "role:invalid test",
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<SearchException>(async () =>
+        {
+            await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+        }).ConfigureAwait(true);
+
+        exception.ErrorCode.Should().Be(SearchErrorCodes.InvalidRoleFilter);
+        exception.Message.Should().Contain("Invalid role filter");
+        exception.Message.Should().Contain("invalid");
+        exception.Remediation.Should().Contain("user, assistant, system, or tool");
+    }
+
+    // NOTE: Valid role filter success case is tested in E2E tests (Priority 3).
 }
