@@ -320,4 +320,52 @@ public class BM25RankerTests
         veryRecentScore.Should().BeApproximately(weekOldScore, 0.01);
         weekOldScore.Should().BeApproximately(oldScore, 0.01);
     }
+
+    [Fact]
+    public void CalculateScore_WithTitleMatch_Applies2xBoost()
+    {
+        // Arrange - AC-048: Title matches weighted 2x over body matches
+        var ranker = new BM25Ranker();
+        var query = "authentication";
+        var createdAt = DateTime.UtcNow.AddDays(-10);
+
+        // Same term in title vs body
+        var title = "authentication guide";
+        var contentWithoutTerm = "This is a guide to securing your application";
+
+        // Act - Calculate score with title match
+        var scoreWithTitleMatch = ranker.CalculateScore(query, title, contentWithoutTerm, createdAt);
+
+        // Calculate score with same term only in body
+        var titleWithoutTerm = "Security guide";
+        var contentWithTerm = "authentication guide for your application";
+        var scoreWithBodyMatch = ranker.CalculateScore(query, titleWithoutTerm, contentWithTerm, createdAt);
+
+        // Assert - Title match should be approximately 2x body match
+        (scoreWithTitleMatch / scoreWithBodyMatch).Should().BeApproximately(2.0, 0.2);
+    }
+
+    [Fact]
+    public void CalculateScore_WithBothTitleAndBodyMatch_CombinesScores()
+    {
+        // Arrange - AC-048: Title and body matches should combine
+        var ranker = new BM25Ranker();
+        var query = "authentication";
+        var createdAt = DateTime.UtcNow.AddDays(-10);
+
+        // Both title and body have the term
+        var title = "authentication guide";
+        var content = "This authentication system is secure";
+
+        // Only body has the term
+        var titleWithoutTerm = "Security guide";
+        var contentWithTerm = "This authentication system is secure";
+
+        // Act
+        var scoreWithBoth = ranker.CalculateScore(query, title, content, createdAt);
+        var scoreWithBodyOnly = ranker.CalculateScore(query, titleWithoutTerm, contentWithTerm, createdAt);
+
+        // Assert - Combined score should be higher than body-only
+        scoreWithBoth.Should().BeGreaterThan(scoreWithBodyOnly);
+    }
 }

@@ -139,8 +139,8 @@ public sealed class SqliteFtsSearchService : ISearchService
                     var createdAt = DateTime.Parse(reader.GetString(4));
                     var content = reader.GetString(5);
 
-                    // Calculate BM25 score with recency boost
-                    var score = _ranker.CalculateScore(query.QueryText, content, createdAt);
+                    // Calculate BM25 score with title boost (AC-048) and recency boost
+                    var score = _ranker.CalculateScore(query.QueryText, chatTitle, content, createdAt);
 
                     // Generate snippet with highlighted terms
                     var snippet = _snippetGenerator.GenerateSnippet(content, query.QueryText);

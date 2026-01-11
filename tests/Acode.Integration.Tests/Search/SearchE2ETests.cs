@@ -1011,6 +1011,51 @@ public sealed class SearchE2ETests : IAsyncLifetime
         results.Results[1].CreatedAt.Should().BeBefore(results.Results[2].CreatedAt);
     }
 
+    // P7.9: TESTS FOR TITLE BOOST (AC-048)
+    [Fact]
+    public async Task Should_BoostTitleMatches_2xOverBodyMatches()
+    {
+        // Arrange - AC-048: Title matches weighted 2x over body matches
+        var chat1 = Chat.Create("authentication guide"); // Title contains term
+        var chat2 = Chat.Create("Security guide"); // Title does NOT contain term
+        await _chatRepository!.CreateAsync(chat1, CancellationToken.None).ConfigureAwait(true);
+        await _chatRepository!.CreateAsync(chat2, CancellationToken.None).ConfigureAwait(true);
+
+        var run1 = Run.Create(chat1.Id, "llama3");
+        var run2 = Run.Create(chat2.Id, "llama3");
+        await _runRepository!.CreateAsync(run1, CancellationToken.None).ConfigureAwait(true);
+        await _runRepository!.CreateAsync(run2, CancellationToken.None).ConfigureAwait(true);
+
+        // Chat1: Term in title, NOT in body
+        var message1 = Message.Create(run1.Id, "user", "This is a general guide", 1);
+
+        // Chat2: Term NOT in title, but in body
+        var message2 = Message.Create(run2.Id, "user", "This is an authentication guide", 2);
+
+        await _messageRepository!.CreateAsync(message1, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message2, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search for "authentication"
+        var query = new SearchQuery
+        {
+            QueryText = "authentication",
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - Title match should score higher than body match (2x boost)
+        results.Results.Should().HaveCount(2);
+        results.Results[0].ChatTitle.Should().Be("authentication guide", "title match should be ranked first due to 2x boost");
+        results.Results[1].ChatTitle.Should().Be("Security guide");
+
+        // Verify scores: title match score should be roughly 2x body match score
+        var titleMatchScore = results.Results[0].Score;
+        var bodyMatchScore = results.Results[1].Score;
+        titleMatchScore.Should().BeGreaterThan(bodyMatchScore);
+    }
+
     private async Task ApplySchemaAsync()
     {
         // Apply minimal schema needed for testing

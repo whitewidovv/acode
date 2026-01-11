@@ -32,49 +32,46 @@ public sealed class BM25Ranker
     /// <returns>The BM25 score with recency boost applied.</returns>
     public double CalculateScore(string query, string content, DateTime createdAt)
     {
-        if (string.IsNullOrWhiteSpace(query) || string.IsNullOrWhiteSpace(content))
+        // Delegate to title-aware overload with empty title
+        return CalculateScore(query, string.Empty, content, createdAt);
+    }
+
+    /// <summary>
+    /// Calculates BM25 score for a document given a query, with title boost and recency boost.
+    /// AC-048: Title matches are weighted 2x over body matches.
+    /// </summary>
+    /// <param name="query">The search query text.</param>
+    /// <param name="title">The document title.</param>
+    /// <param name="content">The document content to score.</param>
+    /// <param name="createdAt">The document creation timestamp.</param>
+    /// <returns>The BM25 score with title boost and recency boost applied.</returns>
+    public double CalculateScore(string query, string title, string content, DateTime createdAt)
+    {
+        if (string.IsNullOrWhiteSpace(query))
         {
             return 0;
         }
 
         var queryTerms = Tokenize(query);
-        var contentTerms = Tokenize(content);
-        var contentLength = contentTerms.Count;
-
-        if (queryTerms.Count == 0 || contentTerms.Count == 0)
+        if (queryTerms.Count == 0)
         {
             return 0;
         }
 
-        // Calculate term frequencies in content
-        var termFrequencies = new Dictionary<string, int>();
-        foreach (var term in contentTerms)
+        double score = 0;
+
+        // Calculate title score with 2x weight (AC-048)
+        if (!string.IsNullOrWhiteSpace(title))
         {
-            if (termFrequencies.ContainsKey(term))
-            {
-                termFrequencies[term]++;
-            }
-            else
-            {
-                termFrequencies[term] = 1;
-            }
+            var titleScore = CalculateFieldScore(queryTerms, title);
+            score += titleScore * 2.0; // Title boost: 2x weight
         }
 
-        // Calculate BM25 score
-        double score = 0;
-        foreach (var queryTerm in queryTerms.Distinct())
+        // Calculate body score with 1x weight
+        if (!string.IsNullOrWhiteSpace(content))
         {
-            if (termFrequencies.TryGetValue(queryTerm, out var termFreq))
-            {
-                // BM25 formula: IDF * ((f(qi, D) * (k1 + 1)) / (f(qi, D) + k1 * (1 - b + b * |D| / avgdl)))
-                // Simplified IDF (assumes query terms are reasonably rare)
-                var idf = 1.0; // Simplified - in full implementation would use document frequency
-
-                var numerator = termFreq * (K1 + 1);
-                var denominator = termFreq + (K1 * (1 - B + (B * contentLength / AvgDocLength)));
-
-                score += idf * (numerator / denominator);
-            }
+            var bodyScore = CalculateFieldScore(queryTerms, content);
+            score += bodyScore;
         }
 
         // Apply recency boost
@@ -90,6 +87,56 @@ public sealed class BM25Ranker
     public IReadOnlyList<SearchResult> RankResults(IEnumerable<SearchResult> results)
     {
         return results.OrderByDescending(r => r.Score).ToList();
+    }
+
+    /// <summary>
+    /// Calculates BM25 score for a single field (title or content).
+    /// </summary>
+    /// <param name="queryTerms">The tokenized query terms.</param>
+    /// <param name="fieldText">The field text to score.</param>
+    /// <returns>The BM25 score for the field.</returns>
+    private static double CalculateFieldScore(List<string> queryTerms, string fieldText)
+    {
+        var fieldTerms = Tokenize(fieldText);
+        if (fieldTerms.Count == 0)
+        {
+            return 0;
+        }
+
+        var fieldLength = fieldTerms.Count;
+
+        // Calculate term frequencies in field
+        var termFrequencies = new Dictionary<string, int>();
+        foreach (var term in fieldTerms)
+        {
+            if (termFrequencies.ContainsKey(term))
+            {
+                termFrequencies[term]++;
+            }
+            else
+            {
+                termFrequencies[term] = 1;
+            }
+        }
+
+        // Calculate BM25 score for this field
+        double score = 0;
+        foreach (var queryTerm in queryTerms.Distinct())
+        {
+            if (termFrequencies.TryGetValue(queryTerm, out var termFreq))
+            {
+                // BM25 formula: IDF * ((f(qi, D) * (k1 + 1)) / (f(qi, D) + k1 * (1 - b + b * |D| / avgdl)))
+                // Simplified IDF (assumes query terms are reasonably rare)
+                var idf = 1.0; // Simplified - in full implementation would use document frequency
+
+                var numerator = termFreq * (K1 + 1);
+                var denominator = termFreq + (K1 * (1 - B + (B * fieldLength / AvgDocLength)));
+
+                score += idf * (numerator / denominator);
+            }
+        }
+
+        return score;
     }
 
     /// <summary>

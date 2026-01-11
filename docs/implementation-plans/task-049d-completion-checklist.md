@@ -2003,7 +2003,7 @@ private DateTime? ParseDate(string input)
 
 ### P7.10: Tests for Sort By Date (AC-056)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **Tests to Create**:
 - tests/Acode.Integration.Tests/Search/SearchE2ETests.cs (ADD 2 NEW):
@@ -2170,7 +2170,7 @@ acode search "test" --json
 - [✅] Priority 4: Error Codes (7 items) - COMPLETE
 - [✅] Priority 5: CLI Index Commands (3 items) - COMPLETE
 - [✅] Priority 6: Configurable Settings (4 items) - COMPLETE
-- [ ] Priority 7: Missing Tests (10 items)
+- [🔄] Priority 7: Missing Tests - PARTIAL (P7.4, P7.10 complete; 7 new tests added)
 
 **Total New Tests Expected**: ~100+ tests
 **Total New AC Coverage**: 105 AC (to reach 132 total)
