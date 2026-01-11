@@ -14,7 +14,6 @@ namespace Acode.Domain.Validation;
 /// </remarks>
 public record EndpointPattern
 {
-    [System.Runtime.CompilerServices.CompilerGenerated]
     private readonly Lazy<Regex?> _compiledRegex;
 
     /// <summary>
