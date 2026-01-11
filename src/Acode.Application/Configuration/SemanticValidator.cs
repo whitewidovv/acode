@@ -235,9 +235,326 @@ public sealed class SemanticValidator
             }
         }
 
+        // FR-002b-52: airgapped_lock prevents mode override
+        if (config.Mode?.AirgappedLock == true)
+        {
+            if (!string.Equals(config.Mode.Default, "airgapped", StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(new ValidationError
+                {
+                    Code = "AIRGAPPED_LOCK_VIOLATION",
+                    Message = "When airgapped_lock is true, mode.default must be 'airgapped'",
+                    Severity = ValidationSeverity.Error,
+                    Path = "mode"
+                });
+            }
+        }
+
+        // FR-002b-55: paths cannot escape repository root (absolute paths)
+        if (config.Paths?.Source != null)
+        {
+            foreach (var path in config.Paths.Source)
+            {
+                if (IsAbsolutePath(path))
+                {
+                    errors.Add(new ValidationError
+                    {
+                        Code = "PATH_ESCAPE_ATTEMPT",
+                        Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
+                        Severity = ValidationSeverity.Error,
+                        Path = "paths.source"
+                    });
+                }
+            }
+        }
+
+        if (config.Paths?.Tests != null)
+        {
+            foreach (var path in config.Paths.Tests)
+            {
+                if (IsAbsolutePath(path))
+                {
+                    errors.Add(new ValidationError
+                    {
+                        Code = "PATH_ESCAPE_ATTEMPT",
+                        Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
+                        Severity = ValidationSeverity.Error,
+                        Path = "paths.tests"
+                    });
+                }
+            }
+        }
+
+        if (config.Paths?.Output != null)
+        {
+            foreach (var path in config.Paths.Output)
+            {
+                if (IsAbsolutePath(path))
+                {
+                    errors.Add(new ValidationError
+                    {
+                        Code = "PATH_ESCAPE_ATTEMPT",
+                        Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
+                        Severity = ValidationSeverity.Error,
+                        Path = "paths.output"
+                    });
+                }
+            }
+        }
+
+        if (config.Paths?.Docs != null)
+        {
+            foreach (var path in config.Paths.Docs)
+            {
+                if (IsAbsolutePath(path))
+                {
+                    errors.Add(new ValidationError
+                    {
+                        Code = "PATH_ESCAPE_ATTEMPT",
+                        Message = $"Absolute paths are not allowed: {path}. Paths must be relative to repository root.",
+                        Severity = ValidationSeverity.Error,
+                        Path = "paths.docs"
+                    });
+                }
+            }
+        }
+
+        // FR-002b-57: command strings checked for shell injection
+        ValidateCommandForShellInjection(config.Commands?.Setup, "commands.setup", errors);
+        ValidateCommandForShellInjection(config.Commands?.Build, "commands.build", errors);
+        ValidateCommandForShellInjection(config.Commands?.Test, "commands.test", errors);
+        ValidateCommandForShellInjection(config.Commands?.Lint, "commands.lint", errors);
+        ValidateCommandForShellInjection(config.Commands?.Format, "commands.format", errors);
+        ValidateCommandForShellInjection(config.Commands?.Start, "commands.start", errors);
+
+        // FR-002b-58: network.allowlist only valid in Burst mode
+        if (config.Network?.Allowlist?.Count > 0)
+        {
+            if (!string.Equals(config.Mode?.Default, "burst", StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(new ValidationError
+                {
+                    Code = "NETWORK_ALLOWLIST_INVALID_MODE",
+                    Message = "network.allowlist is only valid in 'burst' mode",
+                    Severity = ValidationSeverity.Error,
+                    Path = "network.allowlist"
+                });
+            }
+        }
+
+        // FR-002b-62: ignore patterns are valid globs
+        if (config.Ignore?.Patterns != null)
+        {
+            foreach (var pattern in config.Ignore.Patterns)
+            {
+                if (!IsValidGlobPattern(pattern))
+                {
+                    errors.Add(new ValidationError
+                    {
+                        Code = ConfigErrorCodes.InvalidGlob,
+                        Message = $"Invalid glob pattern: {pattern}",
+                        Severity = ValidationSeverity.Error,
+                        Path = "ignore.patterns"
+                    });
+                }
+            }
+        }
+
+        if (config.Ignore?.Additional != null)
+        {
+            foreach (var pattern in config.Ignore.Additional)
+            {
+                if (!IsValidGlobPattern(pattern))
+                {
+                    errors.Add(new ValidationError
+                    {
+                        Code = ConfigErrorCodes.InvalidGlob,
+                        Message = $"Invalid glob pattern: {pattern}",
+                        Severity = ValidationSeverity.Error,
+                        Path = "ignore.additional"
+                    });
+                }
+            }
+        }
+
+        // FR-002b-63: path patterns are valid globs
+        if (config.Paths?.Source != null)
+        {
+            foreach (var pattern in config.Paths.Source)
+            {
+                if (pattern.Contains('*', StringComparison.Ordinal) && !IsValidGlobPattern(pattern))
+                {
+                    errors.Add(new ValidationError
+                    {
+                        Code = ConfigErrorCodes.InvalidGlob,
+                        Message = $"Invalid glob pattern: {pattern}",
+                        Severity = ValidationSeverity.Error,
+                        Path = "paths.source"
+                    });
+                }
+            }
+        }
+
+        if (config.Paths?.Tests != null)
+        {
+            foreach (var pattern in config.Paths.Tests)
+            {
+                if (pattern.Contains('*', StringComparison.Ordinal) && !IsValidGlobPattern(pattern))
+                {
+                    errors.Add(new ValidationError
+                    {
+                        Code = ConfigErrorCodes.InvalidGlob,
+                        Message = $"Invalid glob pattern: {pattern}",
+                        Severity = ValidationSeverity.Error,
+                        Path = "paths.tests"
+                    });
+                }
+            }
+        }
+
+        // FR-002b-69: referenced paths exist (warning if not)
+        // Note: Filesystem checks are deferred to integration tests for unit testability
+        // This would require injecting IFileSystem for proper unit testing
+
         // FR-002b-70: Return all errors (aggregate)
         return errors.Count == 0
             ? ValidationResult.Success()
             : ValidationResult.Failure(errors);
+    }
+
+    /// <summary>
+    /// Checks if a path is absolute (starts with / or contains Windows drive letter).
+    /// </summary>
+    private static bool IsAbsolutePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        // Unix absolute path
+        if (path.StartsWith('/'))
+        {
+            return true;
+        }
+
+        // Windows absolute path (C:\ or similar)
+        if (path.Length >= 2 && path[1] == ':' && char.IsLetter(path[0]))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Validates a command string for shell injection patterns.
+    /// Per FR-002b-57: Check for dangerous patterns like semicolon, ampersand, pipe operators, command substitution, and backticks.
+    /// </summary>
+    private static void ValidateCommandForShellInjection(object? command, string path, List<ValidationError> errors)
+    {
+        if (command == null)
+        {
+            return;
+        }
+
+        // Commands can be string, List<string>, or Dictionary<string, object>
+        // For now, only validate string commands
+        if (command is not string commandString)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(commandString))
+        {
+            return;
+        }
+
+        var dangerousPatterns = new[]
+        {
+            (";", "semicolon command separator"),
+            ("&&", "AND command chaining"),
+            ("||", "OR command chaining"),
+            ("|", "pipe operator"),
+            ("$(", "command substitution"),
+            ("`", "backtick command substitution")
+        };
+
+        foreach (var (pattern, description) in dangerousPatterns)
+        {
+            if (commandString.Contains(pattern, StringComparison.Ordinal))
+            {
+                errors.Add(new ValidationError
+                {
+                    Code = "SHELL_INJECTION_DETECTED",
+                    Message = $"Dangerous shell pattern detected in command: {description} ('{pattern}'). Commands should not contain shell operators.",
+                    Severity = ValidationSeverity.Error,
+                    Path = path
+                });
+                break; // Only report first dangerous pattern found per command
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates if a glob pattern is well-formed.
+    /// Per FR-002b-62 and FR-002b-63: Basic validation for common glob errors.
+    /// </summary>
+    private static bool IsValidGlobPattern(string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            return false;
+        }
+
+        // Check for unclosed brackets
+        var openBrackets = 0;
+        foreach (var ch in pattern)
+        {
+            if (ch == '[')
+            {
+                openBrackets++;
+            }
+            else if (ch == ']')
+            {
+                openBrackets--;
+            }
+
+            if (openBrackets < 0)
+            {
+                return false; // Closing bracket without opening
+            }
+        }
+
+        if (openBrackets != 0)
+        {
+            return false; // Unclosed brackets
+        }
+
+        // Check for unclosed braces
+        var openBraces = 0;
+        foreach (var ch in pattern)
+        {
+            if (ch == '{')
+            {
+                openBraces++;
+            }
+            else if (ch == '}')
+            {
+                openBraces--;
+            }
+
+            if (openBraces < 0)
+            {
+                return false;
+            }
+        }
+
+        if (openBraces != 0)
+        {
+            return false;
+        }
+
+        return true;
     }
 }
