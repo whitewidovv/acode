@@ -1,0 +1,5 @@
+# JSON Schema validation dependencies for task-002a
+jsonschema>=4.20.0  # Draft 2020-12 support
+pyyaml>=6.0.1       # YAML parsing
+referencing>=0.31.0 # Required by jsonschema for $ref resolution
+pytest>=7.4.0       # Test framework
