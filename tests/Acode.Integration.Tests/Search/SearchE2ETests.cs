@@ -936,6 +936,81 @@ public sealed class SearchE2ETests : IAsyncLifetime
         exception.Message.Should().Contain("empty");
     }
 
+    // P7.10: TESTS FOR SORT BY DATE (AC-056)
+    [Fact]
+    public async Task Should_SortBy_DateDescending_WhenRequested()
+    {
+        // Arrange - AC-056: Sort by date available as alternative to relevance sort
+        var chat = Chat.Create("Date Sort Test");
+        await _chatRepository!.CreateAsync(chat, CancellationToken.None).ConfigureAwait(true);
+
+        var run = Run.Create(chat.Id, "llama3");
+        await _runRepository!.CreateAsync(run, CancellationToken.None).ConfigureAwait(true);
+
+        // Create messages with different timestamps
+        var now = DateTimeOffset.UtcNow;
+        var message1 = Message.Reconstitute(MessageId.NewId(), run.Id, "user", "Message from 5 days ago", null, now.AddDays(-5), 1, SyncStatus.Synced);
+        var message2 = Message.Reconstitute(MessageId.NewId(), run.Id, "user", "Message from today", null, now, 2, SyncStatus.Synced);
+        var message3 = Message.Reconstitute(MessageId.NewId(), run.Id, "user", "Message from 2 days ago", null, now.AddDays(-2), 3, SyncStatus.Synced);
+
+        await _messageRepository!.CreateAsync(message1, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message2, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message3, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search with SortBy = DateDescending
+        var query = new SearchQuery
+        {
+            QueryText = "Message",
+            SortBy = SortOrder.DateDescending,
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - Results ordered newest first
+        results.Results.Should().HaveCount(3);
+        results.Results[0].CreatedAt.Should().BeAfter(results.Results[1].CreatedAt);
+        results.Results[1].CreatedAt.Should().BeAfter(results.Results[2].CreatedAt);
+    }
+
+    [Fact]
+    public async Task Should_SortBy_DateAscending_WhenRequested()
+    {
+        // Arrange - AC-056: Sort by date ascending (oldest first)
+        var chat = Chat.Create("Date Sort Ascending Test");
+        await _chatRepository!.CreateAsync(chat, CancellationToken.None).ConfigureAwait(true);
+
+        var run = Run.Create(chat.Id, "llama3");
+        await _runRepository!.CreateAsync(run, CancellationToken.None).ConfigureAwait(true);
+
+        // Create messages with different timestamps
+        var now = DateTimeOffset.UtcNow;
+        var message1 = Message.Reconstitute(MessageId.NewId(), run.Id, "user", "Message from 5 days ago", null, now.AddDays(-5), 1, SyncStatus.Synced);
+        var message2 = Message.Reconstitute(MessageId.NewId(), run.Id, "user", "Message from today", null, now, 2, SyncStatus.Synced);
+        var message3 = Message.Reconstitute(MessageId.NewId(), run.Id, "user", "Message from 2 days ago", null, now.AddDays(-2), 3, SyncStatus.Synced);
+
+        await _messageRepository!.CreateAsync(message1, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message2, CancellationToken.None).ConfigureAwait(true);
+        await _messageRepository!.CreateAsync(message3, CancellationToken.None).ConfigureAwait(true);
+
+        // Act - Search with SortBy = DateAscending
+        var query = new SearchQuery
+        {
+            QueryText = "Message",
+            SortBy = SortOrder.DateAscending,
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        var results = await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+
+        // Assert - Results ordered oldest first
+        results.Results.Should().HaveCount(3);
+        results.Results[0].CreatedAt.Should().BeBefore(results.Results[1].CreatedAt);
+        results.Results[1].CreatedAt.Should().BeBefore(results.Results[2].CreatedAt);
+    }
+
     private async Task ApplySchemaAsync()
     {
         // Apply minimal schema needed for testing
