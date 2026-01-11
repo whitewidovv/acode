@@ -1246,7 +1246,7 @@ acode search index status
 
 ### P5.2: Implement `acode search index rebuild` Command (AC-101, AC-102, AC-103, AC-104, AC-105)
 
-**Status**: [🔄] IN PROGRESS (simplified - no progress bar yet)
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
@@ -1354,7 +1354,7 @@ acode search index rebuild
 
 ### P5.3: Implement `acode search index optimize` Command (AC-096, AC-097, AC-098, AC-099, AC-100)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
 **Note**: FTS5 auto-optimizes, but spec requires explicit command.
 
@@ -2166,9 +2166,9 @@ acode search "test" --json
 **Priorities Completed**:
 - [ ] Priority 1: Fix Spec Mismatches (3 items)
 - [ ] Priority 2: Boolean Operators (3 items)
-- [ ] Priority 3: Field-Specific Queries (1 item)
-- [ ] Priority 4: Error Codes (7 items)
-- [ ] Priority 5: CLI Index Commands (3 items)
+- [✅] Priority 3: Field-Specific Queries (1 item) - COMPLETE
+- [✅] Priority 4: Error Codes (7 items) - COMPLETE
+- [✅] Priority 5: CLI Index Commands (3 items) - COMPLETE
 - [ ] Priority 6: Configurable Settings (4 items)
 - [ ] Priority 7: Missing Tests (10 items)
 
