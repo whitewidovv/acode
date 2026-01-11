@@ -56,7 +56,7 @@ The following files exist and are substantially complete:
 ## GAPS IDENTIFIED (What's Missing or Needs Fixing)
 
 ### Gap #1: Fix ConfigErrorCodes Format
-**Status**: [ ]
+**Status**: [✅]
 **File**: `src/Acode.Application/Configuration/ConfigErrorCodes.cs`
 **Why Needed**: FR-002b requires error codes in format ACODE-CFG-NNN, currently they are CFG0NN
 **Current State**: Error codes exist but wrong format (CFG001 instead of ACODE-CFG-001)
@@ -77,7 +77,7 @@ The following files exist and are substantially complete:
 ---
 
 ### Gap #2: Add Missing Semantic Validation Rules
-**Status**: [ ]
+**Status**: [✅]
 **File**: `src/Acode.Application/Configuration/SemanticValidator.cs`
 **Why Needed**: FR-002b-52, FR-002b-55, FR-002b-57, FR-002b-58, FR-002b-62, FR-002b-63, FR-002b-69
 **Current State**: SemanticValidator has some rules but missing several from spec
@@ -127,7 +127,7 @@ The following files exist and are substantially complete:
 ---
 
 ### Gap #3: Integrate SemanticValidator into ConfigValidator
-**Status**: [ ]
+**Status**: [✅]
 **Files**:
 - `src/Acode.Application/Configuration/ConfigValidator.cs`
 - `tests/Acode.Application.Tests/Configuration/ConfigValidatorTests.cs` (may need creation)
@@ -290,7 +290,7 @@ case "reload" => await ReloadAsync(context, repositoryRoot),
 ---
 
 ### Gap #6: Implement Configuration Redaction
-**Status**: [ ]
+**Status**: [🔄]
 **Files**:
 - `src/Acode.Application/Configuration/ConfigRedactor.cs` (NEW)
 - `src/Acode.Cli/Commands/ConfigCommand.cs` (update Show method)
