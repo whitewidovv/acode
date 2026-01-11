@@ -1,4 +1,5 @@
-#pragma warning disable CA2007 // await using doesn't support ConfigureAwait
+// Note: CA2007 is disabled on specific 'await using' statements below because
+// ConfigureAwait cannot be applied to 'await using' declarations in C#.
 
 using Acode.Application.Database;
 using Microsoft.Data.Sqlite;
@@ -111,13 +112,17 @@ public sealed class SqliteConnectionFactory : IConnectionFactory, IDisposable
             data["size_bytes"] = new FileInfo(dbPath).Length;
 
             // Test connection
+#pragma warning disable CA2007 // ConfigureAwait cannot be applied to await using
             await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(ct);
+#pragma warning restore CA2007
+            await connection.OpenAsync(ct).ConfigureAwait(false);
 
             // Run integrity check (quick version)
+#pragma warning disable CA2007 // ConfigureAwait cannot be applied to await using
             await using var cmd = connection.CreateCommand();
+#pragma warning restore CA2007
             cmd.CommandText = "PRAGMA quick_check;";
-            var result = await cmd.ExecuteScalarAsync(ct);
+            var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
 
             if (result?.ToString() != "ok")
             {
@@ -171,9 +176,11 @@ public sealed class SqliteConnectionFactory : IConnectionFactory, IDisposable
         string value,
         CancellationToken ct)
     {
+#pragma warning disable CA2007 // ConfigureAwait cannot be applied to await using
         await using var cmd = connection.CreateCommand();
+#pragma warning restore CA2007
         cmd.CommandText = $"PRAGMA {pragma}={value};";
-        await cmd.ExecuteNonQueryAsync(ct);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>

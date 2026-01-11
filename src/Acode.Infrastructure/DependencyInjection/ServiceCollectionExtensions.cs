@@ -40,7 +40,9 @@ public static class ServiceCollectionExtensions
                 : JsonSchemaValidator.CreateAsync(schemaPath).GetAwaiter().GetResult();
         });
 
-        // Register logging (required by PromptPacks services)
+        // Register logging if not already configured (required by PromptPacks services).
+        // Note: AddLogging() is idempotent and won't override existing configuration,
+        // but we call it to ensure logging is available for PromptPacks services.
         services.AddLogging();
 
         // Register prompt pack services

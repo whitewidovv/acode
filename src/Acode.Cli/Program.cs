@@ -48,8 +48,7 @@ public static class Program
         // Parse global flags
         // FR-001: --json flag MUST enable JSONL mode
         // FR-002: ACODE_JSON=1 env var MUST enable JSONL mode
-        var useJson = args.Contains("--json") ||
-                      string.Equals(Environment.GetEnvironmentVariable("ACODE_JSON"), "1", StringComparison.Ordinal);
+        var useJson = IsJsonModeRequested(args);
         var noColor = args.Contains("--no-color");
 
         // Remove global flags from args
@@ -87,5 +86,22 @@ public static class Program
         var exitCode = router.RouteAsync(args, context).GetAwaiter().GetResult();
 
         return (int)exitCode;
+    }
+
+    /// <summary>
+    /// Determines if JSONL mode is requested via command line or environment.
+    /// </summary>
+    /// <param name="args">Command line arguments.</param>
+    /// <returns><c>true</c> if JSONL mode is requested; otherwise, <c>false</c>.</returns>
+    private static bool IsJsonModeRequested(string[] args)
+    {
+        // FR-001: --json flag MUST enable JSONL mode
+        if (args.Contains("--json"))
+        {
+            return true;
+        }
+
+        // FR-002: ACODE_JSON=1 env var MUST enable JSONL mode
+        return string.Equals(Environment.GetEnvironmentVariable("ACODE_JSON"), "1", StringComparison.Ordinal);
     }
 }

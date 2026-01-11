@@ -96,6 +96,10 @@ public sealed class ModeDetector : IModeDetector
 
         // FR-001: MUST detect non-interactive when stdin is not TTY
         // FR-002: MUST detect non-interactive when stdout is not TTY
+        // Note: stderr redirection (IsErrorRedirected) is intentionally NOT part of
+        // the TTY determination. Error output may be redirected to logs without
+        // affecting whether the CLI is considered interactive, which is driven
+        // solely by stdin/stdout TTY state per FR-001/FR-002.
         _isTTY = !_consoleWrapper.IsInputRedirected && !_consoleWrapper.IsOutputRedirected;
 
         // Determine interactive mode based on precedence:

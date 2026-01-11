@@ -81,7 +81,7 @@ public sealed class ContentHash : IEquatable<ContentHash>
             sha256.TransformBlock(contentBytes, 0, contentBytes.Length, null, 0);
         }
 
-        sha256.TransformFinalBlock([], 0, 0);
+        sha256.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
         var hashBytes = sha256.Hash!;
 
         return new ContentHash(Convert.ToHexString(hashBytes).ToLowerInvariant());

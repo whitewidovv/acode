@@ -145,13 +145,15 @@ public sealed class CircuitBreaker
                 return true;
             }
 
-            if (
-                _state == CircuitState.Open
-                && DateTimeOffset.UtcNow - _lastFailure > _coolingPeriod
-            )
+            if (_state == CircuitState.Open)
             {
-                _state = CircuitState.HalfOpen;
-                return true;
+                // Cache current time to avoid repeated DateTimeOffset.UtcNow calls within lock
+                var now = DateTimeOffset.UtcNow;
+                if (now - _lastFailure > _coolingPeriod)
+                {
+                    _state = CircuitState.HalfOpen;
+                    return true;
+                }
             }
 
             if (_state == CircuitState.HalfOpen)
