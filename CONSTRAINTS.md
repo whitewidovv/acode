@@ -276,7 +276,7 @@ Soft constraints represent best practices and recommendations that SHOULD be fol
 ## Enforcement Mechanisms
 
 ### Code-Level Enforcement
-- **ModeMatrix** (`src/Acode.Domain/Modes/ModeMatrix.cs`) - 78 mode-capability entries ✅
+- **ModeMatrix** (`src/Acode.Domain/Modes/ModeMatrix.cs`) - 78 mode-capability entries ✅ (corrected from 81 in v1.0.1; actual count is 3 modes × 26 capabilities = 78)
 - **Validation Rules** (Task 001.b) - Comprehensive validation rules for mode transitions, configuration, and security
 - **LlmApiDenylist** (`src/Acode.Domain/Validation/LlmApiDenylist.cs`) - Immutable denylist ✅
 - **Default Mode** - LocalOnly is enum value 0 ✅
@@ -365,7 +365,7 @@ For examples, see:
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0.0 | 2026-01-03 | Initial version: HC-01 through HC-07 defined |
-| 1.0.1 | 2026-01-11 | Added validation rules reference, code documentation standards |
+| 1.0.1 | 2026-01-11 | Corrected mode-capability entry count from 81 to 78 (3 modes × 26 capabilities); added validation rules reference, code documentation standards |
 
 ---
 
