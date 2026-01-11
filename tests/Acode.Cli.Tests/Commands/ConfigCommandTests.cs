@@ -444,4 +444,30 @@ public class ConfigCommandTests
             }
         }
     }
+
+    [Fact]
+    public async Task ExecuteAsync_Reload_InvalidatesCache()
+    {
+        // Arrange
+        var mockCache = Substitute.For<IConfigCache>();
+        var command = new ConfigCommand(_mockLoader, _mockValidator, mockCache);
+        var output = new StringWriter();
+
+        var context = new CommandContext
+        {
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "reload" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
+
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+        // Assert
+        exitCode.Should().Be(ExitCode.Success, "reload should succeed");
+        mockCache.Received(1).InvalidateAll();
+        output.ToString().Should().Contain("Configuration cache invalidated", "success message should indicate cache invalidation");
+    }
 }

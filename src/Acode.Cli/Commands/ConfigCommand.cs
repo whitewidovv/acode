@@ -14,17 +14,20 @@ public sealed class ConfigCommand : ICommand
     private readonly IConfigLoader _loader;
     private readonly IConfigValidator _validator;
     private readonly ConfigRedactor _redactor;
+    private readonly IConfigCache? _cache;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigCommand"/> class.
     /// </summary>
     /// <param name="loader">Configuration loader.</param>
     /// <param name="validator">Configuration validator.</param>
-    public ConfigCommand(IConfigLoader loader, IConfigValidator validator)
+    /// <param name="cache">Optional configuration cache for reload command.</param>
+    public ConfigCommand(IConfigLoader loader, IConfigValidator validator, IConfigCache? cache = null)
     {
         _loader = loader ?? throw new ArgumentNullException(nameof(loader));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _redactor = new ConfigRedactor();
+        _cache = cache;
     }
 
     /// <inheritdoc/>
@@ -55,6 +58,7 @@ public sealed class ConfigCommand : ICommand
             "validate" => await ValidateAsync(context, repositoryRoot).ConfigureAwait(false),
             "show" => await ShowAsync(context, repositoryRoot).ConfigureAwait(false),
             "init" => await InitAsync(context, repositoryRoot).ConfigureAwait(false),
+            "reload" => await ReloadAsync(context).ConfigureAwait(false),
             _ => await WriteUnknownSubcommandAsync(context, subcommand).ConfigureAwait(false),
         };
     }
@@ -68,12 +72,14 @@ Subcommands:
   init        Create a minimal configuration file
   validate    Validate the configuration file
   show        Display the configuration file
+  reload      Invalidate configuration cache
 
 Examples:
   acode config init
   acode config validate
   acode config show
-  acode config show --format json";
+  acode config show --format json
+  acode config reload";
     }
 
     private static async Task<ExitCode> WriteUnknownSubcommandAsync(CommandContext context, string subcommand)
@@ -265,6 +271,30 @@ Examples:
         catch (Exception ex)
         {
             await context.Output.WriteLineAsync($"Error: Failed to create configuration file: {ex.Message}").ConfigureAwait(false);
+            return ExitCode.RuntimeError;
+        }
+    }
+
+    private async Task<ExitCode> ReloadAsync(CommandContext context)
+    {
+        try
+        {
+            if (_cache == null)
+            {
+                await context.Output.WriteLineAsync("Configuration cache is not available").ConfigureAwait(false);
+                return ExitCode.Success;
+            }
+
+            _cache.InvalidateAll();
+
+            await context.Output.WriteLineAsync("Configuration cache invalidated successfully").ConfigureAwait(false);
+            await context.Output.WriteLineAsync("Next config load will re-parse .agent/config.yml").ConfigureAwait(false);
+
+            return ExitCode.Success;
+        }
+        catch (Exception ex)
+        {
+            await context.Output.WriteLineAsync($"Error: Failed to invalidate cache: {ex.Message}").ConfigureAwait(false);
             return ExitCode.RuntimeError;
         }
     }
