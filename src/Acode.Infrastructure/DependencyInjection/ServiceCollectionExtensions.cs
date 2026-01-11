@@ -4,6 +4,7 @@ using Acode.Application.Tools;
 using Acode.Application.Tools.Retry;
 using Acode.Infrastructure.Configuration;
 using Acode.Infrastructure.Ollama;
+using Acode.Infrastructure.PromptPacks;
 using Acode.Infrastructure.Tools;
 using Acode.Infrastructure.Vllm;
 using Acode.Infrastructure.Vllm.Client;
@@ -38,6 +39,12 @@ public static class ServiceCollectionExtensions
                 ? JsonSchemaValidator.CreateFromEmbeddedResourceAsync().GetAwaiter().GetResult()
                 : JsonSchemaValidator.CreateAsync(schemaPath).GetAwaiter().GetResult();
         });
+
+        // Register logging (required by PromptPacks services)
+        services.AddLogging();
+
+        // Register prompt pack services
+        services.AddPromptPacks();
 
         return services;
     }

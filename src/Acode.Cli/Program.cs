@@ -1,5 +1,6 @@
 using Acode.Application.Configuration;
 using Acode.Application.DependencyInjection;
+using Acode.Application.PromptPacks;
 using Acode.Cli.Commands;
 using Acode.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,6 +38,12 @@ public static class Program
         var loader = serviceProvider.GetRequiredService<IConfigLoader>();
         var validator = serviceProvider.GetRequiredService<IConfigValidator>();
         router.RegisterCommand(new ConfigCommand(loader, validator));
+
+        // Register prompts command
+        var packRegistry = serviceProvider.GetRequiredService<IPromptPackRegistry>();
+        var packLoader = serviceProvider.GetRequiredService<IPromptPackLoader>();
+        var packValidator = serviceProvider.GetRequiredService<IPackValidator>();
+        router.RegisterCommand(new PromptsCommand(packRegistry, packLoader, packValidator));
 
         // Parse global flags
         // FR-001: --json flag MUST enable JSONL mode
