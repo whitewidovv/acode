@@ -13,16 +13,21 @@ public sealed class ConfigCommand : ICommand
 {
     private readonly IConfigLoader _loader;
     private readonly IConfigValidator _validator;
+    private readonly ConfigRedactor _redactor;
+    private readonly IConfigCache? _cache;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ConfigCommand"/> class.
     /// </summary>
     /// <param name="loader">Configuration loader.</param>
     /// <param name="validator">Configuration validator.</param>
-    public ConfigCommand(IConfigLoader loader, IConfigValidator validator)
+    /// <param name="cache">Optional configuration cache for reload command.</param>
+    public ConfigCommand(IConfigLoader loader, IConfigValidator validator, IConfigCache? cache = null)
     {
         _loader = loader ?? throw new ArgumentNullException(nameof(loader));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
+        _redactor = new ConfigRedactor();
+        _cache = cache;
     }
 
     /// <inheritdoc/>
@@ -52,6 +57,8 @@ public sealed class ConfigCommand : ICommand
         {
             "validate" => await ValidateAsync(context, repositoryRoot).ConfigureAwait(false),
             "show" => await ShowAsync(context, repositoryRoot).ConfigureAwait(false),
+            "init" => await InitAsync(context, repositoryRoot).ConfigureAwait(false),
+            "reload" => await ReloadAsync(context).ConfigureAwait(false),
             _ => await WriteUnknownSubcommandAsync(context, subcommand).ConfigureAwait(false),
         };
     }
@@ -62,13 +69,17 @@ public sealed class ConfigCommand : ICommand
         return @"Usage: acode config <subcommand> [options]
 
 Subcommands:
+  init        Create a minimal configuration file
   validate    Validate the configuration file
   show        Display the configuration file
+  reload      Invalidate configuration cache
 
 Examples:
+  acode config init
   acode config validate
   acode config show
-  acode config show --format json";
+  acode config show --format json
+  acode config reload";
     }
 
     private static async Task<ExitCode> WriteUnknownSubcommandAsync(CommandContext context, string subcommand)
@@ -82,6 +93,9 @@ Examples:
     {
         try
         {
+            // Check for --strict flag
+            var strictMode = context.Args.Contains("--strict", StringComparer.OrdinalIgnoreCase);
+
             await context.Output.WriteLineAsync("Validating configuration...").ConfigureAwait(false);
             await context.Output.WriteLineAsync().ConfigureAwait(false);
 
@@ -108,7 +122,11 @@ Examples:
 
             await context.Output.WriteLineAsync().ConfigureAwait(false);
 
-            if (result.IsValid)
+            // In strict mode, warnings are treated as errors
+            var hasWarnings = result.WarningsOnly.Count > 0;
+            var hasErrors = result.ErrorsOnly.Count > 0;
+
+            if (result.IsValid && (!strictMode || !hasWarnings))
             {
                 await context.Output.WriteLineAsync("  ✓ Configuration valid").ConfigureAwait(false);
                 return ExitCode.Success;
@@ -117,12 +135,36 @@ Examples:
             {
                 await context.Output.WriteLineAsync("  ✗ Configuration invalid").ConfigureAwait(false);
                 await context.Output.WriteLineAsync().ConfigureAwait(false);
-                await context.Output.WriteLineAsync("Errors:").ConfigureAwait(false);
+
+                if (hasErrors || (strictMode && hasWarnings))
+                {
+                    await context.Output.WriteLineAsync("Errors:").ConfigureAwait(false);
+                }
 
                 foreach (var error in result.Errors)
                 {
                     var severity = error.Severity == ValidationSeverity.Error ? "ERROR" : "WARNING";
-                    await context.Output.WriteLineAsync($"  [{severity}] {error.Path}: {error.Message}").ConfigureAwait(false);
+
+                    // IDE-parseable format: file:line:column [SEVERITY] CODE: message
+                    // Or if no line/column: [SEVERITY] CODE: path: message
+                    string errorLine;
+                    if (error.Line.HasValue && error.Column.HasValue)
+                    {
+                        errorLine = $"  .agent/config.yml:{error.Line}:{error.Column} [{severity}] {error.Code}: {error.Message}";
+                    }
+                    else
+                    {
+                        var pathPart = string.IsNullOrEmpty(error.Path) ? string.Empty : $"{error.Path}: ";
+                        errorLine = $"  [{severity}] {error.Code}: {pathPart}{error.Message}";
+                    }
+
+                    await context.Output.WriteLineAsync(errorLine).ConfigureAwait(false);
+                }
+
+                if (strictMode && hasWarnings)
+                {
+                    await context.Output.WriteLineAsync().ConfigureAwait(false);
+                    await context.Output.WriteLineAsync("Validation failed in strict mode (warnings treated as errors)").ConfigureAwait(false);
                 }
 
                 return ExitCode.ConfigurationError;
@@ -165,6 +207,9 @@ Examples:
 
             var config = await _loader.LoadAsync(repositoryRoot, context.CancellationToken).ConfigureAwait(false);
 
+            // Redact sensitive fields per NFR-002b-06
+            var redactedConfig = _redactor.Redact(config);
+
             if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
             {
                 var options = new JsonSerializerOptions
@@ -174,7 +219,7 @@ Examples:
                     PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
                 };
 
-                var json = JsonSerializer.Serialize(config, options);
+                var json = JsonSerializer.Serialize(redactedConfig, options);
                 await context.Output.WriteLineAsync(json).ConfigureAwait(false);
             }
             else
@@ -184,7 +229,7 @@ Examples:
                     .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
                     .Build();
 
-                var yaml = serializer.Serialize(config);
+                var yaml = serializer.Serialize(redactedConfig);
                 await context.Output.WriteLineAsync(yaml).ConfigureAwait(false);
             }
 
@@ -204,6 +249,83 @@ Examples:
         catch (Exception ex)
         {
             await context.Output.WriteLineAsync($"Error: {ex.Message}").ConfigureAwait(false);
+            return ExitCode.RuntimeError;
+        }
+    }
+
+    private async Task<ExitCode> InitAsync(CommandContext context, string repositoryRoot)
+    {
+        try
+        {
+            var agentDir = Path.Combine(repositoryRoot, ".agent");
+            var configPath = Path.Combine(agentDir, "config.yml");
+
+            // Check if config already exists
+            if (File.Exists(configPath))
+            {
+                await context.Output.WriteLineAsync("Error: Configuration file already exists at .agent/config.yml").ConfigureAwait(false);
+                return ExitCode.GeneralError;
+            }
+
+            // Create .agent directory if it doesn't exist
+            if (!Directory.Exists(agentDir))
+            {
+                Directory.CreateDirectory(agentDir);
+            }
+
+            // Create minimal configuration
+            var minimalConfig = @"schema_version: ""1.0.0""
+
+# This is a minimal Acode configuration file.
+# For full configuration options, see: https://github.com/whitewidovv/acode
+
+# project:
+#   name: my-project
+#   type: dotnet
+
+# mode:
+#   default: local-only
+#   allow_burst: false
+
+# model:
+#   provider: ollama
+#   name: codellama:7b
+";
+
+            await File.WriteAllTextAsync(configPath, minimalConfig).ConfigureAwait(false);
+
+            await context.Output.WriteLineAsync("Created .agent/config.yml with minimal configuration").ConfigureAwait(false);
+            await context.Output.WriteLineAsync("Edit the file to customize settings for your project.").ConfigureAwait(false);
+
+            return ExitCode.Success;
+        }
+        catch (Exception ex)
+        {
+            await context.Output.WriteLineAsync($"Error: Failed to create configuration file: {ex.Message}").ConfigureAwait(false);
+            return ExitCode.RuntimeError;
+        }
+    }
+
+    private async Task<ExitCode> ReloadAsync(CommandContext context)
+    {
+        try
+        {
+            if (_cache == null)
+            {
+                await context.Output.WriteLineAsync("Configuration cache is not available").ConfigureAwait(false);
+                return ExitCode.Success;
+            }
+
+            _cache.InvalidateAll();
+
+            await context.Output.WriteLineAsync("Configuration cache invalidated successfully").ConfigureAwait(false);
+            await context.Output.WriteLineAsync("Next config load will re-parse .agent/config.yml").ConfigureAwait(false);
+
+            return ExitCode.Success;
+        }
+        catch (Exception ex)
+        {
+            await context.Output.WriteLineAsync($"Error: Failed to invalidate cache: {ex.Message}").ConfigureAwait(false);
             return ExitCode.RuntimeError;
         }
     }

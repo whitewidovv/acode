@@ -137,7 +137,7 @@ public sealed class JsonSchemaValidator : ISchemaValidator
             // Convert schema validation errors to our format
             var errors = schemaErrors.Select(e => new ValidationError
             {
-                Code = ConfigErrorCodes.SchemaViolation,
+                Code = ConfigErrorCodes.TypeMismatch,
                 Message = e.ToString(),
                 Severity = ValidationSeverity.Error,
                 Path = e.Path
@@ -149,7 +149,7 @@ public sealed class JsonSchemaValidator : ISchemaValidator
         {
             return ValidationResult.Failure(new ValidationError
             {
-                Code = ConfigErrorCodes.YamlParseError,
+                Code = ConfigErrorCodes.YamlSyntaxError,
                 Message = $"YAML parse error: {ex.Message}",
                 Severity = ValidationSeverity.Error
             });
