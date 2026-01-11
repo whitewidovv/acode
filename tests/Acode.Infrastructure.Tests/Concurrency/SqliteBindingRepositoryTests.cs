@@ -240,7 +240,7 @@ public sealed class SqliteBindingRepositoryTests : IDisposable
         await using var connection = await _connectionFactory.CreateAsync();
         await connection.ExecuteAsync(
             @"
-            INSERT INTO chats (id, title, created_at, updated_at, is_deleted, version)
+            INSERT INTO conv_chats (id, title, created_at, updated_at, is_deleted, version)
             VALUES (@Id, 'Test Chat', @CreatedAt, @UpdatedAt, 0, 1)",
             new
             {
@@ -255,9 +255,9 @@ public sealed class SqliteBindingRepositoryTests : IDisposable
         // Create minimal schema for testing
         await using var connection = await _connectionFactory.CreateAsync();
 
-        // Create chats table (required for foreign key)
+        // Create conv_chats table (required for foreign key)
         await connection.ExecuteAsync(@"
-            CREATE TABLE chats (
+            CREATE TABLE conv_chats (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -272,7 +272,7 @@ public sealed class SqliteBindingRepositoryTests : IDisposable
                 worktree_id TEXT PRIMARY KEY,
                 chat_id TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL,
-                FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+                FOREIGN KEY (chat_id) REFERENCES conv_chats(id) ON DELETE CASCADE
             )");
 
         // Create index

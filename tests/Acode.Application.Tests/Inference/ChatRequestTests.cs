@@ -5,7 +5,6 @@ using System.Text.Json;
 using Acode.Application.Inference;
 using Acode.Domain.Models.Inference;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for ChatRequest record following TDD (RED phase).

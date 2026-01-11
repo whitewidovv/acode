@@ -4,7 +4,6 @@ using Acode.Infrastructure.Vllm;
 using Acode.Infrastructure.Vllm.Client;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.DependencyInjection;
 

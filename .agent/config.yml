@@ -1,0 +1,53 @@
+# Acode Configuration for the Acode project itself
+schema_version: "1.0.0"
+
+project:
+  name: acode
+  type: dotnet
+  languages: [csharp]
+  description: Agentic Coding Bot - Privacy-first AI coding assistant
+
+# Operating mode
+mode:
+  default: local-only
+  allow_burst: false
+
+# LLM model configuration (requires Ollama running locally)
+model:
+  provider: ollama
+  name: codellama:7b
+  endpoint: http://localhost:11434
+  parameters:
+    temperature: 0.3
+    max_tokens: 4096
+  timeout_seconds: 120
+
+# Build commands
+commands:
+  setup:
+    - dotnet restore
+  build:
+    run: dotnet build
+    timeout: 300
+  test:
+    run: dotnet test
+    timeout: 600
+  lint:
+    run: dotnet format --verify-no-changes
+  format:
+    run: dotnet format
+
+# Directory classifications
+paths:
+  source: [src/]
+  tests: [tests/]
+  output: [bin/, obj/]
+  docs: [docs/]
+
+# Ignore patterns
+ignore:
+  patterns:
+    - "**/bin/**"
+    - "**/obj/**"
+    - "**/.vs/**"
+    - "**/node_modules/**"

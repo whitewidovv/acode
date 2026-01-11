@@ -30,9 +30,22 @@ public sealed class SqliteChatRepositoryTests : IDisposable
 
     public void Dispose()
     {
+        // Clear SQLite connection pool to release file locks
+        SqliteConnection.ClearAllPools();
+
+        // Small delay to ensure connections are released
+        Thread.Sleep(50);
+
         if (File.Exists(_dbPath))
         {
-            File.Delete(_dbPath);
+            try
+            {
+                File.Delete(_dbPath);
+            }
+            catch (IOException)
+            {
+                // Ignore if file still locked - will be cleaned up by OS
+            }
         }
     }
 
@@ -119,7 +132,7 @@ public sealed class SqliteChatRepositoryTests : IDisposable
         {
             await connection.OpenAsync();
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE chats SET version = 2 WHERE id = @id";
+            command.CommandText = "UPDATE conv_chats SET version = 2 WHERE id = @id";
             command.Parameters.AddWithValue("@id", chat.Id.Value);
             await command.ExecuteNonQueryAsync();
         }
@@ -372,7 +385,7 @@ public sealed class SqliteChatRepositoryTests : IDisposable
             await connection.OpenAsync();
             using var command = connection.CreateCommand();
             command.CommandText = @"
-                UPDATE chats
+                UPDATE conv_chats
                 SET is_deleted = 1, deleted_at = @OldDate
                 WHERE id = @OldId";
             command.Parameters.AddWithValue("@OldId", oldChat.Id.Value);

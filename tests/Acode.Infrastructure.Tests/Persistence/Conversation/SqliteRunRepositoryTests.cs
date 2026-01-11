@@ -9,6 +9,7 @@ using Acode.Application.Conversation.Persistence;
 using Acode.Domain.Conversation;
 using Acode.Infrastructure.Persistence.Conversation;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 public sealed class SqliteRunRepositoryTests : IDisposable
@@ -28,7 +29,7 @@ public sealed class SqliteRunRepositoryTests : IDisposable
             "001_InitialSchema.sql");
         var schema = File.ReadAllText(schemaPath);
 
-        using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}");
+        using var conn = new SqliteConnection($"Data Source={_dbPath}");
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = schema;
@@ -37,9 +38,22 @@ public sealed class SqliteRunRepositoryTests : IDisposable
 
     public void Dispose()
     {
+        // Clear SQLite connection pool to release file locks
+        SqliteConnection.ClearAllPools();
+
+        // Small delay to ensure connections are released
+        Thread.Sleep(50);
+
         if (File.Exists(_dbPath))
         {
-            File.Delete(_dbPath);
+            try
+            {
+                File.Delete(_dbPath);
+            }
+            catch (IOException)
+            {
+                // Ignore if file still locked - will be cleaned up by OS
+            }
         }
     }
 
@@ -391,7 +405,7 @@ public sealed class SqliteRunRepositoryTests : IDisposable
 
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO chats (id, title, tags, worktree_id, is_deleted, deleted_at,
+            INSERT INTO conv_chats (id, title, tags, worktree_id, is_deleted, deleted_at,
                               sync_status, version, created_at, updated_at)
             VALUES (@Id, @Title, '[]', NULL, 0, NULL, 'Pending', 1, @CreatedAt, @UpdatedAt)";
 

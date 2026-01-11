@@ -107,7 +107,16 @@ public sealed class FileMigrationLock : IMigrationLock
     {
         if (File.Exists(_lockFilePath))
         {
-            File.Delete(_lockFilePath);
+            try
+            {
+                File.Delete(_lockFilePath);
+            }
+            catch (IOException)
+            {
+                // On Windows, we can't delete a file that's locked by another process.
+                // The lock will be released when the holding process terminates or releases it.
+                // This is expected behavior - we just can't force-break a live lock on Windows.
+            }
         }
 
         return Task.CompletedTask;

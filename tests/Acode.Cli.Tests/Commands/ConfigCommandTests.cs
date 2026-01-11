@@ -120,7 +120,7 @@ public class ConfigCommandTests
         var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
         // Assert
-        exitCode.Should().Be(ExitCode.GeneralError, "file not found should return error code");
+        exitCode.Should().Be(ExitCode.ConfigurationError, "missing config file should return configuration error code");
         output.ToString().Should().Contain("not found", "error message should be shown");
     }
 

@@ -2,7 +2,6 @@ namespace Acode.Infrastructure.Tests.Ollama.ToolCall;
 
 using Acode.Infrastructure.Ollama.ToolCall;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for JsonRepairer JSON repair functionality.

@@ -2,7 +2,6 @@ using Acode.Application.Inference;
 using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.Ollama.Mapping;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Ollama.Mapping;
 

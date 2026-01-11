@@ -76,6 +76,401 @@ This task encompasses:
 | Metadata | run.json | Execution context and summary |
 | Custom | *.txt, *.json | Task-specific artifacts |
 
+### ROI Calculation
+
+**Problem Cost (Without Standardization):**
+- Developer time searching for artifacts: 5 min/failure × 20 failures/day × 250 days/year = 416 hours/year
+- At $75/hour: **$31,200/year per developer**
+- Audit preparation with scattered artifacts: 60 hours/audit × $100/hour = $6,000/audit
+- Performance analysis with inconsistent data: 16 hours/month × 12 months × $125/hour = $24,000/year
+- **Total cost per developer: $61,200/year**
+
+**Solution Benefit (With Standardization):**
+- Artifact search time: 30 sec/failure × 20 failures/day × 250 days/year = 42 hours/year (90% reduction)
+- At $75/hour: **$3,150/year** (saves $28,050)
+- Audit preparation automated: 3 hours/audit × $100/hour = $300/audit (saves $5,700)
+- Performance analysis automated: 2 hours/month × 12 months × $125/hour = $3,000/year (saves $21,000)
+- **Total cost per developer: $6,450/year**
+
+**Net Savings: $54,750/year per developer**
+**Team of 10: $547,500/year**
+
+**Implementation Cost:**
+- Development: 3 days × $125/hour × 8 hours = $3,000
+- Testing: 1 day × $125/hour × 8 hours = $1,000
+- Documentation: 0.5 day × $125/hour × 8 hours = $500
+- **Total: $4,500**
+
+**ROI: ($547,500 - $4,500) / $4,500 = 12,067% return**
+**Payback period: 3 days**
+
+### Technical Architecture
+
+**Directory Structure:**
+
+```
+workspace-root/
+└── .acode/
+    └── artifacts/
+        ├── run-01HQRS7TGKMWXY123/
+        │   ├── run.json               # Metadata (required)
+        │   ├── stdout.txt             # Process output (required)
+        │   ├── stderr.txt             # Error output (required)
+        │   ├── combined.txt           # Interleaved streams (optional)
+        │   ├── build.log              # Build-specific logs (optional)
+        │   ├── test-results.trx       # Test results (optional)
+        │   └── coverage.json          # Coverage data (optional)
+        │
+        ├── run-01HQRS8UGKLNPQ456/
+        │   └── ...
+        │
+        └── .gitignore                 # Ensures artifacts not committed
+```
+
+**Path Resolution Service:**
+
+```
+IArtifactPathResolver (Domain Interface)
+    ↓
+ArtifactPathResolver (Infrastructure Implementation)
+    ↓
+Uses: IWorkspaceContext for workspace root
+Uses: IRunIdGenerator for unique identifiers
+Returns: Absolute paths for artifacts
+```
+
+**Component Interactions:**
+
+```
+CommandExecutor
+    ↓ (execution result)
+ArtifactCollector
+    ↓ (write artifacts)
+ArtifactPathResolver.GetRunDirectory(runId)
+    ↓
+Filesystem (creates .acode/artifacts/{runId}/)
+    ↓
+ArtifactWriter.WriteStdout(runId, stdout)
+ArtifactWriter.WriteStderr(runId, stderr)
+ArtifactWriter.WriteMetadata(runId, metadata)
+    ↓
+Files: stdout.txt, stderr.txt, run.json
+```
+
+**Metadata Schema (run.json):**
+
+```json
+{
+  "run_id": "run-01HQRS7TGKMWXY123",
+  "command": "dotnet test",
+  "arguments": ["--configuration", "Release"],
+  "working_directory": "/workspace/MyProject",
+  "start_time": "2024-12-01T14:32:15.123Z",
+  "end_time": "2024-12-01T14:35:42.789Z",
+  "duration_ms": 207666,
+  "exit_code": 0,
+  "status": "Success",
+  "environment": {
+    "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+    "PATH": "/usr/local/bin:/usr/bin:/bin"
+  },
+  "artifacts": [
+    {
+      "path": "stdout.txt",
+      "size_bytes": 45123,
+      "checksum_sha256": "abc123...",
+      "content_type": "text/plain"
+    },
+    {
+      "path": "test-results.trx",
+      "size_bytes": 12456,
+      "checksum_sha256": "def456...",
+      "content_type": "application/xml"
+    }
+  ],
+  "workspace_id": "workspace-abc",
+  "session_id": "session-xyz",
+  "agent_version": "1.0.0"
+}
+```
+
+### Integration Details
+
+**Task 021 (Parent) Integration:**
+- Provides IRunStore interface for persisting run records
+- Defines RunRecord domain entity with artifact references
+- Specifies artifact collection triggers and lifecycle
+
+**Task 050 (Workspace Database) Integration:**
+- Stores run metadata in `runs` table
+- Maintains FK relationship: `runs.workspace_id → workspaces.id`
+- Indexes on `runs.start_time`, `runs.status` for efficient queries
+- Artifact paths stored as JSON blob in `runs.artifacts` column
+
+**Task 018 (Command Runner) Integration:**
+- CommandRunner executes process and captures stdout/stderr streams
+- Invokes IArtifactCollector.CollectAsync(runId, streams)
+- Passes structured CommandResult with exit code, timing, output
+- ArtifactCollector writes streams to files in real-time
+
+**Task 020 (Docker Sandbox) Integration:**
+- Container stdout/stderr mapped to artifact files
+- Docker logs extracted and stored as combined.txt
+- Container exit code stored in run.json metadata
+- Volume mount points recorded in metadata for reproducibility
+
+**Task 021b (CLI Inspection) Integration:**
+- `acode run list` queries runs table, displays run IDs
+- `acode run show {id}` reads run.json from artifacts directory
+- `acode artifact cat {id} {file}` reads specific artifact file
+- CLI resolves paths via IArtifactPathResolver
+
+**Task 021c (Export Bundle) Integration:**
+- Export reads artifact directory structure
+- Creates ZIP with artifacts/ subdirectory preserving structure
+- Includes manifest.json with checksums for integrity
+- Bundle can be imported to reconstruct run history
+
+### Constraints and Limitations
+
+1. **Filesystem Performance** — Large numbers of run directories (>100,000) may slow directory listings on some filesystems (ext4, NTFS). Mitigation: Implement sharding (`.acode/artifacts/01/HQ/run-01HQRS...`) if needed.
+
+2. **Disk Space Growth** — Unbounded artifact storage will exhaust disk. Mitigation: Retention policy automatically prunes old runs (Task 021 parent specifies policy).
+
+3. **Path Length Limits** — Windows MAX_PATH (260 chars) may be exceeded with deep nesting. Mitigation: Use flat structure (no subdirectories within run directory) and short run IDs (26 chars ULID).
+
+4. **Concurrent Access** — Multiple processes writing to same run directory causes race conditions. Mitigation: Run IDs must be globally unique; database constraint prevents duplicate IDs.
+
+5. **Network Filesystems** — NFS/SMB may have different locking semantics causing issues. Mitigation: Document that `.acode/` must be on local filesystem, not network mount.
+
+6. **Case-Insensitive Filesystems** — macOS APFS (default) is case-insensitive, Windows NTFS is case-insensitive. Mitigation: Use lowercase-only run IDs to avoid `Run-123` vs `run-123` collisions.
+
+### Trade-Offs and Alternatives
+
+**Trade-Off 1: Flat vs Nested Run Directory Structure**
+- **Chosen: Flat** — All artifacts at root of run directory (stdout.txt, test-results.trx)
+- **Alternative: Nested** — Subdirectories by type (logs/, tests/, coverage/)
+- **Rationale:** Flat structure is simpler, easier to browse, fewer path resolution issues. Nested structure would complicate path resolution and gitignore patterns.
+
+**Trade-Off 2: ULID vs UUID for Run IDs**
+- **Chosen: ULID** — Time-ordered, sortable, 26 characters
+- **Alternative: UUID v4** — Standard, 36 characters with hyphens
+- **Rationale:** ULID provides natural chronological ordering in directory listings (`ls -l` shows newest first). UUID requires separate timestamp field for ordering.
+
+**Trade-Off 3: JSON vs YAML for Metadata**
+- **Chosen: JSON** — Ubiquitous, fast parsing, compact
+- **Alternative: YAML** — Human-readable, supports comments
+- **Rationale:** JSON has better .NET support (System.Text.Json), smaller file size, no ambiguity in parsing. YAML comments not needed for machine-generated metadata.
+
+**Trade-Off 4: Artifact Directory in Workspace Root vs Hidden**
+- **Chosen: `.acode/artifacts/`** — Hidden directory (dot prefix)
+- **Alternative: `acode-artifacts/`** — Visible directory
+- **Rationale:** Hidden directory reduces clutter in workspace root, follows convention of `.git/`, `.vscode/`. Visible directory might be accidentally committed or deleted.
+
+**Trade-Off 5: Gitignore Auto-Update vs Manual**
+- **Chosen: Auto-Update** — Agent adds `.acode/artifacts/` to .gitignore on first run
+- **Alternative: Manual** — User must add pattern themselves
+- **Rationale:** Auto-update ensures artifacts never accidentally committed, reduces user error. Risk: Modifying user's .gitignore without permission (mitigated by logging action).
+
+---
+
+## Use Cases
+
+### Use Case 1: DevBot Automated Testing Artifact Inspection
+
+**Persona:** DevBot (CI/CD Automation Agent)
+**Scenario:** Test suite fails in CI, developer needs to inspect test results and logs
+
+**Before Standardized Directory Structure:**
+- Test outputs scattered: some in `./test-results/`, some in `./output/`, some in `/tmp/`
+- Each test framework uses different directory structure
+- Developer searches 4-5 different locations to find artifacts
+- Time wasted: 5 minutes per test failure × 20 failures/day = 100 minutes/day
+- Cost: 100 min/day × 21 days/month × $75/hour ÷ 60 min/hour = $2,625/month
+
+**After Standardized Directory Structure:**
+- All artifacts in `.acode/artifacts/{run-id}/`
+- Predictable locations: `stdout.txt`, `stderr.txt`, `test-results.trx`
+- Developer runs: `acode artifact list {run-id}` to see all artifacts
+- Single command to view: `acode artifact cat {run-id} test-results.trx`
+- Time wasted: 30 seconds per failure × 20 failures/day = 10 minutes/day
+- Cost: 10 min/day × 21 days/month × $75/hour ÷ 60 min/hour = $262.50/month
+
+**Savings:** $2,362.50/month per developer, $28,350/year
+
+**Commands Used:**
+```bash
+# CI run fails, developer inspects
+acode run list --status failed --last 1h
+# Returns: run-abc-123 (2024-12-01 14:32:15, exit 1)
+
+# List all artifacts for the failed run
+acode artifact list run-abc-123
+# Returns: stdout.txt, stderr.txt, test-results.trx, coverage.json
+
+# View test results directly
+acode artifact cat run-abc-123 test-results.trx
+# Shows XML test results with failures highlighted
+
+# View stderr for error details
+acode artifact cat run-abc-123 stderr.txt
+# Shows stack traces and error messages
+```
+
+---
+
+### Use Case 2: Jordan Compliance Audit Trail Verification
+
+**Persona:** Jordan (Security Compliance Officer)
+**Scenario:** SOC 2 audit requires proof that all agent operations are logged and artifacts retained
+
+**Before Standardized Directory Structure:**
+- Audit log files mixed with application logs
+- No clear mapping between runs and their outputs
+- Manual reconstruction of "what happened when" from scattered logs
+- Audit preparation time: 60 hours per audit
+- Cost: 60 hours × $100/hour = $6,000 per audit
+
+**After Standardized Directory Structure:**
+- Each run has isolated directory with complete audit trail
+- Metadata file (`run.json`) contains execution context, timing, command
+- Artifacts immutable once written (append-only)
+- Directory structure serves as self-documenting audit trail
+- Audit preparation time: 3 hours per audit (automated export)
+- Cost: 3 hours × $100/hour = $300 per audit
+
+**Savings:** $5,700 per audit, $5,700/year (1 audit/year)
+
+**Audit Workflow:**
+```bash
+# Export all runs from audit period
+acode run list --from 2024-01-01 --to 2024-12-31 --format jsonl > audit-2024.jsonl
+
+# Verify artifact completeness
+for run_id in $(jq -r '.run_id' audit-2024.jsonl); do
+  acode artifact verify $run_id || echo "AUDIT FAILURE: $run_id incomplete"
+done
+
+# Check directory structure compliance
+ls -la .acode/artifacts/ | head -20
+# Expected: Each directory is run-XXXXX with predictable structure
+
+# Sample random run for detailed inspection
+random_run=$(jq -r '.run_id' audit-2024.jsonl | shuf -n 1)
+tree .acode/artifacts/$random_run/
+# Expected: stdout.txt, stderr.txt, run.json, plus task-specific artifacts
+
+# Verify metadata integrity
+jq . .acode/artifacts/$random_run/run.json
+# Expected: Complete execution context with timestamps, command, exit code
+```
+
+---
+
+### Use Case 3: Alex Historical Performance Analysis
+
+**Persona:** Alex (DevOps Performance Engineer)
+**Scenario:** Analyze build performance trends over time to identify optimization opportunities
+
+**Before Standardized Directory Structure:**
+- Build logs in different formats across different periods
+- No consistent metadata schema
+- Manual parsing of logs to extract timing information
+- Analysis script breaks when log format changes
+- Analysis time: 2 days per month
+- Cost: 16 hours × $125/hour = $2,000/month
+
+**After Standardized Directory Structure:**
+- Every run has `run.json` with consistent schema: start_time, end_time, duration_ms
+- Artifacts in predictable locations enable automated analysis
+- Historical data queryable without parsing log formats
+- Analysis script works reliably across all runs
+- Analysis time: 2 hours per month (automated)
+- Cost: 2 hours × $125/hour = $250/month
+
+**Savings:** $1,750/month, $21,000/year per engineer
+
+**Analysis Workflow:**
+```bash
+# Extract build durations from last 90 days
+for run_dir in .acode/artifacts/run-*; do
+  if [[ -f "$run_dir/run.json" ]]; then
+    jq -r '[.run_id, .command, .duration_ms] | @csv' "$run_dir/run.json"
+  fi
+done > build-durations.csv
+
+# Analyze with standard tools
+cat build-durations.csv | \
+  awk -F',' '$2 ~ /dotnet build/ {sum+=$3; count++} END {print "Avg build time:", sum/count/1000 "s"}'
+
+# Identify slowest builds
+sort -t',' -k3 -n build-durations.csv | tail -10
+# Returns: Top 10 slowest builds with run IDs for detailed inspection
+
+# Deep-dive into slowest build
+slowest_run=$(sort -t',' -k3 -n build-durations.csv | tail -1 | cut -d',' -f1)
+acode artifact cat $slowest_run stdout.txt | grep "Time Elapsed"
+# Shows MSBuild timing breakdown for optimization targets
+```
+
+---
+
+### Aggregate ROI Summary
+
+| Use Case | Persona | Annual Savings | Team Savings (10) |
+|----------|---------|----------------|-------------------|
+| Test Artifact Inspection | DevBot | $28,350 | $283,500 |
+| Compliance Audit Trail | Jordan | $5,700 | $5,700 |
+| Performance Analysis | Alex | $21,000 | $210,000 |
+| **Total** | | **$55,050** | **$499,200** |
+
+---
+
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **Artifact Directory** | Root directory `.acode/artifacts/` containing all run subdirectories. Must be in `.gitignore`. Created automatically on first use with 755 permissions. |
+| **Run Directory** | Subdirectory `.acode/artifacts/{run-id}/` containing all artifacts for a single command execution. Named using unique run identifier (UUID/ULID). |
+| **Run ID** | Unique identifier for a command execution. Format: `run-01HQRS7TGKMWXY123` (ULID) or UUID v4. Used as directory name and database primary key. |
+| **Artifact** | Output file produced during command execution: logs, test results, coverage reports, build outputs. Stored in run directory with standard names. |
+| **Standard Artifact** | Well-known artifact with reserved name: `stdout.txt` (process output), `stderr.txt` (error output), `run.json` (metadata), `combined.txt` (interleaved streams). |
+| **Custom Artifact** | Task-specific artifact beyond standard set: test results XML, coverage JSON, build logs, generated code. Stored alongside standard artifacts. |
+| **Metadata File** | JSON file `run.json` in each run directory containing execution context: command, timestamps, exit code, environment variables, workspace info. |
+| **Retention Policy** | Rules determining when artifacts are deleted: age-based (30 days), count-based (max 10,000 runs), size-based (max 50GB), status-based (keep failures longer). |
+| **Artifact Manifest** | Optional JSON file listing all artifacts in run directory with checksums (SHA-256), sizes, timestamps. Enables integrity verification and export. |
+| **Path Resolution** | Process of converting relative artifact references to absolute filesystem paths. Handled by `IArtifactPathResolver` service. Cross-platform (Windows/Linux/Mac). |
+| **Run Isolation** | Guarantee that artifacts from different runs never interfere. Each run has isolated directory preventing overwrites, race conditions, or cross-contamination. |
+| **Artifact Pruning** | Automated deletion of old artifacts according to retention policy. Runs as scheduled background job. Removes run directory and database record atomically. |
+| **Workspace Scoping** | Artifacts are scoped to workspace: different workspaces have separate artifact directories. Path: `{workspace-root}/.acode/artifacts/`. |
+| **Artifact Collection** | Automatic capture of command outputs during execution. Implemented by `ArtifactCollector` service that streams stdout/stderr to files as process runs. |
+| **Directory Layout** | Standard structure within run directory: flat (all files at root) vs nested (organized by type: `logs/`, `tests/`, `coverage/`). This task specifies flat layout. |
+| **Gitignore Integration** | Ensuring `.acode/artifacts/` directory is excluded from version control. Agent adds entry to `.gitignore` on first run if not present. |
+| **Artifact Reference** | Pointer from run record (database) to artifact file (filesystem). Includes relative path, size, content type, checksum. Stored in run metadata. |
+| **Run Summary** | Lightweight view of run record with essential fields: run ID, timestamp, exit code, command. Used for listing runs without loading full artifacts. |
+
+---
+
+## Out of Scope
+
+This task explicitly does NOT include the following capabilities (deferred to other tasks or future work):
+
+1. **Artifact Compression** — No automatic gzip/brotli compression of artifacts. Files stored uncompressed. Compression happens only in export bundles (Task 021c).
+2. **Artifact Deduplication** — No content-addressed storage or deduplication across runs. Each run stores complete artifacts even if identical to previous runs.
+3. **Artifact Encryption** — No encryption of artifacts at rest. Use filesystem-level encryption (LUKS, BitLocker, FileVault) if needed. Export bundles (Task 021c) can be password-protected.
+4. **Distributed Storage** — No object storage (S3, Azure Blob, GCS) integration. All artifacts stored on local filesystem. Cloud storage deferred to Epic 07 (Cloud Burst Compute).
+5. **Artifact Streaming** — No real-time streaming of artifacts during execution (like `docker logs -f`). Artifacts written to files, then displayed after completion.
+6. **Artifact Search Content** — No full-text search inside artifact files. Search by run metadata only (command, timestamp, status). Content search deferred to Epic 03 (Repo Intelligence).
+7. **Artifact Annotations** — No user comments, tags, or labels on individual artifacts. Annotations on run records only, via metadata JSON.
+8. **Artifact Versioning** — No version history for artifacts. Each run creates new artifacts; no updates or patches to existing artifacts.
+9. **Artifact Access Control** — No fine-grained permissions per artifact or per run. Workspace-level access only. ACLs deferred to Epic 09 (Safety/Policy).
+10. **Artifact Preview** — No syntax highlighting, image thumbnails, PDF rendering in CLI. Use `acode artifact cat` and pipe to external viewers (`bat`, `imgcat`, `pdftotext`).
+11. **Artifact Diff UI** — No built-in diff visualization between artifacts from different runs. Export artifacts and use external diff tools (`diff`, `vimdiff`, `Beyond Compare`).
+12. **Artifact Download Protocol** — No HTTP API or download protocol for remote artifact access. Local filesystem only. REST API deferred to Epic 10 (Telemetry/Dashboard).
+13. **Artifact Quota Enforcement** — No per-user or per-workspace storage quotas. Global retention policy only. User quotas deferred to Epic 09 (Policy Engine).
+14. **Artifact Lifecycle Hooks** — No custom scripts triggered on artifact creation, deletion, or access. Hooks deferred to Epic 08 (CI/CD Authoring).
+15. **Artifact Replication** — No automatic replication to backup locations or secondary storage. Manual backup via export bundles (Task 021c) or filesystem tools (`rsync`, `tar`).
+
 ---
 
 ## Functional Requirements
@@ -477,74 +872,1123 @@ This ensures artifacts are not committed to version control.
 
 ---
 
+## Assumptions
+
+This task makes the following assumptions about the system, environment, dependencies, and operational context:
+
+### Technical Assumptions
+
+1. **Filesystem Hierarchy Supported** — Target filesystems (ext4, NTFS, APFS, Btrfs) support sufficient directory depth (`.acode/artifacts/{run-id}/` = 3 levels) without performance degradation
+2. **Cross-Platform Path Handling** — .NET Path.Combine() correctly handles forward slashes on Windows, Linux, and macOS for consistent path resolution
+3. **Unique Run IDs** — Run ID generation (ULID or UUID v4) provides collision-free identifiers with probability <1 in 10^18 for realistic workload (100k runs/workspace)
+4. **Atomic Directory Creation** — Filesystem guarantees atomic directory creation preventing race conditions when multiple processes create `.acode/artifacts/` simultaneously
+5. **Write Permissions Available** — Agent process has write permissions to workspace root directory enabling `.acode/` creation; users run agent with sufficient privileges (not sandboxed)
+6. **Disk Space Monitoring** — Operating system or monitoring tools alert administrators before disk exhaustion; agent does not implement disk space checking beyond retention policy
+7. **File Locking Semantics** — Filesystem supports advisory file locking for preventing concurrent writes to same artifact file; handles distributed filesystems (NFS, SMB) correctly
+8. **Symlink Support** — Filesystem supports symbolic links if needed for artifact references; resolution follows symlinks correctly without infinite loops
+9. **Gitignore Parsing** — Git version control respects `.gitignore` patterns including wildcards (`*.txt`) and negations (`!important.txt`); agent writes valid `.gitignore` syntax
+10. **JSON Serialization** — .NET System.Text.Json correctly serializes run metadata including Unicode characters, timestamps (ISO 8601), and nested objects up to 64 levels depth
+
+### Operational Assumptions
+
+11. **Single Workspace Instance** — Only one agent instance per workspace runs commands concurrently; multiple instances accessing same workspace handled via database locking (Task 050b dependency)
+12. **Workspace Root Stability** — Workspace root directory path remains constant during agent lifetime; moving workspaces requires re-initialization
+13. **Retention Policy Configuration** — Default retention (30 days successful, 90 days failed) is acceptable for most users; custom policies configured in `agent-config.yml` before large-scale use
+14. **Artifact Size Limits** — Default 10MB per artifact and 100MB per run are sufficient for typical builds/tests; larger artifacts (videos, binaries) manually excluded or limits increased
+15. **No External Artifact Management** — Users do not manually edit/delete artifacts in `.acode/artifacts/` directory; all artifact operations go through agent CLI to maintain database consistency
+16. **Run ID Display** — Users can copy/paste run IDs from CLI output (monospace-friendly ULIDs/UUIDs); screen readers correctly announce identifiers for accessibility
+17. **Standard Output Streams** — Executed commands write output to stdout/stderr, not directly to files bypassing stream capture; frameworks like MSBuild, npm, pytest follow this convention
+18. **Artifact Immutability** — Once written, artifacts are never modified by external processes; any tampering detected via checksums (if implemented, see Task 021 parent)
+19. **Workspace Portability** — Workspaces can be archived/restored including `.acode/` directory; restoring workspace with artifacts maintains consistency between database (Task 050) and filesystem
+20. **Pruning Job Reliability** — Background retention job runs reliably via OS scheduler (cron, Task Scheduler, systemd timer); failed pruning attempts retried next cycle without manual intervention
+
+---
+
+## Security Considerations
+
+This section identifies security threats specific to artifact directory standards, with complete C# mitigation implementations.
+
+---
+
+### Security Threat 1: Path Traversal via Malicious Run IDs
+
+**Risk:** Attacker controls run ID value (e.g., via API or CLI), injects path traversal sequences (`../../etc/passwd`) to write artifacts outside designated directory.
+
+**Attack Scenario:**
+1. Attacker crafts malicious run ID: `../../../../../../tmp/malicious`
+2. Agent creates directory: `.acode/artifacts/../../../../../../tmp/malicious/`
+3. Artifacts written to `/tmp/malicious/` instead of workspace artifacts directory
+4. Attacker plants malicious files in system directories
+5. System compromise via planted executable or configuration file
+
+**Mitigation:**
+
+Validate and sanitize run IDs before using them in filesystem operations. Reject invalid characters and path traversal patterns.
+
+```csharp
+// RunIdValidator.cs
+using System;
+using System.Text.RegularExpressions;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class RunIdValidator
+{
+    //  Valid run ID: alphanumeric, hyphens only (ULID/UUID format)
+    private static readonly Regex ValidRunIdPattern = new(@"^[a-zA-Z0-9\-]{20,40}$", RegexOptions.Compiled);
+
+    // Dangerous patterns that must be rejected
+    private static readonly string[] ForbiddenPatterns = new[]
+    {
+        "..",           // Path traversal
+        "/",            // Directory separator
+        "\\",           // Windows separator
+        ":",            // Drive letter (Windows)
+        "*",            // Wildcard
+        "?",            // Wildcard
+        "<", ">",       // Redirection
+        "|",            // Pipe
+        "\"",           // Quote
+        "\0",           // Null byte
+    };
+
+    public (bool IsValid, string Error) Validate(string runId)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+        {
+            return (false, "Run ID cannot be null or empty");
+        }
+
+        // Check for forbidden patterns
+        foreach (var pattern in ForbiddenPatterns)
+        {
+            if (runId.Contains(pattern))
+            {
+                return (false, $"Run ID contains forbidden pattern: '{pattern}'");
+            }
+        }
+
+        // Validate format
+        if (!ValidRunIdPattern.IsMatch(runId))
+        {
+            return (false, "Run ID must contain only alphanumeric characters and hyphens (20-40 chars)");
+        }
+
+        // Ensure it doesn't resolve to parent directories
+        var normalizedPath = Path.GetFullPath(Path.Combine(".acode/artifacts", runId));
+        var expectedPrefix = Path.GetFullPath(".acode/artifacts");
+
+        if (!normalizedPath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, "Run ID resolves outside artifacts directory");
+        }
+
+        return (true, null);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test path traversal prevention
+acode artifact create --run-id "../../tmp/malicious" test.txt
+# Expected: Error - "Run ID contains forbidden pattern: '..'"
+
+acode artifact create --run-id "../escape" test.txt
+# Expected: Error - "Run ID contains forbidden pattern: '..'"
+
+# Test valid run IDs
+acode artifact create --run-id "run-01HQRS7TGKMWXY123" test.txt
+# Expected: Success - directory created at .acode/artifacts/run-01HQRS7TGKMWXY123/
+
+acode artifact create --run-id "a1b2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6" test.txt
+# Expected: Success - UUID format accepted
+```
+
+---
+
+### Security Threat 2: Insufficient Directory Permissions Allowing Unauthorized Access
+
+**Risk:** Artifact directories created with overly permissive permissions (777) allow any user on system to read sensitive artifacts or modify/delete them.
+
+**Attack Scenario:**
+1. Agent creates `.acode/artifacts/` with permissions 777 (read/write/execute for all)
+2. Multi-user system with multiple developers or services
+3. Attacker user reads artifacts from other users' workspaces
+4. Sensitive data exposed: API keys in logs, credentials in test outputs
+5. Attacker modifies artifacts to hide evidence or inject false data
+
+**Mitigation:**
+
+Create artifact directories with restrictive permissions (755 for directories, 644 for files) ensuring only owner can write.
+
+```csharp
+// ArtifactDirectoryInitializer.cs
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class ArtifactDirectoryInitializer
+{
+    private readonly string _artifactsRootPath;
+    private readonly ILogger<ArtifactDirectoryInitializer> _logger;
+
+    public ArtifactDirectoryInitializer(
+        string artifactsRootPath,
+        ILogger<ArtifactDirectoryInitializer> logger)
+    {
+        _artifactsRootPath = artifactsRootPath;
+        _logger = logger;
+    }
+
+    public void EnsureArtifactDirectoryExists(string runId)
+    {
+        var runDirectory = Path.Combine(_artifactsRootPath, runId);
+
+        if (Directory.Exists(runDirectory))
+        {
+            _logger.LogDebug("Artifact directory already exists: {Path}", runDirectory);
+            return;
+        }
+
+        // Create directory
+        Directory.CreateDirectory(runDirectory);
+
+        // Set restrictive permissions (Unix only, Windows uses ACLs)
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            SetUnixPermissions(runDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                                              UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+                                              UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            _logger.LogInformation("Created artifact directory with 755 permissions: {Path}", runDirectory);
+        }
+        else
+        {
+            // Windows: Inherit permissions from parent, no world-writable
+            _logger.LogInformation("Created artifact directory with inherited permissions: {Path}", runDirectory);
+        }
+    }
+
+    public void WriteArtifactFile(string runId, string filename, byte[] content)
+    {
+        var filePath = Path.Combine(_artifactsRootPath, runId, filename);
+
+        File.WriteAllBytes(filePath, content);
+
+        // Set restrictive file permissions (644: owner read/write, others read-only)
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            SetUnixPermissions(filePath, UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                                         UnixFileMode.GroupRead |
+                                         UnixFileMode.OtherRead);
+            _logger.LogDebug("Created artifact file with 644 permissions: {Path}", filePath);
+        }
+    }
+
+    private void SetUnixPermissions(string path, UnixFileMode mode)
+    {
+        File.SetUnixFileMode(path, mode);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test directory permissions
+acode artifact create --run-id test-perms test.txt
+
+# Check directory permissions (Unix)
+ls -ld .acode/artifacts/test-perms/
+# Expected: drwxr-xr-x (755)
+
+# Check file permissions
+ls -l .acode/artifacts/test-perms/test.txt
+# Expected: -rw-r--r-- (644)
+
+# Test unauthorized modification (as different user)
+su other-user
+echo "tampered" > .acode/artifacts/test-perms/test.txt
+# Expected: Permission denied
+
+# Test unauthorized deletion
+rm -rf .acode/artifacts/test-perms/
+# Expected: Permission denied
+```
+
+---
+
+### Security Threat 3: Race Condition in Directory Creation
+
+**Risk:** Multiple concurrent processes create same run directory simultaneously, leading to race condition where one process overwrites another's artifacts.
+
+**Attack Scenario:**
+1. Two agent processes execute commands with same run ID simultaneously
+2. Both check `Directory.Exists(runDir)` → returns false
+3. Both call `Directory.CreateDirectory(runDir)` concurrently
+4. Process A writes `stdout.txt`
+5. Process B overwrites `stdout.txt` with different content
+6. Artifact corruption and data loss
+
+**Mitigation:**
+
+Use atomic directory creation with exclusive locking to prevent race conditions.
+
+```csharp
+// AtomicDirectoryCreator.cs
+using System;
+using System.IO;
+using System.Threading;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class AtomicDirectoryCreator
+{
+    private readonly ILogger<AtomicDirectoryCreator> _logger;
+    private static readonly SemaphoreSlim CreationLock = new(1, 1);
+
+    public AtomicDirectoryCreator(ILogger<AtomicDirectoryCreator> logger)
+    {
+        _logger = logger;
+    }
+
+    public async Task<string> CreateRunDirectoryAsync(string artifactsRoot, string runId)
+    {
+        var runDirectory = Path.Combine(artifactsRoot, runId);
+
+        // Fast path: directory already exists
+        if (Directory.Exists(runDirectory))
+        {
+            return runDirectory;
+        }
+
+        // Slow path: acquire lock for creation
+        await CreationLock.WaitAsync();
+        try
+        {
+            // Double-check after acquiring lock (another thread may have created it)
+            if (Directory.Exists(runDirectory))
+            {
+                _logger.LogDebug("Directory created by another thread: {Path}", runDirectory);
+                return runDirectory;
+            }
+
+            // Create with lock file for inter-process synchronization
+            var lockFilePath = Path.Combine(artifactsRoot, $".lock-{runId}");
+
+            using var lockFile = new FileStream(
+                lockFilePath,
+                FileMode.CreateNew,  // Fails if file exists (atomic)
+                FileAccess.Write,
+                FileShare.None,      // Exclusive access
+                bufferSize: 1,
+                FileOptions.DeleteOnClose);
+
+            // Lock acquired, safe to create directory
+            Directory.CreateDirectory(runDirectory);
+
+            _logger.LogInformation("Atomically created directory: {Path}", runDirectory);
+
+            return runDirectory;
+        }
+        catch (IOException ex) when (ex.Message.Contains("already exists"))
+        {
+            // Another process created the directory concurrently
+            _logger.LogWarning("Race condition detected, directory created by another process: {Path}", runDirectory);
+            return runDirectory;
+        }
+        finally
+        {
+            CreationLock.Release();
+        }
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test concurrent directory creation
+acode artifact create --run-id test-race test1.txt &
+acode artifact create --run-id test-race test2.txt &
+wait
+
+# Verify both artifacts exist without corruption
+ls .acode/artifacts/test-race/
+# Expected: test1.txt, test2.txt (both present, no overwrites)
+
+cat .acode/artifacts/test-race/test1.txt
+cat .acode/artifacts/test-race/test2.txt
+# Expected: Both files have correct content, no corruption
+
+# Check logs for race condition warnings
+acode log query --message "Race condition detected" --last 5m
+# Expected: May show warning if race detected, but handled gracefully
+```
+
+---
+
+### Security Threat 4: Gitignore Injection via Malicious Artifact Names
+
+**Risk:** Attacker creates artifact with name designed to manipulate `.gitignore` patterns, causing sensitive files to be committed or legitimate files to be ignored.
+
+**Attack Scenario:**
+1. Attacker triggers artifact creation with malicious name: `!important.txt\n*.env`
+2. Agent appends artifact pattern to `.gitignore`: `artifacts/!important.txt\n*.env`
+3. Gitignore negation (`!`) exposes artifacts that should be hidden
+4. Wildcard (`*.env`) causes all `.env` files in workspace to be ignored
+5. Credentials accidentally committed to version control
+
+**Mitigation:**
+
+Sanitize artifact filenames and validate `.gitignore` patterns before writing. Escape special characters and reject invalid names.
+
+```csharp
+// GitignoreManager.cs
+using System;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class GitignoreManager
+{
+    private readonly string _workspaceRoot;
+    private readonly ILogger<GitignoreManager> _logger;
+
+    // Valid filename: alphanumeric, hyphens, underscores, dots, no path separators or special chars
+    private static readonly Regex ValidFilenamePattern = new(@"^[a-zA-Z0-9\-_\.]+$", RegexOptions.Compiled);
+
+    public GitignoreManager(string workspaceRoot, ILogger<GitignoreManager> logger)
+    {
+        _workspaceRoot = workspaceRoot;
+        _logger = logger;
+    }
+
+    public void EnsureArtifactsIgnored()
+    {
+        var gitignorePath = Path.Combine(_workspaceRoot, ".gitignore");
+
+        const string artifactsPattern = ".acode/artifacts/";
+
+        // Check if .gitignore exists
+        if (!File.Exists(gitignorePath))
+        {
+            File.WriteAllLines(gitignorePath, new[] { artifactsPattern });
+            _logger.LogInformation("Created .gitignore with artifacts pattern: {Pattern}", artifactsPattern);
+            return;
+        }
+
+        // Check if pattern already exists
+        var existingLines = File.ReadAllLines(gitignorePath);
+        if (existingLines.Any(line => line.Trim() == artifactsPattern))
+        {
+            _logger.LogDebug(".gitignore already contains artifacts pattern");
+            return;
+        }
+
+        // Append pattern (safe: no user input, hardcoded pattern)
+        File.AppendAllLines(gitignorePath, new[] { "", "# Acode artifacts (auto-generated)", artifactsPattern });
+        _logger.LogInformation("Appended artifacts pattern to .gitignore");
+    }
+
+    public (bool IsValid, string Error) ValidateArtifactFilename(string filename)
+    {
+        if (string.IsNullOrWhiteSpace(filename))
+        {
+            return (false, "Filename cannot be null or empty");
+        }
+
+        // Reject path separators
+        if (filename.Contains('/') || filename.Contains('\\'))
+        {
+            return (false, "Filename cannot contain path separators");
+        }
+
+        // Reject gitignore special characters
+        var forbiddenChars = new[] { '!', '*', '?', '[', ']', '{', '}', '\n', '\r' };
+        if (forbiddenChars.Any(filename.Contains))
+        {
+            return (false, $"Filename contains forbidden character (gitignore special chars not allowed)");
+        }
+
+        // Validate format
+        if (!ValidFilenamePattern.IsMatch(filename))
+        {
+            return (false, "Filename must contain only alphanumeric, hyphens, underscores, and dots");
+        }
+
+        return (true, null);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test gitignore injection prevention
+acode artifact create --run-id test-inject --name "!important.txt" content.txt
+# Expected: Error - "Filename contains forbidden character"
+
+acode artifact create --run-id test-inject --name "*.env" content.txt
+# Expected: Error - "Filename contains forbidden character"
+
+acode artifact create --run-id test-inject --name "test\nnewline.txt" content.txt
+# Expected: Error - "Filename contains forbidden character"
+
+# Test valid filenames
+acode artifact create --run-id test-valid --name "build-log.txt" content.txt
+# Expected: Success
+
+acode artifact create --run-id test-valid --name "test_results.json" content.txt
+# Expected: Success
+
+# Verify .gitignore integrity
+cat .gitignore
+# Expected: Contains ".acode/artifacts/" with no malicious patterns
+```
+
+---
+
+### Security Threat 5: Symlink Attack for Artifact Exfiltration
+
+**Risk:** Attacker creates symlink in artifact directory pointing to sensitive file outside workspace, causing agent to expose or overwrite sensitive data when reading/writing artifacts.
+
+**Attack Scenario:**
+1. Attacker gains write access to `.acode/artifacts/run-123/` directory
+2. Creates symlink: `ln -s /etc/passwd stdout.txt`
+3. User runs `acode artifact cat run-123 stdout.txt`
+4. Agent follows symlink, displays `/etc/passwd` contents
+5. Sensitive system configuration exposed
+
+**Mitigation:**
+
+Detect and reject symlinks when reading/writing artifacts. Use `FileOptions.None` and check file attributes before operations.
+
+```csharp
+// SymlinkSafeFileReader.cs
+using System;
+using System.IO;
+
+namespace Acode.Infrastructure.Artifacts.Security;
+
+public sealed class SymlinkSafeFileReader
+{
+    private readonly ILogger<SymlinkSafeFileReader> _logger;
+
+    public SymlinkSafeFileReader(ILogger<SymlinkSafeFileReader> logger)
+    {
+        _logger = logger;
+    }
+
+    public byte[] ReadArtifactFile(string artifactPath)
+    {
+        // Resolve to absolute path
+        var absolutePath = Path.GetFullPath(artifactPath);
+
+        // Check if file exists
+        if (!File.Exists(absolutePath))
+        {
+            throw new FileNotFoundException($"Artifact not found: {artifactPath}");
+        }
+
+        // Check if path is a symlink (Unix)
+        var fileInfo = new FileInfo(absolutePath);
+        if (fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            _logger.LogError("Symlink detected, refusing to read: {Path}", absolutePath);
+            throw new SecurityException($"Artifact is a symlink (forbidden): {artifactPath}");
+        }
+
+        // Additional check: ensure resolved path is still within artifacts directory
+        var artifactsRoot = Path.GetFullPath(".acode/artifacts");
+        if (!absolutePath.StartsWith(artifactsRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogError("Path escapes artifacts directory: {Path}", absolutePath);
+            throw new SecurityException($"Artifact path escapes artifacts directory: {artifactPath}");
+        }
+
+        // Safe to read
+        return File.ReadAllBytes(absolutePath);
+    }
+
+    public void WriteArtifactFile(string artifactPath, byte[] content)
+    {
+        var absolutePath = Path.GetFullPath(artifactPath);
+
+        // Ensure parent directory exists and is not a symlink
+        var directory = Path.GetDirectoryName(absolutePath);
+        var dirInfo = new DirectoryInfo(directory);
+        if (dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            _logger.LogError("Parent directory is a symlink: {Path}", directory);
+            throw new SecurityException($"Parent directory is a symlink: {directory}");
+        }
+
+        // Write with FileOptions that prevent symlink following
+        using var fileStream = new FileStream(
+            absolutePath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 4096,
+            FileOptions.None);  // No FILE_FLAG_OPEN_REPARSE_POINT
+
+        fileStream.Write(content, 0, content.Length);
+
+        _logger.LogDebug("Wrote artifact file (symlink-safe): {Path}", absolutePath);
+    }
+}
+```
+
+**Validation Test:**
+
+```bash
+# Test symlink attack prevention
+mkdir -p .acode/artifacts/test-symlink
+
+# Create symlink to sensitive file
+ln -s /etc/passwd .acode/artifacts/test-symlink/passwd-link
+
+# Attempt to read via symlink
+acode artifact cat test-symlink passwd-link
+# Expected: Error - "Artifact is a symlink (forbidden)"
+
+# Attempt to write via symlink directory
+ln -s /tmp/.acode/artifacts/test-symlink-dir
+acode artifact create --run-id test-symlink-dir test.txt
+# Expected: Error - "Parent directory is a symlink"
+
+# Verify legitimate files work
+acode artifact create --run-id test-legitimate test.txt
+acode artifact cat test-legitimate test.txt
+# Expected: Success, content displayed
+```
+
+---
+
 ## Best Practices
 
-### Directory Structure
+### Directory Structure Best Practices
 
-1. **Consistent hierarchy** - Same structure across all projects
-2. **Predictable naming** - {runId}/{artifactType}/{filename}
-3. **Shallow directories** - Avoid deeply nested structures
-4. **Separate by type** - Logs, test results, coverage in own directories
+1. **Use flat structure within run directories** — Store all artifacts at the root of each run directory (`.acode/artifacts/{run-id}/stdout.txt`) rather than creating subdirectories. This simplifies path resolution, reduces nesting depth, and improves compatibility with tools expecting flat structures. Only use subdirectories if artifact count exceeds 50 files per run.
 
-### File Naming
+2. **Enforce consistent naming across projects** — Standardize artifact filenames: `stdout.txt`, `stderr.txt`, `run.json` must be identical across all workspaces and project types. This enables generic tooling (scripts, exporters) to work without project-specific customization. Document standard names in project README.
 
-5. **Include timestamps** - ISO8601 format in filenames when relevant
-6. **Avoid special characters** - Alphanumeric, hyphen, underscore only
-7. **Preserve extensions** - Keep original file extensions
-8. **Unique names** - Prevent overwrites with UUID or sequence
+3. **Keep directory depth minimal** — Limit structure to 3 levels: `workspace-root/.acode/artifacts/{run-id}/`. Deeper nesting causes issues on Windows (MAX_PATH 260 chars), NFS (performance degradation), and makes paths harder to copy/paste. If sharding needed for >100k runs, use 2-level scheme: `.acode/artifacts/01/HQ/{run-id}/`.
 
-### Maintenance
+4. **Separate standard from custom artifacts** — Standard artifacts (stdout.txt, stderr.txt, run.json) are always present; custom artifacts (test-results.trx, coverage.json) are optional. Custom artifacts use descriptive names indicating tool/format: `dotnet-test-results.trx`, `jest-coverage.json`. Avoid generic names like `output.txt`.
 
-9. **Gitignore artifacts** - Never commit artifacts to source control
-10. **Document structure** - README in artifacts directory explaining layout
-11. **Size monitoring** - Warn when artifacts directory grows large
-12. **Periodic cleanup** - Script or command to prune old artifacts
+### File Naming Best Practices
+
+5. **Use lowercase filenames consistently** — All artifact filenames should be lowercase (stdout.txt, build.log) to avoid case-sensitivity issues on different filesystems. Windows/macOS are case-insensitive (stdout.txt == STDOUT.txt), Linux is case-sensitive. Lowercase-only prevents collisions and confusion.
+
+6. **Preserve original file extensions** — When collecting artifacts, retain the original extension (.log, .trx, .xml, .json). Extensions enable text editors/IDEs to apply correct syntax highlighting and allow file-type based filtering (`ls *.json`). Don't rename `test-results.trx` to `test-results.txt`.
+
+7. **Avoid special characters in filenames** — Restrict filenames to alphanumeric, hyphens, underscores, and dots: `[a-zA-Z0-9\-_\.]+`. Reject spaces, slashes, colons, pipes, wildcards. Special characters break shell scripts (`rm *.log` fails if filename is `*.log`), URLs (artifact download links), and .gitignore patterns.
+
+8. **Include timestamps only when needed** — Standard artifacts (stdout.txt) don't need timestamps; the run directory name (ULID with embedded timestamp) provides chronological ordering. Only add timestamps to custom artifacts when multiple instances generated per run: `screenshot-14-32-15.png`, `profile-14-35-42.json`.
+
+### Artifact Collection Best Practices
+
+9. **Collect artifacts immediately after generation** — Don't defer artifact collection to end of run. Write stdout/stderr to files as data arrives (streaming), not buffered. Immediate collection ensures partial artifacts available if process crashes, and reduces memory usage (no buffering GB of output).
+
+10. **Set size limits per artifact** — Configure maximum artifact size (default 10MB) to prevent disk exhaustion from runaway processes. Truncate oversized artifacts with marker: `[TRUNCATED: exceeded 10MB limit]`. Preserve first 10MB for debugging (usually contains relevant errors), not last 10MB.
+
+11. **Compute checksums on write** — Calculate SHA-256 checksum while writing each artifact, store in run.json metadata. Enables integrity verification after filesystem issues, backups, or security audits. Use streaming hash computation to avoid reading file twice: `using var sha256 = SHA256.Create(); sha256.ComputeHash(fileStream);`
+
+12. **Capture environment context** — Store critical environment variables in run.json: PATH, DOTNET_CLI_TELEMETRY_OPTOUT, JAVA_HOME, NODE_ENV. Exclude sensitive vars (API_KEY, PASSWORD). Context enables reproducibility ("why did this work in CI but not locally?"). Limit to 50 vars max to avoid bloat.
+
+### Retention and Cleanup Best Practices
+
+13. **Configure aggressive retention policies** — Default retention: delete runs older than 30 days (success) or 90 days (failures). Aggressive policies prevent disk exhaustion. Users who need long-term history should export bundles (Task 021c) to external storage, not rely on local artifacts.
+
+14. **Prune during low-activity periods** — Schedule retention cleanup at 2 AM local time, avoiding peak development hours. Pruning is I/O intensive (deleting thousands of files), causes VCS performance issues if run during active development. Use cron/Task Scheduler: `0 2 * * * acode artifacts prune`.
+
+15. **Delete atomically: database then filesystem** — When pruning run, delete database record first, then artifact directory. If deletion fails mid-operation, database has no orphaned records pointing to missing artifacts. Orphaned artifacts (no database record) cleaned up by separate orphan scan job.
+
+16. **Monitor disk usage proactively** — Alert when `.acode/artifacts/` exceeds 10GB or 80% of disk. Don't wait for disk full errors. Provide command to check usage: `acode artifacts stats` shows total size, run count, oldest run date. Dashboard UI (future) graphs trends over time.
+
+### Gitignore Integration Best Practices
+
+17. **Auto-add gitignore entry on first run** — When agent creates `.acode/artifacts/` for first time, automatically append `.acode/artifacts/` to workspace `.gitignore`. Log action: "Added .acode/artifacts/ to .gitignore". If user later removes entry, warn: "Artifacts may be committed to VCS. Re-add gitignore entry?"
+
+18. **Use directory-level ignore, not file patterns** — Gitignore entry should be `.acode/artifacts/` (entire directory), not `.acode/artifacts/*.txt` (file patterns). Directory-level ignore is simpler, faster for git, and prevents accidentally committing files if pattern doesn't match (e.g., forgot to ignore `.xml` files).
+
+19. **Respect user's existing gitignore** — Don't overwrite or reformat user's .gitignore. Append new entry at end with comment: `# Acode artifacts (auto-generated)`. If .gitignore is tracked in VCS, agent modification creates uncommitted change; this is acceptable (user reviews and commits).
+
+### Documentation and Communication Best Practices
+
+20. **Log all artifact operations** — Log artifact directory creation, file writes, retention actions with INFO level. Include paths, sizes, durations: "Created artifact directory: .acode/artifacts/run-123 (755)", "Wrote stdout.txt: 45KB in 12ms", "Pruned 127 runs older than 30 days (freed 1.2GB)". Logs enable troubleshooting and auditing.
+
+21. **Provide artifact discovery commands** — Users shouldn't manually browse `.acode/artifacts/`. Provide commands: `acode artifact list {run-id}` (list artifacts), `acode artifact cat {run-id} {file}` (display content), `acode artifact path {run-id}` (show filesystem path for external tools). CLI is safer than direct filesystem access.
+
+22. **Document upgrade path for structure changes** — If artifact directory structure changes in future versions (e.g., adding sharding), provide migration tool: `acode artifacts migrate --from v1 --to v2`. Don't break existing workspaces. Migration tool moves files to new structure, updates database paths.
 
 ---
 
 ## Troubleshooting
 
-### Issue: Artifacts not being collected
+### Issue 1: Artifacts Not Being Collected Despite Enabled Configuration
 
-**Symptoms:** Run completes but artifacts directory is empty
-
-**Causes:**
-- Artifact collection disabled in config
-- Output files written to unexpected locations
-- File patterns don't match actual outputs
-
-**Solutions:**
-1. Check `runs.artifacts.enabled` in config
-2. Verify output paths in build/test commands
-3. Update artifact patterns to match actual outputs
-
-### Issue: Artifact directory growing too large
-
-**Symptoms:** Disk space warnings, slow file operations
+**Symptoms:**
+- Run completes successfully but `.acode/artifacts/{run-id}/` directory is empty
+- `acode run show <run-id>` reports 0 artifacts collected
+- Expected files (stdout.txt, stderr.txt, build outputs) missing
+- Logs show "Artifact collection skipped" warnings
+- Run metadata shows `artifacts_collected: []`
 
 **Causes:**
-- No retention policy configured
-- Large artifacts (videos, binaries) being collected
-- Many runs accumulating over time
+1. Artifact collection patterns don't match actual output file paths
+2. Output files written to unexpected locations outside workspace
+3. File collection happens before outputs are fully written (timing issue)
+4. Insufficient permissions to read source files for collection
+5. Artifact collector crashed silently during collection phase
+6. `.acodeignore` patterns accidentally excluding artifacts
+7. File size exceeds configured `max-artifact-size-mb` threshold
 
 **Solutions:**
-1. Configure retention policy to delete old artifacts
-2. Exclude large file types from collection
-3. Run `acode artifacts prune` periodically
 
-### Issue: Artifacts not found by ID
+```bash
+# Solution 1: Verify artifact collection is enabled
+acode config get runs.artifacts.enabled
+# Expected: true
 
-**Symptoms:** "Artifact not found" errors when retrieving
+# If false, enable:
+acode config set runs.artifacts.enabled true
+
+# Solution 2: Check artifact patterns match actual outputs
+acode config get runs.artifacts.patterns
+# Expected: ["*.log", "stdout.txt", "stderr.txt", "build/**/*"]
+
+# List actual files created during run:
+find . -type f -newermt "2024-01-15 10:00:00" ! -path "./.acode/*" ! -path "./.git/*"
+# Identify outputs not matching patterns
+
+# Add missing patterns:
+acode config add runs.artifacts.patterns "coverage/**/*.xml"
+acode config add runs.artifacts.patterns "test-results/**/*.trx"
+
+# Solution 3: Increase wait time for file stabilization
+acode config set runs.artifacts.collection-delay-ms 500
+# Waits 500ms after run completes before collecting
+
+# Solution 4: Check file permissions on outputs
+ls -la build/output.dll
+# Should be readable (at least 444)
+
+# Fix permissions:
+chmod 644 build/*.dll
+# Re-run collection:
+acode artifact collect --run-id <run-id> --file build/output.dll
+
+# Solution 5: Review .acodeignore patterns
+cat .acodeignore
+# Look for overly broad excludes like "*.dll" or "build/"
+
+# Temporarily disable .acodeignore to test:
+mv .acodeignore .acodeignore.bak
+acode run execute --task build
+# Check if artifacts now collected
+
+# Solution 6: Check artifact size limits
+acode config get runs.artifacts.max-artifact-size-mb
+# Default: 100
+
+# Increase limit if needed:
+acode config set runs.artifacts.max-artifact-size-mb 500
+
+# Solution 7: Enable debug logging to identify collection issues
+acode config set logging.level debug
+acode run execute --task build
+# Review logs:
+cat .acode/artifacts/<run-id>/acode.log | grep "artifact"
+
+# Solution 8: Manually trigger collection for existing run
+acode artifact collect --run-id <run-id> --pattern "build/**/*" --force
+# Forces re-collection even if run marked complete
+```
+
+---
+
+### Issue 2: Artifact Directory Growing Unbounded, Consuming Disk Space
+
+**Symptoms:**
+- `.acode/artifacts/` directory exceeds 10GB+ size
+- `df -h` shows disk space warnings or full disk
+- File operations slow down (ls, find take seconds)
+- Git operations slow due to large ignored directory
+- Docker build context includes large artifacts accidentally
+- Backup times increase significantly
 
 **Causes:**
-- Artifact was pruned by retention policy
-- ID is from different workspace
-- Database and filesystem out of sync
+1. No retention policy configured (infinite retention by default)
+2. Large binary artifacts (videos, core dumps, disk images) being collected
+3. Many CI/CD runs accumulating over weeks/months
+4. Retention policy not running automatically (cron job disabled)
+5. Failed runs retained longer than successful runs
+6. Export bundles stored inside artifacts directory (double storage)
+7. Compression disabled, storing raw uncompressed artifacts
 
 **Solutions:**
-1. Check artifact retention settings
-2. Verify correct workspace is active
-3. Run `acode artifacts verify` to check consistency
+
+```bash
+# Solution 1: Check current disk usage
+du -sh .acode/artifacts/
+# Example output: 12G    .acode/artifacts/
+
+# Break down by run:
+du -sh .acode/artifacts/*/ | sort -h | tail -20
+# Identifies largest runs
+
+# Solution 2: Configure retention policy
+acode config set runs.artifacts.retention-days-success 30
+acode config set runs.artifacts.retention-days-failure 90
+# Keeps successful runs for 30 days, failures for 90 days
+
+# Verify configuration:
+acode config get runs.artifacts
+# Expected output includes retention settings
+
+# Solution 3: Manually prune old artifacts
+acode artifact prune --dry-run
+# Shows what would be deleted without deleting
+
+# Example output:
+# Would delete 45 runs (78GB):
+#   run-20231201-task-build (2.1GB, 67 days old)
+#   run-20231202-task-test (1.8GB, 66 days old)
+#   ...
+
+# Actually delete:
+acode artifact prune --yes
+# Deleted 45 runs, freed 78GB
+
+# Solution 4: Exclude large file types from collection
+acode config add runs.artifacts.exclude-patterns "*.mp4"
+acode config add runs.artifacts.exclude-patterns "*.mkv"
+acode config add runs.artifacts.exclude-patterns "*.iso"
+acode config add runs.artifacts.exclude-patterns "*.tar"
+acode config add runs.artifacts.exclude-patterns "*.zip"
+acode config add runs.artifacts.exclude-patterns "core.*"
+
+# Solution 5: Delete specific large runs manually
+# Find largest runs:
+du -sh .acode/artifacts/*/ | sort -h | tail -5
+
+# Delete specific run:
+acode run delete run-20231115-load-test --include-artifacts
+# Confirmation: "Delete run and 4.2GB artifacts? (yes/no)"
+
+# Solution 6: Enable compression for artifacts
+acode config set runs.artifacts.compression true
+acode config set runs.artifacts.compression-level 6
+# Typically achieves 60-80% reduction for text artifacts
+
+# Solution 7: Set up automatic pruning (Linux/macOS cron)
+crontab -e
+# Add line:
+# 0 2 * * * cd /path/to/workspace && acode artifact prune --yes >> .acode/prune.log 2>&1
+# Runs daily at 2 AM
+
+# Windows Task Scheduler:
+schtasks /create /tn "Acode Artifact Prune" /tr "C:\path\to\acode.exe artifact prune --yes" /sc daily /st 02:00
+
+# Solution 8: Move export bundles outside artifacts directory
+mkdir -p .acode/exports
+acode config set runs.export.output-directory ".acode/exports"
+# Prevents export bundles from being double-counted in artifact storage
+```
+
+---
+
+### Issue 3: Artifacts Not Found When Querying by Run ID
+
+**Symptoms:**
+- `acode artifact list --run <run-id>` returns "Run not found"
+- `acode run show <run-id>` displays run but shows 0 artifacts
+- Directory `.acode/artifacts/<run-id>/` exists on filesystem
+- Error: "Artifact metadata not found in database"
+- Database queries show run but `artifacts_count` is NULL
+
+**Causes:**
+1. Artifact collection completed but database update failed (transaction rollback)
+2. Database corruption after power loss during write
+3. Database and filesystem restored from different backup points
+4. Run ID format changed between Acode versions (migration incomplete)
+5. Manual filesystem manipulation (moved/renamed directories)
+6. Symbolic links broken after moving workspace
+7. Case sensitivity mismatch (Windows vs Linux filesystem)
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify run exists in database
+acode db query "SELECT id, status, artifacts_count FROM runs WHERE id='<run-id>'"
+# If no results, run not in database
+
+# Check if directory exists:
+ls -la .acode/artifacts/<run-id>/
+# If exists, database desync detected
+
+# Solution 2: Rebuild artifact index from filesystem
+acode artifact reindex --run <run-id>
+# Scans filesystem and updates database
+
+# Example output:
+# Reindexing run-20240115-task-build...
+# Found 12 artifacts on filesystem
+# Updated database: 12 artifacts registered
+
+# Reindex all runs:
+acode artifact reindex --all
+# Warning: May take several minutes for large workspaces
+
+# Solution 3: Verify filesystem and database consistency
+acode artifact verify --check-orphans
+# Reports runs in DB without filesystem artifacts
+# Reports filesystem artifacts without DB records
+
+# Example output:
+# Orphaned DB records: 3 runs (no filesystem artifacts)
+# Orphaned filesystem: 5 runs (not in database)
+
+# Solution 4: Check for case sensitivity issues (Windows → Linux migration)
+# On Linux:
+ls .acode/artifacts/ | grep -i "<run-id>"
+# May find RUN-ID vs run-id mismatch
+
+# Fix case mismatch:
+acode artifact fix-case-sensitivity --dry-run
+# Shows what would be renamed
+
+acode artifact fix-case-sensitivity --apply
+# Renames directories to match database
+
+# Solution 5: Restore database from backup
+# List available backups:
+ls -lt .acode/backups/*.db
+
+# Restore specific backup:
+cp .acode/backups/workspace-20240115.db .acode/workspace.db
+# Warning: May lose recent runs
+
+# Solution 6: Check for broken symbolic links
+find .acode/artifacts/ -type l -exec test ! -e {} \; -print
+# Lists broken symlinks
+
+# Remove broken symlinks:
+find .acode/artifacts/ -type l -exec test ! -e {} \; -delete
+
+# Solution 7: Verify workspace is correct
+acode workspace list
+# Ensure current workspace matches expected
+
+# Switch workspace if needed:
+acode workspace switch <workspace-name>
+
+# Solution 8: Export and re-import run to fix metadata
+acode run export --run <run-id> --output /tmp/run-backup.zip
+acode run delete <run-id> --include-artifacts --force
+acode run import /tmp/run-backup.zip
+# Recreates run with fresh metadata
+```
+
+---
+
+### Issue 4: Permission Denied Errors When Creating Artifact Directories
+
+**Symptoms:**
+- `acode run execute` fails with "Permission denied: .acode/artifacts/"
+- Error: "Failed to create directory: Operation not permitted"
+- Artifacts collected but not written to disk
+- Run status shows "Failed" with exit code 1
+- Logs show: "Unable to set file permissions 755 on .acode/artifacts/<run-id>/"
+
+**Causes:**
+1. Parent `.acode/` directory owned by different user (sudo run previously)
+2. Insufficient filesystem permissions on workspace directory
+3. SELinux or AppArmor policies blocking directory creation
+4. Read-only filesystem mount (Docker volume, network share)
+5. Disk quota exceeded for user
+6. Antivirus software blocking directory creation
+7. File system ACLs restricting write access
+
+**Solutions:**
+
+```bash
+# Solution 1: Check ownership of .acode directory
+ls -ld .acode .acode/artifacts
+# Example output:
+# drwxr-xr-x 5 root root 4096 Jan 15 10:00 .acode
+# Should be owned by current user
+
+# Fix ownership:
+sudo chown -R $USER:$USER .acode/
+# Verify:
+ls -ld .acode
+# drwxr-xr-x 5 user user 4096 Jan 15 10:00 .acode
+
+# Solution 2: Check and fix directory permissions
+stat -c "%a %n" .acode .acode/artifacts
+# Expected: 755 for directories
+
+# Fix permissions:
+chmod 755 .acode
+chmod 755 .acode/artifacts
+# Allow write access:
+chmod u+w .acode/artifacts
+
+# Solution 3: Check SELinux status (RHEL/CentOS/Fedora)
+getenforce
+# If "Enforcing", check denials:
+sudo ausearch -m avc -ts recent | grep acode
+
+# Temporarily disable SELinux to test:
+sudo setenforce 0
+acode run execute --task test
+# If works, create SELinux policy:
+sudo semanage fcontext -a -t user_home_t ".acode/artifacts(/.*)?"
+sudo restorecon -R .acode/artifacts
+
+# Solution 4: Check disk quota
+quota -vs
+# Example output showing quota exceeded:
+# Filesystem  blocks  quota  limit  grace  files  quota  limit  grace
+# /dev/sda1   10240M  10000M 10500M  6days   1234   5000   5500   none
+
+# Clean up space or request quota increase from admin
+
+# Solution 5: Verify filesystem is writable
+mount | grep $(df . | tail -1 | awk '{print $1}')
+# Look for "ro" (read-only) flag
+
+# Example: /dev/sda1 on / type ext4 (ro,relatime)
+# If read-only, remount:
+sudo mount -o remount,rw /
+
+# Solution 6: Check antivirus exclusions (Windows)
+# Add .acode directory to Windows Defender exclusions:
+# Settings > Update & Security > Windows Security > Virus & threat protection
+# > Manage settings > Add or remove exclusions
+# Add: C:\Users\<username>\projects\workspace\.acode
+
+# PowerShell command:
+Add-MpPreference -ExclusionPath "C:\Users\<username>\projects\workspace\.acode"
+
+# Solution 7: Test with explicit permissions override
+acode config set runs.artifacts.directory-permissions "0755"
+acode config set runs.artifacts.file-permissions "0644"
+# Forces specific permissions regardless of umask
+
+# Solution 8: Run Acode with elevated privileges (NOT RECOMMENDED)
+# Only if all else fails and workspace is single-user:
+sudo acode run execute --task build
+# Better: Fix underlying permission issue instead
+```
+
+---
+
+### Issue 5: Cross-Platform Path Incompatibility (Windows ↔ Linux/macOS)
+
+**Symptoms:**
+- Artifact paths work on Windows but fail on Linux (or vice versa)
+- Error: "Invalid path separator: backslash not allowed"
+- Exported bundle from Windows doesn't extract correctly on Linux
+- Run metadata shows paths like `C:\Users\...` on Linux system
+- Symlinks in artifacts don't work after moving between platforms
+- File not found errors despite file existing at expected location
+
+**Causes:**
+1. Windows backslashes (`\`) hardcoded instead of using path separators
+2. Absolute paths embedded in metadata (non-portable)
+3. Drive letters (`C:`) present in artifact paths
+4. Case-sensitive filesystem on Linux vs case-insensitive on Windows
+5. Windows MAX_PATH limit (260 chars) exceeded with long artifact paths
+6. Line endings (CRLF vs LF) causing checksum mismatches
+7. Reserved filenames on Windows (CON, PRN, AUX) not handled
+
+**Solutions:**
+
+```bash
+# Solution 1: Verify path separators in artifact metadata
+acode run show <run-id> --format json | grep -E '\\\\|\\\\'
+# Should show no backslashes in paths
+
+# Check run metadata file:
+cat .acode/artifacts/<run-id>/run.json | jq .artifacts[].path
+# All paths should use forward slashes
+
+# Solution 2: Re-normalize paths using Acode utility
+acode artifact normalize-paths --run <run-id>
+# Converts all paths to forward slashes, removes drive letters
+
+# Example output:
+# Normalizing paths for run-20240115-task-build...
+# Updated: C:\temp\output.dll → temp/output.dll
+# Updated: src\Main.cs → src/Main.cs
+# 15 paths normalized
+
+# Solution 3: Enable portable path mode globally
+acode config set runs.artifacts.portable-paths true
+# Future runs will use portable paths automatically
+
+# Solution 4: Handle case sensitivity issues
+# On Linux, check for duplicates differing only in case:
+find .acode/artifacts/<run-id>/ -type f | awk -F/ '{print tolower($NF)}' | sort | uniq -d
+# Shows filenames with case conflicts
+
+# Rename duplicates:
+acode artifact deduplicate-case --run <run-id>
+# Appends _1, _2 to conflicting names
+
+# Solution 5: Work around Windows MAX_PATH limit
+# Check path lengths:
+find .acode/artifacts/<run-id>/ -type f -exec sh -c 'echo "$(echo "{}" | wc -c) {}"' \; | sort -n | tail -10
+# Shows longest paths
+
+# Enable long path support (Windows 10+):
+# Run as Administrator:
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+
+# Or configure Acode to use short paths:
+acode config set runs.artifacts.use-short-run-ids true
+# Uses 8-char run IDs instead of 26-char ULIDs
+
+# Solution 6: Standardize line endings before collection
+# Configure git to normalize line endings:
+echo "* text=auto" > .gitattributes
+echo "*.txt text eol=lf" >> .gitattributes
+
+# Convert existing artifacts:
+find .acode/artifacts/<run-id>/ -name "*.txt" -exec dos2unix {} \;
+# Converts CRLF → LF
+
+# Recompute checksums after conversion:
+acode artifact recompute-checksums --run <run-id>
+
+# Solution 7: Export with cross-platform compatibility flag
+acode run export --run <run-id> --portable --output bundle.zip
+# Normalizes paths, line endings, symlinks for cross-platform use
+
+# Extract on target platform:
+acode run import bundle.zip --normalize-paths
+# Adjusts paths to target OS conventions
+
+# Solution 8: Avoid Windows reserved filenames
+# Detect reserved names:
+find .acode/artifacts/ -iname "CON" -o -iname "PRN" -o -iname "AUX" -o -iname "NUL" -o -iname "COM[1-9]" -o -iname "LPT[1-9]"
+
+# Acode automatically renames these:
+acode config set runs.artifacts.rename-reserved-names true
+# CON → CON_, PRN → PRN_, etc.
+```
+
+---
 
 ---
 

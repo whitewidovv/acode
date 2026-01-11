@@ -112,6 +112,26 @@ public sealed class VllmProvider : IModelProvider, IDisposable
     }
 
     /// <inheritdoc/>
+    public ModelInfo GetModelInfo(string modelId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId, nameof(modelId));
+
+        // Determine if endpoint is local or remote based on URL
+        var endpoint = new Uri(_config.Endpoint);
+        var isLocal = IsLocalEndpoint(endpoint);
+
+        // vLLM always requires network to communicate with the server
+        // Even if the server is local, it's accessed over HTTP
+        return new ModelInfo
+        {
+            ModelId = modelId,
+            IsLocal = isLocal,
+            RequiresNetwork = !isLocal, // Remote endpoints require network, local do not
+        };
+    }
+
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed)
@@ -121,6 +141,15 @@ public sealed class VllmProvider : IModelProvider, IDisposable
 
         _client.Dispose();
         _disposed = true;
+    }
+
+    private static bool IsLocalEndpoint(Uri endpoint)
+    {
+        var host = endpoint.Host.ToLowerInvariant();
+        return host == "localhost" ||
+               host == "127.0.0.1" ||
+               host == "::1" ||
+               host == "0.0.0.0";
     }
 
     private static FinishReason MapFinishReason(string? vllmReason)

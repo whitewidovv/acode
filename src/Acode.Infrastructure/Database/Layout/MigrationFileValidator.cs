@@ -9,6 +9,9 @@ namespace Acode.Infrastructure.Database.Layout;
 /// </summary>
 public sealed partial class MigrationFileValidator
 {
+    /// <summary>
+    /// Forbidden SQL patterns with user-friendly descriptions.
+    /// </summary>
     private static readonly (string Pattern, string Description)[] ForbiddenPatterns = new[]
     {
         (@"\bDROP\s+DATABASE\b", "DROP DATABASE"),

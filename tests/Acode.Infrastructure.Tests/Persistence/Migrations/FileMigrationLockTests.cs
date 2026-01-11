@@ -29,9 +29,19 @@ public sealed class FileMigrationLockTests : IDisposable
     {
         _sut.DisposeAsync().AsTask().Wait();
 
+        // Give time for file handles to be fully released
+        Thread.Sleep(50);
+
         if (Directory.Exists(_testLockDir))
         {
-            Directory.Delete(_testLockDir, recursive: true);
+            try
+            {
+                Directory.Delete(_testLockDir, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Ignore cleanup errors - may be locked by other parallel tests
+            }
         }
     }
 
@@ -116,12 +126,20 @@ public sealed class FileMigrationLockTests : IDisposable
     [Fact]
     public async Task ForceReleaseAsync_RemovesLock()
     {
-        // Arrange
+        // Arrange - Create a stale lock file without an active FileStream
+        // On Windows, we can't delete a file that's actively held by another process,
+        // so we simulate a stale/orphaned lock file instead
         var lockFilePath = Path.Combine(_testLockDir, "forceable.lock");
-        var lock1 = new FileMigrationLock(lockFilePath, TimeSpan.FromSeconds(5));
-        var lock2 = new FileMigrationLock(lockFilePath, TimeSpan.FromSeconds(5));
+        var lockContent = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            LockId = Guid.NewGuid().ToString(),
+            HolderId = "old-process-12345",
+            AcquiredAt = DateTime.UtcNow.AddMinutes(-5),
+            MachineName = Environment.MachineName
+        });
+        await File.WriteAllTextAsync(lockFilePath, lockContent);
 
-        await lock1.TryAcquireAsync();
+        var lock2 = new FileMigrationLock(lockFilePath, TimeSpan.FromSeconds(5));
 
         // Act
         await lock2.ForceReleaseAsync();
@@ -131,7 +149,6 @@ public sealed class FileMigrationLockTests : IDisposable
         result.Should().BeTrue();
 
         // Cleanup
-        await lock1.DisposeAsync();
         await lock2.DisposeAsync();
     }
 

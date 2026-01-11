@@ -4,7 +4,6 @@ using System;
 using System.Text.Json;
 using Acode.Application.Inference;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for ModelParameters record following TDD (RED phase).

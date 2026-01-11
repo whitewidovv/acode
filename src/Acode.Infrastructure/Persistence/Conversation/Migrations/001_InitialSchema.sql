@@ -1,9 +1,10 @@
 -- 001_InitialSchema.sql
 -- Initial database schema for conversation data model
 -- SQLite database for local-first storage with PostgreSQL sync capability
+-- Idempotent: Can be run multiple times safely (IF NOT EXISTS checks)
 
 -- Chats table (aggregate root)
-CREATE TABLE chats (
+CREATE TABLE IF NOT EXISTS conv_chats (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     tags TEXT,  -- JSON array
@@ -17,7 +18,7 @@ CREATE TABLE chats (
 );
 
 -- Runs table (child of Chat)
-CREATE TABLE runs (
+CREATE TABLE IF NOT EXISTS conv_runs (
     id TEXT PRIMARY KEY,
     chat_id TEXT NOT NULL,
     model_id TEXT NOT NULL,
@@ -29,12 +30,12 @@ CREATE TABLE runs (
     sequence_number INTEGER NOT NULL,
     error_message TEXT,
     sync_status TEXT DEFAULT 'Pending',
-    FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+    FOREIGN KEY (chat_id) REFERENCES conv_chats(id) ON DELETE CASCADE,
     UNIQUE(chat_id, sequence_number)
 );
 
 -- Messages table (child of Run)
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS conv_messages (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
@@ -43,20 +44,20 @@ CREATE TABLE messages (
     created_at TEXT NOT NULL,
     sequence_number INTEGER NOT NULL,
     sync_status TEXT DEFAULT 'Pending',
-    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+    FOREIGN KEY (run_id) REFERENCES conv_runs(id) ON DELETE CASCADE,
     UNIQUE(run_id, sequence_number)
 );
 
 -- Indexes for query performance
-CREATE INDEX idx_chats_worktree ON chats(worktree_id) WHERE worktree_id IS NOT NULL;
-CREATE INDEX idx_chats_is_deleted ON chats(is_deleted);
-CREATE INDEX idx_chats_updated_at ON chats(updated_at DESC);
-CREATE INDEX idx_chats_sync_status ON chats(sync_status);
+CREATE INDEX IF NOT EXISTS idx_chats_worktree ON conv_chats(worktree_id) WHERE worktree_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_chats_is_deleted ON conv_chats(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON conv_chats(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chats_sync_status ON conv_chats(sync_status);
 
-CREATE INDEX idx_runs_chat ON runs(chat_id);
-CREATE INDEX idx_runs_status ON runs(status);
-CREATE INDEX idx_runs_sync_status ON runs(sync_status);
+CREATE INDEX IF NOT EXISTS idx_runs_chat ON conv_runs(chat_id);
+CREATE INDEX IF NOT EXISTS idx_runs_status ON conv_runs(status);
+CREATE INDEX IF NOT EXISTS idx_runs_sync_status ON conv_runs(sync_status);
 
-CREATE INDEX idx_messages_run ON messages(run_id);
-CREATE INDEX idx_messages_role ON messages(role);
-CREATE INDEX idx_messages_sync_status ON messages(sync_status);
+CREATE INDEX IF NOT EXISTS idx_messages_run ON conv_messages(run_id);
+CREATE INDEX IF NOT EXISTS idx_messages_role ON conv_messages(role);
+CREATE INDEX IF NOT EXISTS idx_messages_sync_status ON conv_messages(sync_status);

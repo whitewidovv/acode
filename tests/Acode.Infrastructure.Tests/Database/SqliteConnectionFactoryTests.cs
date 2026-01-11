@@ -4,14 +4,14 @@ using Acode.Application.Database;
 using Acode.Infrastructure.Database;
 using Acode.Infrastructure.Database.Sqlite;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Database;
 
 /// <summary>
-/// Tests for <see cref="SqliteConnectionFactory"/>.
+/// Tests for <see cref="Acode.Infrastructure.Database.Sqlite.SqliteConnectionFactory"/>.
 /// </summary>
 public sealed class SqliteConnectionFactoryTests : IDisposable
 {
@@ -26,9 +26,20 @@ public sealed class SqliteConnectionFactoryTests : IDisposable
 
     public void Dispose()
     {
+        // Clear SQLite connection pools to release file handles
+        SqliteConnection.ClearAllPools();
+        Thread.Sleep(50); // Give time for pools to fully release
+
         if (Directory.Exists(_testDbDir))
         {
-            Directory.Delete(_testDbDir, recursive: true);
+            try
+            {
+                Directory.Delete(_testDbDir, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Ignore cleanup errors - may be locked by other parallel tests
+            }
         }
     }
 

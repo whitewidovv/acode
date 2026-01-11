@@ -1,0 +1,25 @@
+format_version: '1.0'
+id: acode-standard
+version: 1.0.0
+name: Acode Standard
+description: General-purpose coding assistant with strict minimal diff philosophy. Works across Python, JavaScript, TypeScript, Go, Rust, and other languages.
+created_at: 2025-01-01T00:00:00Z
+components:
+  - path: system.md
+    type: system
+    description: Base agent identity and capabilities
+  - path: roles/planner.md
+    type: role
+    metadata:
+      role: planner
+    description: Task decomposition and planning
+  - path: roles/coder.md
+    type: role
+    metadata:
+      role: coder
+    description: Implementation focus
+  - path: roles/reviewer.md
+    type: role
+    metadata:
+      role: reviewer
+    description: Code quality verification

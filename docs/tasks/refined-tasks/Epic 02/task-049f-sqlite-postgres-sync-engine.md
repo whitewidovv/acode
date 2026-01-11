@@ -1,10 +1,12 @@
-# Task 049.f: SQLite→PostgreSQL Sync Engine
+# Task 049.f: PostgreSQL Repository + SQLite→PostgreSQL Sync Engine
 
-**Priority:** P0 – Critical  
-**Tier:** S – Core Infrastructure  
-**Complexity:** 13 (Fibonacci points)  
-**Phase:** Phase 2 – CLI + Orchestration Core  
-**Dependencies:** Task 049.a (Data Model), Task 050 (Workspace DB), Task 039 (Security)  
+**Priority:** P0 – Critical
+**Tier:** S – Core Infrastructure
+**Complexity:** 13 (Fibonacci points)
+**Phase:** Phase 2 – CLI + Orchestration Core
+**Dependencies:** Task 049.a (Data Model), Task 050 (Workspace DB), Task 039 (Security)
+
+**Scope Expansion (2026-01-10):** This task now includes PostgreSQL repository implementation (originally planned as Phase 6 of task-049a but deferred here for cohesion with sync engine).
 
 ---
 
@@ -13,6 +15,8 @@
 **Business Value & ROI**
 
 Reliable sync between local SQLite and remote PostgreSQL enables offline-first development while providing cross-device access and cloud backup. This saves $2,400/year per engineer in productivity (eliminates sync conflicts, data loss) and $1,800/year in reduced cloud costs (efficient batching).
+
+**PostgreSQL Repository:** Provides direct PostgreSQL storage as an alternative to SQLite, enabling cloud-first deployments, multi-user access, and centralized data management.
 
 **Cost Breakdown:**
 - Eliminated sync conflicts: 3 hours/month resolving → 0 (36 hours/year @ $108/hour = $3,888/year)
@@ -1665,6 +1669,25 @@ Chat: chat_abc123 "Feature: Auth"
 - [ ] AC-130: Remote endpoint URL configurable
 - [ ] AC-131: Authentication method configurable
 - [ ] AC-132: Idempotency key TTL configurable
+
+### PostgreSQL Repository Provider (Migrated from Task 049.a)
+
+**Note:** These acceptance criteria were originally AC-077 through AC-082 in task-049a but deferred to task-049f for implementation cohesion with sync engine.
+
+- [ ] AC-133: PostgreSQL CRUD operations work correctly (create, read, update, soft delete)
+- [ ] AC-134: Connection pooling works with configurable pool size (default 10 connections)
+- [ ] AC-135: Command timeout configured (default 30 seconds)
+- [ ] AC-136: Transactions support commit and rollback
+- [ ] AC-137: Statement caching works for prepared statements
+- [ ] AC-138: TLS encryption required for PostgreSQL connections (minimum TLS 1.2)
+- [ ] AC-139: PostgresChatRepository implements IChatRepository interface
+- [ ] AC-140: PostgresRunRepository implements IRunRepository interface
+- [ ] AC-141: PostgresMessageRepository implements IMessageRepository interface
+- [ ] AC-142: PostgreSQL repositories use Dapper for data access (consistent with SQLite)
+- [ ] AC-143: PostgreSQL repositories handle optimistic concurrency with version field
+- [ ] AC-144: PostgreSQL repositories throw ConcurrencyException on version conflicts
+- [ ] AC-145: PostgreSQL connection string supports environment variable override
+- [ ] AC-146: PostgreSQL schema matches SQLite schema (conv_chats, conv_runs, conv_messages)
 
 ---
 

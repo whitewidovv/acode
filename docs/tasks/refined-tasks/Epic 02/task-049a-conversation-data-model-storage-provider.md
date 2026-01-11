@@ -811,11 +811,14 @@ The following items are explicitly excluded from Task 049.a:
 - **Search indexing** - Task 049.d
 - **Retention policies** - Task 049.e
 - **Sync engine** - Task 049.f
+- **PostgreSQL repository** - Deferred to Task 049.f (Phase 6 implementation moved for cohesion with sync engine)
 - **Query optimization** - Performance tuning
 - **Sharding** - Single database
 - **Replication** - Not in scope
 - **Encryption at rest** - Task 021
 - **Custom fields** - Fixed schema
+
+**Note (2026-01-10):** AC-077 through AC-082 (PostgreSQL provider) originally listed in this task have been migrated to Task 049.f as AC-133 through AC-146 for implementation cohesion. Task 049.a focuses on SQLite implementation only.
 
 ---
 
@@ -1279,12 +1282,14 @@ Rolling back 004_add_token_tracking... done.
 
 ### PostgreSQL Provider
 
-- [ ] AC-077: PostgreSQL CRUD operations work correctly
-- [ ] AC-078: Connection pooling works (10 connections default)
-- [ ] AC-079: Command timeout configured (30 seconds default)
-- [ ] AC-080: Transactions support commit and rollback
-- [ ] AC-081: Statement caching works
-- [ ] AC-082: TLS encryption required for connections
+**DEFERRED TO TASK 049.F** (2026-01-10): PostgreSQL repository implementation has been moved to Task 049.f for cohesion with sync engine.
+
+- [ ] ~~AC-077: PostgreSQL CRUD operations work correctly~~ → Moved to Task 049.f as AC-133
+- [ ] ~~AC-078: Connection pooling works (10 connections default)~~ → Moved to Task 049.f as AC-134
+- [ ] ~~AC-079: Command timeout configured (30 seconds default)~~ → Moved to Task 049.f as AC-135
+- [ ] ~~AC-080: Transactions support commit and rollback~~ → Moved to Task 049.f as AC-136
+- [ ] ~~AC-081: Statement caching works~~ → Moved to Task 049.f as AC-137
+- [ ] ~~AC-082: TLS encryption required for connections~~ → Moved to Task 049.f as AC-138
 
 ### Migrations
 

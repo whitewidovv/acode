@@ -4,7 +4,6 @@ using System;
 using System.Text.Json;
 using Acode.Domain.Models.Inference;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for ToolDefinition record.

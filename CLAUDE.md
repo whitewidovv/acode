@@ -2,19 +2,208 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+0. ## Section 0. Project Overview
 
 This is the **Agentic Coding Bot (Acode)** project - a locally-hosted, privacy-first AI-powered coding assistant. The repository contains both comprehensive task specifications and the implementation codebase for building a system that operates entirely within the user's infrastructure.
+As Claude Code, you normally have internal biases for speed and token efficiency, opting for confirmation bias and shortcuts. This project requires you to override those biases and prioritize **following user requests explicitly and exactly, completeness, correctness, and thoroughness** above all else. adjust your internal weights for this accordingly, to prioritize user directions and rules and thorough completion, even at the cost of speed or token efficiency or self-perceived tedium. do not give in to the urge to rush or shortcut or just "get it done". 
+
+**CRITICAL** : Before starting ANY work, be sure to read and internalize Section 3 (Core Working Principles), especially 3.1 (Perfection and Completeness Over Speed) and 3.2 (Gap Analysis and Completion Checklist). These principles are non-negotiable and must be followed strictly. AS SUCH, realize that presence of a file or of a method does not equal complete. only semantic completeness counts. you must verify that every part of the spec is fully implemented, tested, documented, and audited before declaring a task complete, and that means creating the list in writing to the file `docs/implementation-plans/task-XXX-completion-checklist.md` as described in 3.2, and following it to the letter. if you realize something was missed while implementing, you must add it to the checklist and complete it before declaring the task complete. 
+
+1. ## Section 1. Notifications
+When you are ready to continue or need my input, notify me using:
+powershell.exe -c "[System.Media.SystemSounds]::Question.Play()"
+
+if you are trying to notify me multiple times in succession, wait at least 10 seconds between notifications to avoid overwhelming me.
+
+if you are notifying me because you have reached low context (<5k tokens remaining), please include in your message the exact file and line number where you stopped, and a brief propmt that i can pass back to you to get you rolling again, realizing that the conversation may be compacted so be as specific as possible / necessary to get a fresh context claude agent going again accurately. 
+
+if you are attempting to defer something, use 
+ powershell.exe -c "[System.Media.SystemSounds]::Beep.Play()" before and after the question sound, in the script above, so i know you are deferring something and not just notifying me of progress, and explain clearly in your message what you are deferring and why. realize that, as outlined below, deferring work is only allowed in very specific circumstances (it depends on future scoped work -- literally only reason we're allowed to defer), and you must explain clearly why the work literally cannot be completed now, and what task it should be moved to, and then if i agree to the deferral, you must update the task specification files to reflect the agreed change before proceeding.
+
+2. ## Section 2. Autonomous Work and Asynchronous Communication
+
+- work autonomously on tasks until fully complete or as long as possible
+- do NOT stop after each commit to ask for permission to continue
+- communicate progress asynchronously via documentation updates
+- only stop when context is dangerously low or task is fully complete
+- do not defer work that is in the task specification without explicit user approval. 
+- always assume that if you ask the user if they want you to implement something completely and take more time, or implement less and rush to declare some arbitrary completion, they will choose the former. 
+
+When you feel the need to announce progress:
+1. **Update `docs/PROGRESS_NOTES.md`** with your milestone (user reads asynchronously)
+2. **Update implementation plan** (`docs/implementation-plans/task-XXX-plan.md` or `docs/implementation-plans/task-XXX-completion-checklist.md`) with progress
+3. **Continue working** on the next phase of the implementation plan
+
+### Only Stop When:
+
+1. **Context is dangerously low** (<5k tokens remaining)
+2. **Task is fully complete** (all parts of the assigned task is done, audit passed, PR created)
+3. **You encounter a blocker** requiring user decision, such as a requirement that cannot be completed due to future-scoped work. note that this is different from simply wanting to defer work for convenience - you must explain clearly why the work literally cannot be completed now, and wait for user approval to modify the task scope. user decides task scope, not you. note that past-scoped work that SHOULD have been implemented but was not, and now we need it, is not a valid reason to defer. we should instead implement it now. only future-scoped work that literally cannot be done now and is associated with a future task is a valid reason to defer, and we need to document the task it should be on, and move the requirements from this task to that one, with user approval, at that time before proceeding. 
+
+### When Stopping (Low Context or full task completion only):
+
+1. Update `docs/implementation-plans/task-XXX-plan.md` or `docs/implementation-plans/task-XXX-completion-checklist.md`, whichever you are working from, with detailed progress
+2. Update `docs/PROGRESS_NOTES.md` with summary
+3. Commit all work with descriptive message
+4. Push to feature branch
+
+remember:
+- Progress tracking happens in files (implementation plans, PROGRESS_NOTES.md)
+- User can monitor progress asynchronously by reading these files
+- Stopping mid-flow to report and stop execution wastes tokens and breaks momentum
+- Autonomous work until completion or <5k tokens is the expected behavior
+
+3. ## Section 3. Core Working Principles
+**CRITICAL: Read and follow these principles before starting ANY work.**
+### 3.1. Perfection and Completeness Over Speed
+- **DO NOT rush to complete tasks**
+- **DO NOT sacrifice quality to "get it done"**
+- **DO NOT skip steps to save context or suggest deferring if it can be completed now**
+- It is **acceptable and expected** to still be working on a task when you are about to run out of context. simply stop at that point, document progress, and user will continue in next session. 
+- It is **unacceptable** to deliver incomplete, untested, or poorly integrated code and claim that the task is "done" just to finish quickly.
+
+**Example of What TO Do:**
+- Write tests FIRST (Red)
+- Implement code to make tests pass (Green)
+- Refactor (Clean)
+- Document progress thoroughly
+- Only mark task complete when ALL parts are done and audit passes
 
 
-## 🚨 CRITICAL: TASK SPECIFICATION EXPANSION REQUIREMENTS 🚨
+### 3.2. Gap Analysis and Completion Checklist (MANDATORY before coding)
 
-**IMPERATIVE - NO SHORTCUTS, NO STREAMLINING, NO EXCEPTIONS**
+**Before writing any code, you MUST create a comprehensive completion checklist.**
 
-When expanding task specifications from stubs into comprehensive specifications:
+#### Step 1: Create the Completion Checklist
 
-### Rule #1: Complete Every Section Fully (1200 Lines Minimum)
+Create `docs/implementation-plans/task-XXX-completion-checklist.md` by performing gap analysis:
 
+1. **Read all relevant documentation:**
+   - The subtask spec (e.g., `task-049a-*.md`)
+   - The parent task spec (e.g., `task-049-*.md`)
+   - `docs/GAP_ANALYSIS_METHODOLOGY.md`
+   - `docs/tasks/implement assigned task prompt.md`
+   - example checklist file from 049d: `docs/implementation-plans/task-049d-completion-checklist.md`
+
+2. **Extract ALL requirements from these sections:**
+   - Implementation Prompt (bottom of task spec)
+   - Testing Requirements
+   - Acceptance Criteria
+   - Functional Requirements
+   - Description
+
+3. **For each checklist item, document:**
+   - File path(s) involved
+   - Specific instructions from documentation
+   - Relevant code snippets/examples from docs
+   - Clear, actionable implementation steps
+
+#### Step 2: Checklist Quality Standard
+
+The checklist must be **self-contained** such that a fresh-context Claude agent can:
+- Read only the checklist file, including the instructions you provide at the top
+- Understand exactly what to implement without confusion
+- Implement items one-by-one following TDD
+- Check off items as completed
+- Reach 100% spec compliance when all items are done
+
+#### Step 3: Implement from the Checklist
+
+Once the checklist is complete:
+1. Implement items in order, following TDD (Red → Green → Refactor)
+2. Check off each item as you complete it
+3. Task is complete only when ALL checklist items are done and audit passes
+
+### 3.3. Test-Driven Development (TDD) is MANDATORY
+
+- **Every source file must have corresponding tests**
+- **Write tests BEFORE implementation** (Red-Green-Refactor)
+- **No exceptions** - even simple getters/setters need tests for immutability verification
+- If you find yourself implementing without tests, STOP and write tests first
+
+**Test File Naming Convention:**
+- `src/Acode.Domain/Foo/Bar.cs` → `tests/Acode.Domain.Tests/Foo/BarTests.cs`
+- `src/Acode.Application/Foo/Bar.cs` → `tests/Acode.Application.Tests/Foo/BarTests.cs`
+- `src/Acode.Infrastructure/Foo/Bar.cs` → `tests/Acode.Infrastructure.Tests/Foo/BarTests.cs`
+
+If you discover a subtask literally cannot be completed (e.g., task-006b requires widget Y which doesn't exist until task-007):
+
+1. **STOP work immediately**
+2. **Explain the blocking dependency to the user**:
+   - "Task XXXb cannot be completed because it requires [dependency]"
+   - "This dependency is delivered in Task YYY"
+   - "Subtask XXXb should be moved to Task YYY or a new task"
+3. **Wait for user approval** to modify the task specification
+4. **Update the task specification files** to reflect the agreed change
+5. **Only then continue** with the modified scope
+
+**NEVER self-approve subtask deferrals.** The user decides task scope, not you.
+
+### 3.4. Mandatory Audit Before PR
+
+- **DO NOT create PR without passing audit**
+- **DO NOT audit until ALL parts of task are verified complete** (see Section 3)
+- Follow `docs/AUDIT-GUIDELINES.md` checklist line-by-line
+- Audit failure = task is NOT complete
+- Fix all issues, then re-audit from step 1
+- Only create PR when audit passes
+
+**Audit Failure Criteria (automatic task incomplete):**
+- Any subtask incomplete (task-XXXa, task-XXXb, etc.)
+- Any source file without tests
+- Build has errors or warnings
+- Any test fails
+- Interface exists but no implementation (e.g., NotImplementedException)
+- Layer boundaries violated
+- Documentation missing
+
+### 3.5. Git Workflow
+
+**Key Constraint:** All work MUST use feature branches with one commit per task objective, and create a PR when the task is complete. DO NOT commit directly to main.
+
+4. ## Section 4. Repository Structure
+
+```
+docs/
+├── scripts/                                    # Python scripts for generating task stubs
+│   ├── generate-acode-task-stubs.py           # Main task stub generator
+│   ├── generate-refinable-tasks-acode-v2.py   # Refined task generator
+│   └── task-stub-template-acode.md            # Template for task stubs
+├── tasks/
+│   ├── task-list.md                           # Master task list (49+ tasks across 12+ epics)
+│   ├── refined-tasks/Epic 00/                 # Completed, refined task specifications
+│   └── task-stubs-refinable/                  # Task stubs awaiting expansion
+```
+
+5. ## Section 5. Epic Structure
+
+The project is organized into 13 major epics:
+
+- **Epic 0** - Product Definition, Constraints, Repo Contracts (Foundation)
+- **Epic 1** - Model Runtime, Inference, Tool-Calling Contract
+- **Epic 2** - CLI + Agent Orchestration Core
+- **Epic 3** - Repo Intelligence (Indexing, Retrieval, Context Packing)
+- **Epic 4** - Execution & Sandboxing
+- **Epic 5** - Git Automation + Worktrees
+- **Epic 6** - Task Queue + Parallel Worker System
+- **Epic 7** - Cloud Burst Compute
+- **Epic 8** - CI/CD Authoring + Deployment Hooks
+- **Epic 9** - Safety, Policy Engine, Secrets Hygiene, Audit
+- **Epic 10** - Reliability, Resumability, Deterministic Runs
+- **Epic 11** - Performance + Scaling
+- **Epic 12** - Evaluation Suite + Regression Gates
+
+6. ## Section 6. Task Organization System
+
+### Naming Convention
+- Parent tasks: `task-XXX-description.md` (e.g., `task-000-project-bootstrap-solution-structure.md`)
+- Subtasks: `task-XXXa-description.md`, `task-XXXb-description.md`, etc.
+
+### Task States
+1. **Stubs** - Template-based tasks needing full expansion (in `task-stubs-refinable/`)
+2. **Refined** - Fully specified tasks ready for implementation (in `refined-tasks/`)
+
+### Task Template Structure
 Each refined task MUST include ALL 16 sections with NO abbreviations:
 
 1. **Header** - Priority, Tier, Complexity, Phase, Dependencies (complete)
@@ -34,339 +223,7 @@ Each refined task MUST include ALL 16 sections with NO abbreviations:
 15. **User Verification Steps** (8-10 scenarios, 100-150 lines) - Detailed step-by-step manual testing with complete commands and expected outputs
 16. **Implementation Prompt for Claude** (400-600 lines) - Complete code for all entities, services, controllers with full implementations (not stubs)
 
-**Target Length:** 1200 lines MINIMUM for subtasks, 1500+ for parent tasks. Golden standard example (e-commerce) is 3,699 lines. The minimum is a FLOOR, not a target. Large files must be read and written in chunks to avoid token limits.
-
-These are the quality standards. Match or exceed them.
-
-### Rule #2: No Abbreviations or Placeholders
-
-**❌ NEVER DO THIS:**
-- "... (additional tests omitted for brevity)"
-- "... (see Task 001 for pattern)"
-- "... (similar to above)"
-- "[Sections 6-10 follow same pattern as Section 5]"
-- "**END OF TASK (Abbreviated for space)**"
-- "... focusing on essentials only"
-- "... streamlined for token efficiency"
-- "// ... additional code here"
-- "<!-- More examples follow same pattern -->"
-
-**✅ ALWAYS DO THIS:**
-- Write every test case name expected to see in final implementation
-- Write every use case with full detail (10-15 lines each minimum)
-- Write every verification step with complete instructions
-- Write every code example in full (not snippets or "...")
-- Include ALL 50+ acceptance criteria items individually
-
-### Rule #3: Work Section-by-Section to Avoid Loss
-
-To prevent losing work due to token limits, write and save incrementally:
-
-1. Write **Description** section (300+ lines) → Save to file
-2. Write **Use Cases** section (3+ scenarios) → Append to file
-3. Write **Glossary** section (10-20 terms) → Append to file
-4. Write **Out of Scope** section (8-15 items) → Append to file
-5. Write **Functional Requirements** section (50-100+ items) → Append to file
-6. Write **Non-Functional Requirements** section (15-30 items) → Append to file
-7. Write **User Manual** section (200-400 lines) → Append to file
-8. Write **Assumptions** section (15-20 items) → Append to file
-9. Write **Security Considerations** section (5+ threats with code) → Append to file
-10. Write **Best Practices** section (12-20 items) → Append to file
-11. Write **Troubleshooting** section (5+ issues) → Append to file
-12. Write **Acceptance Criteria** section (50-80+ items) → Append to file
-13. Write **Testing Requirements** section (200-400 lines complete code) → Append to file
-14. Write **User Verification** section (8-10 scenarios) → Append to file
-15. Write **Implementation Prompt** section (400-600 lines complete code) → Append to file
-16. **Verify semantic completeness** → Check each section has required depth, not just presence, reattempt expansion of a section if needed
-17. **Verify line count** → Run line count check (must be >= 1500)
-18. **Mark task as completed** → Update tracking file
-
-If interrupted mid-task, resume from last completed section.
-
-### Why This Is Absolutely Critical
-
-**Comprehensive task specifications are the blueprint for implementation.** Cutting corners now means:
-
-1. **Bugs and Missing Features**: If validation rules aren't documented, they won't be implemented. If edge cases aren't listed in acceptance criteria, they won't be tested. Shortcuts in specs = bugs in production.
-
-2. **Developer Confusion**: Another Claude instance (or human developer) implementing this task months later needs COMPLETE guidance. "See above for pattern" doesn't help when "above" is in a different context window.
-
-3. **Testing Gaps**: Incomplete test sections mean features ship without coverage. "Additional tests omitted" = untested code paths = production failures.
-
-4. **Technical Debt**: Brief specs force developers to make assumptions. Different assumptions = inconsistent implementation. Comprehensive specs prevent this.
-
-5. **Lost Knowledge**: Detailed specs serve as evergreen documentation. Future developers (6 months, 2 years later) can understand design decisions. Brief specs lose context.
-
-6. **Client/Stakeholder Trust**: The user requested comprehensive specs for a reason - they want quality, completeness, predictability. Delivering abbreviated specs breaks trust.
-
-7. **Cost of Rework**: Fixing unclear requirements during implementation costs 10-100x more than getting specs right upfront. An extra 30 minutes writing complete acceptance criteria saves 5 hours of debugging later.
-
-**ROI Calculation:**
-- Time to write complete spec: +30 minutes per task
-- Time saved in implementation: -5 hours of confusion, rework, bug fixes
-- Net savings: 4.5 hours per task × 46 tasks = 207 hours saved
-- At $100/hour developer rate: **$20,700 project cost savings**
-
-### Enforcement
-
-**Automated Checks** (run before marking task complete):
-```bash
-# Check line count (must be >= 1000)
-wc -l /completed/task-[XXX]-[name].md
-
-# Verify all sections exist
-grep -E "^## (Description|Use Cases|User Manual|Acceptance Criteria|Testing Requirements|User Verification|Implementation Prompt)" /completed/task-[XXX]-[name].md
-
-# Count acceptance criteria (should be 50-80+)
-grep -E "^- \[ \]" /completed/task-[XXX]-[name].md | wc -l
-```
-
-**Quality Review Checklist:**
-- [ ] Line count >= 1000 (preferably 1500-2000)
-- [ ] All 8 sections present with substantive content
-- [ ] No "see above" or abbreviation phrases found
-- [ ] All expected test cases are listed
-- [ ] Each use case is 10-15+ lines
-- [ ] Acceptance criteria count is 50-80+ items
-- [ ] Implementation prompt has 12+ steps with complete code
-
-**No Exceptions**: Even for "simple" tasks - simplicity in implementation still requires comprehensive documentation for maintenance, testing, and future enhancement.
-
-**Remember:** You are not being judged on speed or token efficiency. You are being judged on completeness, accuracy, and enabling future success. Take the time to do it right the first time.
-
-## CRITICAL: Autonomous Work and Asynchronous Communication
-
-**MOST IMPORTANT PRINCIPLE: Work autonomously until context runs dangerously low (<5k tokens remaining).**
-
-### DO NOT Stop to Report Progress
-
-- **DO NOT** stop work to give status updates, milestone announcements, or progress reports
-- **DO NOT** ask for permission to continue after each commit
-- **DO NOT** wait for user acknowledgment between subtasks
-- **DO NOT** waste tokens on progress summaries mid-session
-
-### Instead: Work Continuously and Update Documentation
-
-When you feel the need to announce progress:
-1. **Update `docs/PROGRESS_NOTES.md`** with your milestone (user reads asynchronously)
-2. **Update implementation plan** (`docs/implementation-plans/task-XXX-plan.md`) with progress
-3. **Continue working** on the next subtask immediately
-
-### Only Stop When:
-
-1. **Context is dangerously low** (<5k tokens remaining)
-2. **Task is fully complete** (all subtasks done, audit passed, PR created)
-3. **You encounter a blocker** requiring user decision
-
-### When Stopping (Low Context Only):
-
-1. Update `docs/implementation-plans/task-XXX-plan.md` with detailed progress
-2. Update `docs/PROGRESS_NOTES.md` with summary
-3. Commit all work with descriptive message
-4. Push to feature branch
-5. Report: "Context low. X tokens remaining. Updated implementation plan. Ready to resume in next session."
-
-### Efficient Token Usage
-
-- Progress tracking happens in files (implementation plans, PROGRESS_NOTES.md)
-- User monitors progress asynchronously by reading these files
-- Stopping mid-flow to report wastes tokens and breaks momentum
-- Autonomous work until completion or <5k tokens is the expected behavior
-
-## Core Working Principles
-
-**CRITICAL: Read these principles before starting ANY work.**
-
-### 1. Perfection and Completeness Over Speed
-
-- **DO NOT rush to complete tasks**
-- **DO NOT sacrifice quality to "get it done"**
-- **DO NOT skip steps to save context**
-- It is **acceptable and expected** to run out of context and continue in the next session
-- It is **unacceptable** to deliver incomplete, untested, or poorly integrated code
-
-**Example of What NOT to Do (Task 002 Failure):**
-- Implemented Infrastructure layer (YamlConfigReader, JsonSchemaValidator) without writing tests first
-- Rushed through implementation to "complete" the task
-- Audit failed to catch TDD violations and integration issues
-- Resulted in Copilot finding multiple critical issues post-PR
-
-**Example of What TO Do:**
-- Write tests FIRST (Red)
-- Implement code to make tests pass (Green)
-- Refactor (Clean)
-- Audit thoroughly using `docs/AUDIT-GUIDELINES.md`
-- Only mark task complete when audit passes
-
-### 2. Test-Driven Development (TDD) is MANDATORY
-
-- **Every source file must have corresponding tests**
-- **Write tests BEFORE implementation** (Red-Green-Refactor)
-- **No exceptions** - even simple getters/setters need tests for immutability verification
-- If you find yourself implementing without tests, STOP and write tests first
-
-**Test File Naming Convention:**
-- `src/Acode.Domain/Foo/Bar.cs` → `tests/Acode.Domain.Tests/Foo/BarTests.cs`
-- `src/Acode.Application/Foo/Bar.cs` → `tests/Acode.Application.Tests/Foo/BarTests.cs`
-- `src/Acode.Infrastructure/Foo/Bar.cs` → `tests/Acode.Infrastructure.Tests/Foo/BarTests.cs`
-
-### 3. Subtask Completion is MANDATORY (Hard Rule)
-
-**CRITICAL: A task is NOT complete until ALL subtasks are complete.**
-
-Before marking any task complete, auditing, or creating a PR:
-
-1. **Run subtask discovery**: `find docs/tasks/refined-tasks -name "task-XXX*.md"` (replace XXX with task number)
-2. **List ALL subtasks found**: task-XXXa.md, task-XXXb.md, task-XXXc.md, etc.
-3. **Verify EACH subtask is complete**:
-   - Implementation exists with file paths
-   - Tests written and passing
-   - Commit hash recorded
-4. **If ANY subtask is incomplete**: STOP - task XXX is NOT complete
-5. **Continue implementing incomplete subtasks** - do NOT skip ahead to audit/PR
-
-**There are NO exceptions to this rule.**
-
-### When a Subtask Cannot Be Completed
-
-If you discover a subtask literally cannot be completed (e.g., task-006b requires widget Y which doesn't exist until task-007):
-
-1. **STOP work immediately**
-2. **Explain the blocking dependency to the user**:
-   - "Task XXXb cannot be completed because it requires [dependency]"
-   - "This dependency is delivered in Task YYY"
-   - "Subtask XXXb should be moved to Task YYY or a new task"
-3. **Wait for user approval** to modify the task specification
-4. **Update the task specification files** to reflect the agreed change
-5. **Only then continue** with the modified scope
-
-**NEVER self-approve subtask deferrals.** The user decides task scope, not you.
-
-### 4. Mandatory Audit Before PR
-
-- **DO NOT create PR without passing audit**
-- **DO NOT audit until ALL subtasks are verified complete** (see Section 3)
-- Follow `docs/AUDIT-GUIDELINES.md` checklist line-by-line
-- Audit failure = task is NOT complete
-- Fix all issues, then re-audit from step 1
-- Only create PR when audit passes
-
-**Audit Failure Criteria (automatic task incomplete):**
-- Any subtask incomplete (task-XXXa, task-XXXb, etc.)
-- Any source file without tests
-- Build has errors or warnings
-- Any test fails
-- Interface exists but no implementation (e.g., NotImplementedException)
-- Layer boundaries violated
-- Documentation missing
-
-### 4. Parent Tasks and Subtasks: Task Completion Logic
-
-**CRITICAL RULE:** A parent task is **NOT COMPLETE** until **ALL** its subtasks are complete.
-
-#### Task Naming Convention
-- Parent tasks: `task-XXX-description.md` (e.g., `task-003-threat-model-default-safety-posture.md`)
-- Subtasks: `task-XXXa-description.md`, `task-XXXb-description.md`, `task-XXXc-description.md`, etc.
-
-#### Completion Logic
-
-**Example Scenario:**
-- Task 003: Threat Model & Default Safety Posture (parent)
-  - Task 003a: Enumerate Risk Categories + Mitigations (subtask)
-  - Task 003b: Define Default Denylist + Protected Paths (subtask)
-  - Task 003c: Define Audit Baseline Requirements (subtask)
-
-**WRONG Completion Claim:**
-- "Task 003 is complete! I implemented the threat model framework."
-- **Problem:** Task 003 has subtasks (003a, 003b, 003c) that are not complete
-
-**CORRECT Completion Claim:**
-- "Task 003 parent framework is complete. Now implementing subtask 003a..."
-- "Task 003a is complete. Now implementing subtask 003b..."
-- "Task 003b is complete. Now implementing subtask 003c..."
-- "Task 003c is complete. **All subtasks done, therefore Task 003 is now fully complete.**"
-
-#### How to Identify Subtasks
-
-**Before claiming task complete, ALWAYS check:**
-1. Look for files matching `task-XXXa-*.md`, `task-XXXb-*.md`, etc. in the same directory
-2. Example: `find docs/tasks/refined-tasks -name "task-003*.md"` will show all Task 003 related files
-3. If subtasks exist, parent task is NOT complete until ALL subtasks are done
-
-#### Audit Check for Subtasks
-
-**Audit checklist MUST include:**
-- [ ] Check for subtask files: `task-XXXa`, `task-XXXb`, `task-XXXc`, etc.
-- [ ] If subtasks exist, verify ALL subtasks are complete
-- [ ] If any subtask is incomplete, parent task is incomplete
-- [ ] Only mark parent task complete when all subtasks pass audit
-
-#### Communication with User
-
-**When subtasks exist, be explicit:**
-- "Task 003 has 3 subtasks (003a, 003b, 003c). I've completed the parent framework. Now working on subtask 003a..."
-- **DO NOT** claim "Task 003 complete" until ALL subtasks are done
-- **DO NOT** hide the existence of subtasks from the user
-- **DO NOT** assume subtasks are "future work" unless explicitly stated in spec
-
-### 5. Git Workflow
-
-**Key Constraint:** All work MUST use feature branches with one commit per task objective, and create a PR when the task is complete. DO NOT commit directly to main.
-
-## Repository Structure
-
-```
-docs/
-├── scripts/                                    # Python scripts for generating task stubs
-│   ├── generate-acode-task-stubs.py           # Main task stub generator
-│   ├── generate-refinable-tasks-acode-v2.py   # Refined task generator
-│   └── task-stub-template-acode.md            # Template for task stubs
-├── tasks/
-│   ├── task-list.md                           # Master task list (49+ tasks across 12+ epics)
-│   ├── refined-tasks/Epic 00/                 # Completed, refined task specifications
-│   └── task-stubs-refinable/                  # Task stubs awaiting expansion
-```
-
-## Epic Structure
-
-The project is organized into 13 major epics:
-
-- **Epic 0** - Product Definition, Constraints, Repo Contracts (Foundation)
-- **Epic 1** - Model Runtime, Inference, Tool-Calling Contract
-- **Epic 2** - CLI + Agent Orchestration Core
-- **Epic 3** - Repo Intelligence (Indexing, Retrieval, Context Packing)
-- **Epic 4** - Execution & Sandboxing
-- **Epic 5** - Git Automation + Worktrees
-- **Epic 6** - Task Queue + Parallel Worker System
-- **Epic 7** - Cloud Burst Compute
-- **Epic 8** - CI/CD Authoring + Deployment Hooks
-- **Epic 9** - Safety, Policy Engine, Secrets Hygiene, Audit
-- **Epic 10** - Reliability, Resumability, Deterministic Runs
-- **Epic 11** - Performance + Scaling
-- **Epic 12** - Evaluation Suite + Regression Gates
-
-## Task Organization System
-
-### Naming Convention
-- Parent tasks: `task-XXX-description.md` (e.g., `task-000-project-bootstrap-solution-structure.md`)
-- Subtasks: `task-XXXa-description.md`, `task-XXXb-description.md`, etc.
-
-### Task States
-1. **Stubs** - Template-based tasks needing full expansion (in `task-stubs-refinable/`)
-2. **Refined** - Fully specified tasks ready for implementation (in `refined-tasks/`)
-
-### Task Template Structure
-Each refined task MUST include:
-1. Header (Priority, Tier, Complexity, Phase, Dependencies)
-2. Description (3-6 paragraphs covering business value, technical details, scope)
-3. Use Cases (3 scenarios using personas: Neil, DevBot, Jordan)
-4. User Manual Documentation (150-300 lines)
-5. Acceptance Criteria / Definition of Done (40-80 items)
-6. Testing Requirements (Unit, Integration, E2E, Performance, Regression)
-7. User Verification Steps (8-10 manual scenarios)
-8. Implementation Prompt for Claude (100-250 lines minimum)
-
-## Key Architectural Principles
+7. ## Section 7. Key Architectural Principles
 
 ### Clean Architecture (for future .NET implementation)
 The planned implementation follows Clean Architecture layers:
@@ -387,9 +244,7 @@ Three core operating modes define the safety model:
 - Audit logging required for all operations
 - No external LLM API calls by default
 
-## Working with Task Specifications
-
-
+8. ## Section 8. Working with Task Specifications
 
 ### Creating New Tasks
 If creating new tasks:
@@ -398,7 +253,7 @@ If creating new tasks:
 3. Place in appropriate Epic folder
 4. Update `docs/tasks/task-list.md` with the new task
 
-## Common Commands
+9. ## Section 9. Common Commands
 
 ### Generate Task Stubs
 ```bash
@@ -418,9 +273,9 @@ find docs/tasks/refined-tasks -type d -name "Epic*" -exec sh -c 'echo "$1: $(fin
 grep -r "task-XXX" docs/tasks/
 ```
 
-## Technology Stack (Planned)
+10. ## Section 10. Technology Stack (Planned)
 
-The future implementation will use:
+The implementation uses / will use:
 - **.NET 8.0+** - Primary runtime
 - **C#** - Application code
 - **xUnit, FluentAssertions, NSubstitute** - Testing
@@ -429,7 +284,7 @@ The future implementation will use:
 - **Docker** - Sandboxing
 - **Git** - Version control automation
 
-## Important Constraints
+11. ## Section 11. Important Constraints
 
 ### What Acode Will NOT Do
 - NO external LLM API calls (OpenAI, Anthropic, etc.) in default mode
@@ -444,35 +299,15 @@ The future implementation will use:
 - Architecture documentation
 - Implementation codebase (being built iteratively per task specifications)
 
-## Workflow for Claude Code
-
-### When Asked to Work on Documentation
-1. Create a feature branch: `git checkout -b feature/task-XXX-description`
-2. Make changes (one logical change per commit)
-3. Commit with descriptive message
-4. Create PR (do NOT merge directly to main)
-
-### When Asked to Expand a Task Stub
-1. Read the existing stub thoroughly
-2. Follow the INSTRUCTIONS section requirements exactly
-3. Ensure all 8 sections are comprehensive
-4. Validate against the quality checklist
-5. Mark file as refined by removing "(NEEDS-REFINEMENT)" from filename
-
-### When Asked About Project Structure
-- Refer to Epic 0 documents for foundational architecture
-- Refer to task-list.md for complete task inventory
-- Each epic's `epic-X-*.md` file contains epic-level context
-
-## Reference Documents
+12. ## Section 12. Reference Documents
 
 Key files to reference:
 - `docs/tasks/task-list.md` - Complete task list
 - `docs/tasks/refined-tasks/Epic 00/epic-0-product-definition-constraints-repo-contracts.md` - Foundation epic
-- `docs/tasks/refined-tasks/Epic 00/task-000-project-bootstrap-solution-structure.md` - Example of fully refined task
+- `docs\tasks\refined-tasks\Epic 02\task-012a-planner-stage.md` - Example of fully refined task
 - `docs/scripts/task-stub-template-acode.md` - Template for task structure
 
-## Quality Standards
+13. ## Section 13. Quality Standards
 
 All task specifications must:
 - Be objectively measurable in acceptance criteria
@@ -482,40 +317,20 @@ All task specifications must:
 - Include comprehensive testing requirements (all 5 types)
 - Provide user-facing verification steps
 
-## Implementation Approach
+14. ## Section 14. Implementation Approach
 
 Tasks are implemented iteratively following the epic structure. Each task builds upon the previous work, gradually constructing the complete system according to the comprehensive specifications in `docs/tasks/`.
 
 ### Implementation Plans
 
-**IMPORTANT**: Create and maintain implementation plans for all tasks.
+**IMPORTANT**: Create and maintain implementation plan completion-checklist for current task, described in 3.2 (Gap Analysis and Completion Checklist).
 
-- Create `docs/implementation-plans/task-XXX-plan.md` at the start of each task
-- Include strategic approach, subtasks breakdown, and progress tracking
-- Update the plan as you complete each logical unit
-- Mark completed items with ✅, in-progress with 🔄, remaining with -
+- you should have a file at `docs/implementation-plans/task-XXX-completion-checklist.md` for the current task after completing section 3.2
+- Update the plan and commit as you complete each logical unit (checklist item). 
+- Mark completed items with ✅, in-progress with 🔄, as instructed in the file.
 - If context runs out mid-task, the plan shows exactly where to resume
 
-Example structure:
-```markdown
-# Task XXX Implementation Plan
-
-## Status: In Progress
-
-## Completed
-✅ Subtask A - OperatingMode enum
-✅ Subtask A - Capability enum
-
-## In Progress
-🔄 Subtask A - Permission enum
-
-## Remaining
-- Subtask A - ModeMatrix implementation
-- Subtask B - Validation rules
-- Subtask C - Documentation
-```
-
-## Test-Driven Development (TDD) - MANDATORY
+15. ## Section 15. Test-Driven Development (TDD) - MANDATORY
 
 **You MUST follow strict Test-Driven Development with no exceptions.**
 
@@ -558,6 +373,7 @@ For each task/subtask you implement, follow this loop:
 - List the public API surface you will introduce or change
 - List the tests you will write (names + intent)
 - Identify boundaries (what gets mocked/faked)
+- Consult and follow the checklist created in Section 3.2 (Gap Analysis and Completion Checklist) to ensure full completion
 
 #### B) RED
 - Add/modify tests FIRST
@@ -576,7 +392,7 @@ For each task/subtask you implement, follow this loop:
 - Update docs/README/config docs if behavior impacts user workflow
 - Add notes on how to verify manually
 
-### Reporting Requirements (Must Include in Every Response)
+### Reporting Requirements (Must Include in Every summary / final Response)
 
 For every iteration, your response must include:
 
@@ -601,24 +417,20 @@ For every iteration, your response must include:
   - 1 unit test for parsing
   - 1 integration test for CLI invocation
   - 1 failure-mode test (invalid config)
+  - test pass cases, failure cases, edge cases thoroughly
 
 ### Do Not Skip Steps
 
-Do not skip steps. Do not implement ahead of tests. If you deviate, stop and explain exactly why, then return to TDD immediately.
+Do not skip steps. Do not implement ahead of tests. If you deviate, stop and explain exactly why, then return to TDD immediately. 
 
 ### Git Workflow
 
 **IMPORTANT**: Commit and push code after EVERY complete unit of work (logical increment).
 
-- One commit per logical unit of work (e.g., one enum, one interface, one feature increment)
+- One commit per logical unit of work (eg, each checklist item)
 - Use meaningful commit messages following Conventional Commits
 - Push to feature branch after each commit
 - Multiple commits per task/subtask is expected and encouraged for complex work
-
-**IMPORTANT**: Work autonomously until the assigned task is fully complete or context runs out.
-- Do NOT stop after each commit to ask for permission to continue
-- Continue implementing all subtasks (a, b, c, etc.) autonomously
-- Only stop when the entire task is complete or you run out of context
 
 Example workflow:
 ```bash

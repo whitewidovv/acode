@@ -65,6 +65,12 @@ public sealed record AcodeConfig
     /// Optional - defaults to local_cache_only.
     /// </summary>
     public StorageConfig? Storage { get; init; }
+
+    /// <summary>
+    /// Gets the search configuration.
+    /// Optional - defaults applied if missing.
+    /// </summary>
+    public SearchSettings? Search { get; init; }
 }
 
 /// <summary>

@@ -132,7 +132,7 @@ Examples:
         {
             await context.Output.WriteLineAsync("Error: Configuration validation failed:").ConfigureAwait(false);
             await context.Output.WriteLineAsync("CFG001: Configuration file not found: .agent/config.yml").ConfigureAwait(false);
-            return ExitCode.GeneralError;
+            return ExitCode.ConfigurationError;
         }
         catch (InvalidOperationException ex)
         {
