@@ -82,6 +82,33 @@ public sealed class JsonAuditLogger : IAuditLogger, IDisposable
         }
     }
 
+    /// <inheritdoc/>
+    public async Task LogAsync(
+        AuditEventType eventType,
+        AuditSeverity severity,
+        string source,
+        IDictionary<string, object> data,
+        IDictionary<string, object>? context = null,
+        CancellationToken cancellationToken = default)
+    {
+        // TODO: Implement convenience method that constructs AuditEvent
+        await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public IDisposable BeginCorrelation(string description)
+    {
+        // TODO: Implement correlation scope
+        return new NoOpDisposable();
+    }
+
+    /// <inheritdoc/>
+    public IDisposable BeginSpan(string operation)
+    {
+        // TODO: Implement span scope
+        return new NoOpDisposable();
+    }
+
     /// <summary>
     /// Disposes the logger and flushes remaining data.
     /// </summary>
@@ -89,5 +116,12 @@ public sealed class JsonAuditLogger : IAuditLogger, IDisposable
     {
         _writer.Dispose();
         _writeLock.Dispose();
+    }
+
+    private sealed class NoOpDisposable : IDisposable
+    {
+        public void Dispose()
+        {
+        }
     }
 }
