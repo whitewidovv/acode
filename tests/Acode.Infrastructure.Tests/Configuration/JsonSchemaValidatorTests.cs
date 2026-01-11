@@ -118,7 +118,7 @@ invalid: yaml: syntax:
         result.Should().NotBeNull();
         result.IsValid.Should().BeFalse();
         result.Errors.Should().ContainSingle();
-        result.Errors[0].Code.Should().Be(ConfigErrorCodes.YamlParseError);
+        result.Errors[0].Code.Should().Be(ConfigErrorCodes.YamlSyntaxError);
         result.Errors[0].Severity.Should().Be(ValidationSeverity.Error);
     }
 
@@ -173,11 +173,11 @@ mode:
         result.Should().NotBeNull();
         result.IsValid.Should().BeFalse();
         result.Errors.Should().NotBeEmpty();
-        result.Errors.Should().ContainSingle(e => e.Code == ConfigErrorCodes.SchemaViolation);
+        result.Errors.Should().ContainSingle(e => e.Code == ConfigErrorCodes.TypeMismatch);
     }
 
     [Fact]
-    public async Task ValidateYaml_WithInvalidType_ShouldReturnSchemaViolation()
+    public async Task ValidateYaml_WithInvalidType_ShouldReturnTypeMismatch()
     {
         // Arrange
         var validator = await JsonSchemaValidator.CreateFromEmbeddedResourceAsync().ConfigureAwait(true);
@@ -194,7 +194,7 @@ model:
         result.Should().NotBeNull();
         result.IsValid.Should().BeFalse();
         result.Errors.Should().NotBeEmpty();
-        result.Errors.Should().ContainSingle(e => e.Code == ConfigErrorCodes.SchemaViolation);
+        result.Errors.Should().ContainSingle(e => e.Code == ConfigErrorCodes.TypeMismatch);
     }
 
     [Fact]

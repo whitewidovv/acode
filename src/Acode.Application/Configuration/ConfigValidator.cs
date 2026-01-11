@@ -39,7 +39,7 @@ public sealed class ConfigValidator : IConfigValidator
         {
             return ValidationResult.Failure(new ValidationError
             {
-                Code = ConfigErrorCodes.FileTooBig,
+                Code = ConfigErrorCodes.FileTooLarge,
                 Message = $"Configuration file is too large: {fileInfo.Length} bytes (max 1MB)",
                 Severity = ValidationSeverity.Error
             });
@@ -72,7 +72,7 @@ public sealed class ConfigValidator : IConfigValidator
         {
             errors.Add(new ValidationError
             {
-                Code = ConfigErrorCodes.MissingRequiredField,
+                Code = ConfigErrorCodes.RequiredFieldMissing,
                 Message = "schema_version is required",
                 Severity = ValidationSeverity.Error,
                 Path = "schema_version"
