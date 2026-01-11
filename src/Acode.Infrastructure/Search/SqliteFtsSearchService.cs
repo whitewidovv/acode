@@ -322,13 +322,30 @@ public sealed class SqliteFtsSearchService : ISearchService
                 }
             }
 
+            // Get last_optimized_at timestamp (P5.3 - AC-098)
+            DateTime? lastOptimizedAt = null;
+            await EnsureMetadataTableExistsAsync(cancellationToken).ConfigureAwait(false);
+            using (var metaCmd = _connection.CreateCommand())
+            {
+                metaCmd.CommandText = "SELECT value FROM search_metadata WHERE key = 'last_optimized_at'";
+                var metaResult = await metaCmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+                if (metaResult != null && metaResult != DBNull.Value)
+                {
+                    if (DateTime.TryParse(metaResult.ToString(), out var parsed))
+                    {
+                        lastOptimizedAt = parsed;
+                    }
+                }
+            }
+
             return new IndexStatus
             {
                 IndexedMessageCount = indexedCount,
                 TotalMessageCount = totalCount,
                 IsHealthy = indexedCount == totalCount,
                 IndexSizeBytes = indexSizeBytes,
-                SegmentCount = segmentCount
+                SegmentCount = segmentCount,
+                LastOptimizedAt = lastOptimizedAt
             };
         }
 
@@ -458,10 +475,26 @@ public sealed class SqliteFtsSearchService : ISearchService
     /// <inheritdoc />
     public async Task OptimizeIndexAsync(CancellationToken cancellationToken)
     {
+        // Ensure metadata table exists
+        await EnsureMetadataTableExistsAsync(cancellationToken).ConfigureAwait(false);
+
         // Run FTS5 optimize command to merge segments
-        using var cmd = _connection.CreateCommand();
-        cmd.CommandText = "INSERT INTO conversation_search(conversation_search) VALUES('optimize')";
-        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        using (var optimizeCmd = _connection.CreateCommand())
+        {
+            optimizeCmd.CommandText = "INSERT INTO conversation_search(conversation_search) VALUES('optimize')";
+            await optimizeCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        // Update last_optimized_at timestamp
+        using (var updateCmd = _connection.CreateCommand())
+        {
+            updateCmd.CommandText = @"
+                INSERT OR REPLACE INTO search_metadata (key, value)
+                VALUES ('last_optimized_at', @timestamp)
+            ";
+            updateCmd.Parameters.AddWithValue("@timestamp", DateTime.UtcNow.ToString("O"));
+            await updateCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -555,5 +588,17 @@ public sealed class SqliteFtsSearchService : ISearchService
         }
 
         return sql;
+    }
+
+    private async Task EnsureMetadataTableExistsAsync(CancellationToken cancellationToken)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS search_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        ";
+        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }
