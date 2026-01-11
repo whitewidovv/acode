@@ -24,7 +24,7 @@ Work through gaps sequentially following TDD: write tests first (RED), then impl
 ## GAPS IDENTIFIED (What's Missing)
 
 ### Gap #1: CommandLogFields Static Class
-**Status**: [ ]
+**Status**: [✅ COMPLETE]
 **File to Create**: `src/Acode.Domain/Commands/CommandLogFields.cs`
 **Why Needed**: Spec lines 1106-1121 define logging field constants for structured logging
 **Required Constants**:
@@ -55,12 +55,12 @@ public static class CommandLogFields
 3. Verify constants are public and accessible
 
 **Success Criteria**: All constants defined, tests pass, used in logging
-**Evidence**: [To be filled when complete]
+**Evidence**: Commit 8d2898a - 10 tests passing, all 9 constants implemented
 
 ---
 
 ### Gap #2: Application Layer - ICommandParser Interface
-**Status**: [ ]
+**Status**: [✅ COMPLETE]
 **File to Create**: `src/Acode.Application/Commands/ICommandParser.cs`
 **Why Needed**: Spec line 1029 defines interface for parsing commands from YAML config
 **Testing Requirements Reference**: UT-002c-01 through UT-002c-09 require command parsing
@@ -96,12 +96,12 @@ public interface ICommandParser
 - UT-002c-09: Preserve multi-line → Lines preserved
 
 **Success Criteria**: Interface defined, all 9 parsing tests pass
-**Evidence**: [To be filled when complete]
+**Evidence**: Commit 3b7204a - Interface defined with Parse/ParseString/ParseArray/ParseObject methods
 
 ---
 
 ### Gap #3: Application Layer - CommandParser Implementation
-**Status**: [ ]
+**Status**: [✅ COMPLETE]
 **File to Create**: `src/Acode.Application/Commands/CommandParser.cs`
 **Why Needed**: Implements ICommandParser to convert YAML config to CommandSpec objects
 **Dependencies**: Gap #2 must be complete (interface defined)
@@ -120,7 +120,7 @@ public interface ICommandParser
 **Test File**: Same as Gap #2 - `tests/Acode.Application.Tests/Commands/CommandParserTests.cs`
 
 **Success Criteria**: All parsing tests pass, handles all three formats correctly
-**Evidence**: [To be filled when complete]
+**Evidence**: Commit 3b7204a - 17/17 tests passing, all formats supported (string, array, object, mixed)
 
 ---
 
@@ -365,7 +365,7 @@ public static class PlatformDetector
 ---
 
 ### Gap #10: Application Layer Tests - Setup Test Project
-**Status**: [ ]
+**Status**: [✅ COMPLETE]
 **Directory to Create**: `tests/Acode.Application.Tests/Commands/`
 **Why Needed**: Testing Requirements specify 25 unit tests, many are Application layer tests
 
@@ -376,7 +376,7 @@ public static class PlatformDetector
 4. Add xUnit, FluentAssertions, NSubstitute packages
 
 **Success Criteria**: Test project builds, ready for test files
-**Evidence**: [To be filled when complete]
+**Evidence**: Commands directory created, test project verified with dependencies (xUnit, FluentAssertions, NSubstitute)
 
 ---
 
