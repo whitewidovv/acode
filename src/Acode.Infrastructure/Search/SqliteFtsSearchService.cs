@@ -277,7 +277,7 @@ public sealed class SqliteFtsSearchService : ISearchService
             }
         }
 
-        // Get index statistics
+        // Get index statistics (P5.1 - AC-106, AC-107, AC-108)
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = @"
             SELECT
@@ -291,11 +291,44 @@ public sealed class SqliteFtsSearchService : ISearchService
             var indexedCount = reader.GetInt32(0);
             var totalCount = reader.GetInt32(1);
 
+            // Calculate index size in bytes
+            long indexSizeBytes = 0;
+            using (var sizeCmd = _connection.CreateCommand())
+            {
+                // Get approximate size from sqlite_master table
+                sizeCmd.CommandText = @"
+                    SELECT SUM(LENGTH(sql))
+                    FROM sqlite_master
+                    WHERE name LIKE 'conversation_search%'
+                ";
+                var sizeResult = await sizeCmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+                if (sizeResult != null && sizeResult != DBNull.Value)
+                {
+                    indexSizeBytes = Convert.ToInt64(sizeResult);
+                }
+            }
+
+            // Get segment count (FTS5 specific)
+            int segmentCount = 0;
+            using (var segCmd = _connection.CreateCommand())
+            {
+                // FTS5 stores segment info in internal tables
+                // This is an approximation - actual segment count requires FTS5 internals
+                segCmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'conversation_search%'";
+                var segResult = await segCmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+                if (segResult != null && segResult != DBNull.Value)
+                {
+                    segmentCount = Math.Max(1, Convert.ToInt32(segResult) - 1);
+                }
+            }
+
             return new IndexStatus
             {
                 IndexedMessageCount = indexedCount,
                 TotalMessageCount = totalCount,
-                IsHealthy = indexedCount == totalCount
+                IsHealthy = indexedCount == totalCount,
+                IndexSizeBytes = indexSizeBytes,
+                SegmentCount = segmentCount
             };
         }
 
@@ -303,7 +336,9 @@ public sealed class SqliteFtsSearchService : ISearchService
         {
             IndexedMessageCount = 0,
             TotalMessageCount = 0,
-            IsHealthy = true
+            IsHealthy = true,
+            IndexSizeBytes = 0,
+            SegmentCount = 0
         };
     }
 

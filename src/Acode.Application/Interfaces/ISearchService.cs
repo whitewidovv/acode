@@ -82,6 +82,16 @@ public sealed record IndexStatus
     public DateTime? LastOptimizedAt { get; init; }
 
     /// <summary>
+    /// Gets the size of the search index in bytes.
+    /// </summary>
+    public long IndexSizeBytes { get; init; }
+
+    /// <summary>
+    /// Gets the number of FTS5 index segments (lower is better for performance).
+    /// </summary>
+    public int SegmentCount { get; init; }
+
+    /// <summary>
     /// Gets the number of pending messages awaiting indexing.
     /// </summary>
     public int PendingCount => TotalMessageCount - IndexedMessageCount;
