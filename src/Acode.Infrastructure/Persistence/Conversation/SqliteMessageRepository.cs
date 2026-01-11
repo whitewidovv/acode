@@ -68,7 +68,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
             SELECT id, run_id AS RunId, role AS Role, content AS Content,
                    tool_calls AS ToolCalls, created_at AS CreatedAt,
                    sequence_number AS SequenceNumber, sync_status AS SyncStatus
-            FROM messages
+            FROM conv_messages
             WHERE id = @Id";
 
 #pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
@@ -93,7 +93,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
         ArgumentNullException.ThrowIfNull(message);
 
         const string sql = @"
-            UPDATE messages
+            UPDATE conv_messages
             SET tool_calls = @ToolCalls,
                 sync_status = @SyncStatus
             WHERE id = @Id";
@@ -121,7 +121,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
             SELECT id, run_id AS RunId, role AS Role, content AS Content,
                    tool_calls AS ToolCalls, created_at AS CreatedAt,
                    sequence_number AS SequenceNumber, sync_status AS SyncStatus
-            FROM messages
+            FROM conv_messages
             WHERE run_id = @RunId
             ORDER BY sequence_number";
 
@@ -140,7 +140,7 @@ public sealed class SqliteMessageRepository : IMessageRepository
     public async Task DeleteByRunAsync(RunId runId, CancellationToken ct)
     {
         const string sql = @"
-            DELETE FROM messages
+            DELETE FROM conv_messages
             WHERE run_id = @RunId";
 
 #pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections

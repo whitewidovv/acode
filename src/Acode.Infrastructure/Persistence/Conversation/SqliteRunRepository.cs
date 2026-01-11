@@ -75,7 +75,7 @@ public sealed class SqliteRunRepository : IRunRepository
                    tokens_in AS TokensIn, tokens_out AS TokensOut,
                    sequence_number AS SequenceNumber, error_message AS ErrorMessage,
                    sync_status AS SyncStatus
-            FROM runs
+            FROM conv_runs
             WHERE id = @Id";
 
 #pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
@@ -100,7 +100,7 @@ public sealed class SqliteRunRepository : IRunRepository
         ArgumentNullException.ThrowIfNull(run);
 
         const string sql = @"
-            UPDATE runs
+            UPDATE conv_runs
             SET model_id = @ModelId,
                 status = @Status,
                 completed_at = @CompletedAt,
@@ -140,7 +140,7 @@ public sealed class SqliteRunRepository : IRunRepository
                    tokens_in AS TokensIn, tokens_out AS TokensOut,
                    sequence_number AS SequenceNumber, error_message AS ErrorMessage,
                    sync_status AS SyncStatus
-            FROM runs
+            FROM conv_runs
             WHERE chat_id = @ChatId
             ORDER BY sequence_number";
 
@@ -164,7 +164,7 @@ public sealed class SqliteRunRepository : IRunRepository
                    tokens_in AS TokensIn, tokens_out AS TokensOut,
                    sequence_number AS SequenceNumber, error_message AS ErrorMessage,
                    sync_status AS SyncStatus
-            FROM runs
+            FROM conv_runs
             WHERE chat_id = @ChatId
             ORDER BY sequence_number DESC
             LIMIT 1";
@@ -189,7 +189,7 @@ public sealed class SqliteRunRepository : IRunRepository
     public async Task DeleteAsync(RunId id, CancellationToken ct)
     {
         const string sql = @"
-            DELETE FROM runs
+            DELETE FROM conv_runs
             WHERE id = @Id";
 
 #pragma warning disable CA2007 // Async disposal doesn't require ConfigureAwait for database connections
