@@ -102,8 +102,8 @@ entries.Add(new DenylistEntry
 ---
 
 ### Gap #3: IPathMatcher Interface
-**Status**: [ ]
-**File to Create**: `src/Acode.Domain/Security/PathProtection/IPathMatcher.cs`
+**Status**: [✅]
+**File Created**: `src/Acode.Domain/Security/PathProtection/IPathMatcher.cs`
 **Why Needed**: Spec lines 4637, 4869-4873 define interface for glob pattern matching
 **Required Methods**:
 ```csharp
@@ -122,7 +122,7 @@ public interface IPathMatcher
 
 **Implementation Pattern**: See spec lines 4869-4902
 **Success Criteria**: Interface compiles, used by GlobMatcher
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Created IPathMatcher interface with Matches() method, comprehensive XML documentation. Builds successfully. Commit: feat(task-003b): create IPathMatcher interface (Gap #3)
 
 ---
 
