@@ -1624,12 +1624,48 @@ dotnet run --project tests/Acode.Performance.Tests -c Release
 
 ## PRIORITY 8: FINAL AUDIT AND VERIFICATION
 
+### P8.0: Pre-Audit Gap Analysis (MANDATORY BEFORE P8.1)
+
+**Status**: [ ]
+
+**Purpose**: Ensure zero gaps before audit and PR submission.
+
+**Steps**:
+1. Run Gap Analysis (docs/GAP_ANALYSIS_METHODOLOGY.md):
+    - Compare implementation against spec (lines 854-1453)
+    - List any missing AC, FR, or tests
+    
+2. Re-verify "Implement Assigned Task" checklist (docs/tasks/implement assigned task prompt.md):
+    - All relevant code from Implementation Prompt accounted for -- files exist, code exists, compiles, tests correctly, is semantically complete. 
+    - All requirements mapped to code
+    - All code covered by tests
+    - All tests passing
+
+3. If gaps found:
+    - Add new items to relevant Priority section above
+    - Implement with TDD (tests first)
+    - Return to step 1
+
+4. Proceed to P8.1 only when zero gaps identified
+
+**Success Criteria**:
+- [ ] Gap analysis completed
+- [ ] Zero gaps remaining
+- [ ] All new items (if any) implemented and tested
+
+**Evidence**:
+```
+# List gaps found and how resolved
+```
+
+---
+
 ### P8.1: Acceptance Criteria Audit (All 98 AC)
 
 **Status**: [ ]
 
 **Requirements**:
-- Verify ALL 98 acceptance criteria are satisfied
+- Verify ALL 98+ acceptance criteria are satisfied
 - Document evidence for each AC
 - Create audit report
 
