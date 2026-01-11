@@ -117,4 +117,78 @@ public sealed class SqliteFtsSearchServiceTests : IAsyncLifetime
         exception.Message.Should().Contain("unbalanced");
         exception.Remediation.Should().Contain("balanced parentheses");
     }
+
+    // DATE VALIDATION ERROR TESTS (P4.3)
+    [Fact]
+    public async Task SearchAsync_WithFutureSinceDate_ThrowsSearchException()
+    {
+        // Arrange - Query with future Since date
+        var query = new SearchQuery
+        {
+            QueryText = "test",
+            Since = DateTime.UtcNow.AddDays(1),
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<SearchException>(async () =>
+        {
+            await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+        }).ConfigureAwait(true);
+
+        exception.ErrorCode.Should().Be(SearchErrorCodes.InvalidDateFilter);
+        exception.Message.Should().Contain("Invalid date filter");
+        exception.Message.Should().Contain("future");
+        exception.Remediation.Should().Contain("past");
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithFutureUntilDate_ThrowsSearchException()
+    {
+        // Arrange - Query with future Until date
+        var query = new SearchQuery
+        {
+            QueryText = "test",
+            Until = DateTime.UtcNow.AddDays(1),
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<SearchException>(async () =>
+        {
+            await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+        }).ConfigureAwait(true);
+
+        exception.ErrorCode.Should().Be(SearchErrorCodes.InvalidDateFilter);
+        exception.Message.Should().Contain("Invalid date filter");
+        exception.Message.Should().Contain("future");
+        exception.Remediation.Should().Contain("past");
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithSinceAfterUntil_ThrowsSearchException()
+    {
+        // Arrange - Query with Since > Until
+        var query = new SearchQuery
+        {
+            QueryText = "test",
+            Since = new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc),
+            Until = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            PageSize = 10,
+            PageNumber = 1
+        };
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<SearchException>(async () =>
+        {
+            await _searchService!.SearchAsync(query, CancellationToken.None).ConfigureAwait(true);
+        }).ConfigureAwait(true);
+
+        exception.ErrorCode.Should().Be(SearchErrorCodes.InvalidDateFilter);
+        exception.Message.Should().Contain("Invalid date filter");
+        exception.Message.Should().Contain("before");
+        exception.Remediation.Should().Contain("Since date is before Until date");
+    }
 }

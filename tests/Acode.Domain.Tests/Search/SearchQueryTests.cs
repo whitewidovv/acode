@@ -163,4 +163,60 @@ public class SearchQueryTests
         // Assert
         query.SortBy.Should().Be(SortOrder.Relevance);
     }
+
+    // DATE VALIDATION TESTS (P4.3)
+    [Fact]
+    public void Validate_SinceDateInFuture_ReturnsFailure()
+    {
+        // Arrange
+        var query = new SearchQuery
+        {
+            QueryText = "test",
+            Since = DateTime.UtcNow.AddDays(1)
+        };
+
+        // Act
+        var result = query.Validate();
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("future"));
+    }
+
+    [Fact]
+    public void Validate_UntilDateInFuture_ReturnsFailure()
+    {
+        // Arrange
+        var query = new SearchQuery
+        {
+            QueryText = "test",
+            Until = DateTime.UtcNow.AddDays(1)
+        };
+
+        // Act
+        var result = query.Validate();
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("future"));
+    }
+
+    [Fact]
+    public void Validate_ValidDateRange_ReturnsSuccess()
+    {
+        // Arrange
+        var query = new SearchQuery
+        {
+            QueryText = "test",
+            Since = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            Until = new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc)
+        };
+
+        // Act
+        var result = query.Validate();
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
+    }
 }

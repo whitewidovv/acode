@@ -802,19 +802,19 @@ Commits:
 
 Currently 0% coverage. Need all 6 error codes with remediation guidance.
 
-### P4.1: Define All Search Error Codes (Already done in P2.3 if followed)
+### P4.1: Define All Search Error Codes (Already done in P2.3)
 
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 
-**Verify**: SearchErrorCodes class exists with all 6 codes:
+**Verified**: SearchErrorCodes class exists with all 6 codes:
 - ACODE-SRCH-001: Invalid query syntax ✅ (from P2.3)
-- ACODE-SRCH-002: Query timeout
-- ACODE-SRCH-003: Invalid date filter
-- ACODE-SRCH-004: Invalid role filter
-- ACODE-SRCH-005: Index corruption
-- ACODE-SRCH-006: Index not initialized
+- ACODE-SRCH-002: Query timeout ✅
+- ACODE-SRCH-003: Invalid date filter ✅
+- ACODE-SRCH-004: Invalid role filter ✅
+- ACODE-SRCH-005: Index corruption ✅
+- ACODE-SRCH-006: Index not initialized ✅
 
-**If not already done**: Create src/Acode.Domain/Errors/SearchErrorCodes.cs
+File: src/Acode.Domain/Search/SearchErrorCodes.cs
 
 **Success Criteria**:
 - [✅] File exists with all 6 codes defined

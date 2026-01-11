@@ -37,6 +37,20 @@ public sealed class SqliteFtsSearchService : ISearchService
         var validationResult = query.Validate();
         if (!validationResult.IsValid)
         {
+            // Check if error is date-related for specific error code (P4.3 - AC-123)
+            var hasDateError = validationResult.Errors.Any(e =>
+                e.Contains("date", StringComparison.OrdinalIgnoreCase) ||
+                e.Contains("Since", StringComparison.Ordinal) ||
+                e.Contains("Until", StringComparison.Ordinal));
+
+            if (hasDateError)
+            {
+                throw new SearchException(
+                    SearchErrorCodes.InvalidDateFilter,
+                    $"Invalid date filter: {string.Join(", ", validationResult.Errors)}",
+                    "Ensure dates are in the past and Since date is before Until date");
+            }
+
             throw new ArgumentException($"Invalid query: {string.Join(", ", validationResult.Errors)}");
         }
 
