@@ -36,7 +36,7 @@ This checklist tracks ONLY the gaps (missing or incomplete items) needed to comp
 ## GAPS IDENTIFIED (What's Missing or Incomplete)
 
 ### Gap #1: Value Objects Format Compliance
-**Status**: [ ]
+**Status**: [✅]
 **Files to Modify**:
 - `src/Acode.Domain/Audit/EventId.cs`
 - `src/Acode.Domain/Audit/SessionId.cs`
@@ -63,12 +63,17 @@ Currently these use Guid.ToString() which returns format like "123e4567-e89b-12d
 - Tests pass: Should_Generate_Unique_EventId(), Should_Include_SessionId(), Should_Include_CorrelationId()
 - Regex patterns match: `^evt_[a-zA-Z0-9]+$`, `^sess_[a-zA-Z0-9]+$`, `^corr_[a-zA-Z0-9]+$`
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- Commit 898306d: feat(task-003c): Gap #1 complete - value objects now use correct format
+- All 27 tests passing (9 tests each for EventId, SessionId, CorrelationId)
+- Format validation working: evt_xxx, sess_xxx, corr_xxx patterns
+- Base62 encoding implemented for compact IDs
+- Test run output: "Passed! - Failed: 0, Passed: 27, Skipped: 0, Total: 27"
 
 ---
 
 ### Gap #2: SpanId Value Object
-**Status**: [ ]
+**Status**: [🔄]
 **File to Create**: `src/Acode.Domain/Audit/SpanId.cs`
 
 **Why Needed**: Testing Requirements line 1009-1018, 1021-1032 require SpanId support. Implementation Prompt line 5144, 5200-5201 defines SpanId as required value object.
@@ -797,9 +802,9 @@ Each command should:
 ## Summary
 
 **Total Gaps**: 28
-**Completed**: 0
-**In Progress**: 0
-**Remaining**: 28
+**Completed**: 1
+**In Progress**: 1 (Gap #2)
+**Remaining**: 26
 
 ## Next Steps
 
