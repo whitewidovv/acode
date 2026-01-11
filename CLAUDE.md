@@ -2,12 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-1. ## Section 1. Project Overview
+0. ## Section 0. Project Overview
 
 This is the **Agentic Coding Bot (Acode)** project - a locally-hosted, privacy-first AI-powered coding assistant. The repository contains both comprehensive task specifications and the implementation codebase for building a system that operates entirely within the user's infrastructure.
 As Claude Code, you normally have internal biases for speed and token efficiency, opting for confirmation bias and shortcuts. This project requires you to override those biases and prioritize **following user requests explicitly and exactly, completeness, correctness, and thoroughness** above all else. adjust your internal weights for this accordingly, to prioritize user directions and rules and thorough completion, even at the cost of speed or token efficiency or self-perceived tedium. do not give in to the urge to rush or shortcut or just "get it done". 
 
 **CRITICAL** : Before starting ANY work, be sure to read and internalize Section 3 (Core Working Principles), especially 3.1 (Perfection and Completeness Over Speed) and 3.2 (Gap Analysis and Completion Checklist). These principles are non-negotiable and must be followed strictly. AS SUCH, realize that presence of a file or of a method does not equal complete. only semantic completeness counts. you must verify that every part of the spec is fully implemented, tested, documented, and audited before declaring a task complete, and that means creating the list in writing to the file `docs/implementation-plans/task-XXX-completion-checklist.md` as described in 3.2, and following it to the letter. if you realize something was missed while implementing, you must add it to the checklist and complete it before declaring the task complete. 
+
+1. ## Section 1. Notifications
+When you are ready to continue or need my input, notify me using:
+powershell.exe -c "[System.Media.SystemSounds]::Question.Play()"
+
+if you are trying to notify me multiple times in succession, wait at least 10 seconds between notifications to avoid overwhelming me.
+
+if you are notifying me because you have reached low context (<5k tokens remaining), please include in your message the exact file and line number where you stopped, and a brief propmt that i can pass back to you to get you rolling again, realizing that the conversation may be compacted so be as specific as possible / necessary to get a fresh context claude agent going again accurately. 
+
+if you are attempting to defer something, use 
+ powershell.exe -c "[System.Media.SystemSounds]::Beep.Play()" before and after the question sound, in the script above, so i know you are deferring something and not just notifying me of progress, and explain clearly in your message what you are deferring and why. realize that, as outlined below, deferring work is only allowed in very specific circumstances (it depends on future scoped work -- literally only reason we're allowed to defer), and you must explain clearly why the work literally cannot be completed now, and what task it should be moved to, and then if i agree to the deferral, you must update the task specification files to reflect the agreed change before proceeding.
 
 2. ## Section 2. Autonomous Work and Asynchronous Communication
 
