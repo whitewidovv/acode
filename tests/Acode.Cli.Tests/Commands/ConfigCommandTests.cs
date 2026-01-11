@@ -545,4 +545,103 @@ public class ConfigCommandTests
         exitCode.Should().Be(ExitCode.Success, "strict mode should succeed when no warnings");
         output.ToString().Should().Contain("valid", "success message should be shown");
     }
+
+    [Fact]
+    public async Task ExecuteAsync_ValidateWithLineColumnInfo_ShowsIdeParseableFormat()
+    {
+        // Arrange - FR-002b requires IDE-parseable error format (file:line:column)
+        var command = new ConfigCommand(_mockLoader, _mockValidator);
+        var config = new AcodeConfig { SchemaVersion = "1.0.0" };
+        var validationResult = new ValidationResult
+        {
+            IsValid = false,
+            Errors = new List<ValidationError>
+            {
+                new()
+                {
+                    Code = "ACODE-CFG-001",
+                    Message = "Invalid value for mode.default",
+                    Path = "mode.default",
+                    Severity = ValidationSeverity.Error,
+                    Line = 10,
+                    Column = 5,
+                },
+            }.AsReadOnly(),
+        };
+
+        _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(config);
+        _mockValidator.Validate(config)
+            .Returns(validationResult);
+
+        var output = new StringWriter();
+        var context = new CommandContext
+        {
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "validate" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
+
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+        // Assert
+        exitCode.Should().Be(ExitCode.GeneralError, "validation errors should return error code");
+        var outputText = output.ToString();
+        outputText.Should().Contain(".agent/config.yml:10:5", "should show file:line:column format");
+        outputText.Should().Contain("[ERROR]", "should show severity");
+        outputText.Should().Contain("ACODE-CFG-001", "should show error code");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ValidateWithoutLineColumnInfo_ShowsPathOnly()
+    {
+        // Arrange - Some errors may not have line/column info
+        var command = new ConfigCommand(_mockLoader, _mockValidator);
+        var config = new AcodeConfig { SchemaVersion = "1.0.0" };
+        var validationResult = new ValidationResult
+        {
+            IsValid = false,
+            Errors = new List<ValidationError>
+            {
+                new()
+                {
+                    Code = "ACODE-CFG-010",
+                    Message = "Semantic validation error",
+                    Path = "mode.allow_burst",
+                    Severity = ValidationSeverity.Error,
+                    Line = null,
+                    Column = null,
+                },
+            }.AsReadOnly(),
+        };
+
+        _mockLoader.LoadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(config);
+        _mockValidator.Validate(config)
+            .Returns(validationResult);
+
+        var output = new StringWriter();
+        var context = new CommandContext
+        {
+            Configuration = new Dictionary<string, object>(),
+            Args = new[] { "validate" },
+            Formatter = new ConsoleFormatter(output, enableColors: false),
+            Output = output,
+            CancellationToken = CancellationToken.None,
+        };
+
+        // Act
+        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+
+        // Assert
+        exitCode.Should().Be(ExitCode.GeneralError, "validation errors should return error code");
+        var outputText = output.ToString();
+        outputText.Should().Contain("[ERROR]", "should show severity");
+        outputText.Should().Contain("ACODE-CFG-010", "should show error code");
+        outputText.Should().Contain("mode.allow_burst", "should show path");
+        outputText.Should().NotContain(":null:", "should not show null line/column");
+    }
 }

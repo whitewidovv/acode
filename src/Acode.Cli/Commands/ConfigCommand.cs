@@ -144,7 +144,21 @@ Examples:
                 foreach (var error in result.Errors)
                 {
                     var severity = error.Severity == ValidationSeverity.Error ? "ERROR" : "WARNING";
-                    await context.Output.WriteLineAsync($"  [{severity}] {error.Path}: {error.Message}").ConfigureAwait(false);
+
+                    // IDE-parseable format: file:line:column [SEVERITY] CODE: message
+                    // Or if no line/column: [SEVERITY] CODE: path: message
+                    string errorLine;
+                    if (error.Line.HasValue && error.Column.HasValue)
+                    {
+                        errorLine = $"  .agent/config.yml:{error.Line}:{error.Column} [{severity}] {error.Code}: {error.Message}";
+                    }
+                    else
+                    {
+                        var pathPart = string.IsNullOrEmpty(error.Path) ? string.Empty : $"{error.Path}: ";
+                        errorLine = $"  [{severity}] {error.Code}: {pathPart}{error.Message}";
+                    }
+
+                    await context.Output.WriteLineAsync(errorLine).ConfigureAwait(false);
                 }
 
                 if (strictMode && hasWarnings)
