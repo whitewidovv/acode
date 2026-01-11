@@ -442,7 +442,7 @@ IDisposable BeginSpan(string operation);
 ---
 
 ### Gap #12: Infrastructure - AuditConfigurationLoader
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Infrastructure/Audit/AuditConfigurationLoader.cs`
 
 **Why Needed**: Implementation Prompt line 5169 lists this as required infrastructure component.
@@ -460,7 +460,23 @@ IDisposable BeginSpan(string operation);
 - Invalid configs rejected with clear errors
 - Defaults applied when config missing
 
-**Evidence**: [To be filled when complete]
+**Evidence**: All 14 tests passed
+- AuditConfigurationLoader.cs (209 lines) with Load, BuildConfiguration, ParseLogLevel, ParseRotationInterval, ValidateConfiguration
+- AuditConfigurationLoaderTests.cs (328 lines) with 14 test methods covering:
+  - Valid config loading (all properties)
+  - Default values when config missing
+  - Partial config with defaults
+  - Negative retention days rejection
+  - Zero retention days rejection
+  - Negative rotation size rejection
+  - Invalid log level rejection
+  - Invalid rotation interval rejection
+  - Non-existent file handling
+  - Malformed YAML handling
+  - MB to bytes conversion (rotation_size_mb, max_total_storage_mb)
+  - Debug/Warning/Error log levels
+- Uses YamlDotNet with UnderscoredNamingConvention
+- Snake_case YAML properties (enabled, level, directory, retention_days, rotation_size_mb, rotation_interval, max_total_storage_mb)
 
 ---
 
@@ -879,13 +895,13 @@ Each command should:
 ## Summary
 
 **Total Gaps**: 28
-**Completed**: 11 (Gaps 1-11) ✅
-**In Progress**: 1 (Gap #12 - AuditConfigurationLoader)
-**Remaining**: 17
+**Completed**: 12 (Gaps 1-12) ✅
+**In Progress**: 1 (Gap #13-16 - Application layer)
+**Remaining**: 16
 
-**Completion**: 39.3% (11/28 gaps)
-**Tests Passing**: 62+ (domain + infrastructure phase 1 & 2)
-**Commits**: 13+ on feature/task-003c-audit-baseline
+**Completion**: 42.9% (12/28 gaps)
+**Tests Passing**: 76+ (domain + infrastructure complete)
+**Commits**: 14+ on feature/task-003c-audit-baseline
 
 ## Next Steps
 
