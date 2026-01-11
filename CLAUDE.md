@@ -67,7 +67,7 @@ If you can make the terminal flash or request attention until it receives focus,
 - **Wait at least 10 seconds** between multiple notifications in succession to avoid overwhelming the user
 - **Low context notifications** (<5k tokens remaining): Include the exact file and line number where you stopped, and a brief prompt for continuation (conversation may be compacted, so be specific)
 - **Always use the dynamic worktree identifier**—never hardcode "Window 1" or "Window 2"
-- **Remember**: You must notify at the END of every response where you're awaiting input. This is not optional.
+- **CRITICAL**: Notification must be the ABSOLUTE LAST action in your response - do NOT notify and then continue generating output. Complete ALL text generation, analysis, and planning FIRST, then execute the notification command as your final action. This ensures the user can immediately continue when notified.
 
 2. ## Section 2. Autonomous Work and Asynchronous Communication
 
