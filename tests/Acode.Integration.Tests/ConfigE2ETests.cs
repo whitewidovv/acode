@@ -47,7 +47,11 @@ mode:
 
         // Assert
         exitCode.Should().Be(0, "valid config should succeed");
-        output.Should().Contain("✓", "output should contain success markers");
+
+        // Check for any checkmark character (Unicode √ or ✓)
+        var hasCheckmark = output.Contains('√', StringComparison.Ordinal)
+            || output.Contains('✓', StringComparison.Ordinal);
+        hasCheckmark.Should().BeTrue("output should contain success markers");
         output.Should().Contain("valid", "output should confirm validation");
         output.Should().Contain("1.0.0", "output should show schema version");
     }
@@ -123,27 +127,50 @@ project:
 
     private static (int ExitCode, string StdOut, string StdErr) RunAcodeCli(string workingDir, params string[] args)
     {
-        // Find the CLI project by searching up from test assembly location
+        // Find the CLI executable from build output
         var testAssembly = typeof(ConfigE2ETests).Assembly.Location;
         var testDir = Path.GetDirectoryName(testAssembly)!;
         var solutionDir = Path.GetFullPath(Path.Combine(testDir, "..", "..", "..", "..", ".."));
-        var cliProjectPath = Path.Combine(solutionDir, "src", "Acode.Cli", "Acode.Cli.csproj");
 
-        if (!File.Exists(cliProjectPath))
+        // Use the compiled executable directly (same build config as tests)
+        var cliExePath = Path.Combine(solutionDir, "src", "Acode.Cli", "bin", "Debug", "net8.0", "Acode.Cli.exe");
+        var cliDllPath = Path.Combine(solutionDir, "src", "Acode.Cli", "bin", "Debug", "net8.0", "Acode.Cli.dll");
+
+        ProcessStartInfo startInfo;
+        if (File.Exists(cliExePath))
         {
-            throw new InvalidOperationException($"CLI project not found at: {cliProjectPath}");
+            // Windows: use .exe directly
+            startInfo = new ProcessStartInfo
+            {
+                FileName = cliExePath,
+                Arguments = string.Join(" ", args),
+                WorkingDirectory = workingDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
         }
-
-        var startInfo = new ProcessStartInfo
+        else if (File.Exists(cliDllPath))
         {
-            FileName = "dotnet",
-            Arguments = $"run --project \"{cliProjectPath}\" --no-build -- {string.Join(" ", args)}",
-            WorkingDirectory = workingDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
+            // Linux/macOS: use dotnet to run the DLL
+            startInfo = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = $"\"{cliDllPath}\" {string.Join(" ", args)}",
+                WorkingDirectory = workingDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                $"CLI executable not found. Expected at: {cliExePath} or {cliDllPath}. " +
+                "Ensure the solution is built before running tests.");
+        }
 
         using var process = Process.Start(startInfo);
         if (process == null)

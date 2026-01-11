@@ -9,15 +9,18 @@ namespace Acode.Infrastructure.Database.Layout;
 /// </summary>
 public sealed partial class MigrationFileValidator
 {
-    private static readonly string[] ForbiddenPatterns = new[]
+    /// <summary>
+    /// Forbidden SQL patterns with user-friendly descriptions.
+    /// </summary>
+    private static readonly (string Pattern, string Description)[] ForbiddenPatterns = new[]
     {
-        @"\bDROP\s+DATABASE\b",
-        @"\bTRUNCATE\s+TABLE\b",
-        @"\bGRANT\b",
-        @"\bREVOKE\b",
-        @"\bCREATE\s+USER\b",
-        @"\bALTER\s+USER\b",
-        @"\bload_extension\b"
+        (@"\bDROP\s+DATABASE\b", "DROP DATABASE"),
+        (@"\bTRUNCATE\s+TABLE\b", "TRUNCATE TABLE"),
+        (@"\bGRANT\b", "GRANT"),
+        (@"\bREVOKE\b", "REVOKE"),
+        (@"\bCREATE\s+USER\b", "CREATE USER"),
+        (@"\bALTER\s+USER\b", "ALTER USER"),
+        (@"\bload_extension\b", "load_extension")
     };
 
     /// <summary>
@@ -77,11 +80,11 @@ public sealed partial class MigrationFileValidator
         }
 
         // Check for forbidden patterns
-        foreach (var pattern in ForbiddenPatterns)
+        foreach (var (pattern, description) in ForbiddenPatterns)
         {
             if (Regex.IsMatch(content, pattern, RegexOptions.IgnoreCase))
             {
-                errors.Add($"Forbidden SQL pattern detected: {pattern.Replace(@"\b", string.Empty, StringComparison.Ordinal).Replace(@"\s+", " ", StringComparison.Ordinal)}");
+                errors.Add($"Forbidden SQL pattern detected: {description}");
             }
         }
 

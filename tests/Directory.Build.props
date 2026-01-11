@@ -5,6 +5,9 @@
   <!-- Test-specific configuration -->
   <PropertyGroup>
     <!-- Allow underscores in test method names (MethodName_Scenario_ExpectedResult pattern) -->
-    <NoWarn>$(NoWarn);CA1707</NoWarn>
+    <!-- CA1707: Identifiers should not contain underscores -->
+    <!-- CA2007: Consider calling ConfigureAwait - not needed in test code -->
+    <!-- SA1615: Element return value should be documented - not needed for xUnit tests -->
+    <NoWarn>$(NoWarn);CA1707;CA2007;SA1615</NoWarn>
   </PropertyGroup>
 </Project>

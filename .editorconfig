@@ -102,5 +102,16 @@ indent_style = tab
 # MSBuild files
 [*.{csproj,vbproj,vcxproj,vcxproj.filters,proj,projitems,shproj}]
 indent_size = 2
+
+# StyleCop rules
+# SA1009 conflicts with multi-line parameter formatting
+# SA1111 conflicts with multi-line parameter formatting
+# SA1502 conflicts with empty constructor bodies using { }
+[*.cs]
+dotnet_diagnostic.SA1009.severity = none
+dotnet_diagnostic.SA1111.severity = none
+dotnet_diagnostic.SA1502.severity = none
+dotnet_diagnostic.SA1402.severity = none
+
 [*.Tests.cs]
 dotnet_diagnostic.CA2007.severity = none

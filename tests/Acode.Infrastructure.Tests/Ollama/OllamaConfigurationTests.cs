@@ -2,7 +2,6 @@ namespace Acode.Infrastructure.Tests.Ollama;
 
 using Acode.Infrastructure.Ollama;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for <see cref="OllamaConfiguration"/>.

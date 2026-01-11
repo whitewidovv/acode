@@ -3,7 +3,6 @@ namespace Acode.Application.Tests.Inference;
 using System.Text.Json;
 using Acode.Application.Inference;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for ProviderCapabilities record following TDD (RED phase).

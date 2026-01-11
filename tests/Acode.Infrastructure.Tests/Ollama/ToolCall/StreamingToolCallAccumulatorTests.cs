@@ -3,7 +3,6 @@ namespace Acode.Infrastructure.Tests.Ollama.ToolCall;
 using Acode.Infrastructure.Ollama.ToolCall;
 using Acode.Infrastructure.Ollama.ToolCall.Models;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for StreamingToolCallAccumulator functionality.

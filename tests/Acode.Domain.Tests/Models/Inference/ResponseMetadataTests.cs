@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Text.Json;
 using Acode.Domain.Models.Inference;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for ResponseMetadata record following TDD (RED phase).

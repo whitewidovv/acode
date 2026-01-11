@@ -10,6 +10,11 @@ namespace Acode.Infrastructure.Database;
 public sealed class DatabaseOptions
 {
     /// <summary>
+    /// The configuration section name for database options.
+    /// </summary>
+    public const string SectionName = "database";
+
+    /// <summary>
     /// Gets or sets local database configuration for embedded SQLite.
     /// </summary>
     public LocalDatabaseOptions? Local { get; set; }

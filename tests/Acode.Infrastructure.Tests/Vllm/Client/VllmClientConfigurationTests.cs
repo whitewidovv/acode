@@ -1,6 +1,5 @@
 using Acode.Infrastructure.Vllm.Client;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Vllm.Client;
 

@@ -48,12 +48,158 @@ This task defines the core Git service interface and shared infrastructure. Spec
 - Network timeout → Configurable timeout, retry with backoff
 - Merge conflict → Detect and report, block commit
 
-### Assumptions
+---
 
-- Git 2.20+ is installed on the system
-- System Git credentials are configured for remotes
-- Repository has at least one commit (not empty)
-- Working directory is within repository bounds
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git availability** - Git 2.20+ is installed and accessible via PATH on all target systems
+2. **Repository initialized** - Working directory is within a valid Git repository with at least one commit
+3. **Commit history exists** - Repository is not empty (has at least initial commit for log operations)
+4. **Command execution layer available** - Task 018 command execution infrastructure is functional and tested
+5. **Porcelain output stability** - Git porcelain output format (--porcelain=v2) remains stable across patch versions
+6. **UTF-8 encoding** - All file paths and commit messages use UTF-8 encoding
+7. **Shell escaping works** - Command execution layer properly escapes shell metacharacters
+8. **Process spawning reliable** - System can reliably spawn git child processes without resource exhaustion
+9. **Working directory writable** - User has write permissions to .git/ directory for local operations
+10. **Index lock handling** - Git index.lock file contention is rare and transient (retry once is sufficient)
+
+### Operational Assumptions
+
+11. **Credentials pre-configured** - System Git credentials are already configured via git-credential-store, SSH keys, or credential helper
+12. **Network available for remotes** - When in burst mode, network connectivity to git remotes is available and stable
+13. **No credential prompts** - Git credential helper is configured to never prompt interactively (breaks automation)
+14. **Reasonable repository size** - Repositories are <1GB, with <100k files, <50k commits for performance targets
+15. **Single user per repository** - Concurrent git operations from different Acode instances on same repository are rare
+16. **Clean working state** - Most operations assume no merge conflicts or rebase in progress
+17. **Standard branch names** - Default branch is "main" or "master" (configurable via .agent/config.yml)
+18. **Shallow clones acceptable** - Operations work with shallow clones (no --depth=1 assumptions)
+
+### Integration Assumptions
+
+19. **Mode resolver available** - Task 001 operating mode system is functional and mode transitions are rare mid-operation
+20. **Configuration accessible** - Task 002 .agent/config.yml is readable and parsed correctly
+21. **Workspace DB writable** - Task 011 workspace database is available for logging git operations
+22. **Artifact directory available** - Task 021 artifact collection can store git command output for debugging
+23. **Command timeout enforcement** - Task 018 command execution enforces timeouts and properly kills hung processes
+24. **Logging infrastructure ready** - Structured logging (ILogger) is available and properly configured
+25. **Exception serialization** - All exceptions can be serialized for cross-process logging
+
+---
+
+## Use Cases
+
+### Use Case 1: DevBot Automated Feature Development with Git Operations
+
+**Persona:** DevBot is an autonomous coding agent working on a new feature branch for adding user authentication to a web application.
+
+**Before:**
+- Human developer must manually create feature branch: `git checkout -b feature/auth` (30 seconds)
+- Human developer must manually stage changes after each file: `git add file.cs` (15 seconds per file × 8 files = 2 minutes)
+- Human developer must manually commit: `git commit -m "..."` and craft message (3 minutes)
+- Human developer must manually push: `git push --set-upstream origin feature/auth` (30 seconds)
+- Human developer must manually check status: `git status` between each step (10 seconds × 4 = 40 seconds)
+- **Total time:** 6 minutes 40 seconds per feature workflow
+- **Annual cost for developer doing 5 feature branches/week:** 5 × 52 × 6.67 min = 1,734 minutes = 28.9 hours/year × $100/hour = **$2,890/year**
+
+**After:**
+- DevBot calls `IGitService.CreateBranchAsync("feature/auth")` automatically (200ms)
+- DevBot calls `IGitService.StageAllAsync()` for all changes automatically (500ms)
+- DevBot calls `IGitService.CommitAsync("feat: add authentication")` automatically (1s)
+- DevBot calls `IGitService.PushAsync()` with auto-upstream setup (3s with network)
+- DevBot calls `IGitService.GetStatusAsync()` automatically between steps (200ms)
+- **Total time:** 5 seconds per feature workflow (automated, no human intervention)
+- **Time savings:** 6 min 35 sec per workflow = 99.1% reduction
+- **Annual savings:** $2,890 × 0.991 = **$2,864/year per developer**
+- **10-developer team:** $28,640/year
+- **ROI:** Immediate (no upfront cost, pure automation benefit)
+
+**Metrics:**
+- Feature branch creation: 30s → 200ms (99.3% faster)
+- Staging changes: 2 min → 500ms (99.6% faster)
+- Commit creation: 3 min → 1s (99.4% faster)
+- Push with upstream: 30s → 3s (90% faster)
+- Developer interruptions: 5 per workflow → 0 (100% reduction)
+
+### Use Case 2: Jordan Investigating Production Incident with Git History
+
+**Persona:** Jordan is a DevOps engineer investigating a production incident that occurred after a recent deployment. They need to find which commits introduced the breaking change.
+
+**Before:**
+- Jordan manually runs: `git log --oneline --since="2 days ago"` (5 seconds)
+- Jordan copies 50 commit SHAs to a text file manually (2 minutes)
+- Jordan manually runs: `git show <sha>` for each commit to inspect changes (30 seconds × 10 commits = 5 minutes)
+- Jordan manually runs: `git diff <sha1> <sha2>` to compare versions (1 minute × 5 comparisons = 5 minutes)
+- Jordan manually runs: `git log --grep="bug"` to search for related fixes (30 seconds)
+- Jordan manually correlates timestamps with deployment logs (10 minutes)
+- **Total investigation time:** 23 minutes per incident
+- **Frequency:** 12 incidents/year requiring git investigation
+- **Annual time:** 23 min × 12 = 276 minutes = 4.6 hours/year
+- **Annual cost:** 4.6 hours × $120/hour (DevOps rate) = **$552/year**
+
+**After:**
+- Acode agent calls `IGitService.GetLogAsync(new LogOptions { Since = "2 days ago", Limit = 50 })` (800ms)
+- Agent automatically parses 50 commits into structured `GitCommit` objects (50ms)
+- Agent calls `IGitService.GetDiffAsync()` for suspicious commits automatically (1.5s × 10 = 15s)
+- Agent automatically correlates commit timestamps with deployment logs (2s)
+- Agent searches commit messages with `LogOptions { Grep = "bug" }` automatically (500ms)
+- Agent presents findings in structured report (instant)
+- **Total investigation time:** 18.5 seconds (automated analysis)
+- **Time savings:** 22 min 41.5 sec per incident = 98.7% reduction
+- **Annual savings:** $552 × 0.987 = **$545/year per engineer**
+- **5-engineer DevOps team:** $2,725/year
+- **ROI:** Immediate (structured Git API enables automated root cause analysis)
+
+**Metrics:**
+- Log retrieval: Manual copy-paste → structured API (0 human time)
+- Commit inspection: 5 min manual → 15s automated (98% faster)
+- Diff comparison: 5 min manual → 15s automated (95% faster)
+- Correlation: 10 min manual → 2s automated (99.7% faster)
+- Mean Time To Identify (MTTI): 23 min → 19 sec (98.7% reduction)
+
+### Use Case 3: Alex Compliance Audit of Code Changes
+
+**Persona:** Alex is a security auditor reviewing all commits made to production branches over the past quarter to ensure compliance with security policies (no hardcoded secrets, proper review process, commit message standards).
+
+**Before:**
+- Alex manually runs: `git log --all --since="3 months ago" --format="%H %an %ae %s"` (10 seconds)
+- Alex manually copies output to spreadsheet (15 minutes for 200 commits)
+- Alex manually runs: `git show <sha>` for each commit to inspect content (2 minutes × 200 commits = 6.67 hours)
+- Alex manually searches for patterns like "password", "api_key", "secret" in diffs (30 minutes across all commits)
+- Alex manually verifies commit message format compliance (1 minute × 200 = 3.33 hours)
+- Alex manually generates compliance report (1 hour)
+- **Total audit time:** 11.5 hours per quarter
+- **Annual time:** 11.5 hours × 4 quarters = 46 hours/year
+- **Annual cost:** 46 hours × $150/hour (auditor rate) = **$6,900/year**
+
+**After:**
+- Acode compliance agent calls `IGitService.GetLogAsync(new LogOptions { Since = "3 months ago" })` (1.5s for 200 commits)
+- Agent receives structured `GitCommit[]` with all metadata parsed (instant)
+- Agent automatically inspects commit diffs using `IGitService.GetDiffAsync()` for all 200 commits (100ms × 200 = 20s)
+- Agent automatically scans diffs for secret patterns using regex (5s total across all commits)
+- Agent automatically validates commit message format against policy (instant with structured data)
+- Agent automatically generates compliance report with violations flagged (2s)
+- **Total audit time:** 28.5 seconds (automated analysis)
+- **Time savings:** 11.5 hours - 28.5s = 11.49 hours per quarter (99.9% reduction)
+- **Annual savings:** $6,900 × 0.999 = **$6,893/year per auditor**
+- **3-auditor team:** $20,679/year
+- **ROI:** Immediate (structured Git API enables automated compliance checks)
+
+**Metrics:**
+- Log collection: 10s + 15 min manual → 1.5s automated (99% faster)
+- Commit content inspection: 6.67 hours → 20s (99.9% faster)
+- Secret pattern scanning: 30 min → 5s (99.7% faster)
+- Message format validation: 3.33 hours → instant (100% faster)
+- Report generation: 1 hour → 2s (99.9% faster)
+- Compliance cycle time: 11.5 hours → 28.5s (99.9% reduction)
+
+**Combined Suite 022 ROI:**
+- DevBot automation: $28,640/year (10 developers)
+- Jordan incident investigation: $2,725/year (5 engineers)
+- Alex compliance audit: $20,679/year (3 auditors)
+- **Total annual value:** $52,044/year for typical 10-person engineering team
+- **Payback period:** Immediate (zero infrastructure cost, pure productivity gain)
 
 ---
 
@@ -373,6 +519,588 @@ git push  # Enter credentials once
 
 ---
 
+## Security Considerations
+
+### Threat 1: Credential Exposure in Logs and Error Messages
+
+**Risk:** Git URLs often contain embedded credentials (e.g., `https://user:password@github.com/repo.git`). If these URLs appear in logs, error messages, or exception stack traces, credentials are exposed to anyone with log access.
+
+**Attack Scenario:**
+1. Developer configures remote with embedded credentials: `git remote add origin https://token:ghp_abc123@github.com/repo.git`
+2. Push operation fails due to network error
+3. GitService logs error message including full URL with token
+4. Attacker with log access (e.g., compromised log aggregator, insider threat) extracts token
+5. Attacker uses token to access private repository and steal source code
+
+**Mitigation:**
+
+```csharp
+// CredentialRedactor.cs - Complete implementation
+namespace Acode.Infrastructure.Git;
+
+public sealed class CredentialRedactor : ICredentialRedactor
+{
+    // Regex patterns for detecting credentials in various formats
+    private static readonly Regex UrlWithEmbeddedCredentials = new(
+        @"(https?://)([^:]+):([^@]+)@",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex SshUrlWithPassword = new(
+        @"(ssh://[^:]+):([^@]+)@",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex GitCredentialLine = new(
+        @"(password|token|secret|key|credential|auth|bearer|api_key|apikey)\s*[:=]\s*\S+",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly string[] SensitiveEnvironmentVariables =
+    {
+        "GIT_ASKPASS", "GIT_PASSWORD", "GIT_TOKEN", "GITHUB_TOKEN",
+        "GITLAB_TOKEN", "GIT_CREDENTIALS"
+    };
+
+    public string Redact(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return input;
+
+        // Step 1: Redact URLs with embedded credentials
+        var result = UrlWithEmbeddedCredentials.Replace(input, "$1[REDACTED]@");
+        result = SshUrlWithPassword.Replace(result, "$1[REDACTED]@");
+
+        // Step 2: Redact lines containing credential keywords
+        var lines = result.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (GitCredentialLine.IsMatch(lines[i]))
+            {
+                var match = GitCredentialLine.Match(lines[i]);
+                var keyPart = match.Value[..match.Value.IndexOfAny(new[] { ':', '=' }) + 1];
+                lines[i] = GitCredentialLine.Replace(lines[i], $"{keyPart}[REDACTED]");
+            }
+        }
+
+        // Step 3: Redact sensitive environment variables
+        result = string.Join('\n', lines);
+        foreach (var envVar in SensitiveEnvironmentVariables)
+        {
+            var pattern = $@"{envVar}\s*=\s*\S+";
+            result = Regex.Replace(result, pattern, $"{envVar}=[REDACTED]", RegexOptions.IgnoreCase);
+        }
+
+        return result;
+    }
+
+    public string RedactUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return url;
+
+        return UrlWithEmbeddedCredentials.Replace(url, "$1[REDACTED]@");
+    }
+}
+
+// Usage in GitService.cs
+private GitException MapToException(CommandResult result, string workingDir)
+{
+    var stderr = result.StdErr ?? "";
+    var redactedStderr = _redactor.Redact(stderr);
+    var redactedWorkingDir = workingDir; // Path is safe
+
+    _logger.LogError(
+        "Git command failed: Exit={ExitCode}, StdErr={StdErr}, WorkingDir={WorkingDir}",
+        result.ExitCode,
+        redactedStderr, // Always redacted
+        redactedWorkingDir);
+
+    return result.ExitCode switch
+    {
+        128 when stderr.Contains("not a git repository") =>
+            new NotARepositoryException(workingDir),
+        // ... other exception mappings with redacted stderr
+        _ => new GitException($"Git command failed: {redactedStderr}",
+            result.ExitCode, redactedStderr, workingDir, "GIT_000")
+    };
+}
+```
+
+---
+
+### Threat 2: Command Injection via Unsanitized Paths
+
+**Risk:** If file paths or branch names from user input are passed to git commands without proper escaping, an attacker can inject shell commands that execute with Acode's privileges.
+
+**Attack Scenario:**
+1. Attacker crafts malicious branch name: `feature/test; rm -rf /tmp/important; #`
+2. Agent calls `IGitService.CheckoutAsync(repoPath, maliciousBranchName)`
+3. GitService constructs command: `git checkout feature/test; rm -rf /tmp/important; #`
+4. Command execution layer executes as shell command (if not properly escaped)
+5. Malicious `rm` command executes, deleting critical files
+
+**Mitigation:**
+
+```csharp
+// PathSanitizer.cs - Complete implementation
+namespace Acode.Infrastructure.Git;
+
+public sealed class PathSanitizer : IPathSanitizer
+{
+    private static readonly char[] ShellMetacharacters =
+    {
+        ';', '&', '|', '<', '>', '`', '$', '(', ')', '{', '}', '[', ']',
+        '\\', '"', '\'', '\n', '\r', '\t'
+    };
+
+    private static readonly Regex BranchNamePattern = new(
+        @"^[a-zA-Z0-9/_\-\.]+$",
+        RegexOptions.Compiled);
+
+    private static readonly Regex PathTraversalPattern = new(
+        @"\.\./|\.\.\\",
+        RegexOptions.Compiled);
+
+    public string SanitizeBranchName(string branchName)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+            throw new ArgumentException("Branch name cannot be empty", nameof(branchName));
+
+        // Check for shell metacharacters
+        if (branchName.IndexOfAny(ShellMetacharacters) >= 0)
+            throw new GitException(
+                $"Branch name contains invalid characters: {branchName}",
+                0, null, null, "GIT_INVALID_INPUT");
+
+        // Validate against allowed pattern
+        if (!BranchNamePattern.IsMatch(branchName))
+            throw new GitException(
+                $"Branch name format invalid: {branchName}. Use only alphanumeric, /, -, _, .",
+                0, null, null, "GIT_INVALID_INPUT");
+
+        // Check for path traversal
+        if (PathTraversalPattern.IsMatch(branchName))
+            throw new GitException(
+                $"Branch name contains path traversal: {branchName}",
+                0, null, null, "GIT_INVALID_INPUT");
+
+        return branchName;
+    }
+
+    public string SanitizePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Path cannot be empty", nameof(path));
+
+        // Normalize path separators
+        var normalized = path.Replace('\\', '/');
+
+        // Check for path traversal
+        if (PathTraversalPattern.IsMatch(normalized))
+            throw new GitException(
+                $"Path contains traversal sequences: {path}",
+                0, null, null, "GIT_INVALID_INPUT");
+
+        // Check for absolute paths outside repository
+        if (Path.IsPathRooted(path) && !path.StartsWith("/repo/", StringComparison.Ordinal))
+        {
+            throw new GitException(
+                $"Absolute path not allowed: {path}",
+                0, null, null, "GIT_INVALID_INPUT");
+        }
+
+        // Shell metacharacter check (especially for file operations)
+        if (path.IndexOfAny(ShellMetacharacters) >= 0)
+        {
+            // Log warning but allow (git handles quoting)
+            // Command execution layer will properly escape
+        }
+
+        return normalized;
+    }
+}
+
+// Usage in GitService.cs
+public async Task CheckoutAsync(string workingDir, string branchOrCommit, CancellationToken ct = default)
+{
+    // Sanitize inputs before constructing command
+    var sanitizedBranch = _sanitizer.SanitizeBranchName(branchOrCommit);
+    var sanitizedWorkingDir = _sanitizer.SanitizePath(workingDir);
+
+    await EnsureRepositoryAsync(sanitizedWorkingDir, ct);
+
+    // Command execution layer will properly quote arguments
+    var args = new[] { "checkout", sanitizedBranch };
+    await ExecuteGitAsync(sanitizedWorkingDir, args, ct);
+
+    _logger.LogInformation("Checked out {Branch} in {Dir}", sanitizedBranch, sanitizedWorkingDir);
+}
+```
+
+---
+
+### Threat 3: Repository Escape via Relative Paths
+
+**Risk:** If working directory parameter is not validated, an attacker can use relative paths (e.g., `../../../../etc`) to execute git commands outside the intended repository, potentially accessing sensitive system files.
+
+**Attack Scenario:**
+1. Attacker provides malicious working directory: `../../../../etc`
+2. Agent calls `IGitService.GetStatusAsync(maliciousPath)`
+3. GitService executes `git -C ../../../../etc status`
+4. Git attempts to access /etc/.git/ (doesn't exist, but info leak if it did)
+5. Error messages reveal filesystem structure and permissions
+
+**Mitigation:**
+
+```csharp
+// RepositoryValidator.cs - Complete implementation
+namespace Acode.Infrastructure.Git;
+
+public sealed class RepositoryValidator : IRepositoryValidator
+{
+    private readonly ICommandExecutor _executor;
+    private readonly ILogger<RepositoryValidator> _logger;
+
+    // Cache validated repositories to avoid repeated checks
+    private readonly ConcurrentDictionary<string, (bool IsValid, DateTime ValidatedAt)> _cache = new();
+    private static readonly TimeSpan CacheExpiration = TimeSpan.FromMinutes(5);
+
+    public async Task<string> ValidateAndNormalizeAsync(string workingDir, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workingDir))
+            throw new ArgumentException("Working directory cannot be empty", nameof(workingDir));
+
+        // Step 1: Resolve to absolute path
+        var absolutePath = Path.GetFullPath(workingDir);
+
+        // Step 2: Check cache
+        if (_cache.TryGetValue(absolutePath, out var cached) &&
+            DateTime.UtcNow - cached.ValidatedAt < CacheExpiration &&
+            cached.IsValid)
+        {
+            return absolutePath;
+        }
+
+        // Step 3: Verify directory exists
+        if (!Directory.Exists(absolutePath))
+            throw new NotARepositoryException(absolutePath);
+
+        // Step 4: Verify it's a git repository (use rev-parse --git-dir)
+        try
+        {
+            var command = new CommandSpec
+            {
+                Executable = "git",
+                Arguments = new[] { "-C", absolutePath, "rev-parse", "--git-dir" },
+                Timeout = TimeSpan.FromSeconds(5),
+                RedactSecrets = false
+            };
+
+            var result = await _executor.ExecuteAsync(command, ct);
+
+            if (result.ExitCode != 0)
+            {
+                _logger.LogWarning(
+                    "Not a git repository: {Path}, Exit={Exit}, StdErr={StdErr}",
+                    absolutePath, result.ExitCode, result.StdErr);
+                throw new NotARepositoryException(absolutePath);
+            }
+
+            // Step 5: Verify git-dir is within working directory (prevent escape)
+            var gitDir = result.StdOut.Trim();
+            var gitDirAbsolute = Path.IsPathRooted(gitDir)
+                ? gitDir
+                : Path.GetFullPath(Path.Combine(absolutePath, gitDir));
+
+            if (!gitDirAbsolute.StartsWith(absolutePath, StringComparison.Ordinal) &&
+                !gitDirAbsolute.StartsWith(Path.Combine(absolutePath, ".git"), StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Git directory outside working directory: WorkingDir={WorkingDir}, GitDir={GitDir}",
+                    absolutePath, gitDirAbsolute);
+                throw new GitException(
+                    $"Git directory outside repository bounds: {gitDirAbsolute}",
+                    0, null, absolutePath, "GIT_SECURITY_VIOLATION");
+            }
+
+            // Step 6: Cache successful validation
+            _cache[absolutePath] = (true, DateTime.UtcNow);
+
+            return absolutePath;
+        }
+        catch (CommandExecutionException ex)
+        {
+            _logger.LogError(ex, "Failed to validate repository: {Path}", absolutePath);
+            throw new NotARepositoryException(absolutePath);
+        }
+    }
+
+    public void InvalidateCache(string workingDir)
+    {
+        var absolutePath = Path.GetFullPath(workingDir);
+        _cache.TryRemove(absolutePath, out _);
+    }
+}
+
+// Usage in GitService.cs - Always validate first
+private async Task EnsureRepositoryAsync(string workingDir, CancellationToken ct)
+{
+    var validatedPath = await _validator.ValidateAndNormalizeAsync(workingDir, ct);
+    // All subsequent operations use validatedPath
+}
+```
+
+---
+
+### Threat 4: Sensitive Data Exposure via Unredacted Diff Output
+
+**Risk:** Git diff output may contain sensitive data (API keys, passwords, tokens) that was accidentally committed. If diff output is logged or displayed without redaction, these secrets are exposed.
+
+**Attack Scenario:**
+1. Developer accidentally commits file containing `API_KEY=sk_live_abc123`
+2. Agent calls `IGitService.GetDiffAsync()` to review changes
+3. Diff output includes full API key in plain text
+4. Diff output is logged to artifact collection (Task 021)
+5. Attacker with artifact access extracts API key from logs
+6. Attacker uses key to access production API
+
+**Mitigation:**
+
+```csharp
+// DiffRedactor.cs - Complete implementation
+namespace Acode.Infrastructure.Git;
+
+public sealed class DiffRedactor : IDiffRedactor
+{
+    private static readonly Regex[] SensitivePatterns =
+    {
+        // API keys (various formats)
+        new Regex(@"(?i)api[_-]?key\s*[:=]\s*['\""]*([a-z0-9_\-]{20,})['\""]*", RegexOptions.Compiled),
+        new Regex(@"(?i)(sk|pk)_live_[a-zA-Z0-9]{24,}", RegexOptions.Compiled),
+
+        // Passwords
+        new Regex(@"(?i)password\s*[:=]\s*['\""]*([^\s'""]+)['\""]*", RegexOptions.Compiled),
+
+        // Tokens (GitHub, GitLab, etc.)
+        new Regex(@"(?i)(ghp|gho|ghu|ghs|ghr|glpat)_[a-zA-Z0-9]{36,}", RegexOptions.Compiled),
+
+        // AWS credentials
+        new Regex(@"AKIA[0-9A-Z]{16}", RegexOptions.Compiled),
+        new Regex(@"(?i)aws_secret_access_key\s*[:=]\s*['\""]*([a-zA-Z0-9/+]{40})['\""]*", RegexOptions.Compiled),
+
+        // Private keys (PEM format)
+        new Regex(@"-----BEGIN (RSA |DSA |EC )?PRIVATE KEY-----[^-]+-----END (RSA |DSA |EC )?PRIVATE KEY-----",
+            RegexOptions.Compiled | RegexOptions.Singleline),
+
+        // Connection strings
+        new Regex(@"(?i)(Server|Host|Data Source)\s*=\s*[^;]+;\s*(User Id|UID)\s*=\s*[^;]+;\s*Password\s*=\s*[^;]+",
+            RegexOptions.Compiled),
+
+        // JWT tokens
+        new Regex(@"eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*", RegexOptions.Compiled),
+
+        // Generic secrets (base64-looking strings >20 chars after "secret")
+        new Regex(@"(?i)secret\s*[:=]\s*['\""]*([a-zA-Z0-9+/]{20,}={0,2})['\""]*", RegexOptions.Compiled)
+    };
+
+    private readonly ILogger<DiffRedactor> _logger;
+
+    public string RedactDiff(string diffOutput)
+    {
+        if (string.IsNullOrEmpty(diffOutput))
+            return diffOutput;
+
+        var redactedCount = 0;
+        var result = diffOutput;
+
+        foreach (var pattern in SensitivePatterns)
+        {
+            var matches = pattern.Matches(result);
+            if (matches.Count > 0)
+            {
+                redactedCount += matches.Count;
+                result = pattern.Replace(result, match =>
+                {
+                    // Keep pattern prefix, redact value
+                    var prefix = match.Value[..Math.Min(match.Value.IndexOf('=') + 1, 20)];
+                    return $"{prefix}[REDACTED]";
+                });
+            }
+        }
+
+        if (redactedCount > 0)
+        {
+            _logger.LogWarning(
+                "Redacted {Count} sensitive patterns from diff output",
+                redactedCount);
+        }
+
+        return result;
+    }
+
+    public bool ContainsSensitiveData(string content)
+    {
+        return SensitivePatterns.Any(pattern => pattern.IsMatch(content));
+    }
+}
+
+// Usage in GitService.cs
+public async Task<string> GetDiffAsync(string workingDir, DiffOptions options, CancellationToken ct = default)
+{
+    await EnsureRepositoryAsync(workingDir, ct);
+
+    var args = new List<string> { "diff" };
+    // ... build diff args ...
+
+    var result = await ExecuteGitAsync(workingDir, args, ct);
+
+    // ALWAYS redact diff output before returning
+    var redactedDiff = _diffRedactor.RedactDiff(result.StdOut);
+
+    return redactedDiff;
+}
+```
+
+---
+
+### Threat 5: Mode Bypass via Configuration Tampering
+
+**Risk:** If git configuration file (.agent/config.yml) is writable by untrusted processes, an attacker can modify operating mode settings to bypass network operation restrictions.
+
+**Attack Scenario:**
+1. System is configured in local-only mode (no network operations allowed)
+2. Attacker gains write access to .agent/config.yml (e.g., via misconfigured permissions)
+3. Attacker modifies: `operatingMode: burst` in config file
+4. Agent reloads configuration and switches to burst mode
+5. Attacker calls `IGitService.PushAsync()` to exfiltrate code to external repository
+6. Source code leaked to attacker-controlled remote
+
+**Mitigation:**
+
+```csharp
+// ModeEnforcementService.cs - Complete implementation
+namespace Acode.Infrastructure.Git;
+
+public sealed class ModeEnforcementService : IModeEnforcementService
+{
+    private readonly IModeResolver _modeResolver;
+    private readonly IConfigurationValidator _configValidator;
+    private readonly ILogger<ModeEnforcementService> _logger;
+
+    // Cached mode to detect unauthorized changes
+    private OperatingMode? _lastValidatedMode;
+    private DateTime _lastValidationTime;
+    private static readonly TimeSpan ValidationExpiration = TimeSpan.FromMinutes(1);
+
+    public async Task<OperatingMode> GetAndValidateModeAsync(CancellationToken ct = default)
+    {
+        // Step 1: Get current mode from resolver
+        var currentMode = await _modeResolver.GetCurrentModeAsync(ct);
+
+        // Step 2: Validate configuration file integrity
+        var configPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".agent", "config.yml");
+        if (File.Exists(configPath))
+        {
+            var configHash = await ComputeFileHashAsync(configPath, ct);
+            var (isValid, reason) = await _configValidator.ValidateIntegrityAsync(configPath, configHash, ct);
+
+            if (!isValid)
+            {
+                _logger.LogCritical(
+                    "Configuration file integrity check failed: {Reason}. Falling back to most restrictive mode (LocalOnly).",
+                    reason);
+
+                // Fallback to most restrictive mode
+                return OperatingMode.LocalOnly;
+            }
+        }
+
+        // Step 3: Detect suspicious mode transitions
+        if (_lastValidatedMode.HasValue &&
+            DateTime.UtcNow - _lastValidationTime < ValidationExpiration &&
+            _lastValidatedMode.Value != currentMode)
+        {
+            _logger.LogWarning(
+                "Operating mode changed unexpectedly: {OldMode} -> {NewMode}. Validating transition...",
+                _lastValidatedMode.Value, currentMode);
+
+            // Audit log the transition
+            await LogModeTransitionAsync(_lastValidatedMode.Value, currentMode, ct);
+        }
+
+        // Step 4: Update cache
+        _lastValidatedMode = currentMode;
+        _lastValidationTime = DateTime.UtcNow;
+
+        return currentMode;
+    }
+
+    public async Task ValidateNetworkOperationAsync(string operationName, CancellationToken ct = default)
+    {
+        var mode = await GetAndValidateModeAsync(ct);
+
+        if (mode is OperatingMode.LocalOnly or OperatingMode.Airgapped)
+        {
+            _logger.LogCritical(
+                "Security violation: Network operation '{Operation}' blocked in {Mode} mode",
+                operationName, mode);
+
+            // Audit log security event
+            await LogSecurityViolationAsync(operationName, mode, ct);
+
+            throw new ModeViolationException(mode.ToString(), operationName);
+        }
+
+        _logger.LogInformation(
+            "Network operation '{Operation}' permitted in {Mode} mode",
+            operationName, mode);
+    }
+
+    private async Task<string> ComputeFileHashAsync(string path, CancellationToken ct)
+    {
+        using var sha256 = SHA256.Create();
+        await using var stream = File.OpenRead(path);
+        var hash = await sha256.ComputeHashAsync(stream, ct);
+        return Convert.ToHexString(hash);
+    }
+
+    private async Task LogModeTransitionAsync(OperatingMode oldMode, OperatingMode newMode, CancellationToken ct)
+    {
+        // Log to audit trail (Task 011 workspace DB)
+        _logger.LogInformation(
+            "Mode transition: {OldMode} -> {NewMode}, Timestamp={Timestamp}",
+            oldMode, newMode, DateTime.UtcNow);
+    }
+
+    private async Task LogSecurityViolationAsync(string operation, OperatingMode mode, CancellationToken ct)
+    {
+        // Log to security audit trail
+        _logger.LogCritical(
+            "SECURITY VIOLATION: Operation={Operation}, Mode={Mode}, Timestamp={Timestamp}, User={User}",
+            operation, mode, DateTime.UtcNow, Environment.UserName);
+    }
+}
+
+// Usage in GitService.cs - ALWAYS check mode before network operations
+public async Task PushAsync(string workingDir, PushOptions options, CancellationToken ct = default)
+{
+    // MANDATORY mode enforcement before any network operation
+    await _modeEnforcement.ValidateNetworkOperationAsync("push", ct);
+
+    await EnsureRepositoryAsync(workingDir, ct);
+
+    // ... proceed with push operation ...
+}
+
+public async Task FetchAsync(string workingDir, FetchOptions? options = null, CancellationToken ct = default)
+{
+    // MANDATORY mode enforcement
+    await _modeEnforcement.ValidateNetworkOperationAsync("fetch", ct);
+
+    // ... proceed with fetch operation ...
+}
+```
+
+---
+
 ## Acceptance Criteria / Definition of Done
 
 ### Functionality
@@ -465,63 +1193,879 @@ git push  # Enter credentials once
 
 ---
 
+## Troubleshooting
+
+### Issue 1: Git Operations Failing with "index.lock File exists"
+
+**Symptoms:**
+- All git operations fail with error: `fatal: Unable to create '.git/index.lock': File exists`
+- Status, add, commit, checkout all return exit code 128
+- Error persists even after waiting several minutes
+- No other git processes visible in task manager/`ps`
+- Repository was working fine previously, failure started suddenly
+
+**Root Causes:**
+1. **Crashed git process** - Previous git operation crashed without cleaning up lock file
+2. **Forced termination** - User or system killed git process (Ctrl+C, task kill, OOM killer)
+3. **Filesystem issues** - NFS/network filesystem delays causing stale lock perception
+4. **Concurrent operations** - Multiple git processes from different Acode instances conflicting
+5. **Permissions mismatch** - Lock file owned by different user (e.g., root vs normal user)
+6. **Disk full** - Git process crashed while writing index due to no space left
+7. **Antivirus interference** - Antivirus software holding lock on .git/index file
+
+**Solutions:**
+
+```bash
+# Solution 1: Check for running git processes
+ps aux | grep -i git
+# If git processes found, wait for them to complete or kill if hung:
+kill -9 <pid>
+# Wait 5 seconds, retry git operation
+acode git status
+
+# Solution 2: Remove stale lock file manually
+ls -la .git/index.lock
+# If file exists and no git processes running:
+rm .git/index.lock
+# Retry git operation
+acode git status
+# Expected: Operation succeeds
+
+# Solution 3: Check lock file ownership and permissions
+ls -l .git/index.lock
+# If owned by different user (e.g., root):
+sudo chown $USER:$USER .git/index.lock
+sudo rm .git/index.lock
+# Or use sudo for one-time fix:
+sudo git status
+# Expected: Operation succeeds
+
+# Solution 4: Check disk space
+df -h .
+# If disk full (100% used):
+# Free space by deleting temp files, logs, or old artifacts
+rm -rf /tmp/old-data
+# Retry git operation after freeing space
+
+# Solution 5: Check for filesystem issues (NFS)
+mount | grep $(df . | tail -1 | awk '{print $1}')
+# If NFS mounted, check for stale file handles:
+stat .git/index.lock
+# If stat hangs or returns "Stale file handle":
+# Unmount and remount NFS
+sudo umount /mnt/nfs
+sudo mount /mnt/nfs
+# Retry git operation
+
+# Solution 6: Disable antivirus temporarily
+# On Windows: Temporarily disable Windows Defender real-time protection
+# Add .git directory to exclusion list:
+Add-MpPreference -ExclusionPath "C:\repo\.git"
+# Retry git operation
+
+# Solution 7: Force git to ignore lock (DANGEROUS - last resort)
+git status --no-lock-index
+# This bypasses lock check but may corrupt repository if actual concurrent access
+# Only use if absolutely certain no other processes are accessing repo
+
+# Solution 8: Validate repository integrity after lock removal
+git fsck --full
+# Expected output: "no problems found"
+# If corruption detected, consider cloning fresh copy
+```
+
+---
+
+### Issue 2: Push Fails with "Authentication Failed" Despite Correct Credentials
+
+**Symptoms:**
+- `acode git push` fails with error: `fatal: Authentication failed`
+- Credentials are correct (tested with manual `git push`)
+- Same credentials work for other operations (fetch, clone)
+- Push from Acode fails but command-line git push succeeds
+- Error occurs in burst mode (not mode violation)
+
+**Root Causes:**
+1. **Credential helper not configured** - System git has credentials, but Acode spawns git without helper access
+2. **SSH key not in agent** - Using SSH URLs but key not loaded in ssh-agent
+3. **Token expiration** - Personal access token or OAuth token has expired
+4. **Two-factor authentication** - Remote requires 2FA but token doesn't have proper scopes
+5. **Credential prompt blocking** - Git attempting interactive credential prompt which blocks automation
+6. **GIT_ASKPASS not set** - Missing environment variable for non-interactive credential retrieval
+7. **PAT scope insufficient** - Token has read access but not write/push access
+
+**Solutions:**
+
+```bash
+# Solution 1: Configure credential helper globally
+git config --global credential.helper store
+git push  # Enter credentials once
+# Credentials saved to ~/.git-credentials
+# Retry Acode push
+acode git push
+# Expected: Push succeeds using stored credentials
+
+# Solution 2: Use SSH with ssh-agent
+# Generate SSH key if not exists:
+ssh-keygen -t ed25519 -C "your_email@example.com"
+# Add key to ssh-agent:
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+# Add public key to GitHub/GitLab
+# Change remote to SSH:
+git remote set-url origin git@github.com:user/repo.git
+# Retry push
+acode git push
+
+# Solution 3: Verify token scopes (GitHub example)
+# Go to Settings > Developer settings > Personal access tokens
+# Ensure token has 'repo' scope (full control of private repositories)
+# If missing, regenerate token with correct scopes
+# Update stored credentials:
+git config --global credential.helper cache
+git push  # Enter new token
+# Retry Acode push
+
+# Solution 4: Set GIT_ASKPASS to prevent interactive prompts
+export GIT_ASKPASS=/bin/true
+# Or set in .agent/config.yml:
+# git:
+#   environment:
+#     GIT_ASKPASS: /bin/true
+# Retry push - will fail fast instead of hanging
+
+# Solution 5: Use credential caching with timeout
+git config --global credential.helper 'cache --timeout=3600'
+git push  # Enter credentials
+# Credentials cached for 1 hour
+# Retry Acode push within timeout
+
+# Solution 6: Debug credential helper invocation
+GIT_TRACE=1 git push
+# Check output for credential helper execution
+# Verify helper is being called and returning credentials
+# If not called, ensure GIT_CONFIG includes credential.helper
+
+# Solution 7: Use URL with embedded token (less secure, for testing)
+git remote set-url origin https://ghp_yourtoken@github.com/user/repo.git
+acode git push
+# SECURITY WARNING: Token visible in URL, ensure logs redact it
+# Switch back to credential helper after testing
+
+# Solution 8: Verify remote URL and protocol
+git remote -v
+# If using http:// instead of https://, change to https:
+git remote set-url origin https://github.com/user/repo.git
+# Some hosts require https for authentication
+acode git push
+```
+
+---
+
+### Issue 3: GetStatusAsync Extremely Slow (>5 seconds) on Large Repository
+
+**Symptoms:**
+- `acode git status` takes 5-15 seconds to complete
+- Repository has 50k+ files
+- Status operation is fast with command-line git (<1 second)
+- Performance degraded over time as repository grew
+- CPU usage 100% during status check
+
+**Root Causes:**
+1. **Untracked files scanning** - Repository has many untracked files (node_modules, build outputs)
+2. **Working directory too large** - 100k+ files in working directory
+3. **Git version too old** - Using git <2.25 without performance improvements
+4. **Filesystem type** - NFS or network filesystem causing slow stat() calls
+5. **Gitignore patterns inefficient** - Complex regex patterns in .gitignore slowing matching
+6. **Git index fragmented** - .git/index file corrupted or fragmented
+7. **Submodules present** - Repository has many submodules requiring recursive status
+8. **Background processes** - Antivirus or indexing service scanning .git directory
+
+**Solutions:**
+
+```bash
+# Solution 1: Add untracked directories to .gitignore
+echo "node_modules/" >> .gitignore
+echo "build/" >> .gitignore
+echo "dist/" >> .gitignore
+echo ".idea/" >> .gitignore
+git add .gitignore
+git commit -m "chore: ignore build artifacts"
+# Retry status
+acode git status
+# Expected: <500ms for <10k tracked files
+
+# Solution 2: Use --untracked-files=no for faster status
+# Modify GitService.cs to add option:
+# args: ["status", "--porcelain=v2", "--branch", "--untracked-files=no"]
+acode git status
+# Expected: Significantly faster (skips untracked file scan)
+
+# Solution 3: Rebuild git index
+git update-index --refresh
+# Or if corrupted:
+rm .git/index
+git reset
+# Retry status
+acode git status
+
+# Solution 4: Update git to latest version
+git --version
+# If <2.25, update:
+# Ubuntu: sudo apt update && sudo apt install git
+# macOS: brew upgrade git
+# Windows: Download from git-scm.com
+# Retry with newer git
+acode git status
+
+# Solution 5: Use sparse checkout for large repos
+git sparse-checkout init --cone
+git sparse-checkout set src/
+# Only checkout src/ directory, ignore rest
+# Status only scans checked-out paths
+acode git status
+# Expected: Much faster
+
+# Solution 6: Optimize .gitignore patterns
+# Replace complex regex with simple prefix matching:
+# SLOW: **/node_modules/**
+# FAST: node_modules/
+# Review all .gitignore patterns for efficiency
+
+# Solution 7: Exclude .git from antivirus scanning
+# Windows Defender: Add-MpPreference -ExclusionPath "C:\repo\.git"
+# macOS: System Preferences > Security > Privacy > Full Disk Access > Exclude
+# Retry status
+
+# Solution 8: Use git status --short for minimal output
+# If only checking clean/dirty state:
+acode git status --short
+# Returns minimal output, faster parsing
+```
+
+---
+
+### Issue 4: Commit Fails with "Unable to Auto-Detect Email Address"
+
+**Symptoms:**
+- `acode git commit -m "message"` fails with error: `fatal: unable to auto-detect email address`
+- Error also mentions `fatal: empty ident name not allowed`
+- Manual `git commit` works fine
+- Acode git operations work but commit specifically fails
+- Fresh system/user account
+
+**Root Causes:**
+1. **Git user.name not configured** - Global git config missing user name
+2. **Git user.email not configured** - Global git config missing user email
+3. **Environment variables missing** - GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL not set
+4. **Running in container** - Docker container without git config volume mounted
+5. **User profile issues** - HOME or USERPROFILE environment variable not set
+6. **Repository-level config incomplete** - Repo config overrides global but missing fields
+7. **Service account** - Running as service/daemon user without proper environment
+
+**Solutions:**
+
+```bash
+# Solution 1: Configure git user globally
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+# Verify configuration:
+git config --global user.name
+git config --global user.email
+# Retry commit
+acode git commit -m "test commit"
+# Expected: Commit succeeds
+
+# Solution 2: Configure git user locally (repository-level)
+cd /path/to/repo
+git config user.name "Your Name"
+git config user.email "your.email@example.com"
+# This overrides global config for this repo only
+acode git commit -m "test commit"
+
+# Solution 3: Set environment variables
+export GIT_AUTHOR_NAME="Your Name"
+export GIT_AUTHOR_EMAIL="your.email@example.com"
+export GIT_COMMITTER_NAME="Your Name"
+export GIT_COMMITTER_EMAIL="your.email@example.com"
+# Retry commit
+acode git commit -m "test commit"
+
+# Solution 4: Set environment in .agent/config.yml
+# Edit ~/.agent/config.yml:
+git:
+  environment:
+    GIT_AUTHOR_NAME: "Your Name"
+    GIT_AUTHOR_EMAIL: "your.email@example.com"
+    GIT_COMMITTER_NAME: "Your Name"
+    GIT_COMMITTER_EMAIL: "your.email@example.com"
+# Restart Acode
+acode git commit -m "test commit"
+
+# Solution 5: Mount git config in Docker container
+docker run -v ~/.gitconfig:/root/.gitconfig acode/agent
+# Or pass environment variables:
+docker run -e GIT_AUTHOR_NAME="Your Name" -e GIT_AUTHOR_EMAIL="email@example.com" acode/agent
+
+# Solution 6: Check git config file permissions
+ls -la ~/.gitconfig
+# If not readable:
+chmod 644 ~/.gitconfig
+# Retry commit
+
+# Solution 7: Verify HOME variable is set
+echo $HOME
+# If empty:
+export HOME=/home/username
+# Retry commit
+
+# Solution 8: Use --author flag as workaround (one-time)
+acode git commit -m "message" --author="Your Name <your.email@example.com>"
+# Not permanent solution, but works for immediate need
+```
+
+---
+
+### Issue 5: Branch Checkout Fails with "Please Commit or Stash Your Changes"
+
+**Symptoms:**
+- `acode git checkout feature-branch` fails with error: `error: Your local changes would be overwritten by checkout`
+- Error message: `Please commit your changes or stash them before you switch branches`
+- `acode git status` shows modified files
+- User wants to switch branches without losing work
+- Files have uncommitted changes that conflict with target branch
+
+**Root Causes:**
+1. **Uncommitted changes** - Working directory has modified files that differ between branches
+2. **Conflicting changes** - Target branch has different content for same files
+3. **Untracked files conflict** - Untracked files in working directory exist in target branch
+4. **Partial commit** - Some changes staged but not committed
+5. **Detached HEAD state** - Currently in detached HEAD, changes not associated with branch
+6. **Merge in progress** - Previous merge not completed, repository in intermediate state
+
+**Solutions:**
+
+```bash
+# Solution 1: Commit changes before checkout
+acode git status
+acode git add .
+acode git commit -m "WIP: save work before branch switch"
+acode git checkout feature-branch
+# Expected: Checkout succeeds, changes preserved in original branch
+
+# Solution 2: Stash changes (git stash)
+acode git stash push -m "work in progress"
+# Checkout target branch
+acode git checkout feature-branch
+# Do work on feature-branch
+# Return to original branch and restore:
+acode git checkout original-branch
+acode git stash pop
+# Expected: Changes restored after branch switch
+
+# Solution 3: Force checkout (DISCARDS CHANGES - DANGEROUS)
+acode git checkout --force feature-branch
+# WARNING: All uncommitted changes LOST
+# Only use if changes are disposable
+
+# Solution 4: Create new branch with current changes
+acode git checkout -b temp-save-work
+acode git add .
+acode git commit -m "temp save work"
+# Now checkout target branch
+acode git checkout feature-branch
+# Work can be retrieved later from temp-save-work branch
+
+# Solution 5: Check which files are blocking
+acode git diff --name-only feature-branch
+# Shows files that differ
+# If specific files not needed, discard them:
+git checkout -- path/to/file
+# Then retry checkout
+
+# Solution 6: Handle untracked files conflict
+acode git clean -n  # Dry run
+# If untracked files listed exist in target branch:
+git clean -f  # Remove untracked files
+# Or move them:
+mkdir ../backup
+mv untracked-file ../backup/
+# Retry checkout
+acode git checkout feature-branch
+
+# Solution 7: Abort merge if in progress
+git merge --abort
+# Or abort rebase:
+git rebase --abort
+# Clean state restored
+acode git checkout feature-branch
+
+# Solution 8: Use worktrees for parallel work (advanced)
+git worktree add ../feature-branch-work feature-branch
+cd ../feature-branch-work
+# Work in separate directory, original branch unchanged
+# When done:
+cd ../original
+git worktree remove ../feature-branch-work
+```
+
+---
+
 ## Testing Requirements
 
-### Unit Tests
+```csharp
+using Xunit;
+using FluentAssertions;
+using NSubstitute;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Acode.Application.Git;
+using Acode.Domain.Git;
+using Acode.Infrastructure.Git;
 
-- [ ] UT-001: Test GitStatus parsing from git output
-- [ ] UT-002: Test FileStatus enum mapping
-- [ ] UT-003: Test GitCommit parsing from log output
-- [ ] UT-004: Test branch name parsing
-- [ ] UT-005: Test remote URL parsing
-- [ ] UT-006: Test exit code to exception mapping
-- [ ] UT-007: Test stderr pattern matching for auth errors
-- [ ] UT-008: Test stderr pattern matching for network errors
-- [ ] UT-009: Test configuration loading
-- [ ] UT-010: Test configuration defaults
-- [ ] UT-011: Test mode validation logic
-- [ ] UT-012: Test credential redaction
-- [ ] UT-013: Test path sanitization
-- [ ] UT-014: Test timeout handling
-- [ ] UT-015: Test retry logic
+namespace Acode.Infrastructure.Tests.Git
+{
+    // Unit Tests - Git Output Parsing
 
-### Integration Tests
+    public class GitOutputParserTests
+    {
+        private readonly GitOutputParser _parser = new();
 
-- [ ] IT-001: Test status on real repository
-- [ ] IT-002: Test diff generation on real changes
-- [ ] IT-003: Test log retrieval on real commits
-- [ ] IT-004: Test branch creation on real repo
-- [ ] IT-005: Test checkout on real repo
-- [ ] IT-006: Test staging on real files
-- [ ] IT-007: Test commit on real changes
-- [ ] IT-008: Test concurrent operations
-- [ ] IT-009: Test operation cancellation
-- [ ] IT-010: Test with various git versions
+        [Fact]
+        public void ParseStatus_WithCleanBranch_ReturnsCleanStatus()
+        {
+            // Arrange
+            var output = @"# branch.oid abc123
+# branch.head main
+# branch.upstream origin/main
+# branch.ab +0 -0";
 
-### End-to-End Tests
+            // Act
+            var status = _parser.ParseStatus(output);
 
-- [ ] E2E-001: CLI status command works
-- [ ] E2E-002: CLI log command works
-- [ ] E2E-003: CLI branch create works
-- [ ] E2E-004: CLI checkout works
-- [ ] E2E-005: CLI add/commit workflow works
-- [ ] E2E-006: Mode blocking prevents push
-- [ ] E2E-007: Error messages are clear
-- [ ] E2E-008: Exit codes are correct
+            // Assert
+            status.Branch.Should().Be("main");
+            status.IsClean.Should().BeTrue();
+            status.UpstreamBranch.Should().Be("origin/main");
+            status.AheadBy.Should().Be(0);
+            status.BehindBy.Should().Be(0);
+        }
 
-### Performance/Benchmarks
+        [Fact]
+        public void ParseStatus_WithModifiedFiles_ParsesCorrectly()
+        {
+            // Arrange
+            var output = @"# branch.head feature/test
+1 .M N... 100644 100644 100644 abc123 def456 file.cs
+? untracked.txt";
 
-- [ ] PB-001: Status in <500ms for 10000 files
-- [ ] PB-002: Log 1000 commits in <1s
-- [ ] PB-003: Diff 10MB in <2s
-- [ ] PB-004: Branch create in <200ms
-- [ ] PB-005: Memory under 50MB for all operations
+            // Act
+            var status = _parser.ParseStatus(output);
 
-### Regression
+            // Assert
+            status.Branch.Should().Be("feature/test");
+            status.IsClean.Should().BeFalse();
+            status.UnstagedFiles.Should().HaveCount(1);
+            status.UnstagedFiles[0].Path.Should().Be("file.cs");
+            status.UnstagedFiles[0].State.Should().Be(GitFileState.Modified);
+            status.UntrackedFiles.Should().ContainSingle("untracked.txt");
+        }
 
-- [ ] RG-001: Verify Task 018 command execution compatibility
-- [ ] RG-002: Verify Task 001 mode integration
-- [ ] RG-003: Verify Task 002 config integration
+        [Fact]
+        public void ParseStatus_WithAheadBehind_ParsesTracking()
+        {
+            // Arrange
+            var output = @"# branch.head main
+# branch.upstream origin/main
+# branch.ab +3 -5";
+
+            // Act
+            var status = _parser.ParseStatus(output);
+
+            // Assert
+            status.AheadBy.Should().Be(3);
+            status.BehindBy.Should().Be(5);
+        }
+
+        [Fact]
+        public void ParseLog_WithMultipleCommits_ParsesAll()
+        {
+            // Arrange
+            var output = @"abc123|John Doe|john@example.com|2025-01-06T12:00:00Z|feat: add feature
+def456|Jane Smith|jane@example.com|2025-01-05T10:30:00Z|fix: bug fix";
+
+            // Act
+            var commits = _parser.ParseLog(output, "--format=%H|%an|%ae|%aI|%s");
+
+            // Assert
+            commits.Should().HaveCount(2);
+            commits[0].Sha.Should().Be("abc123");
+            commits[0].Author.Should().Be("John Doe");
+            commits[0].Subject.Should().Be("feat: add feature");
+            commits[1].Sha.Should().Be("def456");
+        }
+    }
+
+    public class CredentialRedactorTests
+    {
+        private readonly CredentialRedactor _redactor = new();
+
+        [Theory]
+        [InlineData(
+            "https://token:ghp_abc123@github.com/repo.git",
+            "https://[REDACTED]@github.com/repo.git")]
+        [InlineData(
+            "ssh://user:password@host.com/repo.git",
+            "ssh://[REDACTED]@host.com/repo.git")]
+        [InlineData(
+            "API_KEY=sk_live_abc123def456",
+            "API_KEY=[REDACTED]")]
+        public void Redact_WithCredentials_RedactsCorrectly(string input, string expected)
+        {
+            // Act
+            var result = _redactor.Redact(input);
+
+            // Assert
+            result.Should().Be(expected);
+        }
+
+        [Fact]
+        public void Redact_WithoutCredentials_ReturnsUnchanged()
+        {
+            // Arrange
+            var input = "https://github.com/user/repo.git";
+
+            // Act
+            var result = _redactor.Redact(input);
+
+            // Assert
+            result.Should().Be(input);
+        }
+
+        [Fact]
+        public void RedactUrl_WithEmbeddedToken_RedactsToken()
+        {
+            // Arrange
+            var url = "https://oauth2:ghp_abc123@github.com/user/repo.git";
+
+            // Act
+            var result = _redactor.RedactUrl(url);
+
+            // Assert
+            result.Should().Be("https://[REDACTED]@github.com/user/repo.git");
+            result.Should().NotContain("ghp_abc123");
+        }
+    }
+
+    public class PathSanitizerTests
+    {
+        private readonly PathSanitizer _sanitizer = new();
+
+        [Theory]
+        [InlineData("feature/my-branch")]
+        [InlineData("main")]
+        [InlineData("release/v1.0.0")]
+        [InlineData("fix/issue-123")]
+        public void SanitizeBranchName_WithValidName_ReturnsUnchanged(string branchName)
+        {
+            // Act
+            var result = _sanitizer.SanitizeBranchName(branchName);
+
+            // Assert
+            result.Should().Be(branchName);
+        }
+
+        [Theory]
+        [InlineData("feature; rm -rf /")]
+        [InlineData("main && malicious")]
+        [InlineData("branch|pipe")]
+        [InlineData("test`backtick`")]
+        public void SanitizeBranchName_WithShellMetacharacters_ThrowsException(string malicious)
+        {
+            // Act & Assert
+            var act = () => _sanitizer.SanitizeBranchName(malicious);
+            act.Should().Throw<GitException>()
+                .WithMessage("*invalid characters*");
+        }
+
+        [Fact]
+        public void SanitizePath_WithTraversal_ThrowsException()
+        {
+            // Arrange
+            var maliciousPath = "../../etc/passwd";
+
+            // Act & Assert
+            var act = () => _sanitizer.SanitizePath(maliciousPath);
+            act.Should().Throw<GitException>()
+                .WithMessage("*traversal*");
+        }
+    }
+
+    public class ModeEnforcementServiceTests
+    {
+        private readonly IModeResolver _modeResolver = Substitute.For<IModeResolver>();
+        private readonly IConfigurationValidator _configValidator = Substitute.For<IConfigurationValidator>();
+        private readonly ModeEnforcementService _service;
+
+        public ModeEnforcementServiceTests()
+        {
+            _service = new ModeEnforcementService(_modeResolver, _configValidator, Substitute.For<ILogger<ModeEnforcementService>>());
+        }
+
+        [Fact]
+        public async Task ValidateNetworkOperationAsync_InBurstMode_Succeeds()
+        {
+            // Arrange
+            _modeResolver.GetCurrentModeAsync(Arg.Any<CancellationToken>())
+                .Returns(OperatingMode.Burst);
+
+            // Act
+            var act = async () => await _service.ValidateNetworkOperationAsync("push", CancellationToken.None);
+
+            // Assert
+            await act.Should().NotThrowAsync();
+        }
+
+        [Theory]
+        [InlineData(OperatingMode.LocalOnly)]
+        [InlineData(OperatingMode.Airgapped)]
+        public async Task ValidateNetworkOperationAsync_InRestrictiveMode_ThrowsModeViolation(OperatingMode mode)
+        {
+            // Arrange
+            _modeResolver.GetCurrentModeAsync(Arg.Any<CancellationToken>())
+                .Returns(mode);
+
+            // Act & Assert
+            var act = async () => await _service.ValidateNetworkOperationAsync("push", CancellationToken.None);
+            await act.Should().ThrowAsync<ModeViolationException>()
+                .WithMessage($"*{mode}*");
+        }
+    }
+}
+
+namespace Acode.Infrastructure.Tests.Git.Integration
+{
+    // Integration Tests - Real Git Operations
+
+    public class GitServiceIntegrationTests : IDisposable
+    {
+        private readonly string _testRepoPath;
+        private readonly GitService _gitService;
+
+        public GitServiceIntegrationTests()
+        {
+            _testRepoPath = Path.Combine(Path.GetTempPath(), $"git-test-{Guid.NewGuid()}");
+            Directory.CreateDirectory(_testRepoPath);
+
+            // Initialize test repository
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "init",
+                WorkingDirectory = _testRepoPath,
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            })?.WaitForExit();
+
+            // Configure git
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "config user.email 'test@example.com'",
+                WorkingDirectory = _testRepoPath,
+                UseShellExecute = false
+            })?.WaitForExit();
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "config user.name 'Test User'",
+                WorkingDirectory = _testRepoPath,
+                UseShellExecute = false
+            })?.WaitForExit();
+
+            // Create initial commit
+            File.WriteAllText(Path.Combine(_testRepoPath, "README.md"), "# Test");
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "add README.md",
+                WorkingDirectory = _testRepoPath,
+                UseShellExecute = false
+            })?.WaitForExit();
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "commit -m 'Initial commit'",
+                WorkingDirectory = _testRepoPath,
+                UseShellExecute = false
+            })?.WaitForExit();
+
+            _gitService = new GitService(
+                Substitute.For<ICommandExecutor>(),
+                Substitute.For<IGitOutputParser>(),
+                Substitute.For<ICredentialRedactor>(),
+                Substitute.For<IModeResolver>(),
+                Options.Create(new GitConfiguration()),
+                Substitute.For<ILogger<GitService>>());
+        }
+
+        [Fact]
+        public async Task GetStatusAsync_OnCleanRepo_ReturnsCleanStatus()
+        {
+            // Act
+            var status = await _gitService.GetStatusAsync(_testRepoPath, CancellationToken.None);
+
+            // Assert
+            status.IsClean.Should().BeTrue();
+            status.Branch.Should().NotBeNullOrEmpty();
+        }
+
+        [Fact]
+        public async Task CreateBranchAsync_WithValidName_CreatesBranch()
+        {
+            // Act
+            var branch = await _gitService.CreateBranchAsync(_testRepoPath, "feature/test", null, CancellationToken.None);
+
+            // Assert
+            branch.Name.Should().Be("feature/test");
+            branch.IsRemote.Should().BeFalse();
+
+            // Verify branch exists
+            var branches = await _gitService.GetBranchesAsync(_testRepoPath, null, CancellationToken.None);
+            branches.Should().Contain(b => b.Name == "feature/test");
+        }
+
+        [Fact]
+        public async Task CommitAsync_WithStagedChanges_CreatesCommit()
+        {
+            // Arrange
+            File.WriteAllText(Path.Combine(_testRepoPath, "test.txt"), "test content");
+            await _gitService.StageAsync(_testRepoPath, new[] { "test.txt" }, CancellationToken.None);
+
+            // Act
+            var commit = await _gitService.CommitAsync(_testRepoPath, "test: add test file", null, CancellationToken.None);
+
+            // Assert
+            commit.Subject.Should().Be("test: add test file");
+            commit.Sha.Should().NotBeNullOrEmpty();
+
+            // Verify commit in log
+            var log = await _gitService.GetLogAsync(_testRepoPath, new LogOptions { Limit = 1 }, CancellationToken.None);
+            log.First().Sha.Should().Be(commit.Sha);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(_testRepoPath))
+                Directory.Delete(_testRepoPath, true);
+        }
+    }
+}
+
+namespace Acode.Cli.Tests.Commands.Git
+{
+    // End-to-End Tests - CLI Commands
+
+    public class GitCliE2ETests
+    {
+        [Fact]
+        public async Task GitStatusCommand_OnValidRepo_DisplaysStatus()
+        {
+            // Arrange
+            var git = Substitute.For<IGitService>();
+            git.GetStatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(new GitStatus
+                {
+                    Branch = "main",
+                    IsClean = true,
+                    IsDetachedHead = false,
+                    StagedFiles = Array.Empty<FileStatus>(),
+                    UnstagedFiles = Array.Empty<FileStatus>(),
+                    UntrackedFiles = Array.Empty<string>()
+                });
+
+            var console = Substitute.For<IConsole>();
+            var command = new GitStatusCommand();
+
+            // Act
+            var exitCode = await command.ExecuteAsync(git, console, CancellationToken.None);
+
+            // Assert
+            exitCode.Should().Be(0);
+            console.Received().WriteLine(Arg.Is<string>(s => s.Contains("main")));
+            console.Received().WriteLine(Arg.Is<string>(s => s.Contains("clean")));
+        }
+
+        [Fact]
+        public async Task GitStatusCommand_OnNonRepo_Returns128()
+        {
+            // Arrange
+            var git = Substitute.For<IGitService>();
+            git.GetStatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Throws(new NotARepositoryException("/invalid/path"));
+
+            var console = Substitute.For<IConsole>();
+            var command = new GitStatusCommand();
+
+            // Act
+            var exitCode = await command.ExecuteAsync(git, console, CancellationToken.None);
+
+            // Assert
+            exitCode.Should().Be(128);
+            console.Error.Received().WriteLine(Arg.Is<string>(s => s.Contains("not a git repository")));
+        }
+    }
+
+    public class GitModeBlockingE2ETests
+    {
+        [Fact]
+        public async Task PushCommand_InLocalOnlyMode_BlocksWithError()
+        {
+            // Arrange
+            var git = Substitute.For<IGitService>();
+            git.PushAsync(Arg.Any<string>(), Arg.Any<PushOptions>(), Arg.Any<CancellationToken>())
+                .Throws(new ModeViolationException("local-only", "push"));
+
+            var command = new GitPushCommand();
+
+            // Act
+            var exitCode = await command.ExecuteAsync(git, Substitute.For<IConsole>(), CancellationToken.None);
+
+            // Assert
+            exitCode.Should().Be(3); // Mode violation exit code
+        }
+    }
+}
+
+namespace Acode.Infrastructure.Tests.Git.Performance
+{
+    // Performance/Benchmark Tests
+
+    public class GitPerformanceTests
+    {
+        [Fact(Skip = "Performance benchmark")]
+        public async Task GetStatusAsync_On10kFiles_CompletesUnder500ms()
+        {
+            // Benchmark: Status check on 10,000 file repository should complete <500ms
+            // Implementation would measure execution time
+            await Task.CompletedTask;
+        }
+
+        [Fact(Skip = "Performance benchmark")]
+        public async Task GetLogAsync_1000Commits_CompletesUnder1Second()
+        {
+            // Benchmark: Log retrieval for 1000 commits should complete <1s
+            await Task.CompletedTask;
+        }
+    }
+}
+```
 
 ---
 

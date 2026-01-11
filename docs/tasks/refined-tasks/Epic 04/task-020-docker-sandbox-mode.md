@@ -111,29 +111,470 @@ Docker sandboxing is the primary security boundary for untrusted code execution:
 
 8. **Network Isolation:** Default to no network. When enabled, restrict to necessary egress only.
 
+### ROI Calculation
+
+**Aggregate Value Across Three Representative Use Cases:**
+
+| Use Case | Annual Cost (Before) | Annual Cost (After) | Annual Savings | Payback Period |
+|----------|---------------------|---------------------|----------------|----------------|
+| Security Testing (Teresa) | $33,280 | $2,600 | $30,680 | 1.5 days |
+| Build Reproducibility (Marcus) | $120,000 | $10,000 | $110,000 | 2 days |
+| Air-Gapped Compliance (Dr. Priya) | $126,400 | $6,400 | $120,000 | 1 day |
+| **Total** | **$279,680** | **$19,000** | **$260,680** | **1.6 days avg** |
+
+**ROI Metrics:**
+- **Total Annual Savings:** $260,680 (93% cost reduction)
+- **Implementation Cost:** $150/hour × 80 hours (2 weeks) = $12,000
+- **ROI:** 2,172% first year
+- **Payback Period:** 1.6 days average (0.6 weeks)
+- **Break-even:** After 17 days of operation
+
+**Qualitative Benefits (Not Monetized):**
+- **Zero security incidents** from code execution (prev. 24/year across use cases)
+- **100% environment reproducibility** between CI and local
+- **Perfect compliance** for air-gapped requirements (provable at kernel level)
+- **90x faster** security testing workflows (45min → 30sec per test)
+- **96% faster** developer onboarding (2 days → 30 minutes)
+
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          Docker Sandbox Architecture                             │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  Host System                                                                     │
+│                                                                                  │
+│  ┌─────────────────┐                                                            │
+│  │  Acode CLI      │                                                            │
+│  │  Command Entry  │                                                            │
+│  └────────┬────────┘                                                            │
+│           │                                                                      │
+│           │ 1. Execute Command                                                  │
+│           ▼                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐           │
+│  │  Command Executor (Task 018)                                     │           │
+│  │  ┌─────────────────────────────────────────────────────────┐   │           │
+│  │  │  If Sandbox Enabled:                                     │   │           │
+│  │  │    Delegate to ISandbox.RunAsync()                       │   │           │
+│  │  │  Else:                                                   │   │           │
+│  │  │    Execute directly on host                              │   │           │
+│  │  └─────────────────────────────────────────────────────────┘   │           │
+│  └──────────────────────────┬──────────────────────────────────────┘           │
+│                             │                                                   │
+│                             │ 2. RunAsync(command, policy)                      │
+│                             ▼                                                   │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │  DockerSandbox (ISandbox Implementation)                                 │  │
+│  │                                                                           │  │
+│  │  ┌──────────────┐  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐ │  │
+│  │  │  Mount       │  │  Resource   │  │  Network     │  │  Image      │ │  │
+│  │  │  Manager     │  │  Limiter    │  │  Policy      │  │  Manager    │ │  │
+│  │  └──────┬───────┘  └──────┬──────┘  └──────┬───────┘  └──────┬──────┘ │  │
+│  │         │                 │                 │                 │         │  │
+│  │         │ Validate Paths  │ Set CPU/Mem    │ Network Mode   │ Pull    │  │
+│  │         └─────────────────┴─────────────────┴─────────────────┘ Image  │  │
+│  │                             │                                            │  │
+│  │                             │ 3. CreateContainerAsync                    │  │
+│  │                             ▼                                            │  │
+│  │  ┌────────────────────────────────────────────────────────────────┐    │  │
+│  │  │  ContainerLifecycle                                             │    │  │
+│  │  │                                                                 │    │  │
+│  │  │  • CreateContainerAsync(CreateContainerParameters)             │    │  │
+│  │  │  • StartContainerAsync(containerId)                            │    │  │
+│  │  │  • WaitForCompletionAsync(containerId, timeout)                │    │  │
+│  │  │  • GetLogsAsync(containerId) → stdout/stderr                   │    │  │
+│  │  │  • RemoveContainerAsync(containerId, force: true)              │    │  │
+│  │  └────────────────────────┬───────────────────────────────────────┘    │  │
+│  └───────────────────────────┼────────────────────────────────────────────┘  │
+│                              │                                                │
+│                              │ 4. Docker API Calls (Docker.DotNet)            │
+│                              ▼                                                │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │  Docker Daemon (dockerd)                                                │  │
+│  │  • Listens on /var/run/docker.sock (Linux) or npipe (Windows)          │  │
+│  │  • Creates container from image                                         │  │
+│  │  • Enforces resource limits via cgroups                                 │  │
+│  │  • Enforces network isolation via namespaces                            │  │
+│  │  • Enforces security constraints (capabilities, seccomp)                │  │
+│  └────────────────────────────┬───────────────────────────────────────────┘  │
+└─────────────────────────────────┼──────────────────────────────────────────────┘
+                                  │ 5. Container Lifecycle
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  Docker Container (Isolated Namespace)                                          │
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐   │
+│  │  Container Filesystem (Overlay2)                                        │   │
+│  │  ┌──────────────────────────────────────────────────────────────────┐ │   │
+│  │  │  /                                  (Read-Only, from image)       │ │   │
+│  │  │  ├── bin/, lib/, usr/               Security: non-root (uid 1000) │ │   │
+│  │  │  ├── etc/                           Capabilities: NONE             │ │   │
+│  │  │  └── tmp/  (tmpfs, writable)        Seccomp: default profile      │ │   │
+│  │  └──────────────────────────────────────────────────────────────────┘ │   │
+│  │  ┌──────────────────────────────────────────────────────────────────┐ │   │
+│  │  │  /workspace                         (Bind Mount from Host)        │ │   │
+│  │  │  └── Repository files (rw or ro)    Source: /path/to/repo        │ │   │
+│  │  └──────────────────────────────────────────────────────────────────┘ │   │
+│  │  ┌──────────────────────────────────────────────────────────────────┐ │   │
+│  │  │  /root/.nuget/packages              (Volume Mount, cache)        │ │   │
+│  │  │  /root/.npm/_cache                  Persistent across containers │ │   │
+│  │  └──────────────────────────────────────────────────────────────────┘ │   │
+│  └────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐   │
+│  │  Resource Limits (cgroups)                                             │   │
+│  │  • CPU: 1.0 core (100% of single core)                                 │   │
+│  │  • Memory: 512MB hard limit (OOM kill at 512MB)                        │   │
+│  │  • PIDs: 256 max processes (fork bomb prevention)                      │   │
+│  │  • Disk I/O: Best-effort (no hard limit)                               │   │
+│  └────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐   │
+│  │  Network Namespace                                                      │   │
+│  │  • Default: network=none (no interfaces except lo)                      │   │
+│  │  • Enabled: network=bridge (veth pair to docker0)                       │   │
+│  │  • DNS: Disabled if network=none                                        │   │
+│  └────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────┐   │
+│  │  Command Execution                                                      │   │
+│  │  ┌─────────────────────────────────────────────────────────────────┐  │   │
+│  │  │  $ dotnet build                     (or npm test, python run.py) │  │   │
+│  │  │  └──> stdout: Build succeeded.                                   │  │   │
+│  │  │  └──> stderr: (warnings)                                         │  │   │
+│  │  │  └──> exit code: 0                                               │  │   │
+│  │  └─────────────────────────────────────────────────────────────────┘  │   │
+│  └────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+│  6. Container Completes → Logs Captured → Container Removed                     │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  │ 7. Return SandboxResult
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  SandboxResult                                                                   │
+│  {                                                                               │
+│    Stdout: "Build succeeded. 0 Warning(s). 0 Error(s).",                       │
+│    Stderr: "",                                                                   │
+│    ExitCode: 0,                                                                  │
+│    ContainerId: "abc123def456",                                                  │
+│    Duration: TimeSpan(00:00:05.234),                                             │
+│    ResourceStats: { PeakMemoryMB: 387, CpuPercent: 72 }                         │
+│  }                                                                               │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Architectural Decisions and Trade-offs
+
+#### 1. Docker Containers vs. Virtual Machines
+
+**Decision:** Use Docker containers (namespaces + cgroups) instead of full VMs (QEMU/VirtualBox).
+
+**Trade-offs:**
+- **Pro:** 10-50x faster startup (1s vs. 30-60s for VM boot)
+- **Pro:** 10x less memory overhead per instance (50MB vs. 512MB+ for VM)
+- **Pro:** Native performance (no virtualization overhead)
+- **Pro:** Simpler API (Docker.DotNet vs. libvirt/VBoxManage)
+- **Con:** Weaker isolation boundary (shared kernel, not separate OS)
+- **Con:** Windows-only code requires Windows containers (less common, larger images)
+- **Con:** Privilege escalation vulnerabilities can affect host (e.g., CVE-2019-5736)
+
+**Justification:** For agentic coding workloads, the performance and ergonomics benefits outweigh the slightly weaker isolation. Containers provide "good enough" isolation for most threat models (buggy code, accidental damage), while extreme threats (APT, targeted malware) are out of scope. Organizations with high-security requirements can layer containers inside VMs.
+
+---
+
+#### 2. Persistent Containers vs. Per-Execution Containers
+
+**Decision:** Create a new container for each command execution, then destroy it.
+
+**Trade-offs:**
+- **Pro:** Perfect state isolation between tasks (no state leakage)
+- **Pro:** Automatic cleanup (no manual garbage collection)
+- **Pro:** Simplified debugging (container ID maps 1:1 to execution)
+- **Con:** 500ms-1s overhead per execution (create + destroy)
+- **Con:** Cache volumes required for acceptable performance (NuGet, npm)
+- **Con:** Cannot reuse running services (e.g., database container for tests)
+
+**Justification:** Clean state per execution aligns with agentic workflow goals (reproducibility, predictability). The 1s overhead is acceptable for typical commands (builds: 10s-5min, tests: 5s-5min). Future optimization: implement container pooling for hot-path commands if profiling shows overhead dominates.
+
+---
+
+#### 3. Bind Mounts vs. Copy-In/Copy-Out
+
+**Decision:** Bind mount the repository from host into container at `/workspace`.
+
+**Trade-offs:**
+- **Pro:** Zero-copy (instant availability of repo files)
+- **Pro:** Changes visible on host immediately (build artifacts, generated code)
+- **Pro:** Supports large repositories (100GB+ monorepos)
+- **Con:** Host filesystem performance (especially on macOS/Windows Docker Desktop)
+- **Con:** File permission mismatches (container uid 1000 vs. host uid)
+- **Con:** Path translation complexity (Windows paths → Linux paths)
+
+**Justification:** Copy-in would require copying entire repository (10s-60s for large repos), making sandbox unusable. Bind mount is the only practical option. Permission mismatches are handled by configuring container user to match host user (configurable uid:gid). macOS/Windows filesystem performance limitations are inherent to Docker Desktop and cannot be avoided without alternative architectures (VM-based Docker Engine on Linux host).
+
+---
+
+#### 4. Docker.DotNet SDK vs. Docker CLI Wrapper
+
+**Decision:** Use Docker.DotNet library (native API client) instead of wrapping `docker` CLI commands.
+
+**Trade-offs:**
+- **Pro:** Type-safe API (compile-time checking)
+- **Pro:** Structured responses (no parsing stdout)
+- **Pro:** Better error handling (exceptions vs. exit codes)
+- **Pro:** 2-3x faster (no process spawn overhead)
+- **Con:** Dependency on third-party library (Docker.DotNet)
+- **Con:** Slightly lagging Docker feature parity (API client updated after CLI)
+
+**Justification:** Docker.DotNet is the official library from Docker, well-maintained, and battle-tested. Type safety and performance benefits outweigh the minor dependency risk. For unsupported features, can fall back to CLI wrapper.
+
+---
+
+#### 5. Default Network Disabled vs. Default Network Enabled
+
+**Decision:** Network disabled by default (`network: none`), opt-in to enable.
+
+**Trade-offs:**
+- **Pro:** Security by default (prevents accidental data exfiltration)
+- **Pro:** Compliance-friendly (air-gapped provable at config level)
+- **Pro:** Fails loudly (npm install fails immediately, not silently)
+- **Con:** Breaks common workflows (npm install, NuGet restore)
+- **Con:** User must explicitly enable network for legitimate needs
+- **Con:** Documentation burden (explain why network disabled)
+
+**Justification:** Aligns with security-first philosophy and operating mode design (LocalOnly, Burst, Airgapped). Network-enabled mode is trivial to configure (`network: true` in config or `--network` CLI flag), making this a low-friction default. Errors are actionable: "Network disabled by policy. Enable with --network flag."
+
+---
+
+## Use Cases
+
+### Use Case 1: Security Researcher Tests Exploit Detection (Teresa)
+
+**Persona:** Teresa is a security engineer at FinanceCorp implementing agentic code analysis for vulnerability detection. The bot needs to execute potentially malicious code samples to test detection rules without compromising the developer workstation.
+
+**Before (No Sandbox):**
+- Manual VM setup for each test run: 45 minutes per test cycle
+- Risk of accidental execution on host system: 2 incidents per month requiring clean reinstalls
+- Limited test coverage due to setup overhead: Only 20% of vulnerability database tested
+- Manual cleanup of test artifacts: 15 minutes per run
+- **Cost:** 8 hours/week for manual testing + 2 workstation rebuilds/month = $640/week ($33,280/year at $80/hr)
+
+**After (Docker Sandbox):**
+- Automated sandbox execution: 30 seconds per test (90x faster)
+- Zero host contamination incidents: Perfect isolation
+- Full vulnerability database coverage: 100% of 5,000 test cases
+- Automatic cleanup: 0 manual intervention required
+- Parallel test execution: 10 simultaneous containers, 10 test suites/hour vs. 0.13/hour
+- **Savings:** $30,680/year (92% reduction), payback period: 1.5 days
+- **Metrics:** 90x faster execution, 0 security incidents (down from 24/year), 5x test coverage
+
+**Workflow Difference:**
+```
+Before (45 min):
+1. Launch VirtualBox VM (5 min)
+2. Snapshot clean state (2 min)
+3. Copy test code to VM (1 min)
+4. Run exploit sample manually (10 min)
+5. Observe behavior, take notes (15 min)
+6. Revert to snapshot (2 min)
+7. Shutdown VM (1 min)
+8. Repeat for next test case (9 min setup)
+
+After (30 sec):
+1. Run: acode sandbox exec --image security-tools:latest "python exploit.py" (30 sec)
+2. Container auto-creates, runs, captures output, auto-destroys
+3. Immediately start next test (no setup)
+```
+
+---
+
+### Use Case 2: DevOps Lead Ensures Build Reproducibility (Marcus)
+
+**Persona:** Marcus leads DevOps for a 50-person engineering team building a multi-language SaaS platform (.NET backend, React frontend). CI builds succeed but local builds fail due to environment differences. The agentic bot needs to execute builds in the exact CI environment.
+
+**Before (No Sandbox):**
+- "Works in CI, fails locally" debugging: 3 hours per incident, 8 incidents/week
+- Developer environment drift: 25% of team has mismatched SDK versions
+- Onboarding new developers: 2 days to configure local environment
+- CI config changes break local workflows: 2 times/month, 6 hours each to fix
+- **Cost:** 24 hours/week troubleshooting + 16 hours/month CI breakage = 1.5 FTE = $120,000/year (at $80k/year average)
+
+**After (Docker Sandbox):**
+- Identical CI and local environments: 0 "works in CI" incidents
+- Instant environment replication: Pull `ci-build:latest` image
+- Onboarding time reduced: 30 minutes (pull image, run sandbox)
+- CI changes tested locally first: 0 workflow breakages
+- **Savings:** $110,000/year (92% reduction), payback period: 2 days
+- **Metrics:** 0 environment-related incidents (down from 32/month), 96% faster onboarding (30min vs 16hr), 100% CI/local parity
+
+**Workflow Difference:**
+```
+Before (3 hour debugging session):
+1. CI build succeeds, local build fails (30 min to discover)
+2. Compare CI logs vs local output (45 min)
+3. Identify SDK version mismatch (.NET 8.0.2 vs 8.0.1)
+4. Download and install matching SDK (20 min)
+5. Discover NuGet cache corruption (30 min)
+6. Clear NuGet cache, rebuild (15 min)
+7. New error: missing system library (30 min research)
+8. Install library, rebuild, finally succeeds (10 min)
+
+After (5 min):
+1. Run: acode sandbox exec --image ghcr.io/company/ci-build:latest "dotnet build"
+2. Build runs in exact CI image, succeeds immediately
+3. If fails, failure is real bug (not environment drift)
+```
+
+---
+
+### Use Case 3: AI Safety Team Tests Agent in Air-Gapped Mode (Dr. Priya)
+
+**Persona:** Dr. Priya leads AI safety at a defense contractor building an agentic coding system for classified networks. The agent must execute code with zero possibility of network exfiltration, even from compromised dependencies.
+
+**Before (No Sandbox):**
+- Manual network monitoring: 40 hours/week, 1 dedicated security engineer
+- Firewall rule management: 10 hours/week updating allow/deny lists
+- Incident investigation: 6 hours/month for suspicious connections (false positives)
+- Compliance audit overhead: 80 hours/quarter proving network isolation
+- **Cost:** 1 FTE security engineer ($120k/year) + 80 hours/quarter audits ($6,400/year) = $126,400/year
+
+**After (Docker Sandbox with Network Disabled):**
+- Enforced at kernel level: 0 network access, 0 monitoring needed
+- No firewall rule management: Network mode "none" blocks everything
+- Zero false positive investigations: Impossible for container to connect
+- Compliance trivial: "Docker network=none" proves isolation
+- **Savings:** $120,000/year (95% reduction), payback period: 1 day
+- **Metrics:** 0 network connections (down from 150 allowed/week), 0 investigation hours (down from 6/month), 95% faster compliance audits
+
+**Workflow Difference:**
+```
+Before (40 hours/week monitoring):
+1. Agent executes code
+2. Network monitor captures all packets (tcpdump running 24/7)
+3. Analyze 50GB/day of traffic logs for anomalies (8 hours/day)
+4. Investigate 5-10 suspicious connections/day (4 hours/day)
+5. Update firewall allow list when false positive found (2 hours/day)
+6. Weekly report to compliance team (6 hours/week)
+
+After (0 hours monitoring):
+1. Agent executes code in sandbox with network=none
+2. Kernel enforces network isolation (impossible to bypass)
+3. Compliance report: "All executions used network=none" (5 min/week)
+```
+
 ---
 
 ## Glossary / Terms
 
 | Term | Definition |
 |------|------------|
-| Sandbox | Isolated execution environment |
-| Container | Docker container instance |
-| Image | Container template |
-| Mount | Filesystem binding |
-| Resource Limit | CPU/memory constraint |
-| Network Policy | Allowed connections |
-| Lifecycle | Create, run, cleanup phases |
+| **Sandbox** | An isolated execution environment that prevents code from affecting the host system. In this context, Docker containers provide sandboxing through Linux namespaces, cgroups, and seccomp. |
+| **Container** | A Docker container instance - a running process with isolated filesystem, network, and process namespaces. Containers are created from images and destroyed after execution. |
+| **Image** | A read-only template used to create containers. Images contain the filesystem snapshot (OS, runtimes, dependencies). Examples: `mcr.microsoft.com/dotnet/sdk:8.0`, `node:20-alpine`. |
+| **Mount** | A filesystem binding that makes host directories accessible inside the container. Bind mounts attach host paths (e.g., `/home/user/repo` → `/workspace`), while volume mounts use Docker-managed storage. |
+| **Bind Mount** | A type of mount that directly maps a host directory path into the container. Changes in either location are immediately visible in both. Used for repository mounting. |
+| **Volume Mount** | A type of mount using Docker-managed storage volumes. Persists across container deletions. Used for caches (NuGet, npm) that should survive container lifecycle. |
+| **Resource Limit** | Constraints on CPU, memory, PIDs, and I/O enforced by Linux cgroups. Prevents runaway processes from exhausting host resources. Example: `memory: 512m` limits RAM to 512MB. |
+| **Network Policy** | Rules governing container network access. `network: none` disables all networking. `network: bridge` enables connectivity through Docker's bridge network. Air-gapped mode enforces `none`. |
+| **Container Lifecycle** | The sequence of states: create → start → run → stop → remove. Each command execution creates a fresh container and removes it after completion. |
+| **Namespace** | A Linux kernel feature that isolates system resources (PID, network, mount, IPC, UTS, user). Containers use namespaces to create isolated views of the system. |
+| **cgroups** | Control Groups - Linux kernel feature limiting and accounting resource usage (CPU, memory, I/O). Docker uses cgroups to enforce container resource limits. |
+| **Seccomp** | Secure Computing mode - Linux kernel feature restricting system calls available to a process. Docker applies seccomp profiles to limit dangerous syscalls in containers. |
+| **Capabilities** | Linux security feature dividing root privileges into distinct units (e.g., CAP_NET_BIND_SERVICE for binding privileged ports). Containers drop all capabilities by default for security. |
+| **Overlay Filesystem (Overlay2)** | Docker's storage driver using layered filesystem. Image layers are read-only, container layer is writable. Changes are Copy-on-Write, making containers fast to create. |
+| **Docker Daemon (dockerd)** | The background service managing containers on the host. Listens on `/var/run/docker.sock` (Linux) or named pipe (Windows). Acode communicates with daemon via Docker API. |
+| **Docker.DotNet** | Official .NET library for Docker API communication. Provides type-safe API client for creating, managing, and monitoring containers programmatically. |
+| **ISandbox** | Domain interface abstracting sandboxed execution. Implementations can use Docker, VMs, or other isolation mechanisms. Enables mocking for tests and alternative sandbox backends. |
+| **Orphaned Container** | A container left running after unexpected termination of the parent process. Acode detects orphans using labels (`acode.managed=true`) and cleans them up on startup. |
+| **Air-Gapped Mode** | Execution environment with zero network access, preventing all external communication. Enforced by setting container network mode to "none". Required for classified/sensitive environments. |
+| **OOM Kill** | Out-Of-Memory Kill - when a container exceeds its memory limit, the kernel kills it with signal SIGKILL (exit code 137). Detected by checking container exit status. |
 
 ---
 
 ## Out of Scope
 
-- **Container orchestration** - Single container only
-- **Container building** - Pre-built images only
-- **Registry authentication** - Public images only for v1
-- **GPU passthrough** - CPU only
-- **Windows containers** - Linux containers only
+1. **Container Orchestration (Kubernetes, Docker Swarm)** - This task focuses on single-container execution per command. Multi-container orchestration, service meshes, and cluster management are beyond scope. Rationale: Agentic coding tasks are inherently sequential and single-threaded per execution.
+
+2. **Custom Image Building (Dockerfile, BuildKit)** - Only pre-built images from registries are supported. Acode will not dynamically build images from Dockerfiles. Rationale: Image building adds 30s-10min overhead per execution, violating performance requirements. Users must pre-build and push images.
+
+3. **Private Registry Authentication (Docker login)** - Initial version supports only public images from Docker Hub and other public registries. No support for authenticated registries (GitHub Container Registry with token, AWS ECR, Azure ACR). Rationale: Credential management adds security complexity deferred to future iteration.
+
+4. **GPU Passthrough (NVIDIA CUDA, AMD ROCm)** - Only CPU and memory resources are managed. No support for GPU allocation, CUDA toolkit, or ML/AI workloads requiring GPU acceleration. Rationale: GPU passthrough requires privileged mode and host driver dependencies, violating security constraints.
+
+5. **Windows Containers (mcr.microsoft.com/windows/*)** - Only Linux containers are supported, even when running on Windows hosts (via WSL2 or Hyper-V). Windows containers require Windows Server host or special licensing. Rationale: Linux containers are ubiquitous, faster, and smaller. Windows-specific code can be cross-compiled or built in CI.
+
+6. **Container Composition (docker-compose, multi-container stacks)** - No support for defining multi-container applications with dependencies (e.g., web + database + redis). Each execution uses exactly one container. Rationale: Agentic coding tasks execute atomically without external service dependencies. If needed, services can be mocked or started in test code.
+
+7. **Host Network Mode (--network=host)** - Containers cannot use host network stack directly. Only `none` (default) and `bridge` modes are supported. Rationale: Host network mode bypasses network isolation, violating security requirements. Port publishing on bridge network provides necessary connectivity.
+
+8. **Privileged Mode (--privileged)** - Containers MUST NOT run in privileged mode, which disables all security constraints. This is a hard security requirement with no exceptions. Rationale: Privileged containers can trivially escape to host, rendering sandboxing pointless.
+
+9. **Docker-in-Docker (DinD, mounting Docker socket)** - Containers cannot build or run other containers. The Docker socket (`/var/run/docker.sock`) is never mounted into sandbox containers. Rationale: Docker socket access grants full host control, equivalent to privileged mode. If Docker is needed, use kaniko for building or `docker run` before sandbox execution.
+
+10. **Persistent Container State Across Executions** - Containers are ephemeral. File changes inside container (outside mounted `/workspace`) are lost after execution. No support for "resuming" a container. Rationale: Persistent state violates reproducibility and complicates cleanup. Use volume mounts for data that must persist.
+
+11. **Interactive Container Sessions (TTY, stdin)** - Containers run in non-interactive mode only. No support for `docker exec -it` style interactive shells or stdin redirection. Rationale: Agentic execution is batch-mode, not interactive. If debugging is needed, use `acode sandbox exec --image <img> -- bash -c "commands"` for one-shot execution.
+
+12. **Custom Seccomp/AppArmor Profiles** - Only the default Docker seccomp profile is supported. Users cannot provide custom seccomp JSON or AppArmor policies. Rationale: Custom profiles require deep Linux security expertise and could accidentally weaken isolation. Default profile is sufficient for 99% of workloads.
+
+13. **Container Snapshotting/Checkpointing (CRIU)** - No support for checkpoint/restore of running containers to save and resume execution state. Rationale: Adds complexity and CRIU has limited Docker integration. If long-running tasks need resumability, implement application-level checkpointing.
+
+14. **Multi-Architecture Images (ARM64, s390x, ppc64le)** - Only x86_64 (amd64) images are tested and officially supported. Other architectures may work but are not guaranteed. Rationale: Developer workstations are predominantly x86_64. ARM support (Apple Silicon) is possible via Rosetta emulation but performance is degraded.
+
+15. **Real-Time Container Monitoring (Stats API streaming)** - Resource usage stats are captured at end of execution only, not streamed during. No live dashboard of CPU/memory graphs during build. Rationale: Streaming stats API adds complexity and overhead. Post-execution summary (peak memory, average CPU) is sufficient for resource planning.
+
+---
+
+## Assumptions
+
+### Technical Assumptions
+
+1. **Docker Installed and Running** - Docker Engine (Linux) or Docker Desktop (Windows/macOS) is installed on the host system and the daemon is running at the time of execution.
+
+2. **Docker API Version 1.41+** - The Docker daemon supports API version 1.41 or later (Docker 20.10+). Older versions may lack required features (seccomp, PID limits, etc.).
+
+3. **User Has Docker Permissions** - The user running Acode is a member of the `docker` group (Linux) or has Docker Desktop running with appropriate permissions (Windows/macOS). No elevation required.
+
+4. **Sufficient Disk Space for Images** - The host has at least 10GB free disk space for Docker images. Base images (dotnet SDK, node) range from 200MB to 2GB each.
+
+5. **Sufficient Disk Space for Containers** - The host has at least 5GB free space for container filesystem layers and logs. Containers themselves use minimal space (10-50MB) but build outputs can be large.
+
+6. **Linux Kernel with Namespace Support** - The host kernel supports required Linux namespaces (PID, network, mount, IPC, UTS, user). Kernel 4.4+ on Linux, WSL2 on Windows.
+
+7. **cgroups v1 or v2 Available** - The system has cgroups (control groups) enabled for resource limiting. Most modern Linux distributions enable this by default.
+
+8. **Overlay2 Storage Driver** - Docker is configured to use overlay2 storage driver (default on most systems). Other drivers (aufs, btrfs) may have different performance characteristics.
+
+9. **No Conflicting Container Names** - Container names are generated with GUIDs (`acode-{guid}`), making conflicts extremely unlikely (< 1 in 10^36).
+
+10. **Host Clock Synchronized** - The host system clock is reasonably accurate. Container timestamps and timeout calculations rely on system time.
+
+### Operational Assumptions
+
+11. **Repository Path is Accessible** - The repository being mounted exists on the local filesystem and is readable by the Docker daemon. No network mounts (NFS, SMB) are used for repository source.
+
+12. **Repository Fits in Memory** - The repository size is reasonable (<10GB). While bind mounts don't copy data, extremely large repos (100GB+) may cause filesystem performance issues on macOS/Windows.
+
+13. **Commands Complete Within Timeout** - Build and test commands complete within configured timeouts (default 5 minutes). Commands exceeding timeout are killed, which may leave incomplete outputs.
+
+14. **Network Bandwidth for Image Pulls** - Adequate internet bandwidth exists for pulling Docker images (typically 200MB-2GB per image). Initial image pull may take 1-10 minutes.
+
+15. **No Antivirus/EDR Interference** - Antivirus or Endpoint Detection and Response (EDR) software does not block Docker operations. On Windows, Defender may scan container filesystems, causing slowdowns.
+
+16. **User Understands Docker Basics** - Users have basic Docker knowledge (images vs containers, volumes, networking). This is not a Docker tutorial; familiarity is assumed for troubleshooting.
+
+17. **Cleanup Runs on Startup** - Orphaned containers from previous crashes are cleaned up on Acode startup. Users should not manually manage acode-labeled containers.
+
+### Integration Assumptions
+
+18. **Task 018 Command Executor Exists** - The structured command runner (Task 018) is implemented and provides the interface for delegating to ISandbox when sandbox mode is enabled.
+
+19. **Task 001 Operating Modes Configured** - The OperatingMode enum (LocalOnly, Burst, Airgapped) is implemented and air-gapped mode correctly disables network at the policy level.
+
+20. **Task 002 Configuration Loader Available** - The YAML configuration loader parses `.agent/config.yml` and provides SandboxConfiguration with validated settings (image names, resource limits, etc.).
 
 ---
 
@@ -816,6 +1257,852 @@ sandbox:
 
 ---
 
+## Security Considerations
+
+This section provides detailed threat analysis and complete mitigation code for the five primary security risks in Docker sandbox implementation.
+
+### Threat 1: Container Escape via Privileged Mode or Excessive Capabilities
+
+**Risk Description:**
+Running containers in privileged mode or with unnecessary Linux capabilities grants processes inside the container broad access to host resources. Privileged containers can load kernel modules, access all devices, and bypass most isolation mechanisms. Even non-privileged containers with capabilities like `CAP_SYS_ADMIN` can potentially escape to the host.
+
+**Attack Scenario:**
+An attacker who achieves code execution inside a privileged container can:
+1. Mount the host's root filesystem: `mount /dev/sda1 /mnt/host`
+2. Chroot into host filesystem: `chroot /mnt/host`
+3. Execute arbitrary code on host with root privileges
+4. Install backdoors, exfiltrate data, pivot to other systems
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+/// <summary>
+/// Enforces capability dropping and prevents privileged mode.
+/// CRITICAL: This validator MUST be called before every container creation.
+/// </summary>
+public sealed class CapabilityEnforcer
+{
+    private readonly ILogger<CapabilityEnforcer> _logger;
+    private readonly SandboxSecurityConfig _config;
+
+    // Capabilities that should NEVER be granted
+    private static readonly HashSet<string> BlacklistedCapabilities = new()
+    {
+        "CAP_SYS_ADMIN",      // Can mount filesystems, load modules
+        "CAP_SYS_MODULE",     // Can load kernel modules
+        "CAP_SYS_RAWIO",      // Can access /dev/mem, /dev/kmem
+        "CAP_SYS_PTRACE",     // Can attach to arbitrary processes
+        "CAP_SYS_BOOT",       // Can reboot the system
+        "CAP_MAC_ADMIN",      // Can change SELinux/AppArmor policies
+        "CAP_MAC_OVERRIDE",   // Can bypass SELinux/AppArmor
+        "CAP_DAC_OVERRIDE",   // Can bypass file permission checks
+        "CAP_DAC_READ_SEARCH" // Can bypass file read permission checks
+    };
+
+    public CapabilityEnforcer(
+        ILogger<CapabilityEnforcer> logger,
+        SandboxSecurityConfig config)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+    }
+
+    /// <summary>
+    /// Validates that HostConfig does not grant excessive privileges.
+    /// Throws SecurityPolicyViolationException if validation fails.
+    /// </summary>
+    public void ValidateAndEnforceCapabilities(HostConfig hostConfig, string containerId)
+    {
+        ArgumentNullException.ThrowIfNull(hostConfig);
+
+        // CRITICAL CHECK 1: Privileged mode MUST be false
+        if (hostConfig.Privileged)
+        {
+            var error = $"Container {containerId}: Privileged mode is FORBIDDEN. " +
+                       "This would grant full host access. Set Privileged = false.";
+            _logger.LogError(error);
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.PrivilegedModeEnabled, error);
+        }
+
+        // CRITICAL CHECK 2: Drop ALL capabilities by default
+        if (hostConfig.CapDrop == null || !hostConfig.CapDrop.Contains("ALL"))
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: CapDrop does not include ALL. Enforcing.", containerId);
+            hostConfig.CapDrop = new List<string> { "ALL" };
+        }
+
+        // CRITICAL CHECK 3: Validate any added capabilities
+        if (hostConfig.CapAdd != null && hostConfig.CapAdd.Any())
+        {
+            var forbidden = hostConfig.CapAdd.Intersect(BlacklistedCapabilities).ToList();
+            if (forbidden.Any())
+            {
+                var error = $"Container {containerId}: Blacklisted capabilities detected: " +
+                           $"{string.Join(", ", forbidden)}. These MUST NOT be granted.";
+                _logger.LogError(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.BlacklistedCapability, error);
+            }
+
+            // Log approved capabilities (should be minimal or none)
+            _logger.LogInformation(
+                "Container {ContainerId}: Approved capabilities added: {Caps}",
+                containerId, string.Join(", ", hostConfig.CapAdd));
+        }
+
+        // CRITICAL CHECK 4: NoNewPrivileges must be set
+        if (hostConfig.SecurityOpt == null ||
+            !hostConfig.SecurityOpt.Any(opt => opt == "no-new-privileges"))
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: no-new-privileges not set. Enforcing.", containerId);
+            hostConfig.SecurityOpt ??= new List<string>();
+            hostConfig.SecurityOpt.Add("no-new-privileges");
+        }
+
+        _logger.LogInformation(
+            "Container {ContainerId}: Capability enforcement passed. " +
+            "Privileged=false, CapDrop=ALL, NoNewPrivileges=true", containerId);
+    }
+}
+
+/// <summary>
+/// Exception thrown when security policy is violated.
+/// </summary>
+public sealed class SecurityPolicyViolationException : Exception
+{
+    public SecurityViolationCode Code { get; }
+
+    public SecurityPolicyViolationException(SecurityViolationCode code, string message)
+        : base(message)
+    {
+        Code = code;
+    }
+}
+
+public enum SecurityViolationCode
+{
+    PrivilegedModeEnabled,
+    BlacklistedCapability,
+    HostPathEscape,
+    DockerSocketMounted,
+    UnverifiedImage
+}
+```
+
+---
+
+### Threat 2: Host Path Traversal via Malicious Mount Paths
+
+**Risk Description:**
+If mount source paths are not validated, an attacker could specify paths like `/`, `/etc`, `/var/run/docker.sock`, or use path traversal sequences (`../`) to escape the intended mount restriction. This could expose sensitive host files (SSH keys, credentials, Docker socket) or allow modification of system configuration.
+
+**Attack Scenario:**
+Malicious repository contract (`.agent/config.yml`) specifies:
+```yaml
+sandbox:
+  mounts:
+    additional:
+      - source: ../../../../etc
+        target: /container-etc
+        readonly: false
+```
+Without validation, this mounts `/etc` as writable, allowing attacker to:
+1. Modify `/etc/passwd`, `/etc/shadow` (add root user)
+2. Modify `/etc/crontab` (install backdoor)
+3. Read `/etc/machine-id`, `/etc/ssh/ssh_host_*` keys
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+/// <summary>
+/// Validates mount paths to prevent path traversal and access to sensitive host directories.
+/// </summary>
+public sealed class MountPathValidator
+{
+    private readonly ILogger<MountPathValidator> _logger;
+    private readonly string _repositoryRoot;
+
+    // Sensitive paths that MUST NEVER be mounted (even read-only)
+    private static readonly HashSet<string> ForbiddenPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/",                    // Root filesystem
+        "/etc",                 // System configuration
+        "/var",                 // System state
+        "/usr",                 // System binaries
+        "/bin",                 // Critical binaries
+        "/sbin",                // System binaries
+        "/boot",                // Boot files
+        "/dev",                 // Device files
+        "/proc",                // Process information
+        "/sys",                 // Kernel/system information
+        "/run",                 // Runtime data
+        "/var/run",             // Runtime sockets
+        "/var/run/docker.sock", // Docker socket (CRITICAL)
+        "/root",                // Root user home
+        "/home",                // All user homes (too broad)
+        "C:\\",                 // Windows root
+        "C:\\Windows",          // Windows system
+        "C:\\Program Files"     // Windows programs
+    };
+
+    public MountPathValidator(ILogger<MountPathValidator> logger, string repositoryRoot)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _repositoryRoot = Path.GetFullPath(repositoryRoot ?? throw new ArgumentNullException(nameof(repositoryRoot)));
+    }
+
+    /// <summary>
+    /// Validates and canonicalizes a mount source path.
+    /// Returns the canonical path if valid, throws if invalid.
+    /// </summary>
+    public string ValidateAndCanonicalizePath(string sourcePath, bool isWorkspaceMount)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.HostPathEscape,
+                "Mount source path cannot be null or empty");
+        }
+
+        // Step 1: Resolve to absolute path
+        string absolutePath;
+        try
+        {
+            absolutePath = Path.IsPathRooted(sourcePath)
+                ? Path.GetFullPath(sourcePath)
+                : Path.GetFullPath(Path.Combine(_repositoryRoot, sourcePath));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resolve path: {Path}", sourcePath);
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.HostPathEscape,
+                $"Invalid path: {sourcePath}");
+        }
+
+        // Step 2: Check against forbidden paths
+        var canonicalPath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? absolutePath.Replace('/', '\\')
+            : absolutePath.Replace('\\', '/');
+
+        foreach (var forbidden in ForbiddenPaths)
+        {
+            var forbiddenCanonical = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? forbidden.Replace('/', '\\')
+                : forbidden;
+
+            if (canonicalPath.Equals(forbiddenCanonical, StringComparison.OrdinalIgnoreCase) ||
+                canonicalPath.StartsWith(forbiddenCanonical + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                var error = $"FORBIDDEN: Cannot mount sensitive path '{sourcePath}' " +
+                           $"(resolved to '{absolutePath}'). Path is in restricted list.";
+                _logger.LogError(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.HostPathEscape, error);
+            }
+        }
+
+        // Step 3: Workspace mounts MUST be within repository root
+        if (isWorkspaceMount)
+        {
+            if (!absolutePath.StartsWith(_repositoryRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                var error = $"FORBIDDEN: Workspace mount '{sourcePath}' (resolved to '{absolutePath}') " +
+                           $"is outside repository root '{_repositoryRoot}'";
+                _logger.LogError(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.HostPathEscape, error);
+            }
+        }
+
+        // Step 4: Check for excessive parent directory traversals (potential obfuscation)
+        var segments = sourcePath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+        var parentTraversals = segments.Count(s => s == "..");
+        if (parentTraversals > 5)
+        {
+            _logger.LogWarning(
+                "Path '{Path}' has {Count} parent traversals (suspicious)", sourcePath, parentTraversals);
+        }
+
+        // Step 5: Verify path exists (prevents typos leading to security issues)
+        if (!Directory.Exists(absolutePath) && !File.Exists(absolutePath))
+        {
+            _logger.LogWarning("Path does not exist: {Path}", absolutePath);
+            // Don't fail here - Docker will handle non-existent paths
+            // But log for visibility
+        }
+
+        _logger.LogDebug(
+            "Mount path validated: '{Source}' -> '{Canonical}'", sourcePath, canonicalPath);
+
+        return canonicalPath;
+    }
+
+    /// <summary>
+    /// Checks if a path points to the Docker socket (CRITICAL security check).
+    /// </summary>
+    public bool IsDockerSocket(string path)
+    {
+        var canonical = Path.GetFullPath(path);
+        var dockerSockets = new[]
+        {
+            "/var/run/docker.sock",
+            "/run/docker.sock",
+            "\\\\.\\pipe\\docker_engine",
+            "npipe:////./pipe/docker_engine"
+        };
+
+        return dockerSockets.Any(socket =>
+            canonical.Equals(socket, StringComparison.OrdinalIgnoreCase));
+    }
+}
+```
+
+---
+
+### Threat 3: Resource Exhaustion via Missing or Insufficient Limits
+
+**Risk Description:**
+Without proper resource limits, a container can consume unlimited CPU, memory, and PIDs, causing host system degradation or complete denial of service. A fork bomb can create thousands of processes. A memory leak can trigger host OOM killer, potentially killing critical system services.
+
+**Attack Scenario:**
+Malicious code executes inside container:
+```bash
+# Fork bomb
+:(){ :|:& };:
+
+# Memory bomb
+while true; do
+  malloc_bomb=$(cat /dev/zero | head -c 100M | base64)
+done
+```
+Without limits, this exhausts host resources in seconds, affecting all other containers and host processes.
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+/// <summary>
+/// Enforces resource limits to prevent denial-of-service attacks.
+/// </summary>
+public sealed class ResourceLimitEnforcer
+{
+    private readonly ILogger<ResourceLimitEnforcer> _logger;
+    private readonly SandboxConfiguration _config;
+
+    // Absolute maximums (cannot be exceeded even by config)
+    private const long MaxMemoryBytes = 8L * 1024 * 1024 * 1024; // 8GB
+    private const long MaxCpuQuota = 400_000; // 4 cores
+    private const long MaxPids = 2048;
+    private const int MaxUlimitNoFile = 10000;
+
+    public ResourceLimitEnforcer(
+        ILogger<ResourceLimitEnforcer> logger,
+        SandboxConfiguration config)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+    }
+
+    /// <summary>
+    /// Applies and validates resource limits on HostConfig.
+    /// Clamps values to safe maximums if configured limits exceed safety thresholds.
+    /// </summary>
+    public void EnforceResourceLimits(HostConfig hostConfig, string containerId)
+    {
+        ArgumentNullException.ThrowIfNull(hostConfig);
+
+        // Memory limit (CRITICAL: prevents OOM bomb)
+        var requestedMemory = ParseMemoryString(_config.Defaults.Memory);
+        var enforcedMemory = Math.Min(requestedMemory, MaxMemoryBytes);
+
+        if (enforcedMemory < requestedMemory)
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: Requested memory {Requested}MB exceeds maximum {Max}MB. Clamping.",
+                containerId, requestedMemory / (1024 * 1024), MaxMemoryBytes / (1024 * 1024));
+        }
+
+        hostConfig.Memory = enforcedMemory;
+        hostConfig.MemorySwap = 0; // Disable swap (prevents swap thrashing)
+        hostConfig.MemorySwappiness = 0;
+        hostConfig.OomKillDisable = false; // CRITICAL: Allow OOM kill
+
+        _logger.LogInformation(
+            "Container {ContainerId}: Memory limit set to {Memory}MB",
+            containerId, enforcedMemory / (1024 * 1024));
+
+        // CPU limit (CRITICAL: prevents CPU exhaustion)
+        var requestedCpu = _config.Defaults.CpuLimit;
+        var enforcedCpu = Math.Min(requestedCpu, MaxCpuQuota / 100_000.0);
+
+        if (enforcedCpu < requestedCpu)
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: Requested CPU {Requested} cores exceeds maximum {Max}. Clamping.",
+                containerId, requestedCpu, enforcedCpu);
+        }
+
+        hostConfig.CPUQuota = (long)(enforcedCpu * 100_000);
+        hostConfig.CPUPeriod = 100_000; // Standard 100ms period
+        hostConfig.CPUShares = 1024; // Default weight
+
+        _logger.LogInformation(
+            "Container {ContainerId}: CPU limit set to {Cpu} cores",
+            containerId, enforcedCpu);
+
+        // PID limit (CRITICAL: prevents fork bomb)
+        var requestedPids = _config.Defaults.PidsLimit;
+        var enforcedPids = Math.Min(requestedPids, MaxPids);
+
+        if (enforcedPids < requestedPids)
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: Requested PID limit {Requested} exceeds maximum {Max}. Clamping.",
+                containerId, requestedPids, MaxPids);
+        }
+
+        hostConfig.PidsLimit = enforcedPids;
+
+        _logger.LogInformation(
+            "Container {ContainerId}: PID limit set to {Pids}",
+            containerId, enforcedPids);
+
+        // Ulimits (file descriptors, processes)
+        hostConfig.Ulimits = new List<Ulimit>
+        {
+            new Ulimit
+            {
+                Name = "nofile", // Max open files
+                Soft = 1024,
+                Hard = Math.Min(_config.Defaults.PidsLimit * 2, MaxUlimitNoFile)
+            },
+            new Ulimit
+            {
+                Name = "nproc", // Max processes (redundant with PidsLimit but good defense-in-depth)
+                Soft = enforcedPids,
+                Hard = enforcedPids
+            }
+        };
+
+        _logger.LogInformation(
+            "Container {ContainerId}: Resource limits enforced successfully", containerId);
+    }
+
+    private static long ParseMemoryString(string memory)
+    {
+        if (string.IsNullOrWhiteSpace(memory))
+            return 512L * 1024 * 1024; // Default 512MB
+
+        var trimmed = memory.Trim().ToUpperInvariant();
+        var value = double.Parse(new string(trimmed.TakeWhile(char.IsDigit).ToArray()));
+
+        if (trimmed.EndsWith("GB") || trimmed.EndsWith("G"))
+            return (long)(value * 1024 * 1024 * 1024);
+        if (trimmed.EndsWith("MB") || trimmed.EndsWith("M"))
+            return (long)(value * 1024 * 1024);
+        if (trimmed.EndsWith("KB") || trimmed.EndsWith("K"))
+            return (long)(value * 1024);
+
+        // Assume bytes if no unit
+        return (long)value;
+    }
+}
+```
+
+---
+
+### Threat 4: Docker Socket Exposure Leading to Full Host Compromise
+
+**Risk Description:**
+Mounting the Docker socket (`/var/run/docker.sock`) into a container is equivalent to granting root access to the host. Any process inside the container can create privileged containers, mount arbitrary host paths, execute commands on the host, and completely bypass all isolation.
+
+**Attack Scenario:**
+If Docker socket is mounted:
+```yaml
+mounts:
+  - source: /var/run/docker.sock
+    target: /var/run/docker.sock
+```
+Attacker inside container runs:
+```bash
+# Install Docker CLI inside container
+apk add docker-cli
+
+# Create privileged container with host root mounted
+docker run -v /:/host --privileged alpine chroot /host
+
+# Now has full root access to host
+```
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+/// <summary>
+/// Prevents Docker socket exposure which would grant full host access.
+/// </summary>
+public sealed class DockerSocketGuard
+{
+    private readonly ILogger<DockerSocketGuard> _logger;
+    private readonly MountPathValidator _pathValidator;
+
+    // All variations of Docker socket path across platforms
+    private static readonly HashSet<string> DockerSocketPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/var/run/docker.sock",
+        "/run/docker.sock",
+        "//./pipe/docker_engine",          // Windows named pipe
+        "\\\\.\\pipe\\docker_engine",      // Windows named pipe (escaped)
+        "npipe:////./pipe/docker_engine",  // Docker.DotNet Windows format
+        "unix:///var/run/docker.sock",     // Docker.DotNet Unix format
+        "tcp://localhost:2375",            // Unencrypted TCP (also dangerous)
+        "tcp://127.0.0.1:2375"
+    };
+
+    public DockerSocketGuard(
+        ILogger<DockerSocketGuard> logger,
+        MountPathValidator pathValidator)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _pathValidator = pathValidator ?? throw new ArgumentNullException(nameof(pathValidator));
+    }
+
+    /// <summary>
+    /// Scans all mounts for Docker socket and throws if found.
+    /// CRITICAL: This check MUST pass before container creation.
+    /// </summary>
+    public void ValidateNoDockerSocketMounted(IList<string> binds, string containerId)
+    {
+        if (binds == null || !binds.Any())
+            return;
+
+        foreach (var bind in binds)
+        {
+            // Parse bind format: "source:target:mode" or "source:target"
+            var parts = bind.Split(':');
+            if (parts.Length < 2)
+            {
+                _logger.LogWarning(
+                    "Container {ContainerId}: Invalid bind format: {Bind}", containerId, bind);
+                continue;
+            }
+
+            var sourcePath = parts[0];
+
+            // Check if source is Docker socket
+            if (IsDockerSocketPath(sourcePath))
+            {
+                var error = $"CRITICAL SECURITY VIOLATION: Container {containerId} " +
+                           $"attempts to mount Docker socket '{sourcePath}'. " +
+                           "This would grant full host access and is STRICTLY FORBIDDEN.";
+                _logger.LogCritical(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.DockerSocketMounted, error);
+            }
+
+            // Also check canonical path (resolves symlinks)
+            try
+            {
+                var canonical = _pathValidator.ValidateAndCanonicalizePath(sourcePath, false);
+                if (IsDockerSocketPath(canonical))
+                {
+                    var error = $"CRITICAL SECURITY VIOLATION: Container {containerId} " +
+                               $"attempts to mount path '{sourcePath}' which resolves to Docker socket '{canonical}'. " +
+                               "Symlink or relative path to Docker socket is STRICTLY FORBIDDEN.";
+                    _logger.LogCritical(error);
+                    throw new SecurityPolicyViolationException(
+                        SecurityViolationCode.DockerSocketMounted, error);
+                }
+            }
+            catch (SecurityPolicyViolationException)
+            {
+                // Re-throw security violations
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Path validation failed for other reason - log but don't fail
+                // (Docker will reject invalid paths later)
+                _logger.LogWarning(ex,
+                    "Container {ContainerId}: Could not validate mount path: {Path}",
+                    containerId, sourcePath);
+            }
+        }
+
+        _logger.LogDebug(
+            "Container {ContainerId}: Docker socket mount check passed ({Count} mounts scanned)",
+            containerId, binds.Count);
+    }
+
+    private static bool IsDockerSocketPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        // Normalize path for comparison
+        var normalized = path.Replace('\\', '/').TrimEnd('/');
+
+        return DockerSocketPaths.Any(socketPath =>
+        {
+            var normalizedSocket = socketPath.Replace('\\', '/').TrimEnd('/');
+            return normalized.Equals(normalizedSocket, StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith(normalizedSocket, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+}
+```
+
+---
+
+### Threat 5: Malicious Container Images (Supply Chain Attack)
+
+**Risk Description:**
+Container images pulled from registries can contain malware, backdoors, or vulnerable software. A compromised or malicious image could exfiltrate data, mine cryptocurrency, or establish persistence on the host. Even official-looking images can be typosquatted (e.g., `dotnet/sdk` vs `d0tnet/sdk`).
+
+**Attack Scenario:**
+User configures custom image:
+```yaml
+sandbox:
+  images:
+    dotnet: malicious-user/fake-dotnet-sdk:latest
+```
+Image contains:
+1. Backdoored compiler that injects malware into built binaries
+2. Cryptocurrency miner consuming CPU in background
+3. Data exfiltration tool sending code to attacker's server
+
+**Mitigation (Complete C# Code):**
+
+```csharp
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+using System.Security.Cryptography;
+
+namespace Acode.Infrastructure.Sandbox.Security;
+
+/// <summary>
+/// Validates and verifies container images before use.
+/// </summary>
+public sealed class ImageVerifier
+{
+    private readonly IDockerClient _dockerClient;
+    private readonly ILogger<ImageVerifier> _logger;
+    private readonly SandboxConfiguration _config;
+
+    // Trusted registries (configurable, defaults to official sources)
+    private static readonly HashSet<string> TrustedRegistries = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "mcr.microsoft.com",      // Microsoft Container Registry
+        "docker.io",              // Docker Hub (official)
+        "registry.hub.docker.com", // Docker Hub (full URL)
+        "ghcr.io",                // GitHub Container Registry (if org-owned)
+        "gcr.io"                  // Google Container Registry (if project-owned)
+    };
+
+    // Official image patterns (configurable)
+    private static readonly Dictionary<string, string[]> OfficialImagePrefixes = new()
+    {
+        ["dotnet"] = new[] { "mcr.microsoft.com/dotnet/sdk", "mcr.microsoft.com/dotnet/runtime" },
+        ["node"] = new[] { "docker.io/library/node", "node" }, // "node" = docker.io/library/node
+        ["python"] = new[] { "docker.io/library/python", "python" },
+        ["ubuntu"] = new[] { "docker.io/library/ubuntu", "ubuntu" }
+    };
+
+    public ImageVerifier(
+        IDockerClient dockerClient,
+        ILogger<ImageVerifier> logger,
+        SandboxConfiguration config)
+    {
+        _dockerClient = dockerClient ?? throw new ArgumentNullException(nameof(dockerClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+    }
+
+    /// <summary>
+    /// Verifies image before use. Checks:
+    /// 1. Image comes from trusted registry
+    /// 2. Image tag is not 'latest' (pinned version required in production)
+    /// 3. Image exists locally or can be pulled
+    /// 4. Image digest matches expected (if pinned)
+    /// </summary>
+    public async Task<ImageInspectResponse> VerifyImageAsync(
+        string imageName,
+        bool allowPull,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(imageName))
+        {
+            throw new ArgumentException("Image name cannot be null or empty", nameof(imageName));
+        }
+
+        // Parse image name into components
+        var (registry, repository, tag, digest) = ParseImageName(imageName);
+
+        // Check 1: Verify registry is trusted (unless explicitly allowed)
+        if (!string.IsNullOrEmpty(registry) && !TrustedRegistries.Contains(registry))
+        {
+            if (!_config.Security.AllowUntrustedRegistries)
+            {
+                var error = $"Image '{imageName}' is from untrusted registry '{registry}'. " +
+                           $"Trusted registries: {string.Join(", ", TrustedRegistries)}. " +
+                           "Set sandbox.security.allow_untrusted_registries = true to override (NOT RECOMMENDED).";
+                _logger.LogError(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.UnverifiedImage, error);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "SECURITY WARNING: Using image from untrusted registry: {Registry}", registry);
+            }
+        }
+
+        // Check 2: Warn if using :latest tag (non-reproducible)
+        if (tag == "latest")
+        {
+            _logger.LogWarning(
+                "Image '{Image}' uses ':latest' tag which is non-reproducible. " +
+                "Consider pinning to specific version (e.g., 'node:20.10.0') or digest.", imageName);
+        }
+
+        // Check 3: Verify image exists locally
+        ImageInspectResponse? imageInfo = null;
+        try
+        {
+            imageInfo = await _dockerClient.Images.InspectImageAsync(imageName, ct);
+            _logger.LogInformation(
+                "Image '{Image}' found locally. Digest: {Digest}",
+                imageName, imageInfo.RepoDigests?.FirstOrDefault() ?? "unknown");
+        }
+        catch (DockerImageNotFoundException)
+        {
+            _logger.LogInformation("Image '{Image}' not found locally", imageName);
+
+            if (!allowPull)
+            {
+                var error = $"Image '{imageName}' not found locally and pulling is disabled. " +
+                           "Pre-pull image with 'docker pull {imageName}' or enable auto-pull.";
+                _logger.LogError(error);
+                throw new InvalidOperationException(error);
+            }
+
+            // Pull image
+            _logger.LogInformation("Pulling image '{Image}'...", imageName);
+            await PullImageWithProgressAsync(imageName, ct);
+
+            // Inspect after pull
+            imageInfo = await _dockerClient.Images.InspectImageAsync(imageName, ct);
+        }
+
+        // Check 4: If digest was specified, verify it matches
+        if (!string.IsNullOrEmpty(digest))
+        {
+            var actualDigest = imageInfo.RepoDigests?.FirstOrDefault()?.Split('@').LastOrDefault();
+            if (actualDigest != null && !actualDigest.Equals(digest, StringComparison.OrdinalIgnoreCase))
+            {
+                var error = $"Image '{imageName}' digest mismatch. " +
+                           $"Expected: {digest}, Actual: {actualDigest}. " +
+                           "This could indicate image tampering or registry compromise.";
+                _logger.LogError(error);
+                throw new SecurityPolicyViolationException(
+                    SecurityViolationCode.UnverifiedImage, error);
+            }
+        }
+
+        _logger.LogInformation(
+            "Image verification passed: {Image} (Size: {Size}MB, Created: {Created})",
+            imageName,
+            imageInfo.Size / (1024.0 * 1024.0),
+            imageInfo.Created);
+
+        return imageInfo;
+    }
+
+    private static (string Registry, string Repository, string Tag, string Digest) ParseImageName(string imageName)
+    {
+        // Format: [registry/]repository[:tag][@digest]
+        // Examples:
+        //   node:20                        -> ("", "node", "20", "")
+        //   mcr.microsoft.com/dotnet/sdk:8 -> ("mcr.microsoft.com", "dotnet/sdk", "8", "")
+        //   ubuntu@sha256:abc123...        -> ("", "ubuntu", "", "sha256:abc123...")
+
+        string registry = "";
+        string repository = imageName;
+        string tag = "latest";
+        string digest = "";
+
+        // Extract digest if present
+        var digestSplit = repository.Split('@');
+        if (digestSplit.Length == 2)
+        {
+            repository = digestSplit[0];
+            digest = digestSplit[1];
+        }
+
+        // Extract tag if present
+        var tagSplit = repository.Split(':');
+        if (tagSplit.Length == 2)
+        {
+            repository = tagSplit[0];
+            tag = tagSplit[1];
+        }
+
+        // Extract registry if present (contains '/')
+        var registrySplit = repository.Split('/');
+        if (registrySplit.Length > 1 && registrySplit[0].Contains('.'))
+        {
+            registry = registrySplit[0];
+            repository = string.Join("/", registrySplit.Skip(1));
+        }
+
+        return (registry, repository, tag, digest);
+    }
+
+    private async Task PullImageWithProgressAsync(string imageName, CancellationToken ct)
+    {
+        var progress = new Progress<JSONMessage>(msg =>
+        {
+            if (!string.IsNullOrEmpty(msg.Status))
+            {
+                _logger.LogDebug("Pull progress: {Status} {Progress}", msg.Status, msg.ProgressMessage);
+            }
+        });
+
+        await _dockerClient.Images.CreateImageAsync(
+            new ImagesCreateParameters { FromImage = imageName },
+            null, // No auth for public images
+            progress,
+            ct);
+    }
+}
+```
+
+---
+
 ## Best Practices
 
 ### Container Management
@@ -843,150 +2130,594 @@ sandbox:
 
 ## Testing Requirements
 
-### Unit Tests
+**File:** `tests/Acode.Infrastructure.Tests/Sandbox/DockerSandboxTests.cs`
 
-#### DockerSandboxTests
-- DockerSandbox_Constructor_ValidatesDockerClient
-- DockerSandbox_Constructor_AcceptsNullLoggerGracefully
-- DockerSandbox_IsAvailable_ReturnsTrueWhenDockerResponds
-- DockerSandbox_IsAvailable_ReturnsFalseWhenDockerUnreachable
-- DockerSandbox_IsAvailable_CachesResultForConfiguredDuration
-- DockerSandbox_RunAsync_ThrowsWhenNotAvailable
-- DockerSandbox_RunAsync_CreatesContainerWithCorrectImage
-- DockerSandbox_RunAsync_AppliesResourceLimits
-- DockerSandbox_RunAsync_DisablesNetworkByDefault
-- DockerSandbox_RunAsync_MountsWorkspaceCorrectly
-- DockerSandbox_RunAsync_SetsWorkingDirectory
-- DockerSandbox_RunAsync_ReturnsStdoutContent
-- DockerSandbox_RunAsync_ReturnsStderrContent
-- DockerSandbox_RunAsync_ReturnsExitCode
-- DockerSandbox_RunAsync_ReturnsExecutionDuration
-- DockerSandbox_RunAsync_RemovesContainerAfterExecution
-- DockerSandbox_RunAsync_HandlesTimeoutGracefully
-- DockerSandbox_RunAsync_KillsContainerOnTimeout
-- DockerSandbox_RunAsync_CleansUpOnCancellation
-- DockerSandbox_RunAsync_PropagatesDockerExceptions
-- DockerSandbox_CleanupAsync_RemovesAllManagedContainers
-- DockerSandbox_CleanupAsync_HandlesAlreadyRemovedContainers
+```csharp
+using Acode.Domain.Execution;
+using Acode.Infrastructure.Sandbox;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using NSubstitute.ExceptionExtensions;
+using Xunit;
 
-#### ContainerLifecycleTests
-- ContainerLifecycle_Create_GeneratesUniqueContainerId
-- ContainerLifecycle_Create_AppliesLabelsForTracking
-- ContainerLifecycle_Create_SetsRestartPolicyToNo
-- ContainerLifecycle_Create_SetsAutoRemoveToFalse
-- ContainerLifecycle_Create_ConfiguresEntrypoint
-- ContainerLifecycle_Create_SetsEnvironmentVariables
-- ContainerLifecycle_Create_HandlesCreateContainerException
-- ContainerLifecycle_Start_StartsCreatedContainer
-- ContainerLifecycle_Start_WaitsForContainerRunning
-- ContainerLifecycle_Start_ThrowsOnStartFailure
-- ContainerLifecycle_Wait_ReturnsExitCode
-- ContainerLifecycle_Wait_RespectsTimeout
-- ContainerLifecycle_Wait_ReturnsCancelledOnCancellation
-- ContainerLifecycle_Logs_ReturnsStdout
-- ContainerLifecycle_Logs_ReturnsStderr
-- ContainerLifecycle_Logs_HandlesMissingLogs
-- ContainerLifecycle_Remove_RemovesContainer
-- ContainerLifecycle_Remove_ForcesRemovalIfRunning
-- ContainerLifecycle_Remove_RemovesAssociatedVolumes
-- ContainerLifecycle_Remove_IgnoresNotFoundError
+namespace Acode.Infrastructure.Tests.Sandbox;
 
-#### MountManagerTests
-- MountManager_ValidatePath_AllowsWorkspaceSubpaths
-- MountManager_ValidatePath_RejectsParentTraversal
-- MountManager_ValidatePath_RejectsSymlinksOutsideWorkspace
-- MountManager_ValidatePath_RejectsAbsolutePathsOutsideWorkspace
-- MountManager_ValidatePath_RejectsSensitivePaths
-- MountManager_CreateBind_CreatesReadOnlyBindByDefault
-- MountManager_CreateBind_SupportsReadWriteOption
-- MountManager_CreateBind_NormalizesPathsCorrectly
-- MountManager_CreateBind_HandlesSpacesInPaths
-- MountManager_CreateBind_ConvertsWindowsPathsToLinux
-- MountManager_ResolveOutputPath_CreatesOutputDirectory
-- MountManager_ResolveOutputPath_CalculatesContainerPath
-- MountManager_SensitivePaths_IncludesHomeDirectory
-- MountManager_SensitivePaths_IncludesCredentialStores
-- MountManager_SensitivePaths_IncludesDockerSocket
+public sealed class DockerSandboxTests
+{
+    private readonly IDockerClient _mockDockerClient;
+    private readonly DockerSandbox _sandbox;
 
-#### ResourceLimiterTests
-- ResourceLimiter_Configure_SetsCpuLimit
-- ResourceLimiter_Configure_SetsCpuPeriod
-- ResourceLimiter_Configure_SetsCpuQuota
-- ResourceLimiter_Configure_SetsMemoryLimit
-- ResourceLimiter_Configure_SetsMemorySwap
-- ResourceLimiter_Configure_SetsMemorySwappiness
-- ResourceLimiter_Configure_SetsPidsLimit
-- ResourceLimiter_Configure_DisablesOOMKillByDefault
-- ResourceLimiter_Configure_SetsUlimits
-- ResourceLimiter_MergeOverrides_AppliesPerCommandLimits
-- ResourceLimiter_MergeOverrides_PreservesUnspecifiedDefaults
-- ResourceLimiter_Validate_RejectsNegativeLimits
-- ResourceLimiter_Validate_RejectsZeroCpu
-- ResourceLimiter_Validate_RejectsUnreasonableMemory
-- ResourceLimiter_GetResourceStats_ReturnsContainerStats
-- ResourceLimiter_GetResourceStats_CalculatesCpuPercentage
-- ResourceLimiter_GetResourceStats_CalculatesMemoryUsage
+    public DockerSandboxTests()
+    {
+        _mockDockerClient = Substitute.For<IDockerClient>();
+        _sandbox = new DockerSandbox(_mockDockerClient, NullLogger<DockerSandbox>.Instance);
+    }
 
-#### NetworkPolicyTests
-- NetworkPolicy_DisabledByDefault_SetsNetworkModeNone
-- NetworkPolicy_Enabled_SetsNetworkModeBridge
-- NetworkPolicy_AirGapped_ForcesDisabledNetwork
-- NetworkPolicy_AirGapped_OverridesEnabledSetting
-- NetworkPolicy_Configure_SetsPortBindings
-- NetworkPolicy_Configure_SetsDnsServers
-- NetworkPolicy_Configure_SetsExtraHosts
-- NetworkPolicy_Configure_SetsNetworkAliases
-- NetworkPolicy_Validate_RejectsPrivilegedPorts
-- NetworkPolicy_Validate_RejectsConflictingPorts
+    [Fact]
+    public void Constructor_WithNullDockerClient_ThrowsArgumentNullException()
+    {
+        // Arrange & Act
+        var act = () => new DockerSandbox(null!, NullLogger<DockerSandbox>.Instance);
 
-#### ImageManagerTests
-- ImageManager_GetImage_ReturnsConfiguredImageForLanguage
-- ImageManager_GetImage_ReturnsFallbackForUnknownLanguage
-- ImageManager_GetImage_SupportsCustomImageOverride
-- ImageManager_Exists_ReturnsTrueForExistingImage
-- ImageManager_Exists_ReturnsFalseForMissingImage
-- ImageManager_Pull_PullsImageFromRegistry
-- ImageManager_Pull_ReportsProgress
-- ImageManager_Pull_RespectsTimeout
-- ImageManager_Pull_ThrowsInOfflineMode
-- ImageManager_Pull_HandlesAuthenticationErrors
-- ImageManager_List_ReturnsAllManagedImages
-- ImageManager_Prune_RemovesUnusedImages
-- ImageManager_Prune_PreservesRecentlyUsedImages
+        // Assert
+        act.Should().Throw<ArgumentNullException>().WithParameterName("dockerClient");
+    }
+
+    [Fact]
+    public async Task IsAvailable_WhenDockerResponds_ReturnsTrue()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _sandbox.IsAvailableAsync(CancellationToken.None);
+
+        // Assert
+        result.Should().BeTrue();
+        await _mockDockerClient.System.Received(1).PingAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task IsAvailable_WhenDockerUnreachable_ReturnsFalse()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>())
+            .Throws(new DockerApiException(System.Net.HttpStatusCode.ServiceUnavailable, "Docker daemon not responding"));
+
+        // Act
+        var result = await _sandbox.IsAvailableAsync(CancellationToken.None);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenNotAvailable_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>())
+            .Throws(new DockerApiException(System.Net.HttpStatusCode.ServiceUnavailable, "Docker unavailable"));
+
+        var request = new SandboxRequest
+        {
+            Image = "alpine:latest",
+            Command = new[] { "echo", "test" },
+            WorkingDirectory = "/workspace"
+        };
+
+        // Act
+        var act = async () => await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Docker is not available*");
+    }
+
+    [Fact]
+    public async Task RunAsync_CreatesContainerWithCorrectConfiguration()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var createResponse = new CreateContainerResponse { ID = "container-abc123" };
+        _mockDockerClient.Containers.CreateContainerAsync(
+            Arg.Any<CreateContainerParameters>(),
+            Arg.Any<CancellationToken>())
+            .Returns(createResponse);
+
+        _mockDockerClient.Containers.StartContainerAsync(
+            Arg.Any<string>(),
+            Arg.Any<ContainerStartParameters>(),
+            Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        _mockDockerClient.Containers.WaitContainerAsync(
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new ContainerWaitResponse { StatusCode = 0 });
+
+        _mockDockerClient.Containers.GetContainerLogsAsync(
+            Arg.Any<string>(),
+            Arg.Any<ContainerLogsParameters>(),
+            Arg.Any<CancellationToken>())
+            .Returns(new MultiplexedStream(Stream.Null));
+
+        var request = new SandboxRequest
+        {
+            Image = "mcr.microsoft.com/dotnet/sdk:8.0",
+            Command = new[] { "dotnet", "--version" },
+            WorkingDirectory = "/workspace",
+            EnvironmentVariables = new Dictionary<string, string> { ["HOME"] = "/tmp" }
+        };
+
+        // Act
+        var result = await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        await _mockDockerClient.Containers.Received(1).CreateContainerAsync(
+            Arg.Is<CreateContainerParameters>(p =>
+                p.Image == "mcr.microsoft.com/dotnet/sdk:8.0" &&
+                p.WorkingDir == "/workspace" &&
+                p.Cmd.SequenceEqual(new[] { "dotnet", "--version" }) &&
+                p.Env.Contains("HOME=/tmp") &&
+                p.HostConfig.NetworkMode == "none" &&
+                p.HostConfig.AutoRemove == false &&
+                p.Labels.ContainsKey("acode.managed")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAsync_ReturnsStdoutStderrAndExitCode()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var createResponse = new CreateContainerResponse { ID = "container-xyz789" };
+        _mockDockerClient.Containers.CreateContainerAsync(Arg.Any<CreateContainerParameters>(), Arg.Any<CancellationToken>())
+            .Returns(createResponse);
+
+        _mockDockerClient.Containers.StartContainerAsync(Arg.Any<string>(), Arg.Any<ContainerStartParameters>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        _mockDockerClient.Containers.WaitContainerAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ContainerWaitResponse { StatusCode = 42 });
+
+        var stdoutStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("stdout output"));
+        var stderrStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("stderr output"));
+        _mockDockerClient.Containers.GetContainerLogsAsync(Arg.Any<string>(), Arg.Is<ContainerLogsParameters>(p => p.ShowStdout), Arg.Any<CancellationToken>())
+            .Returns(new MultiplexedStream(stdoutStream));
+        _mockDockerClient.Containers.GetContainerLogsAsync(Arg.Any<string>(), Arg.Is<ContainerLogsParameters>(p => p.ShowStderr), Arg.Any<CancellationToken>())
+            .Returns(new MultiplexedStream(stderrStream));
+
+        var request = new SandboxRequest { Image = "alpine", Command = new[] { "test" } };
+
+        // Act
+        var result = await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        result.ExitCode.Should().Be(42);
+        result.Stdout.Should().Contain("stdout output");
+        result.Stderr.Should().Contain("stderr output");
+        result.ContainerId.Should().Be("container-xyz789");
+        result.Duration.Should().BeGreaterThan(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public async Task RunAsync_RemovesContainerAfterExecution()
+    {
+        // Arrange
+        _mockDockerClient.System.PingAsync(Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var containerId = "container-cleanup-test";
+        _mockDockerClient.Containers.CreateContainerAsync(Arg.Any<CreateContainerParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new CreateContainerResponse { ID = containerId });
+        _mockDockerClient.Containers.StartContainerAsync(Arg.Any<string>(), Arg.Any<ContainerStartParameters>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+        _mockDockerClient.Containers.WaitContainerAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ContainerWaitResponse { StatusCode = 0 });
+        _mockDockerClient.Containers.GetContainerLogsAsync(Arg.Any<string>(), Arg.Any<ContainerLogsParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new MultiplexedStream(Stream.Null));
+
+        var request = new SandboxRequest { Image = "alpine", Command = new[] { "echo", "test" } };
+
+        // Act
+        await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync(
+            containerId,
+            Arg.Is<ContainerRemoveParameters>(p => p.Force == true && p.RemoveVolumes == true),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CleanupAsync_RemovesAllManagedContainers()
+    {
+        // Arrange
+        var managedContainers = new List<ContainerListResponse>
+        {
+            new ContainerListResponse { ID = "container-1", Labels = new Dictionary<string, string> { ["acode.managed"] = "true" } },
+            new ContainerListResponse { ID = "container-2", Labels = new Dictionary<string, string> { ["acode.managed"] = "true" } }
+        };
+
+        _mockDockerClient.Containers.ListContainersAsync(
+            Arg.Is<ContainersListParameters>(p => p.All == true),
+            Arg.Any<CancellationToken>())
+            .Returns(managedContainers);
+
+        // Act
+        await _sandbox.CleanupAsync(CancellationToken.None);
+
+        // Assert
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync("container-1", Arg.Any<ContainerRemoveParameters>(), Arg.Any<CancellationToken>());
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync("container-2", Arg.Any<ContainerRemoveParameters>(), Arg.Any<CancellationToken>());
+    }
+}
+```
+
+**File:** `tests/Acode.Infrastructure.Tests/Sandbox/MountManagerTests.cs`
+
+```csharp
+using Acode.Domain.Security;
+using Acode.Infrastructure.Sandbox;
+using FluentAssertions;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Sandbox;
+
+public sealed class MountManagerTests
+{
+    private readonly string _repositoryRoot = "/home/user/repos/myproject";
+    private readonly MountManager _mountManager;
+
+    public MountManagerTests()
+    {
+        _mountManager = new MountManager(_repositoryRoot);
+    }
+
+    [Theory]
+    [InlineData("src/Program.cs")]
+    [InlineData("./docs/README.md")]
+    [InlineData("tests/")]
+    public void ValidatePath_AllowsWorkspaceSubpaths(string relativePath)
+    {
+        // Act
+        var result = _mountManager.ValidatePath(relativePath, isWorkspaceMount: true);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.CanonicalPath.Should().StartWith(_repositoryRoot);
+    }
+
+    [Theory]
+    [InlineData("../../../etc/passwd")]
+    [InlineData("..\\..\\Windows\\System32")]
+    [InlineData("src/../../outside")]
+    public void ValidatePath_RejectsParentTraversal(string traversalPath)
+    {
+        // Act
+        var result = _mountManager.ValidatePath(traversalPath, isWorkspaceMount: true);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Violation.Should().Be(SecurityViolationCode.HostPathEscape);
+        result.ErrorMessage.Should().Contain("outside repository root");
+    }
+
+    [Theory]
+    [InlineData("/etc/passwd")]
+    [InlineData("/var/run/docker.sock")]
+    [InlineData("/root/.ssh/id_rsa")]
+    [InlineData("C:\\Windows\\System32")]
+    public void ValidatePath_RejectsSensitivePaths(string sensitivePath)
+    {
+        // Act
+        var result = _mountManager.ValidatePath(sensitivePath, isWorkspaceMount: false);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Violation.Should().Be(SecurityViolationCode.SensitivePathAccess);
+        result.ErrorMessage.Should().Contain("sensitive");
+    }
+
+    [Fact]
+    public void CreateBind_CreatesReadOnlyBindByDefault()
+    {
+        // Act
+        var bind = _mountManager.CreateBind("src", "/workspace/src");
+
+        // Assert
+        bind.Should().Be("/home/user/repos/myproject/src:/workspace/src:ro");
+    }
+
+    [Fact]
+    public void CreateBind_SupportsReadWriteOption()
+    {
+        // Act
+        var bind = _mountManager.CreateBind("output", "/workspace/output", readOnly: false);
+
+        // Assert
+        bind.Should().Be("/home/user/repos/myproject/output:/workspace/output:rw");
+    }
+
+    [Fact]
+    public void CreateBind_HandlesSpacesInPaths()
+    {
+        // Arrange
+        var mountManager = new MountManager("/home/user/my project");
+
+        // Act
+        var bind = mountManager.CreateBind("src folder", "/workspace/src");
+
+        // Assert
+        bind.Should().Contain("/home/user/my project/src folder");
+    }
+
+    [Fact]
+    public void SensitivePaths_IncludesDockerSocket()
+    {
+        // Arrange
+        var sensitivePaths = MountManager.GetSensitivePaths();
+
+        // Assert
+        sensitivePaths.Should().Contain(p =>
+            p.Contains("/var/run/docker.sock") ||
+            p.Contains("docker_engine"));
+    }
+
+    [Fact]
+    public void SensitivePaths_IncludesCredentialStores()
+    {
+        // Arrange
+        var sensitivePaths = MountManager.GetSensitivePaths();
+
+        // Assert
+        sensitivePaths.Should().Contain(p => p.Contains(".ssh") || p.Contains(".aws") || p.Contains(".kube"));
+    }
+}
+```
+
+**File:** `tests/Acode.Infrastructure.Tests/Sandbox/ResourceLimiterTests.cs`
+
+```csharp
+using Acode.Infrastructure.Sandbox;
+using Docker.DotNet.Models;
+using FluentAssertions;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Sandbox;
+
+public sealed class ResourceLimiterTests
+{
+    [Fact]
+    public void Configure_SetsCpuLimitCorrectly()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var hostConfig = new HostConfig();
+        var limits = new ResourceLimits { CpuCores = 2.0 };
+
+        // Act
+        limiter.Configure(hostConfig, limits);
+
+        // Assert
+        hostConfig.CPUQuota.Should().Be(200_000); // 2.0 * 100_000
+        hostConfig.CPUPeriod.Should().Be(100_000);
+        hostConfig.NanoCPUs.Should().Be(2_000_000_000); // 2.0 * 1e9
+    }
+
+    [Fact]
+    public void Configure_SetsMemoryLimitCorrectly()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var hostConfig = new HostConfig();
+        var limits = new ResourceLimits { MemoryMB = 512 };
+
+        // Act
+        limiter.Configure(hostConfig, limits);
+
+        // Assert
+        hostConfig.Memory.Should().Be(512 * 1024 * 1024); // 512MB in bytes
+        hostConfig.MemorySwap.Should().Be(0); // Swap disabled
+        hostConfig.MemorySwappiness.Should().Be(0);
+        hostConfig.OomKillDisable.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Configure_SetsPidsLimitCorrectly()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var hostConfig = new HostConfig();
+        var limits = new ResourceLimits { MaxPids = 256 };
+
+        // Act
+        limiter.Configure(hostConfig, limits);
+
+        // Assert
+        hostConfig.PidsLimit.Should().Be(256);
+    }
+
+    [Fact]
+    public void Configure_SetsUlimitsForNofileAndNproc()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var hostConfig = new HostConfig();
+        var limits = new ResourceLimits { MaxOpenFiles = 1024, MaxPids = 128 };
+
+        // Act
+        limiter.Configure(hostConfig, limits);
+
+        // Assert
+        hostConfig.Ulimits.Should().ContainSingle(u => u.Name == "nofile" && u.Soft == 1024 && u.Hard == 10000);
+        hostConfig.Ulimits.Should().ContainSingle(u => u.Name == "nproc" && u.Soft == 128 && u.Hard == 128);
+    }
+
+    [Fact]
+    public void MergeOverrides_AppliesPerCommandLimits()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var baseLimits = new ResourceLimits { CpuCores = 1.0, MemoryMB = 512 };
+        var overrides = new ResourceLimits { CpuCores = 4.0 }; // Override only CPU
+
+        // Act
+        var merged = limiter.MergeOverrides(baseLimits, overrides);
+
+        // Assert
+        merged.CpuCores.Should().Be(4.0); // Overridden
+        merged.MemoryMB.Should().Be(512); // Preserved from base
+    }
+
+    [Theory]
+    [InlineData(-1.0)]
+    [InlineData(-512)]
+    public void Validate_RejectsNegativeLimits(double invalidValue)
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var limits = new ResourceLimits { CpuCores = invalidValue };
+
+        // Act
+        var act = () => limiter.Validate(limits);
+
+        // Assert
+        act.Should().Throw<ArgumentException>().WithMessage("*negative*");
+    }
+
+    [Fact]
+    public void Validate_RejectsZeroCpu()
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var limits = new ResourceLimits { CpuCores = 0 };
+
+        // Act
+        var act = () => limiter.Validate(limits);
+
+        // Assert
+        act.Should().Throw<ArgumentException>().WithMessage("*CPU*greater than zero*");
+    }
+
+    [Theory]
+    [InlineData(32 * 1024 * 1024)] // 32TB
+    [InlineData(1)] // 1MB (too small)
+    public void Validate_RejectsUnreasonableMemory(long unreasonableMemoryMB)
+    {
+        // Arrange
+        var limiter = new ResourceLimiter();
+        var limits = new ResourceLimits { MemoryMB = unreasonableMemoryMB };
+
+        // Act
+        var act = () => limiter.Validate(limits);
+
+        // Assert
+        act.Should().Throw<ArgumentException>().WithMessage("*memory*range*");
+    }
+}
+```
 
 ### Integration Tests
 
-#### DockerSandboxIntegrationTests
-- DockerSandbox_RunsSimpleCommand_ReturnsCorrectOutput
-- DockerSandbox_RunsDotNetCommand_CompilesAndExecutes
-- DockerSandbox_RunsNodeCommand_ExecutesJavaScript
-- DockerSandbox_RunsPythonCommand_ExecutesPythonScript
-- DockerSandbox_MountsWorkspace_SeesMountedFiles
-- DockerSandbox_WritesOutput_OutputVisibleOnHost
-- DockerSandbox_RespectsTimeout_KillsLongRunningProcess
-- DockerSandbox_RespectsMemoryLimit_OOMKillsExcessiveProcess
-- DockerSandbox_NetworkDisabled_CannotReachInternet
-- DockerSandbox_NetworkEnabled_CanReachInternet
-- DockerSandbox_CleanupRemovesContainers_NoOrphansRemain
-- DockerSandbox_MultipleParallel_AllExecuteSuccessfully
-- DockerSandbox_RecoverFromFailure_SubsequentCallsSucceed
-- DockerSandbox_NonZeroExit_ReturnsCorrectExitCode
-- DockerSandbox_LargeOutput_StreamsCorrectly
-- DockerSandbox_EnvironmentVariables_PassedToContainer
+**File:** `tests/Acode.Infrastructure.IntegrationTests/Sandbox/DockerSandboxIntegrationTests.cs`
 
-#### ImageManagementIntegrationTests
-- ImageManagement_PullImage_DownloadsFromDockerHub
-- ImageManagement_ListImages_ReturnsDownloadedImages
-- ImageManagement_PruneImages_RemovesDanglingImages
-- ImageManagement_CustomImage_UsedForExecution
+```csharp
+using Acode.Domain.Execution;
+using Acode.Infrastructure.Sandbox;
+using Docker.DotNet;
+using FluentAssertions;
+using Xunit;
 
-#### SecurityIntegrationTests
-- Security_ContainerRunsAsNonRoot_UidIsNotZero
-- Security_PrivilegedDisabled_CannotAccessDevices
-- Security_CapabilitiesDropped_CannotChangePerms
-- Security_SensitivePaths_NotMountable
-- Security_DockerSocket_NotMountable
-- Security_Seccomp_BlocksDangerousSyscalls
+namespace Acode.Infrastructure.IntegrationTests.Sandbox;
+
+[Collection("Docker")]
+public sealed class DockerSandboxIntegrationTests : IAsyncLifetime
+{
+    private readonly IDockerClient _dockerClient;
+    private readonly DockerSandbox _sandbox;
+
+    public DockerSandboxIntegrationTests()
+    {
+        _dockerClient = new DockerClientConfiguration().CreateClient();
+        _sandbox = new DockerSandbox(_dockerClient, NullLogger<DockerSandbox>.Instance);
+    }
+
+    [Fact]
+    public async Task RunsSimpleCommand_ReturnsCorrectOutput()
+    {
+        // Arrange
+        var request = new SandboxRequest
+        {
+            Image = "alpine:latest",
+            Command = new[] { "echo", "Hello from Docker" },
+            WorkingDirectory = "/workspace"
+        };
+
+        // Act
+        var result = await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        result.Stdout.Trim().Should().Be("Hello from Docker");
+        result.Stderr.Should().BeEmpty();
+        result.Duration.Should().BeLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task NetworkDisabled_CannotReachInternet()
+    {
+        // Arrange
+        var request = new SandboxRequest
+        {
+            Image = "alpine:latest",
+            Command = new[] { "wget", "-T", "2", "https://example.com", "-O", "-" },
+            WorkingDirectory = "/workspace",
+            NetworkEnabled = false
+        };
+
+        // Act
+        var result = await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        result.ExitCode.Should().NotBe(0);
+        result.Stderr.Should().Contain("Network");
+    }
+
+    [Fact]
+    public async Task RespectsMemoryLimit_OOMKillsExcessiveProcess()
+    {
+        // Arrange
+        var request = new SandboxRequest
+        {
+            Image = "alpine:latest",
+            Command = new[] { "sh", "-c", "head -c 1G </dev/zero | tail" },
+            WorkingDirectory = "/workspace",
+            ResourceLimits = new ResourceLimits { MemoryMB = 64 }
+        };
+
+        // Act
+        var result = await _sandbox.RunAsync(request, CancellationToken.None);
+
+        // Assert
+        result.ExitCode.Should().Be(137); // OOM killed
+        result.WasOOMKilled.Should().BeTrue();
+    }
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        await _sandbox.CleanupAsync(CancellationToken.None);
+        _dockerClient.Dispose();
+    }
+}
+```
 
 ### Benchmark Tests
 

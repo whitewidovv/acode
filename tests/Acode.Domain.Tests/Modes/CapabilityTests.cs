@@ -1,6 +1,5 @@
 using Acode.Domain.Modes;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Domain.Tests.Modes;
 

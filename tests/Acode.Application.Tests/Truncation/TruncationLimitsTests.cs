@@ -2,7 +2,6 @@ namespace Acode.Application.Tests.Truncation;
 
 using Acode.Application.Truncation;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for TruncationLimits validation and defaults.

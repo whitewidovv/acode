@@ -1,7 +1,6 @@
 using Acode.Infrastructure.Vllm.Models;
 using Acode.Infrastructure.Vllm.Serialization;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Vllm.Serialization;
 

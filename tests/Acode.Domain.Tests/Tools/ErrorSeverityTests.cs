@@ -2,7 +2,6 @@ namespace Acode.Domain.Tests.Tools;
 
 using Acode.Domain.Tools;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for ErrorSeverity enum.

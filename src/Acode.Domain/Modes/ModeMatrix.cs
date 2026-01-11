@@ -59,6 +59,19 @@ public static class ModeMatrix
     }
 
     /// <summary>
+    /// Get all entries for a specific capability across all modes.
+    /// </summary>
+    /// <param name="capability">Capability to filter by.</param>
+    /// <returns>All entries for the capability.</returns>
+    public static IReadOnlyList<MatrixEntry> GetEntriesForCapability(Capability capability)
+    {
+        return _matrix.Values
+            .Where(e => e.Capability == capability)
+            .ToList()
+            .AsReadOnly();
+    }
+
+    /// <summary>
     /// Get all matrix entries.
     /// </summary>
     /// <returns>All mode-capability entries.</returns>

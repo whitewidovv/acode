@@ -1,6 +1,5 @@
 using Acode.Application.Audit;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Application.Tests.Audit;
 

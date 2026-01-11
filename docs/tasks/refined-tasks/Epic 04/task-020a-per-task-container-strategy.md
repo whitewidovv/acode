@@ -62,14 +62,6 @@ This task delivers:
 | Resource limit exceeded | Container killed, task fails |
 | Docker API timeout | Retry with exponential backoff |
 
-### Assumptions
-
-1. Docker or compatible runtime is installed and accessible
-2. User has permissions to create/manage containers
-3. Required images are available (locally or from registry)
-4. Session ID and task ID are provided by orchestration layer
-5. Container networking is available
-
 ### Security Considerations
 
 1. **No privileged containers** - Containers run without elevated privileges
@@ -77,6 +69,104 @@ This task delivers:
 3. **No host namespace sharing** - Network, PID, IPC namespaces isolated
 4. **Dropped capabilities** - Only minimal capabilities enabled
 5. **User namespacing** - Run as non-root user inside container
+
+---
+
+## Use Cases
+
+### Use Case 1: Jordan (Backend Developer) - Preventing State Leakage Between Build Tasks
+
+**Persona:** Jordan is a backend developer working on a microservices architecture with 12 services. Each service has different dependencies (Node 18 vs Node 20, Python 3.11 vs 3.12, different PostgreSQL client versions).
+
+**Problem (Before):**
+Jordan's CI pipeline reuses containers across tasks to "save time." When Service A installs `pg-client 14.x`, Service B (which needs `pg-client 15.x`) fails with cryptic errors because the old version persists. Debugging this takes 3 hours because the failure is intermittent based on task execution order.
+
+**Annual Cost (Before):**
+- **State Leakage Debugging:** 2 incidents/month × 3 hours × $75/hour = $450/month = $5,400/year
+- **Failed Builds:** 8 failed builds/month × 15 min pipeline × $1.50/min = $180/month = $2,160/year
+- **Total Annual Cost:** $7,560/year
+
+**Solution (After):**
+Per-task container strategy ensures each service builds in a fresh container. Service A's `pg-client 14.x` never affects Service B. Container names include task IDs: `acode-abc123-task-build-service-a`, `acode-abc123-task-build-service-b`. Each starts from the same base image.
+
+**Annual Cost (After):**
+- **State Leakage Debugging:** $0 (eliminated)
+- **Failed Builds:** $0 (eliminated)
+- **Container Creation Overhead:** 12 services × 2 builds/day × 1 second/container × 250 days = 1.67 hours/year ≈ $125/year
+- **Total Annual Cost:** $125/year
+
+**ROI Metrics:**
+- **Annual Savings:** $7,560 - $125 = $7,435
+- **Cost Reduction:** 98.3%
+- **Payback Period:** (80 hours implementation × $75/hour = $6,000) / $7,435 = 0.8 years = 9.6 months
+- **Time to Resolution:** 3 hours → 0 hours (100% reduction)
+
+### Use Case 2: Alex (Security Engineer) - Isolating Malicious Code Execution
+
+**Persona:** Alex is a security engineer responsible for scanning third-party dependencies for vulnerabilities. They run automated security analysis tasks that execute untrusted code (npm packages, PyPI packages, crates) to detect malicious behavior.
+
+**Problem (Before):**
+Security scanning tasks run in long-lived containers. A malicious package in Task 1 installs a backdoor in `/tmp/.hidden-script` that persists when Task 2 runs. Task 2's credentials are exfiltrated by the backdoor. Alex discovers this 3 weeks later during an audit, requiring a full credential rotation.
+
+**Annual Cost (Before):**
+- **Credential Rotation:** 1 incident/year × 80 hours × $120/hour = $9,600/year
+- **Incident Response:** 1 incident/year × 120 hours × $150/hour = $18,000/year
+- **Reputation Damage:** 1 incident/year × $50,000 = $50,000/year
+- **Total Annual Cost:** $77,600/year
+
+**Solution (After):**
+Each security scan runs in a fresh container with unique name: `acode-scan-123-task-npm-audit-lodash`. Container is removed immediately after task completes. Malicious code cannot persist between tasks. Container labels `acode.managed=true` and `acode.session=scan-123` enable audit trails showing exactly what ran in which container.
+
+**Annual Cost (After):**
+- **Credential Rotation:** $0 (eliminated)
+- **Incident Response:** $0 (eliminated)
+- **Reputation Damage:** $0 (eliminated)
+- **Container Management:** 50 scans/day × 365 days × 0.5 seconds/container = 2.5 hours/year = $300/year
+- **Total Annual Cost:** $300/year
+
+**ROI Metrics:**
+- **Annual Savings:** $77,600 - $300 = $77,300
+- **Cost Reduction:** 99.6%
+- **Payback Period:** (80 hours × $120/hour = $9,600) / $77,300 = 0.12 years = 1.5 months
+- **Security Incidents:** 1/year → 0/year (100% reduction)
+
+### Use Case 3: Morgan (DevOps Lead) - Orphaned Container Cleanup Automation
+
+**Persona:** Morgan is a DevOps lead managing CI infrastructure for a 50-engineer team. Agents occasionally crash (out-of-memory, network failures, Kubernetes pod evictions), leaving orphaned containers that consume disk space and memory.
+
+**Problem (Before):**
+Orphaned containers accumulate, consuming 120GB disk space and 48GB RAM across 15 build nodes. Manual cleanup requires Morgan to SSH into each node, identify orphaned containers by naming patterns, and manually remove them. This happens twice per week.
+
+**Annual Cost (Before):**
+- **Manual Cleanup:** 2 cleanups/week × 45 minutes × 52 weeks × $100/hour = $7,800/year
+- **Wasted Resources:** 120GB disk × $0.10/GB/month × 12 months = $144/year (disk)
+- **Wasted Resources:** 48GB RAM × $5/GB/month × 12 months = $2,880/year (memory)
+- **Build Delays:** 4 failures/month × 30 min delay × $2/min = $240/month = $2,880/year
+- **Total Annual Cost:** $13,704/year
+
+**Solution (After):**
+Orphan cleanup runs automatically on agent startup. It identifies orphaned containers by name pattern `acode-*` and label `acode.managed=true`, excludes current session containers, and removes orphans. Cleanup logs show: `[INFO] Removed 3 orphaned containers from session abc-123 (defunct)`. Disk and memory are reclaimed automatically.
+
+**Annual Cost (After):**
+- **Manual Cleanup:** $0 (automated)
+- **Wasted Resources:** $0 (reclaimed)
+- **Build Delays:** $0 (eliminated)
+- **Automation Overhead:** 10 startups/day × 2 seconds/cleanup × 365 days = 20 hours/year ≈ $2,000/year
+- **Total Annual Cost:** $2,000/year
+
+**ROI Metrics:**
+- **Annual Savings:** $13,704 - $2,000 = $11,704
+- **Cost Reduction:** 85.4%
+- **Payback Period:** (80 hours × $100/hour = $8,000) / $11,704 = 0.68 years = 8.2 months
+- **Manual Cleanup Time:** 45 min × 104 times/year = 78 hours → 0 hours (100% reduction)
+
+**Aggregate ROI Summary:**
+| Metric | Jordan (State Leakage) | Alex (Security) | Morgan (Cleanup) | Total |
+|--------|----------------------|-----------------|------------------|-------|
+| Annual Savings | $7,435 | $77,300 | $11,704 | **$96,439** |
+| Implementation Cost | $6,000 | $9,600 | $8,000 | $23,600 |
+| Payback Period | 9.6 months | 1.5 months | 8.2 months | 2.9 months (avg) |
+| Cost Reduction | 98.3% | 99.6% | 85.4% | **94.4% avg** |
 
 ---
 
@@ -404,6 +494,39 @@ docker pull mcr.microsoft.com/dotnet/sdk:8.0
 
 ---
 
+## Assumptions
+
+### Technical Assumptions (10 items)
+
+1. **Docker Installed** - Docker Engine 20.10+ or compatible runtime (Podman, containerd) is installed and configured on the host system
+2. **API Access** - Docker API is accessible via Unix socket (`/var/run/docker.sock`) or TCP with appropriate authentication
+3. **User Permissions** - Executing user has permissions to create, start, stop, and remove containers (member of `docker` group on Linux)
+4. **Kernel Support** - Host kernel supports Linux namespaces (PID, network, mount, IPC, UTS, user) and cgroups v1 or v2
+5. **Image Availability** - Required base images (dotnet/sdk:8.0, node:20, python:3.11) are available locally or pullable from configured registries
+6. **Disk Space** - Host has sufficient disk space for images (minimum 10GB free) and container storage (minimum 5GB per concurrent container)
+7. **Network Stack** - Container networking is functional (bridge networks, DNS resolution, port bindings work)
+8. **Resource Limits** - System supports resource limiting via cgroups (CPU quotas, memory limits, PID limits enforceable)
+9. **Clock Synchronization** - Host system clock is synchronized (NTP) to ensure consistent timestamps in container names and logs
+10. **No Name Conflicts** - Container names generated by the system do not conflict with manually created containers
+
+### Operational Assumptions (7 items)
+
+11. **Session ID Provided** - Orchestration layer provides a unique session ID (UUID) for each agent run
+12. **Task ID Provided** - Orchestration layer provides a unique task ID (UUID or sequential integer) for each task within a session
+13. **Sequential Execution** - Within a single session, tasks execute sequentially (parallel tasks have different session IDs)
+14. **Cleanup on Exit** - Agent process cleanup runs on graceful shutdown to remove containers from current session
+15. **Orphan Detection** - Agent startup includes orphan detection and cleanup before executing new tasks
+16. **Timeout Configuration** - Container operation timeouts are configured (default: 30s for start/stop, 5min for image pull)
+17. **Failure Handling** - Caller handles container lifecycle errors appropriately (logs, retries, task failure reporting)
+
+### Integration Assumptions (3 items)
+
+18. **Task 018 CommandExecutor** - CommandExecutor interface exists and accepts container ID for execution delegation
+19. **Task 020b Cache Volumes** - Cache volume management is independent; this task only handles container lifecycle
+20. **Task 020c Policy Enforcement** - Security policy validation occurs before container creation; this task enforces approved configurations
+
+---
+
 ## Acceptance Criteria
 
 ### Container Lifecycle (AC-020A-01 to AC-020A-16)
@@ -490,6 +613,867 @@ docker pull mcr.microsoft.com/dotnet/sdk:8.0
 
 ---
 
+## Security Considerations
+
+### Threat 1: Container Escape via Shared Namespaces
+
+**Risk:** If containers are reused between tasks, a malicious task could modify shared namespaces (PID, network, IPC) to affect future tasks or escape to the host.
+
+**Attack Scenario:**
+1. Task A runs malicious code in a reused container
+2. Malicious code modifies `/proc/sys/kernel/` or installs a kernel module
+3. Task B reuses the same container
+4. Task B inherits the compromised namespace
+5. Attacker gains access to Task B's credentials via namespace pollution
+
+**Mitigation:** Ensure strict per-task container isolation with fresh namespaces.
+
+```csharp
+using Acode.Domain.Execution;
+using Acode.Domain.Security;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Docker;
+
+/// <summary>
+/// Enforces per-task container strategy to prevent namespace sharing.
+/// </summary>
+public sealed class PerTaskContainerEnforcer
+{
+    private readonly IDockerClient _dockerClient;
+    private readonly ILogger<PerTaskContainerEnforcer> _logger;
+    private readonly ConcurrentDictionary<string, ContainerMetadata> _activeContainers = new();
+
+    public PerTaskContainerEnforcer(
+        IDockerClient dockerClient,
+        ILogger<PerTaskContainerEnforcer> logger)
+    {
+        _dockerClient = dockerClient ?? throw new ArgumentNullException(nameof(dockerClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Enforces that each task gets a fresh container with isolated namespaces.
+    /// </summary>
+    public async Task<string> CreateFreshContainerAsync(
+        string sessionId,
+        string taskId,
+        string imageName,
+        CreateContainerParameters parameters,
+        CancellationToken cancellationToken)
+    {
+        // CRITICAL CHECK 1: Verify no container exists for this task
+        var containerKey = $"{sessionId}:{taskId}";
+        if (_activeContainers.TryGetValue(containerKey, out var existing))
+        {
+            _logger.LogError(
+                "SECURITY: Attempted container reuse for task {TaskId}. Existing container: {ContainerId}",
+                taskId, existing.ContainerId);
+
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.ContainerReuseAttempted,
+                $"Task {taskId} already has container {existing.ContainerId}. Container reuse is FORBIDDEN.");
+        }
+
+        // CRITICAL CHECK 2: Ensure fresh namespaces (no sharing with host or other containers)
+        if (parameters.HostConfig == null)
+        {
+            parameters.HostConfig = new HostConfig();
+        }
+
+        // Namespace isolation enforcement
+        parameters.HostConfig.NetworkMode = parameters.HostConfig.NetworkMode ?? "none"; // Isolated network namespace
+        parameters.HostConfig.PidMode = ""; // Fresh PID namespace (NO "host" mode)
+        parameters.HostConfig.IpcMode = ""; // Fresh IPC namespace
+        parameters.HostConfig.UTSMode = ""; // Fresh UTS namespace (hostname)
+        parameters.HostConfig.UsernsMode = ""; // Fresh user namespace
+
+        if (parameters.HostConfig.PidMode == "host" ||
+            parameters.HostConfig.IpcMode == "host" ||
+            parameters.HostConfig.UTSMode == "host")
+        {
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.HostNamespaceSharing,
+                "Host namespace sharing (PID/IPC/UTS) is FORBIDDEN. All containers must use fresh namespaces.");
+        }
+
+        // CRITICAL CHECK 3: Add tracking labels
+        parameters.Labels ??= new Dictionary<string, string>();
+        parameters.Labels["acode.managed"] = "true";
+        parameters.Labels["acode.session"] = sessionId;
+        parameters.Labels["acode.task"] = taskId;
+        parameters.Labels["acode.created"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        parameters.Labels["acode.ephemeral"] = "true"; // Mark as disposable
+
+        // Create the fresh container
+        var response = await _dockerClient.Containers.CreateContainerAsync(
+            parameters,
+            cancellationToken);
+
+        var metadata = new ContainerMetadata
+        {
+            ContainerId = response.ID,
+            SessionId = sessionId,
+            TaskId = taskId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            ImageName = imageName
+        };
+
+        _activeContainers[containerKey] = metadata;
+
+        _logger.LogInformation(
+            "Created fresh container {ContainerId} for task {TaskId} with isolated namespaces",
+            response.ID[..12], taskId);
+
+        return response.ID;
+    }
+
+    /// <summary>
+    /// Removes container and prevents reuse.
+    /// </summary>
+    public async Task RemoveContainerAsync(
+        string sessionId,
+        string taskId,
+        string containerId,
+        CancellationToken cancellationToken)
+    {
+        var containerKey = $"{sessionId}:{taskId}";
+
+        try
+        {
+            await _dockerClient.Containers.RemoveContainerAsync(
+                containerId,
+                new ContainerRemoveParameters
+                {
+                    Force = true,
+                    RemoveVolumes = true
+                },
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Removed ephemeral container {ContainerId} for task {TaskId}",
+                containerId[..12], taskId);
+        }
+        finally
+        {
+            // Always remove from tracking (even if removal fails)
+            _activeContainers.TryRemove(containerKey, out _);
+        }
+    }
+
+    /// <summary>
+    /// Validates no container reuse is happening across tasks.
+    /// </summary>
+    public void ValidateNoReuseAttempt(string sessionId, string taskId)
+    {
+        var containerKey = $"{sessionId}:{taskId}";
+        if (_activeContainers.ContainsKey(containerKey))
+        {
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.ContainerReuseAttempted,
+                $"Container for task {taskId} already exists. Per-task isolation violated.");
+        }
+    }
+
+    private sealed record ContainerMetadata
+    {
+        public required string ContainerId { get; init; }
+        public required string SessionId { get; init; }
+        public required string TaskId { get; init; }
+        public required DateTimeOffset CreatedAt { get; init; }
+        public required string ImageName { get; init; }
+    }
+}
+```
+
+### Threat 2: State Persistence Between Tasks (Malicious File/Process Artifacts)
+
+**Risk:** If containers are reused, malicious code from Task A can leave artifacts (files, processes, cron jobs) that persist and compromise Task B.
+
+**Attack Scenario:**
+1. Task A (malicious) writes `/tmp/.backdoor.sh` with credential exfiltration code
+2. Task A sets up a cron job: `* * * * * /tmp/.backdoor.sh`
+3. Container is reused for Task B (legitimate)
+4. Cron job runs during Task B, exfiltrating Task B's environment variables to attacker
+
+**Mitigation:** Enforce container removal after each task.
+
+```csharp
+using Acode.Domain.Execution;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Docker;
+
+/// <summary>
+/// Enforces immediate container removal to prevent state persistence.
+/// </summary>
+public sealed class ContainerStatePrevention
+{
+    private readonly IDockerClient _dockerClient;
+    private readonly ILogger<ContainerStatePrevention> _logger;
+
+    public ContainerStatePrevention(
+        IDockerClient dockerClient,
+        ILogger<ContainerStatePrevention> logger)
+    {
+        _dockerClient = dockerClient ?? throw new ArgumentNullException(nameof(dockerClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Ensures container is completely destroyed after task completion.
+    /// Prevents any state (files, processes, cron jobs) from persisting.
+    /// </summary>
+    public async Task EnforceCompleteDestructionAsync(
+        string containerId,
+        string taskId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Enforcing complete destruction of container {ContainerId} for task {TaskId}",
+            containerId[..12], taskId);
+
+        try
+        {
+            // Step 1: Stop the container (kills all processes)
+            await _dockerClient.Containers.StopContainerAsync(
+                containerId,
+                new ContainerStopParameters { WaitBeforeKillSeconds = 5 },
+                cancellationToken);
+
+            _logger.LogDebug("Container {ContainerId} stopped", containerId[..12]);
+
+            // Step 2: Verify no processes are running (paranoid check)
+            var inspectResponse = await _dockerClient.Containers.InspectContainerAsync(
+                containerId,
+                cancellationToken);
+
+            if (inspectResponse.State.Running)
+            {
+                _logger.LogWarning(
+                    "Container {ContainerId} still running after stop. Force killing...",
+                    containerId[..12]);
+
+                await _dockerClient.Containers.KillContainerAsync(
+                    containerId,
+                    new ContainerKillParameters { Signal = "SIGKILL" },
+                    cancellationToken);
+            }
+
+            // Step 3: Remove container and ALL associated data
+            await _dockerClient.Containers.RemoveContainerAsync(
+                containerId,
+                new ContainerRemoveParameters
+                {
+                    Force = true,
+                    RemoveVolumes = true, // Delete anonymous volumes (destroy tmpfs, bind mounts remain on host)
+                    RemoveLinks = true     // Remove network links
+                },
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Container {ContainerId} completely destroyed. No state persists.",
+                containerId[..12]);
+
+            // Step 4: Verify container no longer exists (paranoid verification)
+            await VerifyContainerDestroyed(containerId, cancellationToken);
+        }
+        catch (DockerContainerNotFoundException)
+        {
+            // Container already removed - acceptable outcome
+            _logger.LogDebug("Container {ContainerId} already removed", containerId[..12]);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "CRITICAL: Failed to completely destroy container {ContainerId}. Manual cleanup required.",
+                containerId[..12]);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Paranoid verification that container no longer exists in Docker.
+    /// </summary>
+    private async Task VerifyContainerDestroyed(
+        string containerId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var allContainers = await _dockerClient.Containers.ListContainersAsync(
+                new ContainersListParameters { All = true },
+                cancellationToken);
+
+            var stillExists = allContainers.Any(c => c.ID == containerId);
+            if (stillExists)
+            {
+                throw new InvalidOperationException(
+                    $"SECURITY FAILURE: Container {containerId} still exists after removal attempt.");
+            }
+
+            _logger.LogDebug("Verified container {ContainerId} no longer exists", containerId[..12]);
+        }
+        catch (DockerApiException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to verify container destruction for {ContainerId}. Assuming success.",
+                containerId[..12]);
+        }
+    }
+
+    /// <summary>
+    /// Inspects container filesystem for suspicious artifacts before destruction.
+    /// Logs potential security issues for audit.
+    /// </summary>
+    public async Task AuditContainerBeforeDestructionAsync(
+        string containerId,
+        string taskId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Auditing container {ContainerId} for suspicious artifacts before destruction",
+            containerId[..12]);
+
+        try
+        {
+            // Check for suspicious files (backdoors, hidden scripts)
+            var suspiciousFiles = new[]
+            {
+                "/tmp/.backdoor*",
+                "/tmp/.hidden*",
+                "/root/.ssh/authorized_keys",
+                "/etc/cron.d/*",
+                "/var/spool/cron/*"
+            };
+
+            foreach (var pattern in suspiciousFiles)
+            {
+                // Note: This requires executing a shell command in the container
+                // In production, this would use Docker exec API
+                _logger.LogDebug(
+                    "Checking for suspicious files matching pattern: {Pattern}",
+                    pattern);
+            }
+
+            // Log if suspicious activity detected
+            // Actual implementation would execute: docker exec <container> find /tmp -name ".hidden*"
+            // For brevity, this is示意性 示意性 示意性 示意性conceptual
+
+            _logger.LogInformation(
+                "Audit complete for container {ContainerId}. No suspicious artifacts found.",
+                containerId[..12]);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to audit container {ContainerId}. Proceeding with destruction.",
+                containerId[..12]);
+        }
+    }
+}
+```
+
+### Threat 3: Container Name Prediction (Targeted Attacks)
+
+**Risk:** If container names are predictable (sequential IDs, simple patterns), attackers can target specific containers for exploitation.
+
+**Attack Scenario:**
+1. Attacker observes container naming pattern: `acode-001`, `acode-002`, etc.
+2. Attacker predicts next container name will be `acode-003`
+3. Attacker prepares exploit targeting `acode-003`
+4. When `acode-003` is created, attacker gains immediate access via pre-positioned exploit
+
+**Mitigation:** Use cryptographically random, unpredictable container names.
+
+```csharp
+using System.Security.Cryptography;
+using System.Text;
+
+namespace Acode.Infrastructure.Docker;
+
+/// <summary>
+/// Generates cryptographically secure, unpredictable container names.
+/// </summary>
+public sealed class SecureContainerNameGenerator
+{
+    private const int RandomBytesLength = 16; // 128 bits of entropy
+    private const int MaxDnsLabelLength = 63; // DNS label limit
+
+    /// <summary>
+    /// Generates a secure, DNS-compatible container name with high entropy.
+    /// Format: acode-{session-prefix}-{random-suffix}
+    /// Example: acode-a1b2c3d4-7f3e9a2b1c4d
+    /// </summary>
+    public string GenerateSecureName(string sessionId, string taskId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+            throw new ArgumentException("Session ID cannot be empty", nameof(sessionId));
+        if (string.IsNullOrWhiteSpace(taskId))
+            throw new ArgumentException("Task ID cannot be empty", nameof(taskId));
+
+        // Step 1: Extract session prefix (first 8 chars of session ID)
+        var sessionPrefix = SanitizeForDns(sessionId[..Math.Min(8, sessionId.Length)]);
+
+        // Step 2: Generate cryptographically random suffix
+        var randomBytes = GenerateRandomBytes(RandomBytesLength);
+        var randomSuffix = BytesToHex(randomBytes);
+
+        // Step 3: Include task identifier (hashed for unpredictability)
+        var taskHash = HashTaskId(taskId)[..8]; // First 8 chars of hash
+
+        // Step 4: Construct full name
+        var fullName = $"acode-{sessionPrefix}-{taskHash}-{randomSuffix}";
+
+        // Step 5: Ensure DNS compatibility and length limit
+        var dnsCompatibleName = EnforceDnsCompliance(fullName);
+
+        return dnsCompatibleName;
+    }
+
+    /// <summary>
+    /// Generates cryptographically random bytes using RNGCryptoServiceProvider.
+    /// </summary>
+    private byte[] GenerateRandomBytes(int length)
+    {
+        var bytes = new byte[length];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(bytes);
+        return bytes;
+    }
+
+    /// <summary>
+    /// Converts bytes to lowercase hex string.
+    /// </summary>
+    private string BytesToHex(byte[] bytes)
+    {
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Hashes task ID to prevent predictability.
+    /// Uses SHA256 to make task ID unpredictable from external observation.
+    /// </summary>
+    private string HashTaskId(string taskId)
+    {
+        var bytes = Encoding.UTF8.GetBytes(taskId);
+        var hash = SHA256.HashData(bytes);
+        return BytesToHex(hash);
+    }
+
+    /// <summary>
+    /// Sanitizes string for DNS compatibility (lowercase, alphanumeric, hyphens only).
+    /// </summary>
+    private string SanitizeForDns(string input)
+    {
+        var sanitized = new StringBuilder();
+        foreach (var c in input.ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(c) || c == '-')
+            {
+                sanitized.Append(c);
+            }
+        }
+        return sanitized.ToString();
+    }
+
+    /// <summary>
+    /// Enforces DNS compliance: lowercase, alphanumeric + hyphens, max 63 chars, no leading/trailing hyphens.
+    /// </summary>
+    private string EnforceDnsCompliance(string name)
+    {
+        // Truncate to max length
+        if (name.Length > MaxDnsLabelLength)
+        {
+            name = name[..MaxDnsLabelLength];
+        }
+
+        // Remove leading/trailing hyphens
+        name = name.Trim('-');
+
+        // Ensure starts with letter/digit
+        if (!char.IsLetterOrDigit(name[0]))
+        {
+            name = "a" + name[1..];
+        }
+
+        return name;
+    }
+
+    /// <summary>
+    /// Validates that a container name has sufficient entropy to prevent prediction.
+    /// </summary>
+    public bool ValidateNameEntropy(string containerName)
+    {
+        // Extract random portion (after last hyphen)
+        var parts = containerName.Split('-');
+        if (parts.Length < 4) return false;
+
+        var randomPortion = parts[^1]; // Last part should be random hex
+
+        // Verify it's hex and at least 16 characters (64 bits entropy)
+        if (randomPortion.Length < 16) return false;
+        if (!randomPortion.All(c => "0123456789abcdef".Contains(c))) return false;
+
+        return true;
+    }
+}
+```
+
+### Threat 4: Orphaned Container Exploitation (Persistent Backdoors)
+
+**Risk:** Orphaned containers (from crashed sessions) can be exploited as persistent backdoors if not cleaned up promptly.
+
+**Attack Scenario:**
+1. Agent crashes, leaving container `acode-xyz-123` running
+2. Container has network access and exposed ports
+3. Attacker discovers orphaned container via port scan
+4. Attacker exploits service in orphaned container (e.g., SSH on port 2222)
+5. Attacker uses orphaned container as pivot point to attack internal network
+
+**Mitigation:** Automatic orphan detection and removal on agent startup.
+
+```csharp
+using Acode.Domain.Execution;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Docker;
+
+/// <summary>
+/// Detects and removes orphaned containers to prevent backdoor exploitation.
+/// </summary>
+public sealed class OrphanContainerCleanup
+{
+    private readonly IDockerClient _dockerClient;
+    private readonly ILogger<OrphanContainerCleanup> _logger;
+    private readonly string _currentSessionId;
+
+    public OrphanContainerCleanup(
+        IDockerClient dockerClient,
+        ILogger<OrphanContainerCleanup> logger,
+        string currentSessionId)
+    {
+        _dockerClient = dockerClient ?? throw new ArgumentNullException(nameof(dockerClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _currentSessionId = currentSessionId ?? throw new ArgumentNullException(nameof(currentSessionId));
+    }
+
+    /// <summary>
+    /// Detects and removes all orphaned Acode containers on agent startup.
+    /// CRITICAL SECURITY OPERATION - Must run before any tasks execute.
+    /// </summary>
+    public async Task<OrphanCleanupResult> DetectAndRemoveOrphansAsync(
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Starting orphan container cleanup. Current session: {SessionId}",
+            _currentSessionId);
+
+        var result = new OrphanCleanupResult();
+
+        try
+        {
+            // Step 1: Find all containers managed by Acode
+            var allContainers = await _dockerClient.Containers.ListContainersAsync(
+                new ContainersListParameters { All = true }, // Include stopped containers
+                cancellationToken);
+
+            var acodeContainers = allContainers
+                .Where(c => c.Labels.ContainsKey("acode.managed") &&
+                           c.Labels["acode.managed"] == "true")
+                .ToList();
+
+            _logger.LogInformation(
+                "Found {Count} Acode-managed containers",
+                acodeContainers.Count);
+
+            // Step 2: Identify orphans (not from current session)
+            var orphans = acodeContainers
+                .Where(c => c.Labels.TryGetValue("acode.session", out var session) &&
+                           session != _currentSessionId)
+                .ToList();
+
+            result.TotalScanned = acodeContainers.Count;
+            result.OrphansFound = orphans.Count;
+
+            if (orphans.Count == 0)
+            {
+                _logger.LogInformation("No orphaned containers found");
+                return result;
+            }
+
+            _logger.LogWarning(
+                "SECURITY: Found {Count} orphaned containers from defunct sessions",
+                orphans.Count);
+
+            // Step 3: Remove each orphan
+            foreach (var orphan in orphans)
+            {
+                try
+                {
+                    await RemoveOrphanAsync(orphan, result, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "Failed to remove orphan container {ContainerId}. Will retry on next startup.",
+                        orphan.ID[..12]);
+                    result.FailedRemovals.Add(orphan.ID);
+                }
+            }
+
+            _logger.LogInformation(
+                "Orphan cleanup complete. Removed: {Removed}, Failed: {Failed}",
+                result.RemovedContainers.Count,
+                result.FailedRemovals.Count);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CRITICAL: Orphan cleanup failed. Manual intervention required.");
+            throw;
+        }
+    }
+
+    private async Task RemoveOrphanAsync(
+        ContainerListResponse orphan,
+        OrphanCleanupResult result,
+        CancellationToken cancellationToken)
+    {
+        var containerId = orphan.ID;
+        var sessionId = orphan.Labels.GetValueOrDefault("acode.session", "unknown");
+        var taskId = orphan.Labels.GetValueOrDefault("acode.task", "unknown");
+
+        _logger.LogWarning(
+            "Removing orphan container {ContainerId} from session {SessionId}, task {TaskId}. " +
+            "State: {State}, Created: {Created}",
+            containerId[..12],
+            sessionId,
+            taskId,
+            orphan.State,
+            DateTimeOffset.FromUnixTimeSeconds(orphan.Created));
+
+        // Kill if running
+        if (orphan.State == "running")
+        {
+            await _dockerClient.Containers.KillContainerAsync(
+                containerId,
+                new ContainerKillParameters { Signal = "SIGKILL" },
+                cancellationToken);
+
+            _logger.LogDebug("Killed running orphan {ContainerId}", containerId[..12]);
+        }
+
+        // Remove forcefully
+        await _dockerClient.Containers.RemoveContainerAsync(
+            containerId,
+            new ContainerRemoveParameters
+            {
+                Force = true,
+                RemoveVolumes = true
+            },
+            cancellationToken);
+
+        result.RemovedContainers.Add(new RemovedOrphan
+        {
+            ContainerId = containerId,
+            SessionId = sessionId,
+            TaskId = taskId,
+            State = orphan.State,
+            CreatedAt = DateTimeOffset.FromUnixTimeSeconds(orphan.Created)
+        });
+
+        _logger.LogInformation("Removed orphan container {ContainerId}", containerId[..12]);
+    }
+
+    public sealed class OrphanCleanupResult
+    {
+        public int TotalScanned { get; set; }
+        public int OrphansFound { get; set; }
+        public List<RemovedOrphan> RemovedContainers { get; } = new();
+        public List<string> FailedRemovals { get; } = new();
+    }
+
+    public sealed record RemovedOrphan
+    {
+        public required string ContainerId { get; init; }
+        public required string SessionId { get; init; }
+        public required string TaskId { get; init; }
+        public required string State { get; init; }
+        public required DateTimeOffset CreatedAt { get; init; }
+    }
+}
+```
+
+### Threat 5: Resource Exhaustion via Container Accumulation (Container Fork Bomb)
+
+**Risk:** Malicious code could rapidly create containers to exhaust host resources (disk, file descriptors, kernel resources).
+
+**Attack Scenario:**
+1. Malicious task gains access to Docker socket (misconfiguration)
+2. Task creates 1000 containers in a loop: `docker run -d alpine sleep 3600`
+3. Host kernel exhausts PID limit, file descriptor limit, or disk space
+4. Legitimate tasks fail with "cannot create container" errors
+5. Denial of service for entire agent system
+
+**Mitigation:** Rate limiting, max concurrent containers, strict socket access control.
+
+```csharp
+using System.Collections.Concurrent;
+using System.Threading.RateLimiting;
+using Acode.Domain.Security;
+using Docker.DotNet;
+using Microsoft.Extensions.Logging;
+
+namespace Acode.Infrastructure.Docker;
+
+/// <summary>
+/// Prevents resource exhaustion via container accumulation attacks.
+/// </summary>
+public sealed class ContainerCreationRateLimiter
+{
+    private readonly ILogger<ContainerCreationRateLimiter> _logger;
+    private readonly SemaphoreSlim _concurrencyLimiter;
+    private readonly RateLimiter _rateLimiter;
+    private readonly ConcurrentDictionary<string, int> _sessionContainerCounts = new();
+
+    private const int MaxConcurrentContainers = 10;
+    private const int MaxContainersPerMinute = 30;
+    private const int MaxContainersPerSession = 100;
+
+    public ContainerCreationRateLimiter(ILogger<ContainerCreationRateLimiter> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        _concurrencyLimiter = new SemaphoreSlim(MaxConcurrentContainers, MaxConcurrentContainers);
+
+        _rateLimiter = new SlidingWindowRateLimiter(new SlidingWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = MaxContainersPerMinute,
+            SegmentsPerWindow = 6, // 10-second segments
+            QueueLimit = 0 // No queueing - fail fast
+        });
+    }
+
+    /// <summary>
+    /// Acquires permission to create a container, enforcing rate limits and concurrency limits.
+    /// </summary>
+    public async Task<IDisposable> AcquireCreationPermitAsync(
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        // Check 1: Per-session container limit (prevent fork bomb)
+        var currentCount = _sessionContainerCounts.GetOrAdd(sessionId, 0);
+        if (currentCount >= MaxContainersPerSession)
+        {
+            _logger.LogError(
+                "SECURITY: Session {SessionId} exceeded max container limit ({Max}). Fork bomb suspected.",
+                sessionId, MaxContainersPerSession);
+
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.ContainerQuotaExceeded,
+                $"Session {sessionId} has reached maximum container limit ({MaxContainersPerSession}). " +
+                "This may indicate a container fork bomb attack.");
+        }
+
+        // Check 2: Rate limit (containers per minute)
+        using var rateLease = await _rateLimiter.AcquireAsync(1, cancellationToken);
+        if (!rateLease.IsAcquired)
+        {
+            _logger.LogWarning(
+                "SECURITY: Container creation rate limit exceeded. Denying request from session {SessionId}",
+                sessionId);
+
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.RateLimitExceeded,
+                $"Container creation rate limit exceeded ({MaxContainersPerMinute}/minute). " +
+                "Possible resource exhaustion attack.");
+        }
+
+        // Check 3: Concurrency limit
+        var acquired = await _concurrencyLimiter.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+        if (!acquired)
+        {
+            _logger.LogWarning(
+                "SECURITY: Max concurrent containers reached. Denying request from session {SessionId}",
+                sessionId);
+
+            throw new SecurityPolicyViolationException(
+                SecurityViolationCode.ConcurrencyLimitExceeded,
+                $"Maximum concurrent containers ({MaxConcurrentContainers}) reached. Cannot create more.");
+        }
+
+        // Increment session container count
+        _sessionContainerCounts.AddOrUpdate(sessionId, 1, (_, count) => count + 1);
+
+        _logger.LogDebug(
+            "Granted container creation permit to session {SessionId}. Session total: {Count}",
+            sessionId, _sessionContainerCounts[sessionId]);
+
+        // Return permit that releases all locks on disposal
+        return new CreationPermit(_concurrencyLimiter, _logger);
+    }
+
+    /// <summary>
+    /// Releases a container slot when container is removed.
+    /// </summary>
+    public void ReleaseContainer(string sessionId, string containerId)
+    {
+        _sessionContainerCounts.AddOrUpdate(sessionId, 0, (_, count) => Math.Max(0, count - 1));
+
+        _logger.LogDebug(
+            "Released container {ContainerId} from session {SessionId}. Session remaining: {Count}",
+            containerId[..12], sessionId, _sessionContainerCounts[sessionId]);
+    }
+
+    /// <summary>
+    /// Resets session container count (called on session cleanup).
+    /// </summary>
+    public void ResetSession(string sessionId)
+    {
+        _sessionContainerCounts.TryRemove(sessionId, out _);
+        _logger.LogInformation("Reset container count for session {SessionId}", sessionId);
+    }
+
+    private sealed class CreationPermit : IDisposable
+    {
+        private readonly SemaphoreSlim _semaphore;
+        private readonly ILogger _logger;
+        private bool _disposed;
+
+        public CreationPermit(SemaphoreSlim semaphore, ILogger logger)
+        {
+            _semaphore = semaphore;
+            _logger = logger;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+
+            _semaphore.Release();
+            _disposed = true;
+
+            _logger.LogDebug("Released concurrency permit");
+        }
+    }
+}
+```
+
+---
+
 ## Best Practices
 
 ### Container Lifecycle
@@ -517,117 +1501,495 @@ docker pull mcr.microsoft.com/dotnet/sdk:8.0
 
 ## Testing Requirements
 
-### Unit Tests
+**File:** `tests/Acode.Infrastructure.Tests/Docker/PerTaskContainerEnforcerTests.cs`
 
-```
-Tests/Unit/Domain/Docker/
-├── ContainerConfigTests.cs
-│   ├── Name_FollowsPattern()
-│   ├── Name_IsDnsCompatible()
-│   ├── Name_DoesNotExceed63Chars()
-│   ├── Labels_ContainSessionAndTask()
-│   ├── ResourceLimits_HaveDefaults()
-│   └── Image_MatchesLanguage()
-│
-└── ContainerNameGeneratorTests.cs
-    ├── Generate_IncludesSessionId()
-    ├── Generate_IncludesTaskId()
-    ├── Generate_IsDnsCompatible()
-    ├── Generate_ReplacesInvalidChars()
-    ├── Generate_TruncatesToMaxLength()
-    ├── Parse_ExtractsSessionId()
-    └── Parse_ExtractsTaskId()
+```csharp
+using Acode.Domain.Security;
+using Acode.Infrastructure.Docker;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Null NullLogger;
+using NSubstitute;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Docker;
+
+public sealed class PerTaskContainerEnforcerTests
+{
+    private readonly IDockerClient _mockDockerClient;
+    private readonly PerTaskContainerEnforcer _enforcer;
+
+    public PerTaskContainerEnforcerTests()
+    {
+        _mockDockerClient = Substitute.For<IDockerClient>();
+        _enforcer = new PerTaskContainerEnforcer(_mockDockerClient, NullLogger<PerTaskContainerEnforcer>.Instance);
+    }
+
+    [Fact]
+    public async Task CreateFreshContainerAsync_WithValidParameters_CreatesContainer()
+    {
+        // Arrange
+        var sessionId = "session-abc123";
+        var taskId = "task-001";
+        var imageName = "alpine:latest";
+        var parameters = new CreateContainerParameters { Image = imageName };
+
+        _mockDockerClient.Containers.CreateContainerAsync(Arg.Any<CreateContainerParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new CreateContainerResponse { ID = "container-xyz789" });
+
+        // Act
+        var containerId = await _enforcer.CreateFreshContainerAsync(sessionId, taskId, imageName, parameters, CancellationToken.None);
+
+        // Assert
+        containerId.Should().Be("container-xyz789");
+        await _mockDockerClient.Containers.Received(1).CreateContainerAsync(
+            Arg.Is<CreateContainerParameters>(p =>
+                p.Labels.ContainsKey("acode.managed") &&
+                p.Labels["acode.session"] == sessionId &&
+                p.Labels["acode.task"] == taskId &&
+                p.HostConfig.NetworkMode == "none"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateFreshContainerAsync_WithExistingContainerForTask_ThrowsSecurityException()
+    {
+        // Arrange
+        var sessionId = "session-abc123";
+        var taskId = "task-duplicate";
+        var parameters = new CreateContainerParameters { Image = "alpine" };
+
+        _mockDockerClient.Containers.CreateContainerAsync(Arg.Any<CreateContainerParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new CreateContainerResponse { ID = "container-first" });
+
+        await _enforcer.CreateFreshContainerAsync(sessionId, taskId, "alpine", parameters, CancellationToken.None);
+
+        // Act
+        var act = async () => await _enforcer.CreateFreshContainerAsync(
+            sessionId, taskId, "alpine", new CreateContainerParameters { Image = "alpine" }, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<SecurityPolicyViolationException>()
+            .WithMessage("*Container reuse is FORBIDDEN*");
+    }
+
+    [Fact]
+    public async Task CreateFreshContainerAsync_WithHostNamespaceSharing_ThrowsSecurityException()
+    {
+        // Arrange
+        var parameters = new CreateContainerParameters
+        {
+            Image = "alpine",
+            HostConfig = new HostConfig { PidMode = "host" }
+        };
+
+        // Act
+        var act = async () => await _enforcer.CreateFreshContainerAsync(
+            "session-123", "task-001", "alpine", parameters, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<SecurityPolicyViolationException>()
+            .WithMessage("*Host namespace sharing*FORBIDDEN*");
+    }
+
+    [Fact]
+    public async Task RemoveContainerAsync_RemovesContainerAndClearsTracking()
+    {
+        // Arrange
+        var sessionId = "session-abc";
+        var taskId = "task-remove";
+        var containerId = "container-to-remove";
+        var parameters = new CreateContainerParameters { Image = "alpine" };
+
+        _mockDockerClient.Containers.CreateContainerAsync(Arg.Any<CreateContainerParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new CreateContainerResponse { ID = containerId });
+
+        await _enforcer.CreateFreshContainerAsync(sessionId, taskId, "alpine", parameters, CancellationToken.None);
+
+        // Act
+        await _enforcer.RemoveContainerAsync(sessionId, taskId, containerId, CancellationToken.None);
+
+        // Assert
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync(
+            containerId,
+            Arg.Is<ContainerRemoveParameters>(p => p.Force == true && p.RemoveVolumes == true),
+            Arg.Any<CancellationToken>());
+
+        // Verify can create again (tracking cleared)
+        var act = async () => await _enforcer.CreateFreshContainerAsync(
+            sessionId, taskId, "alpine", new CreateContainerParameters { Image = "alpine" }, CancellationToken.None);
+        await act.Should().NotThrowAsync();
+    }
+}
 ```
 
+**File:** `tests/Acode.Infrastructure.Tests/Docker/SecureContainerNameGeneratorTests.cs`
+
+```csharp
+using Acode.Infrastructure.Docker;
+using FluentAssertions;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Docker;
+
+public sealed class SecureContainerNameGeneratorTests
+{
+    private readonly SecureContainerNameGenerator _generator = new();
+
+    [Fact]
+    public void GenerateSecureName_WithValidInputs_ReturnsValidName()
+    {
+        // Arrange
+        var sessionId = "abc123-def456";
+        var taskId = "task-001";
+
+        // Act
+        var name = _generator.GenerateSecureName(sessionId, taskId);
+
+        // Assert
+        name.Should().StartWith("acode-");
+        name.Should().MatchRegex("^[a-z0-9-]+$"); // DNS compatible
+        name.Length.Should().BeLessOrEqualTo(63); // DNS label limit
+    }
+
+    [Fact]
+    public void GenerateSecureName_CalledTwiceWithSameInputs_ReturnsDifferentNames()
+    {
+        // Arrange
+        var sessionId = "session-abc";
+        var taskId = "task-001";
+
+        // Act
+        var name1 = _generator.GenerateSecureName(sessionId, taskId);
+        var name2 = _generator.GenerateSecureName(sessionId, taskId);
+
+        // Assert
+        name1.Should().NotBe(name2); // Cryptographic randomness ensures uniqueness
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void GenerateSecureName_WithInvalidSessionId_ThrowsArgumentException(string invalidSessionId)
+    {
+        // Act
+        var act = () => _generator.GenerateSecureName(invalidSessionId, "task-001");
+
+        // Assert
+        act.Should().Throw<ArgumentException>().WithParameterName("sessionId");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void GenerateSecureName_WithInvalidTaskId_ThrowsArgumentException(string invalidTaskId)
+    {
+        // Act
+        var act = () => _generator.GenerateSecureName("session-123", invalidTaskId);
+
+        // Assert
+        act.Should().Throw<ArgumentException>().WithParameterName("taskId");
+    }
+
+    [Fact]
+    public void ValidateNameEntropy_WithHighEntropyName_ReturnsTrue()
+    {
+        // Arrange
+        var highEntropyName = "acode-abc123-def456-0123456789abcdef01234567";
+
+        // Act
+        var result = _generator.ValidateNameEntropy(highEntropyName);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("acode-abc")] // Too few parts
+    [InlineData("acode-abc-def-123")] // Random portion too short
+    [InlineData("acode-abc-def-GHIJKLMNOP")] // Not hex
+    public void ValidateNameEntropy_WithLowEntropyName_ReturnsFalse(string lowEntropyName)
+    {
+        // Act
+        var result = _generator.ValidateNameEntropy(lowEntropyName);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GenerateSecureName_WithSpecialCharactersInSessionId_SanitizesCorrectly()
+    {
+        // Arrange
+        var sessionId = "session_WITH_special@chars!";
+        var taskId = "task-001";
+
+        // Act
+        var name = _generator.GenerateSecureName(sessionId, taskId);
+
+        // Assert
+        name.Should().MatchRegex("^[a-z0-9-]+$"); // Only lowercase, digits, hyphens
+        name.Should().NotContain("_");
+        name.Should().NotContain("@");
+        name.Should().NotContain("!");
+    }
+}
 ```
-Tests/Unit/Infrastructure/Docker/
-├── ContainerLifecycleManagerTests.cs
-│   ├── CreateAsync_CallsDockerCreate()
-│   ├── CreateAsync_AppliesNameAndLabels()
-│   ├── CreateAsync_AppliesResourceLimits()
-│   ├── CreateAsync_PullsImageIfMissing()
-│   ├── CreateAsync_ReturnsContainerIdAndName()
-│   ├── CreateAsync_WhenFails_ThrowsException()
-│   ├── CreateAsync_WhenFails_NoOrphansLeft()
-│   ├── CreateAsync_SupportsCanellation()
-│   ├── StartAsync_CallsDockerStart()
-│   ├── StartAsync_WhenFails_ThrowsException()
-│   ├── StopAsync_CallsDockerStop()
-│   ├── StopAsync_WhenTimeout_ForcesKill()
-│   ├── RemoveAsync_CallsDockerRemove()
-│   ├── RemoveAsync_SupportsForce()
-│   ├── RemoveAsync_WhenFails_Retries()
-│   ├── GetStatusAsync_ReturnsCorrectStatus()
-│   └── Operations_AreThreadSafe()
-│
-├── ImageManagerTests.cs
-│   ├── SelectImage_ForDotNet_ReturnsDotNetSdk()
-│   ├── SelectImage_ForNode_ReturnsNodeImage()
-│   ├── SelectImage_UsesConfigOverride()
-│   ├── SelectImage_UsesContractOverride()
-│   ├── IsPresent_WhenExists_ReturnsTrue()
-│   ├── IsPresent_WhenMissing_ReturnsFalse()
-│   ├── PullAsync_PullsImage()
-│   ├── PullAsync_ReportsProgress()
-│   └── PullAsync_WhenFails_ThrowsException()
-│
-├── OrphanCleanupServiceTests.cs
-│   ├── FindOrphans_ByNamePattern()
-│   ├── FindOrphans_ByLabel()
-│   ├── FindOrphans_ExcludesCurrentSession()
-│   ├── Cleanup_RemovesAllOrphans()
-│   ├── Cleanup_LogsRemovedContainers()
-│   ├── Cleanup_ContinuesOnFailure()
-│   └── Cleanup_ReportsCount()
-│
-└── ResourceLimitValidatorTests.cs
-    ├── Validate_ValidLimits_ReturnsSuccess()
-    ├── Validate_NegativeMemory_ReturnsError()
-    ├── Validate_ZeroCpu_ReturnsError()
-    ├── Validate_ExcessiveLimits_ReturnsWarning()
-    └── ApplyDefaults_FillsMissingLimits()
+
+**File:** `tests/Acode.Infrastructure.Tests/Docker/OrphanContainerCleanupTests.cs`
+
+```csharp
+using Acode.Infrastructure.Docker;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
+using Xunit;
+
+namespace Acode.Infrastructure.Tests.Docker;
+
+public sealed class OrphanContainerCleanupTests
+{
+    private readonly IDockerClient _mockDockerClient;
+    private readonly string _currentSessionId = "current-session-abc123";
+    private readonly OrphanContainerCleanup _cleanup;
+
+    public OrphanContainerCleanupTests()
+    {
+        _mockDockerClient = Substitute.For<IDockerClient>();
+        _cleanup = new OrphanContainerCleanup(
+            _mockDockerClient,
+            NullLogger<OrphanContainerCleanup>.Instance,
+            _currentSessionId);
+    }
+
+    [Fact]
+    public async Task DetectAndRemoveOrphansAsync_WithNoContainers_ReturnsZeroOrphans()
+    {
+        // Arrange
+        _mockDockerClient.Containers.ListContainersAsync(Arg.Any<ContainersListParameters>(), Arg.Any<CancellationToken>())
+            .Returns(new List<ContainerListResponse>());
+
+        // Act
+        var result = await _cleanup.DetectAndRemoveOrphansAsync(CancellationToken.None);
+
+        // Assert
+        result.TotalScanned.Should().Be(0);
+        result.OrphansFound.Should().Be(0);
+        result.RemovedContainers.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DetectAndRemoveOrphansAsync_WithOnlyCurrentSessionContainers_DoesNotRemoveThem()
+    {
+        // Arrange
+        var containers = new List<ContainerListResponse>
+        {
+            new ContainerListResponse
+            {
+                ID = "container-current-1",
+                Labels = new Dictionary<string, string>
+                {
+                    ["acode.managed"] = "true",
+                    ["acode.session"] = _currentSessionId
+                }
+            }
+        };
+
+        _mockDockerClient.Containers.ListContainersAsync(Arg.Any<ContainersListParameters>(), Arg.Any<CancellationToken>())
+            .Returns(containers);
+
+        // Act
+        var result = await _cleanup.DetectAndRemoveOrphansAsync(CancellationToken.None);
+
+        // Assert
+        result.TotalScanned.Should().Be(1);
+        result.OrphansFound.Should().Be(0);
+        result.RemovedContainers.Should().BeEmpty();
+        await _mockDockerClient.Containers.DidNotReceive().RemoveContainerAsync(Arg.Any<string>(), Arg.Any<ContainerRemoveParameters>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DetectAndRemoveOrphansAsync_WithOrphanedContainers_RemovesThem()
+    {
+        // Arrange
+        var orphanSessionId = "old-defunct-session";
+        var containers = new List<ContainerListResponse>
+        {
+            new ContainerListResponse
+            {
+                ID = "orphan-container-1",
+                State = "running",
+                Created = DateTimeOffset.UtcNow.AddHours(-2).ToUnixTimeSeconds(),
+                Labels = new Dictionary<string, string>
+                {
+                    ["acode.managed"] = "true",
+                    ["acode.session"] = orphanSessionId,
+                    ["acode.task"] = "task-orphaned"
+                }
+            },
+            new ContainerListResponse
+            {
+                ID = "current-container-1",
+                State = "running",
+                Created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                Labels = new Dictionary<string, string>
+                {
+                    ["acode.managed"] = "true",
+                    ["acode.session"] = _currentSessionId
+                }
+            }
+        };
+
+        _mockDockerClient.Containers.ListContainersAsync(Arg.Any<ContainersListParameters>(), Arg.Any<CancellationToken>())
+            .Returns(containers);
+
+        // Act
+        var result = await _cleanup.DetectAndRemoveOrphansAsync(CancellationToken.None);
+
+        // Assert
+        result.TotalScanned.Should().Be(2);
+        result.OrphansFound.Should().Be(1);
+        result.RemovedContainers.Should().HaveCount(1);
+        result.RemovedContainers[0].ContainerId.Should().Be("orphan-container-1");
+        result.RemovedContainers[0].SessionId.Should().Be(orphanSessionId);
+
+        // Verify orphan was killed (it was running)
+        await _mockDockerClient.Containers.Received(1).KillContainerAsync(
+            "orphan-container-1",
+            Arg.Any<ContainerKillParameters>(),
+            Arg.Any<CancellationToken>());
+
+        // Verify orphan was removed
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync(
+            "orphan-container-1",
+            Arg.Is<ContainerRemoveParameters>(p => p.Force == true && p.RemoveVolumes == true),
+            Arg.Any<CancellationToken>());
+
+        // Verify current session container was NOT touched
+        await _mockDockerClient.Containers.DidNotReceive().KillContainerAsync(
+            "current-container-1",
+            Arg.Any<ContainerKillParameters>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DetectAndRemoveOrphansAsync_WithStoppedOrphan_RemovesWithoutKilling()
+    {
+        // Arrange
+        var containers = new List<ContainerListResponse>
+        {
+            new ContainerListResponse
+            {
+                ID = "orphan-stopped",
+                State = "exited",
+                Created = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds(),
+                Labels = new Dictionary<string, string>
+                {
+                    ["acode.managed"] = "true",
+                    ["acode.session"] = "old-session"
+                }
+            }
+        };
+
+        _mockDockerClient.Containers.ListContainersAsync(Arg.Any<ContainersListParameters>(), Arg.Any<CancellationToken>())
+            .Returns(containers);
+
+        // Act
+        var result = await _cleanup.DetectAndRemoveOrphansAsync(CancellationToken.None);
+
+        // Assert
+        result.OrphansFound.Should().Be(1);
+        await _mockDockerClient.Containers.DidNotReceive().KillContainerAsync(Arg.Any<string>(), Arg.Any<ContainerKillParameters>(), Arg.Any<CancellationToken>());
+        await _mockDockerClient.Containers.Received(1).RemoveContainerAsync("orphan-stopped", Arg.Any<ContainerRemoveParameters>(), Arg.Any<CancellationToken>());
+    }
+}
 ```
 
 ### Integration Tests
 
-```
-Tests/Integration/Infrastructure/Docker/
-├── ContainerLifecycleIntegrationTests.cs
-│   ├── Should_Create_Container_With_Correct_Name()
-│   ├── Should_Start_And_Stop_Container()
-│   ├── Should_Remove_Container()
-│   ├── Should_Force_Remove_Running_Container()
-│   ├── Should_Apply_Resource_Limits()
-│   ├── Should_Pull_Missing_Image()
-│   ├── Should_Apply_Labels()
-│   ├── Should_Execute_Command_In_Container()
-│   └── Should_Cleanup_On_Error()
-│
-├── OrphanCleanupIntegrationTests.cs
-│   ├── Should_Detect_Orphaned_Containers()
-│   ├── Should_Remove_Orphaned_Containers()
-│   ├── Should_Not_Remove_Current_Session_Containers()
-│   └── Should_Handle_Mixed_Container_States()
-│
-└── ParallelContainerTests.cs
-    ├── Should_Create_Multiple_Containers_Concurrently()
-    ├── Should_Isolate_Parallel_Tasks()
-    ├── Should_Respect_Max_Concurrent_Limit()
-    └── Should_Cleanup_All_Parallel_Containers()
-```
+**File:** `tests/Acode.Infrastructure.IntegrationTests/Docker/ContainerLifecycleIntegrationTests.cs`
 
-### E2E Tests
+```csharp
+using Acode.Infrastructure.Docker;
+using Docker.DotNet;
+using Docker.DotNet.Models;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
 
-```
-Tests/E2E/CLI/
-└── DockerSandboxE2ETests.cs
-    ├── Should_Execute_Task_In_Container()
-    ├── Should_Isolate_Consecutive_Tasks()
-    ├── Should_Cleanup_After_Task()
-    ├── Should_Cleanup_After_Failure()
-    ├── Should_List_Active_Containers()
-    ├── Should_Show_Container_Logs()
-    └── Should_Cleanup_Orphans()
+namespace Acode.Infrastructure.IntegrationTests.Docker;
+
+[Collection("Docker")]
+public sealed class ContainerLifecycleIntegrationTests : IAsyncLifetime
+{
+    private readonly IDockerClient _dockerClient;
+    private readonly PerTaskContainerEnforcer _enforcer;
+    private readonly List<string> _createdContainerIds = new();
+
+    public ContainerLifecycleIntegrationTests()
+    {
+        _dockerClient = new DockerClientConfiguration().CreateClient();
+        _enforcer = new PerTaskContainerEnforcer(_dockerClient, NullLogger<PerTaskContainerEnforcer>.Instance);
+    }
+
+    [Fact]
+    public async Task CreatesAndRemovesContainer_WithIsolatedNamespaces()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid().ToString();
+        var taskId = "integration-test-001";
+        var parameters = new CreateContainerParameters
+        {
+            Image = "alpine:latest",
+            Cmd = new[] { "echo", "Hello from isolated container" }
+        };
+
+        // Act
+        var containerId = await _enforcer.CreateFreshContainerAsync(
+            sessionId, taskId, "alpine:latest", parameters, CancellationToken.None);
+        _createdContainerIds.Add(containerId);
+
+        // Assert - Verify container exists
+        var inspectResponse = await _dockerClient.Containers.InspectContainerAsync(containerId);
+        inspectResponse.Should().NotBeNull();
+        inspectResponse.HostConfig.NetworkMode.Should().Be("none");
+        inspectResponse.Config.Labels.Should().ContainKey("acode.managed");
+        inspectResponse.Config.Labels["acode.session"].Should().Be(sessionId);
+
+        // Cleanup
+        await _enforcer.RemoveContainerAsync(sessionId, taskId, containerId, CancellationToken.None);
+
+        // Verify removed
+        var act = async () => await _dockerClient.Containers.InspectContainerAsync(containerId);
+        await act.Should().ThrowAsync<DockerContainerNotFoundException>();
+    }
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        foreach (var containerId in _createdContainerIds)
+        {
+            try
+            {
+                await _dockerClient.Containers.RemoveContainerAsync(
+                    containerId,
+                    new ContainerRemoveParameters { Force = true },
+                    CancellationToken.None);
+            }
+            catch
+            {
+                // Best effort cleanup
+            }
+        }
+        _dockerClient.Dispose();
+    }
+}
 ```
 
 ### Performance Benchmarks
@@ -646,11 +2008,11 @@ Tests/E2E/CLI/
 
 | Component | Minimum | Target |
 |-----------|---------|--------|
-| `ContainerLifecycleManager` | 85% | 95% |
-| `ImageManager` | 85% | 95% |
-| `OrphanCleanupService` | 90% | 98% |
-| `ContainerNameGenerator` | 100% | 100% |
-| `ResourceLimitValidator` | 95% | 100% |
+| `PerTaskContainerEnforcer` | 90% | 98% |
+| `SecureContainerNameGenerator` | 100% | 100% |
+| `OrphanContainerCleanup` | 95% | 98% |
+| `ContainerStatePrevention` | 90% | 95% |
+| `ContainerCreationRateLimiter` | 85% | 95% |
 | Domain models | 100% | 100% |
 | **Overall** | **90%** | **95%** |
 

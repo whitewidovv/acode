@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using Acode.Infrastructure.Ollama.Health;
 using Acode.Infrastructure.Tests.Ollama.Http;
 using FluentAssertions;
-using Xunit;
 
 /// <summary>
 /// Tests for <see cref="OllamaHealthChecker"/>.

@@ -1,0 +1,21 @@
+format_version: "1.0"
+id: acode-react
+version: 1.0.0
+name: Acode React Starter Pack
+description: >-
+  Starter prompt pack for React development. Includes TypeScript language
+  guidance and React framework patterns.
+created_at: 2025-01-01T00:00:00Z
+components:
+  - path: system.md
+    type: system
+  - path: roles/planner.md
+    type: role
+  - path: roles/coder.md
+    type: role
+  - path: roles/reviewer.md
+    type: role
+  - path: languages/typescript.md
+    type: language
+  - path: frameworks/react.md
+    type: framework

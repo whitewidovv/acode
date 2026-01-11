@@ -1,6 +1,5 @@
 using Acode.Infrastructure.Configuration;
 using FluentAssertions;
-using Xunit;
 
 namespace Acode.Infrastructure.Tests.Configuration;
 
@@ -9,8 +8,6 @@ namespace Acode.Infrastructure.Tests.Configuration;
 /// </summary>
 public class YamlSecurityTests
 {
-    private const string SchemaPath = "/mnt/c/Users/neilo/source/local coding agent/data/config-schema.json";
-
     [Fact]
     public async Task ReadAsync_WithFileLargerThan1MB_ShouldThrowException()
     {

