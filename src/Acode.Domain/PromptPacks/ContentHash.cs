@@ -5,15 +5,16 @@ namespace Acode.Domain.PromptPacks;
 
 /// <summary>
 /// Represents a SHA-256 content hash for integrity verification.
+/// Hash values are normalized to lowercase for consistent comparison.
 /// </summary>
-public sealed class ContentHash : IEquatable<ContentHash>
+public sealed record ContentHash
 {
     private readonly string _value;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ContentHash"/> class.
     /// </summary>
-    /// <param name="value">The lowercase hexadecimal hash string.</param>
+    /// <param name="value">The hexadecimal hash string (will be normalized to lowercase).</param>
     /// <exception cref="ArgumentException">Thrown when value is not a valid 64-character hex string.</exception>
     public ContentHash(string value)
     {
@@ -21,43 +22,16 @@ public sealed class ContentHash : IEquatable<ContentHash>
 
         if (value.Length != 64 || !IsHexString(value))
         {
-            throw new ArgumentException("Hash must be a 64-character lowercase hexadecimal string.", nameof(value));
+            throw new ArgumentException("Hash must be a 64-character hexadecimal string.", nameof(value));
         }
 
         _value = value.ToLowerInvariant();
     }
 
     /// <summary>
-    /// Gets the hexadecimal string representation of the hash.
+    /// Gets the lowercase hexadecimal string representation of the hash.
     /// </summary>
     public string Value => _value;
-
-    /// <summary>
-    /// Equality operator.
-    /// </summary>
-    /// <param name="left">The left operand.</param>
-    /// <param name="right">The right operand.</param>
-    /// <returns><c>true</c> if equal; otherwise, <c>false</c>.</returns>
-    public static bool operator ==(ContentHash? left, ContentHash? right)
-    {
-        if (left is null)
-        {
-            return right is null;
-        }
-
-        return left.Equals(right);
-    }
-
-    /// <summary>
-    /// Inequality operator.
-    /// </summary>
-    /// <param name="left">The left operand.</param>
-    /// <param name="right">The right operand.</param>
-    /// <returns><c>true</c> if not equal; otherwise, <c>false</c>.</returns>
-    public static bool operator !=(ContentHash? left, ContentHash? right)
-    {
-        return !(left == right);
-    }
 
     /// <summary>
     /// Computes a content hash from a collection of path/content pairs.
@@ -89,35 +63,32 @@ public sealed class ContentHash : IEquatable<ContentHash>
 
     /// <summary>
     /// Determines whether this hash matches another hash.
+    /// Since values are normalized to lowercase, standard equality is used.
     /// </summary>
     /// <param name="other">The other hash to compare.</param>
     /// <returns><c>true</c> if the hashes match; otherwise, <c>false</c>.</returns>
     public bool Matches(ContentHash? other)
     {
-        if (other is null)
-        {
-            return false;
-        }
-
-        return string.Equals(_value, other._value, StringComparison.OrdinalIgnoreCase);
+        return other is not null && _value == other._value;
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Determines whether the specified object is equal to the current object.
+    /// </summary>
+    /// <param name="other">The object to compare with the current object.</param>
+    /// <returns><c>true</c> if the specified object is equal to the current object; otherwise, <c>false</c>.</returns>
     public bool Equals(ContentHash? other)
     {
-        return other is not null && Matches(other);
+        return other is not null && _value == other._value;
     }
 
-    /// <inheritdoc/>
-    public override bool Equals(object? obj)
-    {
-        return obj is ContentHash other && Equals(other);
-    }
-
-    /// <inheritdoc/>
+    /// <summary>
+    /// Returns the hash code for this instance.
+    /// </summary>
+    /// <returns>A 32-bit signed integer hash code.</returns>
     public override int GetHashCode()
     {
-        return _value.GetHashCode(StringComparison.OrdinalIgnoreCase);
+        return _value.GetHashCode(StringComparison.Ordinal);
     }
 
     /// <inheritdoc/>
