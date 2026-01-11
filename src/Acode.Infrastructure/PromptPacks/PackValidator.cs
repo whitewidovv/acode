@@ -1,18 +1,31 @@
-using System.Text;
 using System.Text.RegularExpressions;
 using Acode.Application.PromptPacks;
 using Acode.Domain.PromptPacks;
+using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.PromptPacks;
 
 /// <summary>
-/// Validates prompt packs against schema and business rules.
+/// Validates prompt packs for correctness and security.
 /// </summary>
 public sealed partial class PackValidator : IPackValidator
 {
-    private const int MaxPackSizeBytes = 5 * 1024 * 1024; // 5 MB
-    private static readonly Regex PackIdRegex = GetPackIdRegex();
-    private static readonly Regex TemplateVariableRegex = GetTemplateVariableRegex();
+    private const long MaxPackSizeBytes = 5 * 1024 * 1024; // 5MB
+    private const long MaxComponentSizeBytes = 1 * 1024 * 1024; // 1MB
+
+    private readonly ManifestParser _manifestParser;
+    private readonly ILogger<PackValidator> _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PackValidator"/> class.
+    /// </summary>
+    /// <param name="manifestParser">The manifest parser.</param>
+    /// <param name="logger">The logger.</param>
+    public PackValidator(ManifestParser manifestParser, ILogger<PackValidator> logger)
+    {
+        _manifestParser = manifestParser;
+        _logger = logger;
+    }
 
     /// <inheritdoc/>
     public ValidationResult Validate(PromptPack pack)
@@ -21,121 +34,180 @@ public sealed partial class PackValidator : IPackValidator
 
         var errors = new List<ValidationError>();
 
-        // Validate manifest
-        ValidateManifest(pack.Manifest, errors);
+        // Validate pack ID
+        if (!PackManifest.IsValidPackId(pack.Id))
+        {
+            errors.Add(new ValidationError
+            {
+                Code = "ACODE-VAL-002",
+                Message = $"Invalid pack ID: '{pack.Id}'. Must be kebab-case, 3-64 characters.",
+            });
+        }
 
-        // Validate components
-        ValidateComponents(pack, errors);
+        // Validate components exist
+        if (pack.Components.Count == 0)
+        {
+            errors.Add(new ValidationError
+            {
+                Code = "ACODE-VAL-001",
+                Message = "Pack must have at least one component.",
+            });
+        }
 
         // Validate total size
-        ValidateTotalSize(pack, errors);
-
-        return errors.Count == 0
-            ? ValidationResult.Success()
-            : ValidationResult.Failure(errors);
-    }
-
-    private static void ValidateManifest(PackManifest manifest, List<ValidationError> errors)
-    {
-        // Validate ID
-        if (string.IsNullOrWhiteSpace(manifest.Id))
+        var totalSize = pack.Components.Sum(c => (long)c.Content.Length);
+        if (totalSize > MaxPackSizeBytes)
         {
-            errors.Add(new ValidationError(
-                "PACK_ID_REQUIRED",
-                "Pack ID is required"));
-        }
-        else if (!PackIdRegex.IsMatch(manifest.Id))
-        {
-            errors.Add(new ValidationError(
-                "PACK_ID_INVALID_FORMAT",
-                "Pack ID must contain only lowercase letters, numbers, and hyphens"));
-        }
-
-        // Validate Name
-        if (string.IsNullOrWhiteSpace(manifest.Name))
-        {
-            errors.Add(new ValidationError(
-                "PACK_NAME_REQUIRED",
-                "Pack name is required"));
-        }
-
-        // Validate Description
-        if (string.IsNullOrWhiteSpace(manifest.Description))
-        {
-            errors.Add(new ValidationError(
-                "PACK_DESCRIPTION_REQUIRED",
-                "Pack description is required"));
-        }
-    }
-
-    private static void ValidateComponents(PromptPack pack, List<ValidationError> errors)
-    {
-        foreach (var component in pack.Manifest.Components)
-        {
-            // Validate path is relative
-            if (Path.IsPathRooted(component.Path))
+            errors.Add(new ValidationError
             {
-                errors.Add(new ValidationError(
-                    "COMPONENT_PATH_ABSOLUTE",
-                    $"Component path must be relative, not absolute: {component.Path}",
-                    component.Path));
-                continue;
-            }
-
-            // Validate no path traversal
-            if (component.Path.Contains("..", StringComparison.Ordinal))
-            {
-                errors.Add(new ValidationError(
-                    "COMPONENT_PATH_TRAVERSAL",
-                    $"Component path contains path traversal: {component.Path}",
-                    component.Path));
-                continue;
-            }
-
-            // Validate template variable syntax in content
-            if (!string.IsNullOrEmpty(component.Content))
-            {
-                ValidateTemplateVariables(component.Path, component.Content, errors);
-            }
+                Code = "ACODE-VAL-006",
+                Message = $"Pack size {totalSize:N0} bytes exceeds limit of {MaxPackSizeBytes:N0} bytes.",
+            });
         }
-    }
 
-    private static void ValidateTemplateVariables(string componentPath, string content, List<ValidationError> errors)
-    {
-        // Find all potential template variables (anything between {{ and }})
-        var matches = Regex.Matches(content, @"\{\{([^}]*)\}\}");
-
-        var invalidVariables = matches.Cast<Match>()
-            .Select(match => match.Groups[1].Value.Trim())
-            .Where(variableName => !TemplateVariableRegex.IsMatch(variableName));
-
-        foreach (var variableName in invalidVariables)
+        // Validate individual components
+        foreach (var component in pack.Components)
         {
-            errors.Add(new ValidationError(
-                "INVALID_TEMPLATE_VARIABLE",
-                $"Invalid template variable syntax: '{{{{{variableName}}}}}'. Variables must contain only letters, numbers, and underscores.",
-                componentPath));
+            ValidateComponent(component, errors);
         }
-    }
 
-    private static void ValidateTotalSize(PromptPack pack, List<ValidationError> errors)
-    {
-        long totalBytes = pack.Components.Values
-            .Where(component => !string.IsNullOrEmpty(component.Content))
-            .Sum(component => (long)Encoding.UTF8.GetByteCount(component.Content!));
+        // Validate template variables
+        ValidateTemplateVariables(pack, errors);
 
-        if (totalBytes > MaxPackSizeBytes)
+        if (errors.Count > 0)
         {
-            var sizeMB = totalBytes / (1024.0 * 1024.0);
-            errors.Add(new ValidationError(
-                "PACK_SIZE_EXCEEDS_LIMIT",
-                $"Pack size ({sizeMB:F2} MB) exceeds the maximum allowed size of 5 MB"));
+            _logger.LogWarning("Pack {PackId} has {ErrorCount} validation errors", pack.Id, errors.Count);
+        }
+
+        return new ValidationResult(errors);
+    }
+
+    /// <inheritdoc/>
+    public ValidationResult ValidatePath(string packPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packPath);
+
+        var errors = new List<ValidationError>();
+
+        var manifestPath = Path.Combine(packPath, "manifest.yml");
+        if (!File.Exists(manifestPath))
+        {
+            errors.Add(new ValidationError
+            {
+                Code = "ACODE-VAL-001",
+                Message = "Missing required file: manifest.yml",
+                FilePath = manifestPath,
+            });
+            return new ValidationResult(errors);
+        }
+
+        // Try to parse manifest
+        PackManifest manifest;
+        try
+        {
+            manifest = _manifestParser.ParseFile(manifestPath, PackSource.User);
+        }
+        catch (Exception ex)
+        {
+            errors.Add(new ValidationError
+            {
+                Code = "ACODE-VAL-001",
+                Message = $"Failed to parse manifest: {ex.Message}",
+                FilePath = manifestPath,
+            });
+            return new ValidationResult(errors);
+        }
+
+        // Validate pack ID
+        if (!PackManifest.IsValidPackId(manifest.Id))
+        {
+            errors.Add(new ValidationError
+            {
+                Code = "ACODE-VAL-002",
+                Message = $"Invalid pack ID: '{manifest.Id}'. Must be kebab-case, 3-64 characters.",
+                FilePath = manifestPath,
+            });
+        }
+
+        // Validate components exist on disk
+        foreach (var component in manifest.Components)
+        {
+            var componentPath = Path.Combine(packPath, component.Path.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(componentPath))
+            {
+                errors.Add(new ValidationError
+                {
+                    Code = "ACODE-VAL-004",
+                    Message = $"Component not found: {component.Path}",
+                    FilePath = componentPath,
+                });
+            }
+            else
+            {
+                var fileInfo = new FileInfo(componentPath);
+                if (fileInfo.Length > MaxComponentSizeBytes)
+                {
+                    errors.Add(new ValidationError
+                    {
+                        Code = "ACODE-VAL-006",
+                        Message = $"Component {component.Path} exceeds size limit of {MaxComponentSizeBytes:N0} bytes.",
+                        FilePath = componentPath,
+                    });
+                }
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            _logger.LogWarning("Path validation for {Path} found {ErrorCount} errors", packPath, errors.Count);
+        }
+
+        return new ValidationResult(errors);
+    }
+
+    private static void ValidateComponent(LoadedComponent component, List<ValidationError> errors)
+    {
+        if (string.IsNullOrWhiteSpace(component.Path))
+        {
+            errors.Add(new ValidationError
+            {
+                Code = "ACODE-VAL-001",
+                Message = "Component path cannot be empty.",
+            });
+        }
+
+        if (component.Content.Length > MaxComponentSizeBytes)
+        {
+            errors.Add(new ValidationError
+            {
+                Code = "ACODE-VAL-006",
+                Message = $"Component {component.Path} exceeds size limit of {MaxComponentSizeBytes:N0} bytes.",
+                FilePath = component.Path,
+            });
         }
     }
 
-    [GeneratedRegex("^[a-z0-9-]+$", RegexOptions.Compiled)]
-    private static partial Regex GetPackIdRegex();
+    [GeneratedRegex(@"\{\{(\w+)\}\}", RegexOptions.Compiled)]
+    private static partial Regex TemplateVariableRegex();
 
-    [GeneratedRegex("^[a-zA-Z0-9_]+$", RegexOptions.Compiled)]
-    private static partial Regex GetTemplateVariableRegex();
+    private void ValidateTemplateVariables(PromptPack pack, List<ValidationError> errors)
+    {
+        // Find template variables used in components
+        var variablePattern = TemplateVariableRegex();
+
+        foreach (var component in pack.Components)
+        {
+            var matches = variablePattern.Matches(component.Content);
+            foreach (Match match in matches)
+            {
+                var varName = match.Groups[1].Value;
+
+                // Log but don't error - we're lenient on undefined variables
+                _logger.LogDebug(
+                    "Found template variable {VarName} in {Path}",
+                    varName,
+                    component.Path);
+            }
+        }
+    }
 }

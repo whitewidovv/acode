@@ -3,18 +3,18 @@ using Acode.Domain.PromptPacks;
 namespace Acode.Application.PromptPacks;
 
 /// <summary>
-/// Metadata about an available prompt pack.
+/// Summary information about a prompt pack for listing.
 /// </summary>
-/// <param name="Id">Unique identifier for the pack.</param>
-/// <param name="Version">Semantic version of the pack.</param>
-/// <param name="Name">Human-readable name.</param>
-/// <param name="Description">Brief description of the pack's purpose.</param>
-/// <param name="Source">Where the pack was loaded from (BuiltIn or User).</param>
-/// <param name="Author">Optional author name.</param>
+/// <param name="Id">The pack ID.</param>
+/// <param name="Version">The pack version.</param>
+/// <param name="Name">The pack name.</param>
+/// <param name="Source">The pack source (built-in or user).</param>
+/// <param name="IsActive">Whether this is the active pack.</param>
+/// <param name="Path">The pack path.</param>
 public sealed record PromptPackInfo(
     string Id,
     PackVersion Version,
     string Name,
-    string Description,
     PackSource Source,
-    string? Author = null);
+    bool IsActive,
+    string Path);

@@ -1,402 +1,328 @@
+using Acode.Application.PromptPacks;
 using Acode.Domain.PromptPacks;
 using Acode.Infrastructure.PromptPacks;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Acode.Infrastructure.Tests.PromptPacks;
 
 /// <summary>
-/// Tests for <see cref="PackValidator"/>.
+/// Tests for PackValidator.
 /// </summary>
-public class PackValidatorTests
+public class PackValidatorTests : IDisposable
 {
+    private readonly string _tempDir;
+    private readonly PackValidator _validator;
+    private readonly ManifestParser _parser;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PackValidatorTests"/> class.
+    /// </summary>
+    public PackValidatorTests()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), $"acode-validator-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(_tempDir);
+
+        _parser = new ManifestParser();
+        _validator = new PackValidator(_parser, NullLogger<PackValidator>.Instance);
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        if (Directory.Exists(_tempDir))
+        {
+            Directory.Delete(_tempDir, true);
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Test that a valid pack passes validation.
+    /// </summary>
     [Fact]
-    public void Validate_ValidPack_ShouldReturnSuccess()
+    public void Should_Validate_Valid_Pack()
     {
         // Arrange
-        var validator = new PackValidator();
         var pack = CreateValidPack();
 
         // Act
-        var result = validator.Validate(pack);
+        var result = _validator.Validate(pack);
 
         // Assert
-        result.Should().NotBeNull();
         result.IsValid.Should().BeTrue();
         result.Errors.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Test that empty pack ID fails validation.
+    /// </summary>
     [Fact]
-    public void Validate_PackWithMissingId_ShouldReturnError()
+    public void Should_Fail_On_Invalid_PackId()
     {
         // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-        pack = pack with
-        {
-            Manifest = pack.Manifest with { Id = string.Empty },
-        };
+        var pack = CreateValidPackWithId("AB"); // Too short, must be 3+ chars
 
         // Act
-        var result = validator.Validate(pack);
+        var result = _validator.Validate(pack);
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Code == "PACK_ID_REQUIRED");
+        result.Errors.Should().Contain(e => e.Code == "ACODE-VAL-002");
     }
 
+    /// <summary>
+    /// Test that pack with no components fails validation.
+    /// </summary>
     [Fact]
-    public void Validate_PackWithInvalidIdFormat_ShouldReturnError()
+    public void Should_Fail_On_Empty_Components()
     {
         // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-        pack = pack with
-        {
-            Manifest = pack.Manifest with { Id = "Invalid_Pack_ID" },
-        };
+        var pack = new PromptPack(
+            "empty-pack",
+            PackVersion.Parse("1.0.0"),
+            "Empty Pack",
+            "No components",
+            PackSource.User,
+            _tempDir,
+            null,
+            Array.Empty<LoadedComponent>());
 
         // Act
-        var result = validator.Validate(pack);
+        var result = _validator.Validate(pack);
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e =>
-            e.Code == "PACK_ID_INVALID_FORMAT" &&
-            e.Message.Contains("lowercase"));
+        result.Errors.Should().Contain(e => e.Code == "ACODE-VAL-001");
     }
 
+    /// <summary>
+    /// Test that oversized pack fails validation.
+    /// </summary>
     [Fact]
-    public void Validate_PackWithMissingName_ShouldReturnError()
+    public void Should_Fail_On_Size_Exceeds_Limit()
     {
-        // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-        pack = pack with
+        // Arrange - Create pack with content over 5MB
+        var largeContent = new string('x', 6 * 1024 * 1024); // 6MB
+
+        var components = new[]
         {
-            Manifest = pack.Manifest with { Name = string.Empty },
+            new LoadedComponent("large.md", ComponentType.System, largeContent, null),
         };
 
+        var pack = new PromptPack(
+            "large-pack",
+            PackVersion.Parse("1.0.0"),
+            "Large Pack",
+            "Oversized",
+            PackSource.User,
+            _tempDir,
+            null,
+            components);
+
         // Act
-        var result = validator.Validate(pack);
+        var result = _validator.Validate(pack);
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Code == "PACK_NAME_REQUIRED");
+        result.Errors.Should().Contain(e => e.Code == "ACODE-VAL-006");
     }
 
+    /// <summary>
+    /// Test that component with empty path fails validation.
+    /// </summary>
     [Fact]
-    public void Validate_PackWithMissingDescription_ShouldReturnError()
+    public void Should_Fail_On_Empty_Component_Path()
     {
         // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-        pack = pack with
+        var components = new[]
         {
-            Manifest = pack.Manifest with { Description = string.Empty },
+            new LoadedComponent(string.Empty, ComponentType.System, "content", null),
         };
 
+        var pack = new PromptPack(
+            "test-pack",
+            PackVersion.Parse("1.0.0"),
+            "Test Pack",
+            "Has empty path",
+            PackSource.User,
+            _tempDir,
+            null,
+            components);
+
         // Act
-        var result = validator.Validate(pack);
+        var result = _validator.Validate(pack);
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Code == "PACK_DESCRIPTION_REQUIRED");
+        result.Errors.Should().Contain(e => e.Code == "ACODE-VAL-001");
     }
 
+    /// <summary>
+    /// Test that component size limit is enforced.
+    /// </summary>
     [Fact]
-    public void Validate_ComponentWithAbsolutePath_ShouldReturnError()
+    public void Should_Fail_On_Component_Too_Large()
     {
-        // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-        var component = new PackComponent
+        // Arrange - Single component over 1MB limit
+        var largeContent = new string('x', 2 * 1024 * 1024); // 2MB
+
+        var components = new[]
         {
-            Path = "/absolute/path/to/component.md",
-            Type = ComponentType.Custom,
-            Content = "Test content",
-        };
-        pack = pack with
-        {
-            Manifest = pack.Manifest with { Components = [component] },
-            Components = new Dictionary<string, PackComponent>
-            {
-                [component.Path] = component,
-            },
+            new LoadedComponent("large.md", ComponentType.System, largeContent, null),
         };
 
+        var pack = new PromptPack(
+            "component-large",
+            PackVersion.Parse("1.0.0"),
+            "Large Component",
+            "Has component over limit",
+            PackSource.User,
+            _tempDir,
+            null,
+            components);
+
         // Act
-        var result = validator.Validate(pack);
+        var result = _validator.Validate(pack);
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e =>
-            e.Code == "COMPONENT_PATH_ABSOLUTE" &&
-            e.Path == "/absolute/path/to/component.md");
+        result.Errors.Should().Contain(e => e.Code == "ACODE-VAL-006");
     }
 
+    /// <summary>
+    /// Test that ValidatePath returns errors for missing manifest.
+    /// </summary>
     [Fact]
-    public void Validate_ComponentWithPathTraversal_ShouldReturnError()
+    public void ValidatePath_Should_Fail_On_Missing_Manifest()
     {
         // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-        var component = new PackComponent
-        {
-            Path = "../../../etc/passwd",
-            Type = ComponentType.System,
-            Content = "Malicious content",
-        };
-        pack = pack with
-        {
-            Manifest = pack.Manifest with { Components = [component] },
-            Components = new Dictionary<string, PackComponent>
-            {
-                [component.Path] = component,
-            },
-        };
+        var packPath = Path.Combine(_tempDir, "no-manifest");
+        Directory.CreateDirectory(packPath);
 
         // Act
-        var result = validator.Validate(pack);
+        var result = _validator.ValidatePath(packPath);
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e =>
-            e.Code == "COMPONENT_PATH_TRAVERSAL" &&
-            e.Path == "../../../etc/passwd");
+        result.Errors.Should().Contain(e => e.Code == "ACODE-VAL-001");
     }
 
+    /// <summary>
+    /// Test that ValidatePath returns errors for missing components.
+    /// </summary>
     [Fact]
-    public void Validate_InvalidTemplateVariableSyntax_ShouldReturnError()
+    public void ValidatePath_Should_Fail_On_Missing_Component()
     {
         // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-        var component = new PackComponent
-        {
-            Path = "roles/coder.md",
-            Type = ComponentType.Role,
-            Content = "Use {{invalid variable}} and {single_brace} syntax",
-        };
-        pack = pack with
-        {
-            Manifest = pack.Manifest with { Components = [component] },
-            Components = new Dictionary<string, PackComponent>
-            {
-                [component.Path] = component,
-            },
-        };
+        var packPath = Path.Combine(_tempDir, "missing-comp");
+        Directory.CreateDirectory(packPath);
+
+        var manifest = @"
+format_version: '1.0'
+id: test
+version: 1.0.0
+name: Test
+description: Test
+created_at: 2025-01-01T00:00:00Z
+components:
+  - path: missing.md
+    type: system
+";
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifest);
 
         // Act
-        var result = validator.Validate(pack);
+        var result = _validator.ValidatePath(packPath);
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e =>
-            e.Code == "INVALID_TEMPLATE_VARIABLE" &&
-            e.Path == "roles/coder.md");
+        result.Errors.Should().Contain(e => e.Code == "ACODE-VAL-004");
     }
 
+    /// <summary>
+    /// Test that ValidatePath validates pack ID format during parsing.
+    /// </summary>
     [Fact]
-    public void Validate_ValidTemplateVariableSyntax_ShouldPass()
+    public void ValidatePath_Should_Fail_On_Invalid_PackId()
     {
         // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-        var component = new PackComponent
-        {
-            Path = "roles/coder.md",
-            Type = ComponentType.Role,
-            Content = "Use {{variable_name}} and {{another_var}} syntax",
-        };
-        pack = pack with
-        {
-            Manifest = pack.Manifest with { Components = [component] },
-            Components = new Dictionary<string, PackComponent>
-            {
-                [component.Path] = component,
-            },
-        };
+        var packPath = Path.Combine(_tempDir, "bad-id");
+        Directory.CreateDirectory(packPath);
+
+        // Pack ID "AB" is too short (min 3 chars) - this causes ManifestParser to throw
+        var manifest = @"
+format_version: '1.0'
+id: AB
+version: 1.0.0
+name: Test
+description: Test
+created_at: 2025-01-01T00:00:00Z
+components:
+  - path: system.md
+    type: system
+";
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifest);
+        File.WriteAllText(Path.Combine(packPath, "system.md"), "content");
 
         // Act
-        var result = validator.Validate(pack);
+        var result = _validator.ValidatePath(packPath);
+
+        // Assert - Parse fails because ID is invalid
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == "ACODE-VAL-001" && e.Message.Contains("AB"));
+    }
+
+    /// <summary>
+    /// Test that ValidationResult.Success creates valid result.
+    /// </summary>
+    [Fact]
+    public void ValidationResult_Success_Should_Be_Valid()
+    {
+        // Act
+        var result = ValidationResult.Success();
 
         // Assert
         result.IsValid.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Test that ValidationResult.Failure creates invalid result.
+    /// </summary>
     [Fact]
-    public void Validate_PackExceeds5MBLimit_ShouldReturnError()
+    public void ValidationResult_Failure_Should_Be_Invalid()
     {
-        // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-
-        // Create component with > 5MB content (5 * 1024 * 1024 + 1 bytes)
-        var largeContent = new string('x', (5 * 1024 * 1024) + 1);
-        var component = new PackComponent
-        {
-            Path = "large-file.md",
-            Type = ComponentType.Custom,
-            Content = largeContent,
-        };
-        pack = pack with
-        {
-            Manifest = pack.Manifest with { Components = [component] },
-            Components = new Dictionary<string, PackComponent>
-            {
-                [component.Path] = component,
-            },
-        };
-
         // Act
-        var result = validator.Validate(pack);
+        var result = ValidationResult.Failure("CODE-001", "Error message");
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e =>
-            e.Code == "PACK_SIZE_EXCEEDS_LIMIT" &&
-            e.Message.Contains("5 MB"));
+        result.Errors.Should().HaveCount(1);
+        result.Errors[0].Code.Should().Be("CODE-001");
+        result.Errors[0].Message.Should().Be("Error message");
     }
 
-    [Fact]
-    public void Validate_PackUnder5MBLimit_ShouldPass()
+    private PromptPack CreateValidPack()
     {
-        // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-
-        // Create component with < 5MB content
-        var content = new string('x', 1024 * 1024); // 1 MB
-        var component = new PackComponent
-        {
-            Path = "medium-file.md",
-            Type = ComponentType.Custom,
-            Content = content,
-        };
-        pack = pack with
-        {
-            Manifest = pack.Manifest with { Components = [component] },
-            Components = new Dictionary<string, PackComponent>
-            {
-                [component.Path] = component,
-            },
-        };
-
-        // Act
-        var result = validator.Validate(pack);
-
-        // Assert
-        result.IsValid.Should().BeTrue();
+        return CreateValidPackWithId("test-pack");
     }
 
-    [Fact]
-    public void Validate_MultipleErrors_ShouldReturnAllErrors()
+    private PromptPack CreateValidPackWithId(string id)
     {
-        // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-
-        // Create pack with multiple validation errors
-        var component = new PackComponent
+        var components = new[]
         {
-            Path = "/absolute/path.md",
-            Type = ComponentType.Custom,
-            Content = "Invalid {{variable name}} syntax",
-        };
-        pack = pack with
-        {
-            Manifest = pack.Manifest with
-            {
-                Id = string.Empty, // Missing ID
-                Name = string.Empty, // Missing name
-                Components = [component],
-            },
-            Components = new Dictionary<string, PackComponent>
-            {
-                [component.Path] = component,
-            },
+            new LoadedComponent("system.md", ComponentType.System, "System prompt content", null),
         };
 
-        // Act
-        var result = validator.Validate(pack);
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().HaveCountGreaterThan(2);
-        result.Errors.Should().Contain(e => e.Code == "PACK_ID_REQUIRED");
-        result.Errors.Should().Contain(e => e.Code == "PACK_NAME_REQUIRED");
-        result.Errors.Should().Contain(e => e.Code == "COMPONENT_PATH_ABSOLUTE");
-    }
-
-    [Fact]
-    public void Validate_Performance_ShouldCompleteUnder100ms()
-    {
-        // Arrange
-        var validator = new PackValidator();
-        var pack = CreateValidPack();
-
-        // Add multiple components to make validation more realistic
-        var components = new Dictionary<string, PackComponent>();
-        for (int i = 0; i < 50; i++)
-        {
-            var component = new PackComponent
-            {
-                Path = $"components/component-{i}.md",
-                Type = ComponentType.Custom,
-                Content = $"Content for component {i} with {{variable_{i}}}",
-            };
-            components[component.Path] = component;
-        }
-
-        pack = pack with
-        {
-            Manifest = pack.Manifest with { Components = components.Values.ToList() },
-            Components = components,
-        };
-
-        // Act
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var result = validator.Validate(pack);
-        stopwatch.Stop();
-
-        // Assert
-        result.Should().NotBeNull();
-        stopwatch.ElapsedMilliseconds.Should().BeLessThan(100, "validation must complete within 100ms");
-    }
-
-    private static PromptPack CreateValidPack()
-    {
-        var manifest = new PackManifest
-        {
-            FormatVersion = "1.0",
-            Id = "test-pack",
-            Version = PackVersion.Parse("1.0.0"),
-            Name = "Test Pack",
-            Description = "A test pack for validation",
-            ContentHash = new ContentHash("a".PadRight(64, '1')),
-            CreatedAt = DateTime.UtcNow,
-            Components =
-            [
-                new PackComponent
-                {
-                    Path = "roles/coder.md",
-                    Type = ComponentType.Role,
-                    Role = "coder",
-                    Content = "You are a coding assistant with {{skill_level}} expertise.",
-                },
-            ],
-        };
-
-        var components = new Dictionary<string, PackComponent>
-        {
-            ["roles/coder.md"] = manifest.Components[0],
-        };
-
-        return new PromptPack
-        {
-            Manifest = manifest,
-            Components = components,
-            Source = PackSource.User,
-        };
+        return new PromptPack(
+            id,
+            PackVersion.Parse("1.0.0"),
+            "Test Pack",
+            "Valid test pack",
+            PackSource.User,
+            _tempDir,
+            null,
+            components);
     }
 }

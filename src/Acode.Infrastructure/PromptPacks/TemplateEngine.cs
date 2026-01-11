@@ -1,185 +1,140 @@
-using System.Text;
 using System.Text.RegularExpressions;
 using Acode.Application.PromptPacks;
 using Acode.Domain.PromptPacks;
+using Acode.Domain.PromptPacks.Exceptions;
 
 namespace Acode.Infrastructure.PromptPacks;
 
 /// <summary>
-/// Template engine for substituting variables in prompt pack components.
+/// Processes Mustache-style {{variable}} templates.
 /// </summary>
 public sealed partial class TemplateEngine : ITemplateEngine
 {
-    private const int MaxVariableLength = 1024;
-    private const int MaxRecursionDepth = 3;
+    private readonly int _maxVariableLength;
+    private readonly int _maxExpansionDepth;
 
-    /// <inheritdoc/>
-    public string Substitute(string templateText, Dictionary<string, string> variables)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TemplateEngine"/> class.
+    /// </summary>
+    /// <param name="maxVariableLength">Maximum allowed length for variable values.</param>
+    /// <param name="maxExpansionDepth">Maximum recursion depth for nested variable expansion.</param>
+    public TemplateEngine(
+        int maxVariableLength = 1024,
+        int maxExpansionDepth = 3)
     {
-        ArgumentNullException.ThrowIfNull(templateText);
-        ArgumentNullException.ThrowIfNull(variables);
-
-        if (string.IsNullOrEmpty(templateText))
-        {
-            return string.Empty;
-        }
-
-        // Validate variable values don't exceed max length
-        var oversizedVariable = variables
-            .Where(kvp => kvp.Value.Length > MaxVariableLength)
-            .Select(kvp => kvp.Key)
-            .FirstOrDefault();
-
-        if (oversizedVariable != null)
-        {
-            throw new ArgumentException(
-                $"Variable '{oversizedVariable}' value exceeds maximum length of {MaxVariableLength} characters.",
-                nameof(variables));
-        }
-
-        // Perform substitution with recursion detection
-        return SubstituteRecursive(templateText, variables, 0);
+        _maxVariableLength = maxVariableLength;
+        _maxExpansionDepth = maxExpansionDepth;
     }
 
-    /// <inheritdoc/>
-    public ValidationResult ValidateTemplate(string templateText)
+    /// <inheritdoc />
+    public string Substitute(string content, CompositionContext context)
     {
-        ArgumentNullException.ThrowIfNull(templateText);
-
-        var errors = new List<ValidationError>();
-        var regex = GetVariablePattern();
-        var matches = regex.Matches(templateText);
-
-        // Check for unclosed braces
-        var openBraces = templateText.Count(c => c == '{');
-        var closeBraces = templateText.Count(c => c == '}');
-
-        if (openBraces != closeBraces)
+        if (string.IsNullOrEmpty(content))
         {
-            errors.Add(new ValidationError(
-                "TEMPLATE_UNCLOSED_BRACES",
-                "Template contains unclosed braces",
-                null,
-                ValidationSeverity.Error));
+            return content;
         }
 
-        // Validate each variable name
-        var variableNames = matches.Cast<Match>()
-            .Select(match => match.Groups[1].Value)
-            .ToList();
+        ArgumentNullException.ThrowIfNull(context);
 
-        var emptyVariables = variableNames.Where(string.IsNullOrWhiteSpace);
-        foreach (var emptyVariable in emptyVariables)
-        {
-            errors.Add(new ValidationError(
-                "TEMPLATE_EMPTY_VARIABLE",
-                "Template contains empty variable name {{}}",
-                null,
-                ValidationSeverity.Error));
-        }
-
-        var invalidVariables = variableNames
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Where(name => !GetVariableNamePattern().IsMatch(name));
-
-        foreach (var variableName in invalidVariables)
-        {
-            errors.Add(new ValidationError(
-                "TEMPLATE_INVALID_VARIABLE_NAME",
-                $"Template contains invalid variable name '{variableName}'. Variable names must contain only alphanumeric characters and underscores.",
-                null,
-                ValidationSeverity.Error));
-        }
-
-        // Check for empty variable names like {{}}
-        if (templateText.Contains("{{}}", StringComparison.Ordinal))
-        {
-            errors.Add(new ValidationError(
-                "TEMPLATE_EMPTY_VARIABLE",
-                "Template contains empty variable name {{}}",
-                null,
-                ValidationSeverity.Error));
-        }
-
-        // Check for potential malformed patterns like {{name with spaces}}
-        if (templateText.Contains("{{", StringComparison.Ordinal))
-        {
-            var malformedPattern = new Regex(@"\{\{[^}]*\s+[^}]*\}\}", RegexOptions.Compiled);
-            if (malformedPattern.IsMatch(templateText))
-            {
-                errors.Add(new ValidationError(
-                    "TEMPLATE_INVALID_VARIABLE_NAME",
-                    "Template contains invalid variable name with spaces or special characters",
-                    null,
-                    ValidationSeverity.Error));
-            }
-        }
-
-        return errors.Count == 0
-            ? ValidationResult.Success()
-            : ValidationResult.Failure(errors);
+        var variables = BuildVariableMap(context);
+        return SubstituteRecursive(content, variables, depth: 0);
     }
 
-    private static string SubstituteRecursive(
-        string templateText,
-        Dictionary<string, string> variables,
+    [GeneratedRegex(@"\{\{(?<name>[a-zA-Z_][a-zA-Z0-9_]*)\}\}", RegexOptions.Compiled)]
+    private static partial Regex VariablePattern();
+
+    private static string EscapeValue(string value)
+    {
+        // Escape HTML entities to prevent injection
+        return value
+            .Replace("&", "&amp;", StringComparison.Ordinal)
+            .Replace("<", "&lt;", StringComparison.Ordinal)
+            .Replace(">", "&gt;", StringComparison.Ordinal)
+            .Replace("\"", "&quot;", StringComparison.Ordinal)
+            .Replace("'", "&#39;", StringComparison.Ordinal);
+    }
+
+    private IReadOnlyDictionary<string, string> BuildVariableMap(CompositionContext context)
+    {
+        // Priority: config > environment > context > defaults > variables
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Variables (lowest priority when using multi-source)
+        foreach (var kvp in context.Variables)
+        {
+            map[kvp.Key] = kvp.Value;
+        }
+
+        // 2. Defaults
+        foreach (var kvp in context.DefaultVariables)
+        {
+            map[kvp.Key] = kvp.Value;
+        }
+
+        // 3. Context variables
+        foreach (var kvp in context.ContextVariables)
+        {
+            map[kvp.Key] = kvp.Value;
+        }
+
+        // 4. Environment variables
+        foreach (var kvp in context.EnvironmentVariables)
+        {
+            map[kvp.Key] = kvp.Value;
+        }
+
+        // 5. Config variables (highest priority)
+        foreach (var kvp in context.ConfigVariables)
+        {
+            map[kvp.Key] = kvp.Value;
+        }
+
+        return map;
+    }
+
+    private string SubstituteRecursive(
+        string content,
+        IReadOnlyDictionary<string, string> variables,
         int depth)
     {
-        if (depth >= MaxRecursionDepth)
+        if (depth > _maxExpansionDepth)
         {
-            throw new InvalidOperationException(
-                $"Recursive variable expansion detected. Maximum depth of {MaxRecursionDepth} exceeded.");
+            throw new TemplateVariableException(
+                $"Template variable expansion depth limit ({_maxExpansionDepth}) exceeded. Possible circular reference.",
+                "ACODE-PRM-008",
+                null);
         }
 
-        var regex = GetVariablePattern();
-        var result = new StringBuilder(templateText);
-        var matches = regex.Matches(templateText);
-
-        // Track if any substitution was made
-        var substitutionMade = false;
-
-        // Replace from end to start to preserve match indices
-        for (var i = matches.Count - 1; i >= 0; i--)
+        return VariablePattern().Replace(content, match =>
         {
-            var match = matches[i];
-            var variableName = match.Groups[1].Value;
+            var variableName = match.Groups["name"].Value;
 
-            // Get variable value (empty string if missing)
-            var value = variables.GetValueOrDefault(variableName) ?? string.Empty;
-
-            // Replace the match
-            result.Remove(match.Index, match.Length);
-            result.Insert(match.Index, value);
-
-            if (!string.IsNullOrEmpty(value))
+            if (!variables.TryGetValue(variableName, out var value))
             {
-                substitutionMade = true;
+                // Missing variable replaced with empty string
+                return string.Empty;
             }
-        }
 
-        var substituted = result.ToString();
+            ValidateVariableValue(value, variableName);
+            var escaped = EscapeValue(value);
 
-        // Check if result contains more variables (indicating recursion)
-        if (substitutionMade && regex.IsMatch(substituted))
-        {
-            // Recursively substitute
-            return SubstituteRecursive(substituted, variables, depth + 1);
-        }
+            // Check if value contains more variables (nested expansion)
+            if (VariablePattern().IsMatch(escaped))
+            {
+                return SubstituteRecursive(escaped, variables, depth + 1);
+            }
 
-        return substituted;
+            return escaped;
+        });
     }
 
-    /// <summary>
-    /// Regular expression for matching {{variable_name}} patterns.
-    /// Variable names can contain alphanumeric characters and underscores.
-    /// </summary>
-    [GeneratedRegex(@"\{\{([a-zA-Z0-9_]+)\}\}", RegexOptions.Compiled)]
-    private static partial Regex GetVariablePattern();
-
-    /// <summary>
-    /// Regular expression for validating variable names.
-    /// Variable names must be non-empty and contain only alphanumeric characters and underscores.
-    /// </summary>
-    [GeneratedRegex("^[a-zA-Z0-9_]+$", RegexOptions.Compiled)]
-    private static partial Regex GetVariableNamePattern();
+    private void ValidateVariableValue(string value, string variableName)
+    {
+        if (value.Length > _maxVariableLength)
+        {
+            throw new TemplateVariableException(
+                $"Variable '{variableName}' value exceeds maximum length ({_maxVariableLength} characters).",
+                variableName);
+        }
+    }
 }

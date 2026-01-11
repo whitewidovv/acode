@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Acode.Application\Acode.Application.csproj" />
+    <ProjectReference Include="..\..\src\Acode.Infrastructure\Acode.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

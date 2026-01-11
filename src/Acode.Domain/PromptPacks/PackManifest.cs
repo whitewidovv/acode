@@ -1,87 +1,81 @@
 namespace Acode.Domain.PromptPacks;
 
 /// <summary>
-/// Represents the manifest metadata for a prompt pack.
+/// Represents the parsed manifest.yml metadata for a prompt pack.
 /// </summary>
-/// <remarks>
-/// The manifest (manifest.yml) defines pack metadata including version, components, and content hash.
-/// All packs must have a valid manifest to be loaded.
-/// </remarks>
-public sealed record PackManifest
+/// <param name="FormatVersion">Gets the manifest format version.</param>
+/// <param name="Id">Gets the unique pack identifier (kebab-case).</param>
+/// <param name="Version">Gets the pack version.</param>
+/// <param name="Name">Gets the human-readable pack name.</param>
+/// <param name="Description">Gets the optional pack description.</param>
+/// <param name="ContentHash">Gets the content hash for integrity verification.</param>
+/// <param name="CreatedAt">Gets the pack creation timestamp.</param>
+/// <param name="Components">Gets the list of component files in this pack.</param>
+/// <param name="Source">Gets the pack source (built-in or user).</param>
+/// <param name="PackPath">Gets the file system path to the pack directory.</param>
+public sealed record PackManifest(
+    string FormatVersion,
+    string Id,
+    PackVersion Version,
+    string Name,
+    string? Description,
+    ContentHash? ContentHash,
+    DateTimeOffset CreatedAt,
+    IReadOnlyList<PackComponent> Components,
+    PackSource Source,
+    string PackPath)
 {
     /// <summary>
-    /// Gets the manifest format version.
+    /// Validates that a pack ID conforms to the expected format.
     /// </summary>
-    /// <remarks>
-    /// Current version is "1.0". Used for future compatibility and migration.
-    /// </remarks>
-    public required string FormatVersion { get; init; }
+    /// <param name="id">The pack ID to validate.</param>
+    /// <returns><c>true</c> if the ID is valid; otherwise, <c>false</c>.</returns>
+    public static bool IsValidPackId(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return false;
+        }
 
-    /// <summary>
-    /// Gets the unique pack identifier.
-    /// </summary>
-    /// <remarks>
-    /// Must be lowercase with hyphens only. Examples: "acode-standard", "my-custom-pack".
-    /// Pack ID should be stable across versions.
-    /// </remarks>
-    public required string Id { get; init; }
+        // Must be kebab-case: lowercase letters, numbers, and hyphens
+        // Must start with a letter
+        // Must not start or end with hyphen
+        // Must not have consecutive hyphens
+        // Minimum 3 characters, maximum 64
+        if (id.Length < 3 || id.Length > 64)
+        {
+            return false;
+        }
 
-    /// <summary>
-    /// Gets the pack version following Semantic Versioning 2.0.
-    /// </summary>
-    public required PackVersion Version { get; init; }
+        if (!char.IsLetter(id[0]) || !char.IsLower(id[0]))
+        {
+            return false;
+        }
 
-    /// <summary>
-    /// Gets the human-readable pack name.
-    /// </summary>
-    /// <remarks>
-    /// Display name shown in CLI and UI. Example: "Acode Standard Pack".
-    /// </remarks>
-    public required string Name { get; init; }
+        if (id[^1] == '-')
+        {
+            return false;
+        }
 
-    /// <summary>
-    /// Gets the pack description.
-    /// </summary>
-    /// <remarks>
-    /// Brief description of the pack's purpose and use cases.
-    /// </remarks>
-    public required string Description { get; init; }
+        for (var i = 0; i < id.Length; i++)
+        {
+            var c = id[i];
+            if (!char.IsLetterOrDigit(c) && c != '-')
+            {
+                return false;
+            }
 
-    /// <summary>
-    /// Gets the SHA-256 content hash of all pack components.
-    /// </summary>
-    /// <remarks>
-    /// Used for integrity verification. Hash mismatch triggers warnings in logs.
-    /// </remarks>
-    public required ContentHash ContentHash { get; init; }
+            if (char.IsLetter(c) && !char.IsLower(c))
+            {
+                return false;
+            }
 
-    /// <summary>
-    /// Gets the pack creation timestamp (ISO 8601 UTC).
-    /// </summary>
-    public required DateTime CreatedAt { get; init; }
+            if (c == '-' && i > 0 && id[i - 1] == '-')
+            {
+                return false;
+            }
+        }
 
-    /// <summary>
-    /// Gets the pack last updated timestamp (ISO 8601 UTC).
-    /// </summary>
-    /// <remarks>
-    /// Optional. Only present if pack has been updated since creation.
-    /// </remarks>
-    public DateTime? UpdatedAt { get; init; }
-
-    /// <summary>
-    /// Gets the pack author name or email.
-    /// </summary>
-    /// <remarks>
-    /// Optional. Used for attribution and support contacts.
-    /// </remarks>
-    public string? Author { get; init; }
-
-    /// <summary>
-    /// Gets the list of components included in this pack.
-    /// </summary>
-    /// <remarks>
-    /// Each component references a file within the pack directory.
-    /// Components are loaded in order during composition.
-    /// </remarks>
-    public required IReadOnlyList<PackComponent> Components { get; init; }
+        return true;
+    }
 }

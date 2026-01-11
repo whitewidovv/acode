@@ -1,197 +1,74 @@
 # C# Language Guidelines
 
-## Naming Conventions
+## Code Style
 
-Follow .NET naming conventions strictly:
+### Naming Conventions
+- **PascalCase**: Classes, Methods, Properties, Events, Namespaces
+- **camelCase**: Local variables, parameters
+- **_camelCase**: Private fields (with underscore prefix)
+- **IPascalCase**: Interfaces (I prefix)
+- **TPascalCase**: Generic type parameters (T prefix)
 
-- **PascalCase**: Classes, methods, properties, events, namespaces
-  ```csharp
-  public class OrderProcessor { }
-  public void ProcessOrder() { }
-  public string CustomerName { get; set; }
-  ```
+### Modern C# Features (C# 12+)
+- **Primary Constructors**: `class Person(string name)`
+- **Collection Expressions**: `[1, 2, 3]` instead of `new int[] {1, 2, 3}`
+- **Required Members**: `required string Name { get; init; }`
+- **File-scoped Namespaces**: `namespace Foo;`
+- **Global Usings**: For common namespaces
 
-- **camelCase**: Local variables, parameters, private fields (with _ prefix)
-  ```csharp
-  private readonly ILogger _logger;
-  public void Process(string orderNumber)
-  {
-      var processingTime = DateTime.UtcNow;
-  }
-  ```
+### Async/Await Patterns
 
-- **IPascalCase**: Interfaces start with 'I'
-  ```csharp
-  public interface IOrderService { }
-  ```
-
-## Async/Await Patterns
-
-**✅ CORRECT - Async all the way**:
-```csharp
-public async Task<Order> GetOrderAsync(int orderId)
-{
-    var order = await _repository.GetAsync(orderId);
-    return order;
-}
-```
-
-**❌ WRONG - Blocking on async (causes deadlocks)**:
-```csharp
-public Order GetOrder(int orderId)
-{
-    var order = _repository.GetAsync(orderId).Result; // DEADLOCK RISK
-    return order;
-}
-```
-
-**✅ CORRECT - ConfigureAwait(false) in library code**:
-```csharp
-public async Task ProcessAsync()
-{
-    await SaveDataAsync().ConfigureAwait(false);
-}
-```
-
-## Nullable Reference Types
-
-Enable nullable reference types and handle nullability explicitly:
+When writing async code:
+- **Always use async/await** - Never use `.Result` or `.Wait()` on tasks
+- **Pass CancellationToken** through the call chain
+- **Use ConfigureAwait(false)** in library code
+- **Name async methods with Async suffix** - `GetDataAsync`, `SaveAsync`
 
 ```csharp
-#nullable enable
-
-public class OrderService
+// Correct async pattern
+public async Task<Result> ProcessAsync(int id, CancellationToken cancellationToken)
 {
-    // Non-nullable property - must be initialized
-    public string OrderId { get; set; } = string.Empty;
-
-    // Nullable property - can be null
-    public string? Notes { get; set; }
-
-    // Parameter validation
-    public void Process(Order order)
+    var data = await _repository.GetByIdAsync(id, cancellationToken)
+        .ConfigureAwait(false);
+    
+    if (data is null)
     {
-        ArgumentNullException.ThrowIfNull(order);
-
-        if (order.Items.Count == 0)
-            throw new ArgumentException("Order must have items", nameof(order));
+        return Result.NotFound();
     }
+    
+    await _service.ProcessAsync(data, cancellationToken)
+        .ConfigureAwait(false);
+    
+    return Result.Success();
 }
 ```
 
-## Dependency Injection
-
-Use constructor injection, not property injection:
-
-**✅ CORRECT**:
-```csharp
-public class OrderController : ControllerBase
-{
-    private readonly IOrderService _orderService;
-    private readonly ILogger<OrderController> _logger;
-
-    public OrderController(IOrderService orderService, ILogger<OrderController> logger)
-    {
-        _orderService = orderService;
-        _logger = logger;
-    }
-}
-```
-
-**❌ WRONG**:
-```csharp
-public class OrderController : ControllerBase
-{
-    [Inject]
-    public IOrderService OrderService { get; set; } // Don't use property injection
-}
-```
-
-## LINQ and Collections
-
-Prefer LINQ for readability, but be aware of performance:
+### Common Patterns
 
 ```csharp
-// Good - single enumeration
-var activeOrders = orders
-    .Where(o => o.Status == OrderStatus.Active)
-    .ToList();
+// Record types for DTOs
+public record PersonDto(string Name, int Age);
 
-// Avoid - multiple enumerations
-var count = orders.Where(o => o.IsActive).Count(); // Don't do this
-var first = orders.Where(o => o.IsActive).First(); // And this - use Count() and First() directly
+// Null checking
+ArgumentNullException.ThrowIfNull(parameter);
 
-// Better
-var activeOrders = orders.Where(o => o.IsActive).ToList();
-var count = activeOrders.Count;
-var first = activeOrders.First();
-```
-
-## IDisposable Pattern
-
-Implement IDisposable correctly:
-
-```csharp
-public class OrderProcessor : IDisposable
+// Pattern matching
+if (obj is Person { Age: > 18 } adult)
 {
-    private readonly HttpClient _httpClient = new HttpClient();
-    private bool _disposed;
+    // Use adult
+}
 
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (_disposed) return;
-
-        if (disposing)
-        {
-            _httpClient?.Dispose();
-        }
-
-        _disposed = true;
-    }
+// Primary constructor with field
+public class Service(ILogger logger)
+{
+    private readonly ILogger _logger = logger;
 }
 ```
 
-Or use 'using' declarations:
+## Avoid
 
-```csharp
-public async Task ProcessAsync()
-{
-    using var client = new HttpClient();
-    await client.GetAsync("https://api.example.com");
-}
-```
-
-## Exception Handling
-
-Be specific with exceptions:
-
-```csharp
-// Good - specific exceptions
-if (order == null)
-    throw new ArgumentNullException(nameof(order));
-
-if (order.Total < 0)
-    throw new ArgumentOutOfRangeException(nameof(order.Total), "Total must be non-negative");
-
-// Avoid catching generic Exception unless re-throwing
-try
-{
-    await ProcessOrderAsync(order);
-}
-catch (OrderValidationException ex)
-{
-    _logger.LogWarning(ex, "Validation failed for order {OrderId}", order.Id);
-    throw;
-}
-catch (Exception ex)
-{
-    _logger.LogError(ex, "Unexpected error processing order {OrderId}", order.Id);
-    throw; // Re-throw to preserve stack trace
-}
-```
+- Nested ternary operators
+- Deep nesting (prefer early returns)
+- Magic strings (use constants or nameof)
+- Mutable public fields (use properties)
+- Blocking async code (.Result, .Wait())

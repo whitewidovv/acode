@@ -64,8 +64,8 @@ public static class MatrixExporter
         // Data rows
         foreach (var entry in entries)
         {
-            var prerequisite = entry.Prerequisite?.Replace("\"", "\"\"") ?? "";
-            var rationale = entry.Rationale.Replace("\"", "\"\"");
+            var prerequisite = entry.Prerequisite?.Replace("\"", "\"\"", StringComparison.Ordinal) ?? string.Empty;
+            var rationale = entry.Rationale.Replace("\"", "\"\"", StringComparison.Ordinal);
             sb.AppendLine($"{entry.Mode},{entry.Capability},{entry.Permission},\"{rationale}\",\"{prerequisite}\"");
         }
 

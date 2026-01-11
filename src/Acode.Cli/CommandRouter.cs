@@ -76,7 +76,9 @@ public sealed class CommandRouter : ICommandRouter
     {
         ArgumentNullException.ThrowIfNull(commandName);
 
-        _commands.TryGetValue(commandName, out var command);
+        // FR-014: Router MUST trim whitespace from input
+        var trimmedName = commandName.Trim();
+        _commands.TryGetValue(trimmedName, out var command);
         return command;
     }
 

@@ -53,8 +53,8 @@ public sealed class ConfigMatrixCommand : ICommand
         }
         catch (Exception ex)
         {
-            context.Formatter.WriteError($"Error displaying matrix: {ex.Message}");
-            return ExitCode.InternalError;
+            context.Formatter.WriteMessage($"Error displaying matrix: {ex.Message}", MessageType.Error);
+            return ExitCode.GeneralError;
         }
     }
 
@@ -98,8 +98,11 @@ Related commands:
         if (index >= 0 && index + 1 < args.Length)
         {
             if (Enum.TryParse<OperatingMode>(args[index + 1], ignoreCase: true, out var mode))
+            {
                 return mode;
+            }
         }
+
         return null;
     }
 
@@ -109,8 +112,11 @@ Related commands:
         if (index >= 0 && index + 1 < args.Length)
         {
             if (Enum.TryParse<Capability>(args[index + 1], ignoreCase: true, out var capability))
+            {
                 return capability;
+            }
         }
+
         return null;
     }
 
@@ -121,8 +127,11 @@ Related commands:
         {
             var format = args[index + 1].ToLowerInvariant();
             if (format == "json" || format == "table")
+            {
                 return format;
+            }
         }
+
         return "table";
     }
 }

@@ -1,98 +1,75 @@
 using Acode.Application.PromptPacks;
 using Acode.Domain.PromptPacks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Acode.Infrastructure.PromptPacks;
 
 /// <summary>
-/// Composes final prompts from prompt pack components.
+/// Composes final system prompts from pack components.
 /// </summary>
 public sealed class PromptComposer : IPromptComposer
 {
-    private const int MaxPromptLength = 32000;
-    private const string ComponentSeparator = "\n\n";
-
     private readonly ITemplateEngine _templateEngine;
-    private readonly ILogger<PromptComposer>? _logger;
+    private readonly ComponentMerger _merger;
+    private readonly int _maxLength;
+    private readonly ILogger<PromptComposer> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PromptComposer"/> class.
     /// </summary>
-    /// <param name="templateEngine">Template engine for variable substitution.</param>
-    /// <param name="logger">Optional logger.</param>
-    public PromptComposer(ITemplateEngine templateEngine, ILogger<PromptComposer>? logger = null)
+    /// <param name="templateEngine">The template engine for variable substitution.</param>
+    /// <param name="maxLength">Maximum allowed prompt length in characters.</param>
+    /// <param name="logger">Optional logger instance.</param>
+    public PromptComposer(
+        ITemplateEngine templateEngine,
+        int maxLength = 128000,
+        ILogger<PromptComposer>? logger = null)
     {
-        ArgumentNullException.ThrowIfNull(templateEngine);
-        _templateEngine = templateEngine;
-        _logger = logger;
+        _templateEngine = templateEngine ?? throw new ArgumentNullException(nameof(templateEngine));
+        _merger = new ComponentMerger(deduplicateHeadings: true);
+        _maxLength = maxLength;
+        _logger = logger ?? NullLogger<PromptComposer>.Instance;
     }
 
-    /// <inheritdoc/>
-    public string Compose(PromptPack pack, CompositionContext context)
+    /// <inheritdoc />
+    public Task<string> ComposeAsync(
+        PromptPack pack,
+        CompositionContext context,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(pack);
         ArgumentNullException.ThrowIfNull(context);
 
-        var components = new List<string>();
+        cancellationToken.ThrowIfCancellationRequested();
 
-        // 1. Base system prompt (always included)
-        if (pack.Components.TryGetValue("system.md", out var systemComponent) &&
-            !string.IsNullOrEmpty(systemComponent.Content))
-        {
-            components.Add(systemComponent.Content);
-        }
+        // Merge components with context filtering and deduplication
+        var merged = _merger.Merge(pack.Components, context);
 
-        // 2. Role-specific prompt (if context.Role specified)
-        if (!string.IsNullOrWhiteSpace(context.Role))
-        {
-            var rolePath = $"roles/{context.Role}.md";
-            if (pack.Components.TryGetValue(rolePath, out var roleComponent) &&
-                !string.IsNullOrEmpty(roleComponent.Content))
-            {
-                components.Add(roleComponent.Content);
-            }
-        }
-
-        // 3. Language-specific prompt (if context.Language specified)
-        if (!string.IsNullOrWhiteSpace(context.Language))
-        {
-            var languagePath = $"languages/{context.Language}.md";
-            if (pack.Components.TryGetValue(languagePath, out var languageComponent) &&
-                !string.IsNullOrEmpty(languageComponent.Content))
-            {
-                components.Add(languageComponent.Content);
-            }
-        }
-
-        // 4. Framework-specific prompt (if context.Framework specified)
-        if (!string.IsNullOrWhiteSpace(context.Framework))
-        {
-            var frameworkPath = $"frameworks/{context.Framework}.md";
-            if (pack.Components.TryGetValue(frameworkPath, out var frameworkComponent) &&
-                !string.IsNullOrEmpty(frameworkComponent.Content))
-            {
-                components.Add(frameworkComponent.Content);
-            }
-        }
-
-        // Join components with double newlines
-        var composed = string.Join(ComponentSeparator, components);
-
-        // 5. Template variable substitution
-        var variables = context.VariablesOrEmpty;
-        var substituted = _templateEngine.Substitute(composed, new Dictionary<string, string>(variables));
+        // Apply template variable substitution
+        var result = _templateEngine.Substitute(merged, context);
 
         // Enforce maximum length
-        if (substituted.Length > MaxPromptLength)
+        if (result.Length > _maxLength)
         {
-            _logger?.LogWarning(
-                "Composed prompt exceeds maximum length of {MaxLength} characters. Truncating from {ActualLength} characters.",
-                MaxPromptLength,
-                substituted.Length);
-
-            substituted = substituted.Substring(0, MaxPromptLength);
+            _logger.LogWarning(
+                "Composed prompt exceeds maximum length ({Length} > {MaxLength}), truncating",
+                result.Length,
+                _maxLength);
+            result = result[.._maxLength];
         }
 
-        return substituted;
+        // Log composition hash for debugging
+        var hash = ComputeHash(result);
+        _logger.LogInformation("Composed prompt hash: {Hash}, length: {Length}", hash, result.Length);
+
+        return Task.FromResult(result);
+    }
+
+    private static string ComputeHash(string content)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+        var hashBytes = System.Security.Cryptography.SHA256.HashData(bytes);
+        return Convert.ToHexString(hashBytes)[..16];
     }
 }

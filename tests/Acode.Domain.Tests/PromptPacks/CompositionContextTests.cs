@@ -4,36 +4,12 @@ using FluentAssertions;
 namespace Acode.Domain.Tests.PromptPacks;
 
 /// <summary>
-/// Tests for <see cref="CompositionContext"/>.
+/// Tests for CompositionContext domain model.
 /// </summary>
 public class CompositionContextTests
 {
     [Fact]
-    public void Constructor_WithAllParameters_SetsProperties()
-    {
-        // Arrange
-        var variables = new Dictionary<string, string>
-        {
-            ["workspace_name"] = "MyProject",
-            ["language"] = "csharp",
-        };
-
-        // Act
-        var context = new CompositionContext(
-            Role: "coder",
-            Language: "csharp",
-            Framework: "aspnetcore",
-            Variables: variables);
-
-        // Assert
-        context.Role.Should().Be("coder");
-        context.Language.Should().Be("csharp");
-        context.Framework.Should().Be("aspnetcore");
-        context.Variables.Should().BeSameAs(variables);
-    }
-
-    [Fact]
-    public void Constructor_WithNullParameters_AllowsNulls()
+    public void Should_Create_Empty_Context_With_Defaults()
     {
         // Act
         var context = new CompositionContext();
@@ -42,192 +18,90 @@ public class CompositionContextTests
         context.Role.Should().BeNull();
         context.Language.Should().BeNull();
         context.Framework.Should().BeNull();
-        context.Variables.Should().BeNull();
+        context.Variables.Should().BeEmpty();
+        context.ConfigVariables.Should().BeEmpty();
+        context.EnvironmentVariables.Should().BeEmpty();
+        context.ContextVariables.Should().BeEmpty();
+        context.DefaultVariables.Should().BeEmpty();
     }
 
     [Fact]
-    public void VariablesOrEmpty_WithVariables_ReturnsVariables()
+    public void Should_Set_Role_Language_Framework()
     {
-        // Arrange
-        var variables = new Dictionary<string, string>
-        {
-            ["key"] = "value",
-        };
-        var context = new CompositionContext(Variables: variables);
-
         // Act
-        var result = context.VariablesOrEmpty;
-
-        // Assert
-        result.Should().BeSameAs(variables);
-    }
-
-    [Fact]
-    public void VariablesOrEmpty_WithNullVariables_ReturnsEmptyDictionary()
-    {
-        // Arrange
-        var context = new CompositionContext();
-
-        // Act
-        var result = context.VariablesOrEmpty;
-
-        // Assert
-        result.Should().NotBeNull();
-        result.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void WithVariables_CreatesContextWithVariables()
-    {
-        // Arrange
-        var variables = new Dictionary<string, string>
+        var context = new CompositionContext
         {
-            ["name"] = "Test",
+            Role = "coder",
+            Language = "csharp",
+            Framework = "aspnetcore"
         };
 
-        // Act
-        var context = CompositionContext.WithVariables(variables);
-
         // Assert
-        context.Variables.Should().BeSameAs(variables);
-        context.Role.Should().BeNull();
-        context.Language.Should().BeNull();
-        context.Framework.Should().BeNull();
+        context.Role.Should().Be("coder");
+        context.Language.Should().Be("csharp");
+        context.Framework.Should().Be("aspnetcore");
     }
 
     [Fact]
-    public void ForRole_WithValidRole_CreatesContextWithRole()
-    {
-        // Act
-        var context = CompositionContext.ForRole("planner");
-
-        // Assert
-        context.Role.Should().Be("planner");
-        context.Language.Should().BeNull();
-        context.Framework.Should().BeNull();
-        context.Variables.Should().BeNull();
-    }
-
-    [Fact]
-    public void ForRole_WithVariables_CreatesContextWithRoleAndVariables()
+    public void Should_Set_Variables_Dictionary()
     {
         // Arrange
         var variables = new Dictionary<string, string>
         {
             ["workspace_name"] = "MyProject",
+            ["team_name"] = "Backend"
         };
 
         // Act
-        var context = CompositionContext.ForRole("coder", variables);
-
-        // Assert
-        context.Role.Should().Be("coder");
-        context.Variables.Should().BeSameAs(variables);
-    }
-
-    [Fact]
-    public void ForRole_WithNullRole_ThrowsArgumentException()
-    {
-        // Act
-        var act = () => CompositionContext.ForRole(null!);
-
-        // Assert
-        act.Should().Throw<ArgumentException>();
-    }
-
-    [Fact]
-    public void ForRole_WithEmptyRole_ThrowsArgumentException()
-    {
-        // Act
-        var act = () => CompositionContext.ForRole(string.Empty);
-
-        // Assert
-        act.Should().Throw<ArgumentException>();
-    }
-
-    [Fact]
-    public void ForTechnology_WithLanguage_CreatesContextWithLanguage()
-    {
-        // Act
-        var context = CompositionContext.ForTechnology("typescript");
-
-        // Assert
-        context.Language.Should().Be("typescript");
-        context.Framework.Should().BeNull();
-        context.Role.Should().BeNull();
-    }
-
-    [Fact]
-    public void ForTechnology_WithLanguageAndFramework_CreatesContextWithBoth()
-    {
-        // Act
-        var context = CompositionContext.ForTechnology("typescript", "react");
-
-        // Assert
-        context.Language.Should().Be("typescript");
-        context.Framework.Should().Be("react");
-    }
-
-    [Fact]
-    public void ForTechnology_WithAllParameters_CreatesCompleteContext()
-    {
-        // Arrange
-        var variables = new Dictionary<string, string>
+        var context = new CompositionContext
         {
-            ["project_name"] = "WebApp",
+            Variables = variables
         };
 
-        // Act
-        var context = CompositionContext.ForTechnology("csharp", "aspnetcore", variables);
-
         // Assert
-        context.Language.Should().Be("csharp");
-        context.Framework.Should().Be("aspnetcore");
-        context.Variables.Should().BeSameAs(variables);
+        context.Variables.Should().HaveCount(2);
+        context.Variables["workspace_name"].Should().Be("MyProject");
+        context.Variables["team_name"].Should().Be("Backend");
     }
 
     [Fact]
-    public void ForTechnology_WithNullLanguage_ThrowsArgumentException()
-    {
-        // Act
-        var act = () => CompositionContext.ForTechnology(null!);
-
-        // Assert
-        act.Should().Throw<ArgumentException>();
-    }
-
-    [Fact]
-    public void ForTechnology_WithEmptyLanguage_ThrowsArgumentException()
-    {
-        // Act
-        var act = () => CompositionContext.ForTechnology(string.Empty);
-
-        // Assert
-        act.Should().Throw<ArgumentException>();
-    }
-
-    [Fact]
-    public void RecordEquality_WithSameValues_AreEqual()
+    public void Should_Set_All_Variable_Sources()
     {
         // Arrange
-        var variables = new Dictionary<string, string> { ["key"] = "value" };
-        var context1 = new CompositionContext("coder", "csharp", "aspnetcore", variables);
-        var context2 = new CompositionContext("coder", "csharp", "aspnetcore", variables);
+        var configVars = new Dictionary<string, string> { ["key1"] = "config" };
+        var envVars = new Dictionary<string, string> { ["key2"] = "env" };
+        var contextVars = new Dictionary<string, string> { ["key3"] = "context" };
+        var defaultVars = new Dictionary<string, string> { ["key4"] = "default" };
 
-        // Act & Assert
-        context1.Should().Be(context2);
-        (context1 == context2).Should().BeTrue();
+        // Act
+        var context = new CompositionContext
+        {
+            ConfigVariables = configVars,
+            EnvironmentVariables = envVars,
+            ContextVariables = contextVars,
+            DefaultVariables = defaultVars
+        };
+
+        // Assert
+        context.ConfigVariables["key1"].Should().Be("config");
+        context.EnvironmentVariables["key2"].Should().Be("env");
+        context.ContextVariables["key3"].Should().Be("context");
+        context.DefaultVariables["key4"].Should().Be("default");
     }
 
     [Fact]
-    public void RecordEquality_WithDifferentValues_AreNotEqual()
+    public void Should_Be_Immutable_After_Creation()
     {
         // Arrange
-        var context1 = new CompositionContext("coder");
-        var context2 = new CompositionContext("planner");
+        var context = new CompositionContext
+        {
+            Role = "coder",
+            Language = "csharp"
+        };
 
-        // Act & Assert
-        context1.Should().NotBe(context2);
-        (context1 != context2).Should().BeTrue();
+        // Assert - with expressions create new instances, original unchanged
+        var newContext = context with { Role = "planner" };
+        context.Role.Should().Be("coder");
+        newContext.Role.Should().Be("planner");
     }
 }

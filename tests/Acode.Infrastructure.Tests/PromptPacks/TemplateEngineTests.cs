@@ -1,239 +1,253 @@
+using Acode.Domain.PromptPacks;
+using Acode.Domain.PromptPacks.Exceptions;
 using Acode.Infrastructure.PromptPacks;
 using FluentAssertions;
 
 namespace Acode.Infrastructure.Tests.PromptPacks;
 
 /// <summary>
-/// Tests for <see cref="TemplateEngine"/>.
+/// Tests for TemplateEngine implementation.
+/// Tests from Task 008 spec lines 1079-1250.
 /// </summary>
 public class TemplateEngineTests
 {
     [Fact]
-    public void Substitute_SingleVariable_ReplacesCorrectly()
+    public void Should_Substitute_Single_Variable()
     {
         // Arrange
-        var engine = new TemplateEngine();
-        var templateText = "Hello {{name}}!";
-        var variables = new Dictionary<string, string>
+        var content = "Working on {{workspace_name}} project";
+        var context = new CompositionContext
         {
-            ["name"] = "World",
+            Variables = new Dictionary<string, string>
+            {
+                ["workspace_name"] = "AgenticCoder"
+            }
         };
+        var engine = new TemplateEngine();
 
         // Act
-        var result = engine.Substitute(templateText, variables);
+        var result = engine.Substitute(content, context);
 
         // Assert
-        result.Should().Be("Hello World!");
+        result.Should().Be("Working on AgenticCoder project");
     }
 
     [Fact]
-    public void Substitute_MultipleVariables_ReplacesAll()
+    public void Should_Substitute_Multiple_Variables()
     {
         // Arrange
-        var engine = new TemplateEngine();
-        var templateText = "{{greeting}} {{name}}, today is {{day}}!";
-        var variables = new Dictionary<string, string>
+        var content = "Project {{workspace_name}} uses {{language}} with {{framework}}";
+        var context = new CompositionContext
         {
-            ["greeting"] = "Hello",
-            ["name"] = "Alice",
-            ["day"] = "Monday",
+            Variables = new Dictionary<string, string>
+            {
+                ["workspace_name"] = "MyApp",
+                ["language"] = "csharp",
+                ["framework"] = "aspnetcore"
+            }
         };
+        var engine = new TemplateEngine();
 
         // Act
-        var result = engine.Substitute(templateText, variables);
+        var result = engine.Substitute(content, context);
 
         // Assert
-        result.Should().Be("Hello Alice, today is Monday!");
+        result.Should().Be("Project MyApp uses csharp with aspnetcore");
     }
 
     [Fact]
-    public void Substitute_MissingVariable_BecomesEmptyString()
+    public void Should_Replace_Missing_Variable_With_Empty_String()
     {
         // Arrange
-        var engine = new TemplateEngine();
-        var templateText = "Hello {{name}}, your role is {{role}}.";
-        var variables = new Dictionary<string, string>
+        var content = "Language: {{language}}, Framework: {{framework}}";
+        var context = new CompositionContext
         {
-            ["name"] = "Bob",
+            Variables = new Dictionary<string, string>
+            {
+                ["language"] = "typescript"
+            }
         };
+        var engine = new TemplateEngine();
 
         // Act
-        var result = engine.Substitute(templateText, variables);
+        var result = engine.Substitute(content, context);
 
         // Assert
-        result.Should().Be("Hello Bob, your role is .");
+        result.Should().Be("Language: typescript, Framework: ");
     }
 
     [Fact]
-    public void Substitute_VariableValueTooLong_ThrowsArgumentException()
+    public void Should_Escape_Special_Characters_In_Variable_Values()
     {
         // Arrange
-        var engine = new TemplateEngine();
-        var templateText = "Content: {{data}}";
-        var longValue = new string('a', 1025); // Exceeds 1024 char limit
-        var variables = new Dictionary<string, string>
+        var content = "Description: {{description}}";
+        var context = new CompositionContext
         {
-            ["data"] = longValue,
+            Variables = new Dictionary<string, string>
+            {
+                ["description"] = "Use <script>alert('xss')</script> carefully"
+            }
         };
+        var engine = new TemplateEngine();
 
         // Act
-        var act = () => engine.Substitute(templateText, variables);
+        var result = engine.Substitute(content, context);
 
         // Assert
-        act.Should().Throw<ArgumentException>()
-            .WithMessage("*exceeds maximum length*");
+        result.Should().Be("Description: Use &lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt; carefully");
     }
 
     [Fact]
-    public void Substitute_NoVariables_ReturnsOriginalText()
+    public void Should_Reject_Variable_Value_Exceeding_Maximum_Length()
     {
         // Arrange
+        var content = "Value: {{long_value}}";
+        var longValue = new string('x', 1025); // Exceeds 1024 limit
+        var context = new CompositionContext
+        {
+            Variables = new Dictionary<string, string>
+            {
+                ["long_value"] = longValue
+            }
+        };
         var engine = new TemplateEngine();
-        var templateText = "This is plain text without any variables.";
-        var variables = new Dictionary<string, string>();
 
-        // Act
-        var result = engine.Substitute(templateText, variables);
-
-        // Assert
-        result.Should().Be(templateText);
+        // Act & Assert
+        var act = () => engine.Substitute(content, context);
+        act.Should().Throw<TemplateVariableException>()
+           .WithMessage("*exceeds maximum length*");
     }
 
     [Fact]
-    public void Substitute_SameVariableMultipleTimes_ReplacesAllOccurrences()
+    public void Should_Handle_Variable_Resolution_Priority()
     {
         // Arrange
-        var engine = new TemplateEngine();
-        var templateText = "{{name}} said {{name}} likes {{name}}.";
-        var variables = new Dictionary<string, string>
+        var content = "Value: {{custom_var}}";
+        var context = new CompositionContext
         {
-            ["name"] = "Charlie",
+            // Priority: config > environment > context > defaults
+            ConfigVariables = new Dictionary<string, string> { ["custom_var"] = "from_config" },
+            EnvironmentVariables = new Dictionary<string, string> { ["custom_var"] = "from_env" },
+            ContextVariables = new Dictionary<string, string> { ["custom_var"] = "from_context" },
+            DefaultVariables = new Dictionary<string, string> { ["custom_var"] = "from_default" }
         };
+        var engine = new TemplateEngine();
 
         // Act
-        var result = engine.Substitute(templateText, variables);
+        var result = engine.Substitute(content, context);
 
         // Assert
-        result.Should().Be("Charlie said Charlie likes Charlie.");
+        result.Should().Be("Value: from_config");
     }
 
     [Fact]
-    public void Substitute_EmptyTemplateText_ReturnsEmpty()
+    public void Should_Detect_Recursive_Variable_Expansion()
+    {
+        // Arrange
+        var content = "{{var_a}}";
+        var context = new CompositionContext
+        {
+            Variables = new Dictionary<string, string>
+            {
+                ["var_a"] = "{{var_b}}",
+                ["var_b"] = "{{var_c}}",
+                ["var_c"] = "{{var_d}}",
+                ["var_d"] = "{{var_a}}" // Circular reference
+            }
+        };
+        var engine = new TemplateEngine(maxExpansionDepth: 3);
+
+        // Act & Assert
+        var act = () => engine.Substitute(content, context);
+        act.Should().Throw<TemplateVariableException>()
+           .WithMessage("*expansion depth limit*");
+    }
+
+    [Fact]
+    public void Should_Substitute_Variables_In_Multi_Line_Template()
+    {
+        // Arrange
+        var content = @"
+# Project: {{workspace_name}}
+
+Language: {{language}}
+Framework: {{framework}}
+Team: {{team_name}}";
+
+        var context = new CompositionContext
+        {
+            Variables = new Dictionary<string, string>
+            {
+                ["workspace_name"] = "PaymentService",
+                ["language"] = "go",
+                ["framework"] = "gin",
+                ["team_name"] = "Backend Team"
+            }
+        };
+        var engine = new TemplateEngine();
+
+        // Act
+        var result = engine.Substitute(content, context);
+
+        // Assert
+        result.Should().Contain("Project: PaymentService");
+        result.Should().Contain("Language: go");
+        result.Should().Contain("Framework: gin");
+        result.Should().Contain("Team: Backend Team");
+    }
+
+    [Fact]
+    public void Should_Handle_Null_Context()
+    {
+        // Arrange
+        var content = "Test {{var}}";
+        var engine = new TemplateEngine();
+
+        // Act & Assert
+        var act = () => engine.Substitute(content, null!);
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void Should_Return_Original_When_No_Variables()
+    {
+        // Arrange
+        var content = "No variables here";
+        var context = new CompositionContext();
+        var engine = new TemplateEngine();
+
+        // Act
+        var result = engine.Substitute(content, context);
+
+        // Assert
+        result.Should().Be("No variables here");
+    }
+
+    [Fact]
+    public void Should_Handle_Empty_Content()
     {
         // Arrange
         var engine = new TemplateEngine();
-        var variables = new Dictionary<string, string>
-        {
-            ["name"] = "Test",
-        };
+        var context = new CompositionContext();
 
         // Act
-        var result = engine.Substitute(string.Empty, variables);
+        var result = engine.Substitute(string.Empty, context);
 
         // Assert
         result.Should().BeEmpty();
     }
 
     [Fact]
-    public void Substitute_RecursiveExpansion_DetectsAndThrows()
+    public void Should_Handle_Null_Content()
     {
         // Arrange
         var engine = new TemplateEngine();
-        var templateText = "Value: {{var1}}";
-        var variables = new Dictionary<string, string>
-        {
-            ["var1"] = "{{var2}}",
-            ["var2"] = "{{var3}}",
-            ["var3"] = "{{var4}}",
-            ["var4"] = "final",
-        };
+        var context = new CompositionContext();
 
         // Act
-        var act = () => engine.Substitute(templateText, variables);
+        var result = engine.Substitute(null!, context);
 
         // Assert
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*recursive*expansion*");
-    }
-
-    [Fact]
-    public void Substitute_VariableWithUnderscores_ReplacesCorrectly()
-    {
-        // Arrange
-        var engine = new TemplateEngine();
-        var templateText = "Workspace: {{workspace_name}}, Lang: {{current_language}}";
-        var variables = new Dictionary<string, string>
-        {
-            ["workspace_name"] = "MyProject",
-            ["current_language"] = "csharp",
-        };
-
-        // Act
-        var result = engine.Substitute(templateText, variables);
-
-        // Assert
-        result.Should().Be("Workspace: MyProject, Lang: csharp");
-    }
-
-    [Fact]
-    public void ValidateTemplate_ValidTemplate_ReturnsSuccess()
-    {
-        // Arrange
-        var engine = new TemplateEngine();
-        var templateText = "Hello {{name}}, welcome to {{workspace_name}}!";
-
-        // Act
-        var result = engine.ValidateTemplate(templateText);
-
-        // Assert
-        result.IsValid.Should().BeTrue();
-        result.Errors.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void ValidateTemplate_UnclosedBraces_ReturnsError()
-    {
-        // Arrange
-        var engine = new TemplateEngine();
-        var templateText = "Hello {{name, missing closing braces!";
-
-        // Act
-        var result = engine.ValidateTemplate(templateText);
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().NotBeEmpty();
-        result.Errors[0].Message.Should().Contain("unclosed");
-    }
-
-    [Fact]
-    public void ValidateTemplate_InvalidVariableName_ReturnsError()
-    {
-        // Arrange
-        var engine = new TemplateEngine();
-        var templateText = "Hello {{name with spaces}}!";
-
-        // Act
-        var result = engine.ValidateTemplate(templateText);
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().NotBeEmpty();
-        result.Errors[0].Message.Should().Contain("invalid variable name");
-    }
-
-    [Fact]
-    public void ValidateTemplate_EmptyVariableName_ReturnsError()
-    {
-        // Arrange
-        var engine = new TemplateEngine();
-        var templateText = "Value: {{}}";
-
-        // Act
-        var result = engine.ValidateTemplate(templateText);
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().NotBeEmpty();
+        result.Should().BeNull();
     }
 }

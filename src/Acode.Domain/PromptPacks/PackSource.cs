@@ -1,17 +1,17 @@
 namespace Acode.Domain.PromptPacks;
 
 /// <summary>
-/// Defines the source of a prompt pack.
+/// Defines the source location of a prompt pack.
 /// </summary>
 public enum PackSource
 {
     /// <summary>
-    /// Built-in pack shipped with Acode (embedded resources).
+    /// Pack is embedded within the application as a built-in resource.
     /// </summary>
-    BuiltIn = 0,
+    BuiltIn,
 
     /// <summary>
-    /// User-provided pack from workspace .acode/prompts/ directory.
+    /// Pack is loaded from the user's configuration directory.
     /// </summary>
-    User = 1,
+    User,
 }

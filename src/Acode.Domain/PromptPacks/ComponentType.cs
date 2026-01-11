@@ -6,27 +6,27 @@ namespace Acode.Domain.PromptPacks;
 public enum ComponentType
 {
     /// <summary>
-    /// Base system prompt that defines the agent's core identity and capabilities.
+    /// Core system-level prompts defining fundamental agent behavior.
     /// </summary>
-    System = 0,
+    System,
 
     /// <summary>
-    /// Role-specific guidance (e.g., planner, coder, reviewer).
+    /// Role-specific behavioral configurations.
     /// </summary>
-    Role = 1,
+    Role,
 
     /// <summary>
-    /// Language-specific conventions and patterns (e.g., csharp, typescript, python).
+    /// Programming language-specific guidelines.
     /// </summary>
-    Language = 2,
+    Language,
 
     /// <summary>
-    /// Framework-specific guidance (e.g., aspnetcore, react, nextjs).
+    /// Framework-specific patterns and practices.
     /// </summary>
-    Framework = 3,
+    Framework,
 
     /// <summary>
-    /// Custom user-defined component.
+    /// User-defined custom component type.
     /// </summary>
-    Custom = 4,
+    Custom,
 }

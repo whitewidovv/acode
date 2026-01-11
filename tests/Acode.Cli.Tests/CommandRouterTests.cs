@@ -37,8 +37,7 @@ public class CommandRouterTests
         var act = () => router.RegisterCommand(command2);
 
         // Assert
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*already registered*");
+        act.Should().Throw<InvalidOperationException>().WithMessage("*already registered*");
     }
 
     [Fact]
@@ -179,11 +178,105 @@ public class CommandRouterTests
         var act = () => router.RegisterCommand(null!);
 
         // Assert
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("command");
+        act.Should().Throw<ArgumentNullException>().WithParameterName("command");
     }
 
-    private static ICommand CreateMockCommand(string name, string description, string[]? aliases = null)
+    [Fact]
+    public void GetCommand_ShouldBeCaseInsensitive()
+    {
+        // Arrange
+        var router = new CommandRouter();
+        var command = CreateMockCommand("Config", "Config command");
+        router.RegisterCommand(command);
+
+        // Act & Assert
+        router.GetCommand("config").Should().BeSameAs(command);
+        router.GetCommand("CONFIG").Should().BeSameAs(command);
+        router.GetCommand("CoNfIg").Should().BeSameAs(command);
+    }
+
+    /// <summary>
+    /// FR-014: Router MUST trim whitespace from input.
+    /// </summary>
+    [Fact]
+    public void GetCommand_ShouldTrimWhitespace()
+    {
+        // Arrange
+        var router = new CommandRouter();
+        var command = CreateMockCommand("chat", "Chat command");
+        router.RegisterCommand(command);
+
+        // Act & Assert
+        router.GetCommand("  chat  ").Should().BeSameAs(command);
+        router.GetCommand("chat ").Should().BeSameAs(command);
+        router.GetCommand(" chat").Should().BeSameAs(command);
+        router.GetCommand("\tchat\t").Should().BeSameAs(command);
+    }
+
+    [Fact]
+    public void SuggestCommands_ShouldRankBySimilarity()
+    {
+        // Arrange
+        var router = new CommandRouter();
+        router.RegisterCommand(CreateMockCommand("chat", "Chat"));
+        router.RegisterCommand(CreateMockCommand("check", "Check"));
+        router.RegisterCommand(CreateMockCommand("config", "Config"));
+
+        // Act - "chaz" is closer to "chat" (1 edit) than "check" (2 edits)
+        var suggestions = router.SuggestCommands("chaz");
+
+        // Assert
+        suggestions.Should().HaveCount(2);
+        suggestions[0].Should().Be("chat"); // Closest match first
+    }
+
+    [Fact]
+    public void SuggestCommands_ShouldLimitResults()
+    {
+        // Arrange
+        var router = new CommandRouter();
+        router.RegisterCommand(CreateMockCommand("cat", "Cat"));
+        router.RegisterCommand(CreateMockCommand("bat", "Bat"));
+        router.RegisterCommand(CreateMockCommand("rat", "Rat"));
+        router.RegisterCommand(CreateMockCommand("hat", "Hat"));
+        router.RegisterCommand(CreateMockCommand("mat", "Mat"));
+
+        // Act
+        var suggestions = router.SuggestCommands("fat", maxSuggestions: 2);
+
+        // Assert
+        suggestions.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task RouteAsync_ShouldCompleteUnder10ms()
+    {
+        // Arrange
+        var router = new CommandRouter();
+        for (int i = 0; i < 50; i++)
+        {
+            var cmd = CreateMockCommand($"cmd{i}", $"Command {i}");
+            cmd.ExecuteAsync(Arg.Any<CommandContext>()).Returns(ExitCode.Success);
+            router.RegisterCommand(cmd);
+        }
+
+        var context = CreateMockContext();
+        var args = new[] { "cmd25" };
+
+        // Act
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await router.RouteAsync(args, context).ConfigureAwait(true);
+        sw.Stop();
+
+        // Assert
+        sw.ElapsedMilliseconds.Should().BeLessThan(10, "routing should complete in under 10ms");
+    }
+
+    private static ICommand CreateMockCommand(
+        string name,
+        string description,
+        string[]? aliases = null
+    )
     {
         var command = Substitute.For<ICommand>();
         command.Name.Returns(name);

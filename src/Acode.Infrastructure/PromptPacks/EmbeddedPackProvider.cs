@@ -1,161 +1,285 @@
+// <copyright file="EmbeddedPackProvider.cs" company="Acode">
+// Copyright (c) Acode. All rights reserved.
+// </copyright>
+
 using System.Reflection;
-using Acode.Application.PromptPacks;
 using Acode.Domain.PromptPacks;
+using Acode.Domain.PromptPacks.Exceptions;
+using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.PromptPacks;
 
 /// <summary>
-/// Provides access to built-in prompt packs embedded as resources.
+/// Provides access to built-in prompt packs embedded as assembly resources.
 /// </summary>
 public sealed class EmbeddedPackProvider
 {
-    private const string ResourcePrefix = "Acode.Infrastructure.Resources.PromptPacks";
-    private static readonly string[] BuiltInPackIds = { "acode-standard", "acode-dotnet", "acode-react" };
+    private const string ResourcePrefix = "Acode.Infrastructure.Resources.PromptPacks.";
 
-    private readonly IPromptPackLoader _loader;
-    private readonly IContentHasher _hasher;
+    private readonly ManifestParser _manifestParser;
+    private readonly ILogger<EmbeddedPackProvider> _logger;
     private readonly Assembly _assembly;
+    private readonly Dictionary<string, string> _extractionCache = new();
+    private readonly object _cacheLock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="EmbeddedPackProvider"/> class.
     /// </summary>
-    /// <param name="loader">Pack loader for parsing pack files.</param>
-    /// <param name="hasher">Content hasher for verification.</param>
-    public EmbeddedPackProvider(IPromptPackLoader loader, IContentHasher hasher)
+    /// <param name="manifestParser">The manifest parser.</param>
+    /// <param name="logger">The logger.</param>
+    public EmbeddedPackProvider(ManifestParser manifestParser, ILogger<EmbeddedPackProvider> logger)
     {
-        ArgumentNullException.ThrowIfNull(loader);
-        ArgumentNullException.ThrowIfNull(hasher);
-
-        _loader = loader;
-        _hasher = hasher;
+        _manifestParser = manifestParser;
+        _logger = logger;
         _assembly = typeof(EmbeddedPackProvider).Assembly;
     }
 
     /// <summary>
     /// Gets the list of available built-in pack IDs.
     /// </summary>
-    /// <returns>Array of pack IDs.</returns>
-    public string[] GetAvailablePackIds()
+    /// <returns>The available pack IDs.</returns>
+    public IReadOnlyList<string> GetAvailablePackIds()
     {
-        return BuiltInPackIds.ToArray();
+        var packIds = new HashSet<string>();
+        var resourceNames = _assembly.GetManifestResourceNames()
+            .Where(n => n.StartsWith(ResourcePrefix, StringComparison.Ordinal));
+
+        foreach (var name in resourceNames)
+        {
+            var remainder = name[ResourcePrefix.Length..];
+            var firstDot = remainder.IndexOf('.', StringComparison.Ordinal);
+            if (firstDot > 0)
+            {
+                var resourcePackId = remainder[..firstDot];
+
+                // Convert underscores back to hyphens for canonical pack ID format
+                packIds.Add(DenormalizeFromResource(resourcePackId));
+            }
+        }
+
+        return packIds.ToList().AsReadOnly();
     }
 
     /// <summary>
-    /// Checks if a pack ID is a built-in pack.
+    /// Checks if a built-in pack exists.
     /// </summary>
-    /// <param name="packId">Pack ID to check.</param>
-    /// <returns>True if the pack is built-in, false otherwise.</returns>
-    public bool IsBuiltInPack(string packId)
-    {
-        return BuiltInPackIds.Contains(packId);
-    }
-
-    /// <summary>
-    /// Extracts an embedded pack to a temporary directory and loads it.
-    /// </summary>
-    /// <param name="packId">Pack ID to load.</param>
-    /// <returns>Loaded prompt pack.</returns>
-    /// <exception cref="PackNotFoundException">Thrown when pack is not found in embedded resources.</exception>
-    public PromptPack LoadPack(string packId)
+    /// <param name="packId">The pack ID.</param>
+    /// <returns><c>true</c> if the pack exists; otherwise, <c>false</c>.</returns>
+    public bool HasPack(string packId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packId);
 
-        if (!IsBuiltInPack(packId))
+        var normalizedPackId = NormalizeForResource(packId);
+        var prefix = ResourcePrefix + normalizedPackId + ".";
+        return _assembly.GetManifestResourceNames()
+            .Any(n => n.StartsWith(prefix, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Loads a built-in pack manifest.
+    /// </summary>
+    /// <param name="packId">The pack ID.</param>
+    /// <returns>The loaded pack manifest.</returns>
+    /// <exception cref="PackNotFoundException">Thrown when the pack is not found.</exception>
+    public PackManifest LoadManifest(string packId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packId);
+
+        var manifestResourceName = GetResourceName(packId, "manifest.yml");
+        using var stream = _assembly.GetManifestResourceStream(manifestResourceName);
+
+        if (stream is null)
         {
             throw new PackNotFoundException(packId);
         }
 
-        // Extract pack to temporary directory
-        var tempPackDir = ExtractPackToTemp(packId);
+        using var reader = new StreamReader(stream);
+        var manifestContent = reader.ReadToEnd();
 
-        try
+        return _manifestParser.Parse(manifestContent, GetExtractedPath(packId), PackSource.BuiltIn);
+    }
+
+    /// <summary>
+    /// Loads a complete built-in pack with all components.
+    /// </summary>
+    /// <param name="packId">The pack ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The loaded prompt pack.</returns>
+    /// <exception cref="PackNotFoundException">Thrown when the pack is not found.</exception>
+    public async Task<PromptPack> LoadPackAsync(string packId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packId);
+
+        if (!HasPack(packId))
         {
-            // Load pack using standard loader
-            var pack = _loader.LoadPack(tempPackDir);
-
-            // Ensure source is marked as BuiltIn
-            return pack with { Source = PackSource.BuiltIn };
+            throw new PackNotFoundException(packId);
         }
-        finally
+
+        _logger.LogInformation("Loading built-in pack {PackId}", packId);
+
+        // Extract pack to temp directory
+        var extractPath = ExtractPack(packId);
+        var manifest = LoadManifest(packId);
+
+        // Load component contents
+        var components = new List<LoadedComponent>();
+
+        foreach (var componentDef in manifest.Components)
         {
-            // Clean up temporary files
-            if (Directory.Exists(tempPackDir))
+            var content = ReadResourceContent(packId, componentDef.Path);
+
+            if (content is null)
             {
-                try
+                throw new PackLoadException(
+                    "ACODE-PKL-003",
+                    $"Component file not found in embedded resources: {componentDef.Path}",
+                    packId);
+            }
+
+            var metadata = componentDef.Metadata is null
+                ? null
+                : componentDef.Metadata.ToDictionary(k => k.Key, v => v.Value);
+
+            components.Add(new LoadedComponent(
+                componentDef.Path,
+                componentDef.Type,
+                content,
+                metadata?.AsReadOnly()));
+        }
+
+        _logger.LogInformation(
+            "Loaded built-in pack {PackId} v{Version} with {ComponentCount} components",
+            packId,
+            manifest.Version,
+            components.Count);
+
+        await Task.CompletedTask.ConfigureAwait(false);
+
+        return new PromptPack(
+            manifest.Id,
+            manifest.Version,
+            manifest.Name,
+            manifest.Description,
+            PackSource.BuiltIn,
+            extractPath,
+            manifest.ContentHash,
+            components.AsReadOnly());
+    }
+
+    /// <summary>
+    /// Extracts a built-in pack to the temporary directory.
+    /// </summary>
+    /// <param name="packId">The pack ID.</param>
+    /// <returns>The path to the extracted pack.</returns>
+    public string ExtractPack(string packId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packId);
+
+        lock (_cacheLock)
+        {
+            if (_extractionCache.TryGetValue(packId, out var cachedPath) && Directory.Exists(cachedPath))
+            {
+                // Verify cached path has manifest (not empty directory from failed extraction)
+                if (File.Exists(Path.Combine(cachedPath, "manifest.yml")))
                 {
-                    Directory.Delete(tempPackDir, recursive: true);
-                }
-                catch
-                {
-                    // Ignore cleanup errors
+                    return cachedPath;
                 }
             }
+
+            var extractPath = GetExtractedPath(packId);
+
+            // Check if already extracted and valid
+            if (Directory.Exists(extractPath) && File.Exists(Path.Combine(extractPath, "manifest.yml")))
+            {
+                _extractionCache[packId] = extractPath;
+                return extractPath;
+            }
+
+            // Create or clear the directory
+            if (Directory.Exists(extractPath))
+            {
+                Directory.Delete(extractPath, true);
+            }
+
+            Directory.CreateDirectory(extractPath);
+
+            var normalizedPackId = NormalizeForResource(packId);
+            var prefix = ResourcePrefix + normalizedPackId + ".";
+            var resourceNames = _assembly.GetManifestResourceNames()
+                .Where(n => n.StartsWith(prefix, StringComparison.Ordinal));
+
+            foreach (var resourceName in resourceNames)
+            {
+                var relativePath = resourceName[prefix.Length..];
+
+                // Convert resource name dots back to path separators
+                // (except the last dot which is the file extension)
+                var lastDotIndex = relativePath.LastIndexOf('.');
+                if (lastDotIndex > 0)
+                {
+                    var pathPart = relativePath[..lastDotIndex].Replace('.', Path.DirectorySeparatorChar);
+                    var extension = relativePath[lastDotIndex..];
+                    relativePath = pathPart + extension;
+                }
+
+                var targetPath = Path.Combine(extractPath, relativePath);
+                var targetDir = Path.GetDirectoryName(targetPath);
+
+                if (targetDir is not null && !Directory.Exists(targetDir))
+                {
+                    Directory.CreateDirectory(targetDir);
+                }
+
+                using var stream = _assembly.GetManifestResourceStream(resourceName);
+                if (stream is not null)
+                {
+                    using var fileStream = File.Create(targetPath);
+                    stream.CopyTo(fileStream);
+                }
+            }
+
+            _extractionCache[packId] = extractPath;
+            _logger.LogDebug("Extracted pack {PackId} to {Path}", packId, extractPath);
+            return extractPath;
         }
     }
 
-    private string ExtractPackToTemp(string packId)
+    private static string GetExtractedPath(string packId)
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), "acode", "packs", packId, Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDir);
+        return Path.Combine(Path.GetTempPath(), "acode", "packs", packId);
+    }
 
-        // MSBuild converts hyphens to underscores in embedded resource names
-        // e.g., "acode-dotnet" directory becomes "acode_dotnet" in resource names
-        var resourcePackId = packId.Replace("-", "_", StringComparison.Ordinal);
-        var packResourcePrefix = $"{ResourcePrefix}.{resourcePackId}";
+    private static string GetResourceName(string packId, string componentPath)
+    {
+        // Convert path separators to dots for resource name
+        // Also normalize pack ID for resource lookup (hyphens -> underscores)
+        var normalizedPackId = NormalizeForResource(packId);
+        var resourcePath = componentPath.Replace('/', '.').Replace('\\', '.');
+        return ResourcePrefix + normalizedPackId + "." + resourcePath;
+    }
 
-        // Get all resource names for this pack
-        var resourceNames = _assembly.GetManifestResourceNames()
-            .Where(name => name.StartsWith(packResourcePrefix, StringComparison.Ordinal))
-            .ToList();
+    /// <summary>
+    /// Normalizes a pack ID for resource lookup (converts hyphens to underscores).
+    /// .NET's embedded resource naming converts folder hyphens to underscores.
+    /// </summary>
+    private static string NormalizeForResource(string packId) => packId.Replace('-', '_');
 
-        if (resourceNames.Count == 0)
+    /// <summary>
+    /// Denormalizes a resource pack ID back to the canonical format (converts underscores to hyphens).
+    /// </summary>
+    private static string DenormalizeFromResource(string resourcePackId) => resourcePackId.Replace('_', '-');
+
+    private string? ReadResourceContent(string packId, string componentPath)
+    {
+        var resourceName = GetResourceName(packId, componentPath);
+        using var stream = _assembly.GetManifestResourceStream(resourceName);
+
+        if (stream is null)
         {
-            throw new PackNotFoundException(packId);
+            return null;
         }
 
-        foreach (var resourceName in resourceNames)
-        {
-            // Extract relative path from resource name
-            // e.g., "Acode.Infrastructure.Resources.PromptPacks.acode-standard.manifest.yml"
-            //    -> "manifest.yml"
-            // e.g., "Acode.Infrastructure.Resources.PromptPacks.acode-standard.roles.coder.md"
-            //    -> "roles/coder.md"
-            var relativePath = resourceName
-                .Substring(packResourcePrefix.Length + 1) // +1 for the dot
-                .Replace('.', Path.DirectorySeparatorChar);
-
-            // Special handling for file extensions - restore the last dot
-            // Path.DirectorySeparatorChar + "md" = "/md" (3 characters)
-            // Path.DirectorySeparatorChar + "yml" = "/yml" (4 characters)
-            if (relativePath.EndsWith(Path.DirectorySeparatorChar + "md", StringComparison.Ordinal))
-            {
-                relativePath = relativePath.Substring(0, relativePath.Length - 3) + ".md";
-            }
-            else if (relativePath.EndsWith(Path.DirectorySeparatorChar + "yml", StringComparison.Ordinal))
-            {
-                relativePath = relativePath.Substring(0, relativePath.Length - 4) + ".yml";
-            }
-
-            var targetPath = Path.Combine(tempDir, relativePath);
-
-            // Ensure directory exists
-            var targetDir = Path.GetDirectoryName(targetPath);
-            if (!string.IsNullOrEmpty(targetDir))
-            {
-                Directory.CreateDirectory(targetDir);
-            }
-
-            // Extract resource to file
-            using var resourceStream = _assembly.GetManifestResourceStream(resourceName);
-            if (resourceStream == null)
-            {
-                continue;
-            }
-
-            using var fileStream = File.Create(targetPath);
-            resourceStream.CopyTo(fileStream);
-        }
-
-        return tempDir;
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 }

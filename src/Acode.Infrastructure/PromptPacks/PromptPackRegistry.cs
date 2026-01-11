@@ -1,55 +1,70 @@
 using System.Collections.Concurrent;
 using Acode.Application.PromptPacks;
 using Acode.Domain.PromptPacks;
+using Acode.Domain.PromptPacks.Exceptions;
+using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.PromptPacks;
 
 /// <summary>
-/// Registry for discovering, indexing, and retrieving prompt packs.
+/// Registry that indexes and provides access to prompt packs.
 /// </summary>
 public sealed class PromptPackRegistry : IPromptPackRegistry
 {
-    private const string DefaultPackId = "acode-standard";
-    private const string PacksDirectoryName = ".acode/prompts";
-    private const string EnvVarPromptPack = "ACODE_PROMPT_PACK";
+    private readonly PackDiscovery _discovery;
+    private readonly PromptPackLoader _loader;
+    private readonly PackValidator _validator;
+    private readonly PackCache _cache;
+    private readonly PackConfiguration _configuration;
+    private readonly ILogger<PromptPackRegistry> _logger;
 
-    private readonly IPromptPackLoader _loader;
-    private readonly string _workspaceRoot;
-    private readonly ConcurrentDictionary<string, PromptPack> _packs = new();
+    private readonly ConcurrentDictionary<string, PackManifest> _index = new();
+    private readonly object _refreshLock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PromptPackRegistry"/> class.
     /// </summary>
-    /// <param name="loader">Pack loader for loading packs from disk.</param>
-    /// <param name="workspaceRoot">Workspace root directory.</param>
-    public PromptPackRegistry(IPromptPackLoader loader, string workspaceRoot)
+    /// <param name="discovery">The pack discovery service.</param>
+    /// <param name="loader">The pack loader.</param>
+    /// <param name="validator">The pack validator.</param>
+    /// <param name="cache">The pack cache.</param>
+    /// <param name="configuration">The pack configuration.</param>
+    /// <param name="logger">The logger.</param>
+    public PromptPackRegistry(
+        PackDiscovery discovery,
+        PromptPackLoader loader,
+        PackValidator validator,
+        PackCache cache,
+        PackConfiguration configuration,
+        ILogger<PromptPackRegistry> logger)
     {
-        ArgumentNullException.ThrowIfNull(loader);
-        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceRoot);
-
+        _discovery = discovery;
         _loader = loader;
-        _workspaceRoot = workspaceRoot;
+        _validator = validator;
+        _cache = cache;
+        _configuration = configuration;
+        _logger = logger;
     }
 
-    /// <inheritdoc/>
-    public void Initialize()
+    /// <summary>
+    /// Initializes the registry by discovering available packs.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the initialization.</returns>
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        DiscoverAndLoadPacks();
-    }
+        _logger.LogInformation("Initializing pack registry");
 
-    /// <inheritdoc/>
-    public IReadOnlyList<PromptPackInfo> ListPacks()
-    {
-        return _packs.Values
-            .Select(pack => new PromptPackInfo(
-                pack.Manifest.Id,
-                pack.Manifest.Version,
-                pack.Manifest.Name,
-                pack.Manifest.Description,
-                pack.Source,
-                pack.Manifest.Author))
-            .OrderBy(p => p.Id)
-            .ToList();
+        var packs = await _discovery.DiscoverAsync(cancellationToken).ConfigureAwait(false);
+
+        foreach (var pack in packs)
+        {
+            // User packs override built-in packs with same ID
+            _index[pack.Id] = pack;
+            _logger.LogDebug("Indexed pack {PackId} v{Version} from {Source}", pack.Id, pack.Version, pack.Source);
+        }
+
+        _logger.LogInformation("Pack registry initialized with {Count} packs", _index.Count);
     }
 
     /// <inheritdoc/>
@@ -57,76 +72,126 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packId);
 
-        if (_packs.TryGetValue(packId, out var pack))
+        var pack = TryGetPack(packId);
+        if (pack is null)
         {
-            return pack;
+            throw new PackNotFoundException(packId);
         }
 
-        throw new PackNotFoundException(packId);
+        return pack;
+    }
+
+    /// <inheritdoc/>
+    public PromptPack? TryGetPack(string packId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packId);
+
+        // Check cache first
+        var cached = _cache.GetByPackId(packId);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        // Check if pack is in index
+        if (!_index.TryGetValue(packId, out var manifest))
+        {
+            return null;
+        }
+
+        // Load the pack
+        try
+        {
+            var pack = _loader.LoadPackAsync(manifest.PackPath).GetAwaiter().GetResult();
+
+            // Validate
+            var validationResult = _validator.Validate(pack);
+            if (!validationResult.IsValid)
+            {
+                _logger.LogWarning(
+                    "Pack {PackId} has {ErrorCount} validation errors",
+                    packId,
+                    validationResult.Errors.Count);
+
+                foreach (var error in validationResult.Errors)
+                {
+                    _logger.LogWarning("  {Code}: {Message}", error.Code, error.Message);
+                }
+            }
+
+            // Cache it
+            _cache.Set(pack);
+
+            return pack;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load pack {PackId}", packId);
+            return null;
+        }
+    }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<PromptPackInfo> ListPacks()
+    {
+        var activePackId = GetActivePackId();
+
+        return _index.Values
+            .OrderBy(p => p.Id)
+            .Select(p => new PromptPackInfo(
+                p.Id,
+                p.Version,
+                p.Name,
+                p.Source,
+                IsActive: string.Equals(p.Id, activePackId, StringComparison.OrdinalIgnoreCase),
+                p.PackPath))
+            .ToList()
+            .AsReadOnly();
     }
 
     /// <inheritdoc/>
     public PromptPack GetActivePack()
     {
-        // Configuration precedence:
-        // 1. Environment variable ACODE_PROMPT_PACK
-        // 2. Default "acode-standard"
-        var packId = Environment.GetEnvironmentVariable(EnvVarPromptPack);
+        var packId = GetActivePackId();
+        var pack = TryGetPack(packId);
 
-        if (!string.IsNullOrWhiteSpace(packId))
+        if (pack is null)
         {
-            if (_packs.TryGetValue(packId, out var envPack))
-            {
-                return envPack;
-            }
+            _logger.LogWarning(
+                "Active pack '{PackId}' not found, falling back to default '{DefaultPack}'",
+                packId,
+                PackConfiguration.DefaultPack);
 
-            // Environment variable set but pack not found - log warning and fall back to default
-            Console.WriteLine($"WARNING: Pack '{packId}' specified in {EnvVarPromptPack} not found. Falling back to '{DefaultPackId}'.");
+            pack = TryGetPack(PackConfiguration.DefaultPack);
         }
 
-        // Fall back to default pack
-        if (_packs.TryGetValue(DefaultPackId, out var defaultPack))
+        if (pack is null)
         {
-            return defaultPack;
+            throw new PackNotFoundException(packId);
         }
 
-        throw new PackNotFoundException(DefaultPackId);
+        _logger.LogInformation("Active pack: {PackId} v{Version}", pack.Id, pack.Version);
+        return pack;
+    }
+
+    /// <inheritdoc/>
+    public string GetActivePackId()
+    {
+        return _configuration.GetActivePackId();
     }
 
     /// <inheritdoc/>
     public void Refresh()
     {
-        _packs.Clear();
-        DiscoverAndLoadPacks();
-    }
-
-    private void DiscoverAndLoadPacks()
-    {
-        var packsDirectory = Path.Combine(_workspaceRoot, PacksDirectoryName);
-
-        if (!Directory.Exists(packsDirectory))
+        lock (_refreshLock)
         {
-            // No packs directory - registry will be empty
-            return;
-        }
+            _logger.LogInformation("Refreshing pack registry");
 
-        // Discover pack directories (each subdirectory is a potential pack)
-        var packDirs = Directory.GetDirectories(packsDirectory);
+            _cache.Clear();
+            _index.Clear();
+            _configuration.ClearCache();
 
-        foreach (var packDir in packDirs)
-        {
-            try
-            {
-                var pack = _loader.LoadPack(packDir);
-
-                // User packs override built-in packs with same ID
-                _packs[pack.Manifest.Id] = pack;
-            }
-            catch (Exception ex)
-            {
-                // Log warning but continue loading other packs
-                Console.WriteLine($"WARNING: Failed to load pack from '{packDir}': {ex.Message}");
-            }
+            InitializeAsync().GetAwaiter().GetResult();
         }
     }
 }

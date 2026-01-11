@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using Acode.Application.PromptPacks;
 using Acode.Domain.PromptPacks;
@@ -6,72 +5,110 @@ using Acode.Domain.PromptPacks;
 namespace Acode.Infrastructure.PromptPacks;
 
 /// <summary>
-/// Service for computing and verifying deterministic SHA-256 content hashes.
+/// Provides content hashing functionality for prompt pack integrity verification.
 /// </summary>
-/// <remarks>
-/// Implements deterministic hashing by:
-/// - Sorting component paths alphabetically.
-/// - Normalizing line endings to LF (\n).
-/// - Using UTF-8 encoding without BOM.
-/// This ensures hash stability across platforms and tool versions.
-/// </remarks>
 public sealed class ContentHasher : IContentHasher
 {
-    /// <inheritdoc/>
-    public ContentHash Compute(IReadOnlyDictionary<string, string> components)
+    /// <summary>
+    /// Computes a hash from path/content pairs directly.
+    /// </summary>
+    /// <param name="components">The path and content pairs to hash.</param>
+    /// <returns>The computed content hash.</returns>
+    public ContentHash ComputeHash(IEnumerable<(string Path, string Content)> components)
     {
         ArgumentNullException.ThrowIfNull(components);
 
-        // Sort paths alphabetically for deterministic order
-        var sortedPaths = components.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList();
+        var contents = new List<(string Path, string Content)>();
 
-        // Build combined content with normalized line endings
-        var combinedContent = new StringBuilder();
-        foreach (var path in sortedPaths)
+        foreach (var (path, content) in components.OrderBy(c => c.Path, StringComparer.Ordinal))
         {
-            var content = components[path];
-            var normalizedContent = NormalizeLineEndings(content);
-
-            // Include both path and content to detect path changes
-            combinedContent.Append(path);
-            combinedContent.Append('\n');
-            combinedContent.Append(normalizedContent);
-            combinedContent.Append('\n');
+            // Normalize line endings (CRLF -> LF)
+            var normalizedContent = content.Replace("\r\n", "\n", StringComparison.Ordinal);
+            contents.Add((path, normalizedContent));
         }
 
-        // Compute SHA-256 hash
-        var bytes = Encoding.UTF8.GetBytes(combinedContent.ToString());
-        var hashBytes = SHA256.HashData(bytes);
-
-        // Convert to lowercase hex string
-        var hashHex = Convert.ToHexString(hashBytes).ToLowerInvariant();
-
-        return new ContentHash(hashHex);
-    }
-
-    /// <inheritdoc/>
-    public bool Verify(IReadOnlyDictionary<string, string> components, ContentHash expectedHash)
-    {
-        ArgumentNullException.ThrowIfNull(components);
-        ArgumentNullException.ThrowIfNull(expectedHash);
-
-        var actualHash = Compute(components);
-        return actualHash.Equals(expectedHash);
+        return ContentHash.Compute(contents);
     }
 
     /// <summary>
-    /// Normalizes line endings to LF (\n) for cross-platform stability.
+    /// Computes a hash from file contents within a pack directory.
     /// </summary>
-    /// <param name="content">The content to normalize.</param>
-    /// <returns>Content with normalized line endings.</returns>
-    private static string NormalizeLineEndings(string content)
+    /// <param name="packPath">The path to the pack directory.</param>
+    /// <param name="componentPaths">The relative paths to component files.</param>
+    /// <returns>The computed content hash.</returns>
+    public ContentHash ComputeHash(string packPath, IEnumerable<string> componentPaths)
     {
-        if (string.IsNullOrEmpty(content))
+        ArgumentException.ThrowIfNullOrWhiteSpace(packPath);
+        ArgumentNullException.ThrowIfNull(componentPaths);
+
+        var contents = new List<(string Path, string Content)>();
+
+        foreach (var relativePath in componentPaths)
         {
-            return content;
+            PathNormalizer.EnsurePathSafe(relativePath);
+            var normalizedPath = PathNormalizer.Normalize(relativePath);
+            var fullPath = Path.Combine(packPath, normalizedPath.Replace('/', Path.DirectorySeparatorChar));
+
+            if (File.Exists(fullPath))
+            {
+                var content = File.ReadAllText(fullPath, Encoding.UTF8);
+                contents.Add((normalizedPath, content));
+            }
         }
 
-        // Replace CRLF (\r\n) with LF (\n), then remove any remaining CR (\r)
-        return content.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\r", "\n", StringComparison.Ordinal);
+        return ComputeHash(contents);
+    }
+
+    /// <summary>
+    /// Asynchronously computes a hash from file contents within a pack directory.
+    /// </summary>
+    /// <param name="packPath">The path to the pack directory.</param>
+    /// <param name="componentPaths">The relative paths to component files.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the async operation with the computed hash.</returns>
+    public async Task<ContentHash> ComputeHashAsync(
+        string packPath,
+        IEnumerable<string> componentPaths,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packPath);
+        ArgumentNullException.ThrowIfNull(componentPaths);
+
+        var contents = new List<(string Path, string Content)>();
+
+        foreach (var relativePath in componentPaths)
+        {
+            PathNormalizer.EnsurePathSafe(relativePath);
+            var normalizedPath = PathNormalizer.Normalize(relativePath);
+            var fullPath = Path.Combine(packPath, normalizedPath.Replace('/', Path.DirectorySeparatorChar));
+
+            if (File.Exists(fullPath))
+            {
+                var content = await File.ReadAllTextAsync(fullPath, Encoding.UTF8, cancellationToken)
+                    .ConfigureAwait(false);
+                contents.Add((normalizedPath, content));
+            }
+        }
+
+        return ComputeHash(contents);
+    }
+
+    /// <summary>
+    /// Regenerates the content hash for a pack and updates the manifest.
+    /// </summary>
+    /// <param name="manifest">The pack manifest.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A new manifest with updated content hash.</returns>
+    public async Task<PackManifest> RegenerateAsync(
+        PackManifest manifest,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+
+        var componentPaths = manifest.Components.Select(c => c.Path);
+        var newHash = await ComputeHashAsync(manifest.PackPath, componentPaths, cancellationToken)
+            .ConfigureAwait(false);
+
+        return manifest with { ContentHash = newHash };
     }
 }

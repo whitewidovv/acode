@@ -1,326 +1,299 @@
-using Acode.Domain.PromptPacks;
+using Acode.Domain.PromptPacks.Exceptions;
 using Acode.Infrastructure.PromptPacks;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace Acode.Infrastructure.Tests.PromptPacks;
 
 /// <summary>
-/// Tests for <see cref="PromptPackRegistry"/>.
+/// Tests for PromptPackRegistry.
 /// </summary>
 public class PromptPackRegistryTests : IDisposable
 {
-    private readonly string _testWorkspaceRoot;
-    private readonly string _testPacksDir;
+    private readonly string _tempDir;
+    private readonly PromptPackRegistry _registry;
+    private readonly PackDiscovery _discovery;
+    private readonly PromptPackLoader _loader;
+    private readonly PackValidator _validator;
+    private readonly PackCache _cache;
+    private readonly PackConfiguration _configuration;
+    private string? _originalEnvValue;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PromptPackRegistryTests"/> class.
+    /// </summary>
     public PromptPackRegistryTests()
     {
-        _testWorkspaceRoot = Path.Combine(Path.GetTempPath(), $"acode-test-workspace-{Guid.NewGuid():N}");
-        _testPacksDir = Path.Combine(_testWorkspaceRoot, ".acode", "prompts");
-        Directory.CreateDirectory(_testPacksDir);
+        _tempDir = Path.Combine(Path.GetTempPath(), $"acode-registry-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(_tempDir);
+
+        _originalEnvValue = Environment.GetEnvironmentVariable("ACODE_PROMPT_PACK");
+        Environment.SetEnvironmentVariable("ACODE_PROMPT_PACK", null);
+
+        var parser = new ManifestParser();
+        var hasher = new ContentHasher();
+        var embeddedProvider = new EmbeddedPackProvider(parser, NullLogger<EmbeddedPackProvider>.Instance);
+
+        var discoveryOptions = new PackDiscoveryOptions
+        {
+            UserPacksPath = Path.Combine(_tempDir, ".acode", "prompts"),
+        };
+
+        _discovery = new PackDiscovery(parser, Options.Create(discoveryOptions), NullLogger<PackDiscovery>.Instance);
+        _loader = new PromptPackLoader(parser, hasher, embeddedProvider, NullLogger<PromptPackLoader>.Instance);
+        _validator = new PackValidator(parser, NullLogger<PackValidator>.Instance);
+        _cache = new PackCache();
+        _configuration = new PackConfiguration(NullLogger<PackConfiguration>.Instance);
+
+        _registry = new PromptPackRegistry(
+            _discovery,
+            _loader,
+            _validator,
+            _cache,
+            _configuration,
+            NullLogger<PromptPackRegistry>.Instance);
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
-        if (Directory.Exists(_testWorkspaceRoot))
+        Environment.SetEnvironmentVariable("ACODE_PROMPT_PACK", _originalEnvValue);
+
+        if (Directory.Exists(_tempDir))
         {
-            Directory.Delete(_testWorkspaceRoot, recursive: true);
+            Directory.Delete(_tempDir, true);
         }
+
+        GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// Test that ListPacks returns empty when no packs.
+    /// </summary>
+    /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public void Initialize_WithNoPacks_ShouldSucceed()
+    public async Task ListPacks_Should_Return_Empty_When_No_Packs()
     {
         // Arrange
-        var loader = new PromptPackLoader(new ContentHasher());
-        var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
+        await _registry.InitializeAsync();
 
         // Act
-        registry.Initialize();
-        var packs = registry.ListPacks();
+        var packs = _registry.ListPacks();
 
         // Assert
-        packs.Should().NotBeNull();
         packs.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Test that ListPacks returns discovered packs.
+    /// </summary>
+    /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public void Initialize_WithUserPacks_ShouldDiscoverPacks()
+    public async Task ListPacks_Should_Return_Discovered_Packs()
     {
         // Arrange
-        CreateTestPack("user-pack-1", "1.0.0");
-        CreateTestPack("user-pack-2", "2.5.0");
-
-        var loader = new PromptPackLoader(new ContentHasher());
-        var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
+        CreateUserPack("my-pack");
+        await _registry.InitializeAsync();
 
         // Act
-        registry.Initialize();
-        var packs = registry.ListPacks();
+        var packs = _registry.ListPacks();
 
         // Assert
-        packs.Should().HaveCount(2);
-        packs.Should().Contain(p => p.Id == "user-pack-1" && p.Version.ToString() == "1.0.0");
-        packs.Should().Contain(p => p.Id == "user-pack-2" && p.Version.ToString() == "2.5.0");
+        packs.Should().HaveCount(1);
+        packs[0].Id.Should().Be("my-pack");
     }
 
+    /// <summary>
+    /// Test that GetPack returns the pack.
+    /// </summary>
+    /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public void ListPacks_AfterInitialize_ShouldReturnPackMetadata()
+    public async Task GetPack_Should_Return_Pack()
     {
         // Arrange
-        CreateTestPack("test-pack", "1.2.3", "Test Pack", "A test pack", "Test Author");
-
-        var loader = new PromptPackLoader(new ContentHasher());
-        var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
-        registry.Initialize();
+        CreateUserPack("test-pack");
+        await _registry.InitializeAsync();
 
         // Act
-        var packs = registry.ListPacks();
-
-        // Assert
-        packs.Should().ContainSingle();
-        var packInfo = packs[0];
-        packInfo.Id.Should().Be("test-pack");
-        packInfo.Version.ToString().Should().Be("1.2.3");
-        packInfo.Name.Should().Be("Test Pack");
-        packInfo.Description.Should().Be("A test pack");
-        packInfo.Source.Should().Be(PackSource.User);
-        packInfo.Author.Should().Be("Test Author");
-    }
-
-    [Fact]
-    public void GetPack_ExistingPack_ShouldReturnPack()
-    {
-        // Arrange
-        CreateTestPack("existing-pack", "1.0.0");
-
-        var loader = new PromptPackLoader(new ContentHasher());
-        var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
-        registry.Initialize();
-
-        // Act
-        var pack = registry.GetPack("existing-pack");
+        var pack = _registry.GetPack("test-pack");
 
         // Assert
         pack.Should().NotBeNull();
-        pack.Manifest.Id.Should().Be("existing-pack");
-        pack.Source.Should().Be(PackSource.User);
+        pack.Id.Should().Be("test-pack");
     }
 
+    /// <summary>
+    /// Test that GetPack throws for unknown pack.
+    /// </summary>
+    /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public void GetPack_NonExistentPack_ShouldThrowPackNotFoundException()
+    public async Task GetPack_Should_Throw_For_Unknown_Pack()
     {
         // Arrange
-        var loader = new PromptPackLoader(new ContentHasher());
-        var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
-        registry.Initialize();
+        await _registry.InitializeAsync();
 
         // Act
-        var act = () => registry.GetPack("non-existent-pack");
+        var act = () => _registry.GetPack("nonexistent");
 
         // Assert
-        act.Should().Throw<PackNotFoundException>()
-            .WithMessage("*non-existent-pack*");
+        act.Should().Throw<PackNotFoundException>();
     }
 
+    /// <summary>
+    /// Test that TryGetPack returns null for unknown pack.
+    /// </summary>
+    /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public void GetActivePack_WithDefaultStandard_ShouldReturnStandardPack()
+    public async Task TryGetPack_Should_Return_Null_For_Unknown_Pack()
     {
         // Arrange
-        CreateTestPack("acode-standard", "1.0.0");
-
-        var loader = new PromptPackLoader(new ContentHasher());
-        var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
-        registry.Initialize();
+        await _registry.InitializeAsync();
 
         // Act
-        var activePack = registry.GetActivePack();
+        var pack = _registry.TryGetPack("nonexistent");
 
         // Assert
-        activePack.Should().NotBeNull();
-        activePack.Manifest.Id.Should().Be("acode-standard");
+        pack.Should().BeNull();
     }
 
+    /// <summary>
+    /// Test that TryGetPack uses cache.
+    /// </summary>
+    /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public void GetActivePack_WithEnvironmentVariable_ShouldUseEnvVarPack()
+    public async Task TryGetPack_Should_Use_Cache()
     {
         // Arrange
-        CreateTestPack("acode-standard", "1.0.0");
-        CreateTestPack("custom-pack", "2.0.0");
+        CreateUserPack("cached-pack");
+        await _registry.InitializeAsync();
 
-        Environment.SetEnvironmentVariable("ACODE_PROMPT_PACK", "custom-pack");
-        try
-        {
-            var loader = new PromptPackLoader(new ContentHasher());
-            var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
-            registry.Initialize();
+        // Act - Load twice
+        var first = _registry.TryGetPack("cached-pack");
+        var second = _registry.TryGetPack("cached-pack");
 
-            // Act
-            var activePack = registry.GetActivePack();
-
-            // Assert
-            activePack.Should().NotBeNull();
-            activePack.Manifest.Id.Should().Be("custom-pack");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ACODE_PROMPT_PACK", null);
-        }
+        // Assert
+        first.Should().NotBeNull();
+        second.Should().NotBeNull();
+        second.Should().BeSameAs(first); // Same instance from cache
     }
 
+    /// <summary>
+    /// Test that GetActivePackId returns configuration value.
+    /// </summary>
     [Fact]
-    public void GetActivePack_EnvVarNotFound_ShouldFallbackToDefault()
+    public void GetActivePackId_Should_Return_Default()
     {
-        // Arrange
-        CreateTestPack("acode-standard", "1.0.0");
+        // Act
+        var packId = _registry.GetActivePackId();
 
-        Environment.SetEnvironmentVariable("ACODE_PROMPT_PACK", "non-existent-pack");
-        try
-        {
-            var loader = new PromptPackLoader(new ContentHasher());
-            var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
-            registry.Initialize();
-
-            // Act
-            var activePack = registry.GetActivePack();
-
-            // Assert
-            activePack.Should().NotBeNull();
-            activePack.Manifest.Id.Should().Be("acode-standard");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ACODE_PROMPT_PACK", null);
-        }
+        // Assert
+        packId.Should().Be("acode-standard");
     }
 
+    /// <summary>
+    /// Test that GetActivePackId respects environment variable.
+    /// </summary>
     [Fact]
-    public void Refresh_AfterAddingNewPack_ShouldDiscoverNewPack()
+    public void GetActivePackId_Should_Use_Environment_Variable()
     {
         // Arrange
-        CreateTestPack("pack-1", "1.0.0");
-
-        var loader = new PromptPackLoader(new ContentHasher());
-        var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
-        registry.Initialize();
-
-        var packsBeforeRefresh = registry.ListPacks();
-        packsBeforeRefresh.Should().ContainSingle();
-
-        // Add a new pack after initialization
-        CreateTestPack("pack-2", "2.0.0");
+        Environment.SetEnvironmentVariable("ACODE_PROMPT_PACK", "env-pack");
+        _configuration.ClearCache();
 
         // Act
-        registry.Refresh();
-        var packsAfterRefresh = registry.ListPacks();
+        var packId = _registry.GetActivePackId();
 
         // Assert
-        packsAfterRefresh.Should().HaveCount(2);
-        packsAfterRefresh.Should().Contain(p => p.Id == "pack-1");
-        packsAfterRefresh.Should().Contain(p => p.Id == "pack-2");
+        packId.Should().Be("env-pack");
     }
 
+    /// <summary>
+    /// Test that Refresh clears cache and re-discovers.
+    /// </summary>
+    /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public void Refresh_AfterModifyingPack_ShouldReloadPack()
+    public async Task Refresh_Should_Clear_Cache_And_Rediscover()
     {
         // Arrange
-        CreateTestPack("test-pack", "1.0.0", "Original Name");
+        CreateUserPack("initial-pack");
+        await _registry.InitializeAsync();
+        _registry.ListPacks().Should().HaveCount(1);
 
-        var loader = new PromptPackLoader(new ContentHasher());
-        var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
-        registry.Initialize();
-
-        var originalPack = registry.GetPack("test-pack");
-        originalPack.Manifest.Name.Should().Be("Original Name");
-
-        // Modify the pack
-        CreateTestPack("test-pack", "1.0.0", "Modified Name");
+        // Add another pack
+        CreateUserPack("second-pack");
 
         // Act
-        registry.Refresh();
-        var refreshedPack = registry.GetPack("test-pack");
+        _registry.Refresh();
 
         // Assert
-        refreshedPack.Manifest.Name.Should().Be("Modified Name");
+        _registry.ListPacks().Should().HaveCount(2);
     }
 
+    /// <summary>
+    /// Test that ListPacks marks active pack.
+    /// </summary>
+    /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public async Task Registry_ShouldBeThreadSafe()
+    public async Task ListPacks_Should_Mark_Active_Pack()
     {
         // Arrange
-        for (int i = 0; i < 10; i++)
-        {
-            CreateTestPack($"pack-{i}", "1.0.0");
-        }
+        CreateUserPack("active-test");
+        Environment.SetEnvironmentVariable("ACODE_PROMPT_PACK", "active-test");
+        _configuration.ClearCache();
+        await _registry.InitializeAsync();
 
-        var loader = new PromptPackLoader(new ContentHasher());
-        var registry = new PromptPackRegistry(loader, _testWorkspaceRoot);
-        registry.Initialize();
-
-        var exceptions = new System.Collections.Concurrent.ConcurrentBag<Exception>();
-
-        // Act - Concurrent read access
-        var tasks = Enumerable.Range(0, 50).Select(i => Task.Run(() =>
-        {
-            try
-            {
-                var packs = registry.ListPacks();
-                packs.Should().HaveCount(10);
-
-                var packId = $"pack-{i % 10}";
-                var pack = registry.GetPack(packId);
-                pack.Should().NotBeNull();
-            }
-            catch (Exception ex)
-            {
-                exceptions.Add(ex);
-            }
-        })).ToArray();
-
-        await Task.WhenAll(tasks).ConfigureAwait(true);
+        // Act
+        var packs = _registry.ListPacks();
 
         // Assert
-        exceptions.Should().BeEmpty("registry operations should be thread-safe");
+        packs.Should().HaveCount(1);
+        packs[0].IsActive.Should().BeTrue();
     }
 
-    private void CreateTestPack(
-        string id,
-        string version,
-        string name = "Test Pack",
-        string description = "A test pack",
-        string? author = null)
+    /// <summary>
+    /// Test that packs are sorted by ID.
+    /// </summary>
+    /// <returns>A task representing the asynchronous test.</returns>
+    [Fact]
+    public async Task ListPacks_Should_Be_Sorted_By_Id()
     {
-        var packPath = Path.Combine(_testPacksDir, id);
+        // Arrange
+        CreateUserPack("zebra-pack");
+        CreateUserPack("apple-pack");
+        CreateUserPack("mango-pack");
+        await _registry.InitializeAsync();
+
+        // Act
+        var packs = _registry.ListPacks();
+
+        // Assert
+        packs.Should().HaveCount(3);
+        packs[0].Id.Should().Be("apple-pack");
+        packs[1].Id.Should().Be("mango-pack");
+        packs[2].Id.Should().Be("zebra-pack");
+    }
+
+    private void CreateUserPack(string packId)
+    {
+        var userPacksPath = Path.Combine(_tempDir, ".acode", "prompts");
+        Directory.CreateDirectory(userPacksPath);
+
+        var packPath = Path.Combine(userPacksPath, packId);
         Directory.CreateDirectory(packPath);
-        Directory.CreateDirectory(Path.Combine(packPath, "roles"));
 
-        // Create component file
-        var componentContent = "You are a coding assistant.";
-        File.WriteAllText(Path.Combine(packPath, "roles", "coder.md"), componentContent);
-
-        // Compute content hash
-        var hasher = new ContentHasher();
-        var components = new Dictionary<string, string>
-        {
-            ["roles/coder.md"] = componentContent,
-        };
-        var contentHash = hasher.Compute(components);
-
-        // Create manifest
-        var manifestContent = $@"
+        var manifest = $@"
 format_version: '1.0'
-id: {id}
-version: {version}
-name: {name}
-description: {description}
-{(author != null ? $"author: {author}" : string.Empty)}
-content_hash: {contentHash.Value}
-created_at: 2024-01-15T10:30:00Z
+id: {packId}
+version: 1.0.0
+name: {packId} Name
+description: Test pack
+created_at: 2025-01-01T00:00:00Z
 components:
-  - path: roles/coder.md
-    type: role
-    role: coder
+  - path: system.md
+    type: system
 ";
-
-        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifestContent);
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifest);
+        File.WriteAllText(Path.Combine(packPath, "system.md"), "System prompt content");
     }
 }

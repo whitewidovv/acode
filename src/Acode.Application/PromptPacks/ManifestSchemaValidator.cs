@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Acode.Domain.PromptPacks;
+using Acode.Domain.PromptPacks.Exceptions;
 
 namespace Acode.Application.PromptPacks;
 

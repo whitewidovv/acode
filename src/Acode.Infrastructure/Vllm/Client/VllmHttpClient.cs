@@ -93,6 +93,13 @@ public sealed class VllmHttpClient : IDisposable
         {
             throw;
         }
+        catch (TaskCanceledException ex) when (IsConnectionTimeout(ex))
+        {
+            // Connection timeout should be treated as a connection error, not a request timeout
+            throw new VllmConnectionException(
+                $"Failed to connect to vLLM at {_config.Endpoint}: connection timed out",
+                ex);
+        }
         catch (TaskCanceledException ex)
         {
             throw new VllmTimeoutException(
@@ -231,5 +238,23 @@ public sealed class VllmHttpClient : IDisposable
             default:
                 throw new VllmException("ACODE-VLM-999", message);
         }
+    }
+
+    private static bool IsConnectionTimeout(TaskCanceledException ex)
+    {
+        // Check if this is a connection timeout (vs request timeout)
+        // Connection timeouts have a TimeoutException in the chain
+        var current = ex.InnerException;
+        while (current != null)
+        {
+            if (current is TimeoutException)
+            {
+                return true;
+            }
+
+            current = current.InnerException;
+        }
+
+        return false;
     }
 }

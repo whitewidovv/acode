@@ -1,30 +1,32 @@
 using Acode.Domain.PromptPacks;
+using Acode.Domain.PromptPacks.Exceptions;
 
 namespace Acode.Application.PromptPacks;
 
 /// <summary>
-/// Provides template variable substitution for prompt pack components.
+/// Processes Mustache-style template variables in prompts.
 /// </summary>
+/// <remarks>
+/// The TemplateEngine substitutes {{variable}} placeholders with values from
+/// the CompositionContext. Features include:
+/// - Single and multiple variable substitution.
+/// - Missing variable handling (replaced with empty string).
+/// - HTML entity escaping for security.
+/// - Variable value length limits.
+/// - Recursive expansion detection.
+/// - Variable priority resolution (config > env > context > defaults).
+/// </remarks>
 public interface ITemplateEngine
 {
     /// <summary>
-    /// Substitutes variables in a template string using Mustache-style syntax ({{variable}}).
+    /// Substitute template variables in content.
     /// </summary>
-    /// <param name="templateText">Template string containing {{variable}} placeholders.</param>
-    /// <param name="variables">Dictionary of variable names to values.</param>
-    /// <returns>Template string with all variables substituted.</returns>
-    /// <remarks>
-    /// Missing variables are replaced with empty strings.
-    /// Variable values exceeding 1024 characters are rejected.
-    /// Supports variable resolution priority: config > env > context > default.
-    /// Detects recursive expansion (max depth 3).
-    /// </remarks>
-    string Substitute(string templateText, Dictionary<string, string> variables);
-
-    /// <summary>
-    /// Validates that a template string has correct syntax.
-    /// </summary>
-    /// <param name="templateText">Template string to validate.</param>
-    /// <returns>Validation result indicating success or errors.</returns>
-    ValidationResult ValidateTemplate(string templateText);
+    /// <param name="content">Template content with {{variable}} placeholders.</param>
+    /// <param name="context">Composition context with variable values.</param>
+    /// <returns>Content with variables substituted.</returns>
+    /// <exception cref="ArgumentNullException">Context is null.</exception>
+    /// <exception cref="TemplateVariableException">
+    /// Variable value exceeds maximum length or circular reference detected.
+    /// </exception>
+    string Substitute(string content, CompositionContext context);
 }

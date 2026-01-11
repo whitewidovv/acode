@@ -3,27 +3,29 @@ using Acode.Domain.PromptPacks;
 namespace Acode.Application.PromptPacks;
 
 /// <summary>
-/// Composes final prompts from prompt pack components based on context.
+/// Composes final system prompts from pack components.
 /// </summary>
+/// <remarks>
+/// The PromptComposer takes a prompt pack and composition context, then assembles
+/// the final system prompt by:
+/// 1. Selecting relevant components based on context (role, language, framework).
+/// 2. Merging components in the correct order (system → role → language → framework).
+/// 3. Applying template variable substitution.
+/// 4. Deduplicating repeated sections.
+/// 5. Enforcing maximum length limits.
+/// </remarks>
 public interface IPromptComposer
 {
     /// <summary>
-    /// Composes a final prompt by combining pack components according to context.
+    /// Compose a prompt from pack components using provided context.
     /// </summary>
-    /// <param name="pack">Prompt pack containing components.</param>
-    /// <param name="context">Composition context specifying role, language, framework, and variables.</param>
-    /// <returns>Composed prompt text with all components merged and variables substituted.</returns>
-    /// <remarks>
-    /// Composition order (hierarchical merging):
-    /// 1. Base system prompt (system.md)
-    /// 2. Role-specific prompt (roles/{role}.md) if context.Role specified
-    /// 3. Language-specific prompt (languages/{language}.md) if context.Language specified
-    /// 4. Framework-specific prompt (frameworks/{framework}.md) if context.Framework specified
-    /// 5. Template variable substitution applied to final result
-    ///
-    /// Components are separated by double newlines.
-    /// Missing optional components are skipped.
-    /// Maximum composed prompt length: 32,000 characters (truncated with warning if exceeded).
-    /// </remarks>
-    string Compose(PromptPack pack, CompositionContext context);
+    /// <param name="pack">The prompt pack containing components to compose.</param>
+    /// <param name="context">Composition context (role, language, framework, variables).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Composed system prompt string.</returns>
+    /// <exception cref="ArgumentNullException">Pack or context is null.</exception>
+    Task<string> ComposeAsync(
+        PromptPack pack,
+        CompositionContext context,
+        CancellationToken cancellationToken = default);
 }

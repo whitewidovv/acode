@@ -1,59 +1,97 @@
 namespace Acode.Domain.PromptPacks;
 
 /// <summary>
-/// Provides context for composing prompts from a prompt pack.
+/// Context for prompt composition including role, language, framework, and template variables.
 /// </summary>
-/// <param name="Role">Optional role to include in composition (e.g., "planner", "coder", "reviewer").</param>
-/// <param name="Language">Optional language-specific component to include (e.g., "csharp", "typescript").</param>
-/// <param name="Framework">Optional framework-specific component to include (e.g., "aspnetcore", "react").</param>
-/// <param name="Variables">Template variables for substitution. Key is variable name, value is replacement value.</param>
-public sealed record CompositionContext(
-    string? Role = null,
-    string? Language = null,
-    string? Framework = null,
-    IReadOnlyDictionary<string, string>? Variables = null)
+/// <remarks>
+/// The CompositionContext provides all the information needed to compose a final system prompt
+/// from pack components. It includes:
+/// - Role: The agent role (planner, coder, reviewer) that determines which role-specific prompts to include.
+/// - Language: The primary programming language for language-specific prompts.
+/// - Framework: The framework being used for framework-specific prompts.
+/// - Variables: Template variable values from multiple sources with defined priority.
+/// Variable resolution priority (highest to lowest):
+/// 1. ConfigVariables - from .agent/config.yml prompts.variables section.
+/// 2. EnvironmentVariables - from ACODE_PROMPT_VAR_* environment variables.
+/// 3. ContextVariables - from runtime context (workspace, date, etc.).
+/// 4. DefaultVariables - built-in defaults.
+/// </remarks>
+public sealed record CompositionContext
 {
     /// <summary>
-    /// Gets the variables dictionary, creating an empty one if null.
+    /// Gets the current agent role (planner, coder, reviewer).
     /// </summary>
-    public IReadOnlyDictionary<string, string> VariablesOrEmpty =>
-        Variables ?? new Dictionary<string, string>();
+    /// <remarks>
+    /// Used to select role-specific prompts from the pack.
+    /// If null, no role-specific prompt is included in composition.
+    /// </remarks>
+    public string? Role { get; init; }
 
     /// <summary>
-    /// Creates a composition context with only variables.
+    /// Gets the primary programming language.
     /// </summary>
-    /// <param name="variables">Template variables.</param>
-    /// <returns>Composition context with variables.</returns>
-    public static CompositionContext WithVariables(IReadOnlyDictionary<string, string> variables)
-    {
-        return new CompositionContext(Variables: variables);
-    }
+    /// <remarks>
+    /// Used to select language-specific prompts (e.g., csharp.md, typescript.md).
+    /// If null, no language-specific prompt is included in composition.
+    /// </remarks>
+    public string? Language { get; init; }
 
     /// <summary>
-    /// Creates a composition context for a specific role.
+    /// Gets the framework being used.
     /// </summary>
-    /// <param name="role">Role name.</param>
-    /// <param name="variables">Optional template variables.</param>
-    /// <returns>Composition context with role.</returns>
-    public static CompositionContext ForRole(string role, IReadOnlyDictionary<string, string>? variables = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(role);
-        return new CompositionContext(Role: role, Variables: variables);
-    }
+    /// <remarks>
+    /// Used to select framework-specific prompts (e.g., aspnetcore.md, react.md).
+    /// If null, no framework-specific prompt is included in composition.
+    /// </remarks>
+    public string? Framework { get; init; }
 
     /// <summary>
-    /// Creates a composition context for a specific language and framework.
+    /// Gets template variables (all sources merged).
     /// </summary>
-    /// <param name="language">Language name.</param>
-    /// <param name="framework">Optional framework name.</param>
-    /// <param name="variables">Optional template variables.</param>
-    /// <returns>Composition context with language and framework.</returns>
-    public static CompositionContext ForTechnology(
-        string language,
-        string? framework = null,
-        IReadOnlyDictionary<string, string>? variables = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(language);
-        return new CompositionContext(Language: language, Framework: framework, Variables: variables);
-    }
+    /// <remarks>
+    /// Pre-merged variables from all sources with priority already applied.
+    /// Use this for simple scenarios where priority handling is done externally.
+    /// </remarks>
+    public IReadOnlyDictionary<string, string> Variables { get; init; }
+        = new Dictionary<string, string>();
+
+    /// <summary>
+    /// Gets variables from configuration file (.agent/config.yml).
+    /// </summary>
+    /// <remarks>
+    /// Highest priority variable source.
+    /// These override all other variable sources.
+    /// </remarks>
+    public IReadOnlyDictionary<string, string> ConfigVariables { get; init; }
+        = new Dictionary<string, string>();
+
+    /// <summary>
+    /// Gets variables from environment.
+    /// </summary>
+    /// <remarks>
+    /// Second highest priority.
+    /// Populated from ACODE_PROMPT_VAR_* environment variables.
+    /// </remarks>
+    public IReadOnlyDictionary<string, string> EnvironmentVariables { get; init; }
+        = new Dictionary<string, string>();
+
+    /// <summary>
+    /// Gets variables from runtime context.
+    /// </summary>
+    /// <remarks>
+    /// Third priority.
+    /// Includes workspace_name, current date, OS info, etc.
+    /// </remarks>
+    public IReadOnlyDictionary<string, string> ContextVariables { get; init; }
+        = new Dictionary<string, string>();
+
+    /// <summary>
+    /// Gets default built-in variables.
+    /// </summary>
+    /// <remarks>
+    /// Lowest priority.
+    /// Provides fallback values when not specified elsewhere.
+    /// </remarks>
+    public IReadOnlyDictionary<string, string> DefaultVariables { get; init; }
+        = new Dictionary<string, string>();
 }

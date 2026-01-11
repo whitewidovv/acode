@@ -3,36 +3,40 @@ using Acode.Domain.PromptPacks;
 namespace Acode.Application.PromptPacks;
 
 /// <summary>
-/// Service for loading prompt packs from disk or embedded resources.
+/// Interface for loading prompt packs from various sources.
 /// </summary>
 public interface IPromptPackLoader
 {
     /// <summary>
-    /// Loads a prompt pack from the specified directory path.
+    /// Loads a pack from the specified path.
     /// </summary>
-    /// <param name="packPath">Absolute path to the pack directory containing manifest.yml.</param>
+    /// <param name="path">The path to the pack directory.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The loaded prompt pack.</returns>
-    /// <exception cref="PackLoadException">Thrown when the pack cannot be loaded.</exception>
-    /// <remarks>
-    /// The loader performs the following steps:
-    /// 1. Reads and parses manifest.yml.
-    /// 2. Loads all component files referenced in the manifest.
-    /// 3. Computes content hash and compares with manifest (warning if mismatch).
-    /// 4. Constructs and returns a PromptPack instance.
-    ///
-    /// Security:
-    /// - All paths are validated for traversal attempts.
-    /// - Symlinks are rejected.
-    /// - All paths must be relative to pack root.
-    /// </remarks>
-    PromptPack LoadPack(string packPath);
+    Task<PromptPack> LoadPackAsync(string path, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Loads a built-in prompt pack from embedded resources.
+    /// Loads a built-in pack by ID.
     /// </summary>
-    /// <param name="packId">The ID of the built-in pack to load.</param>
+    /// <param name="packId">The pack ID.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The loaded prompt pack.</returns>
-    /// <exception cref="PackNotFoundException">Thrown when the built-in pack is not found.</exception>
-    /// <exception cref="PackLoadException">Thrown when the pack cannot be loaded.</exception>
-    PromptPack LoadBuiltInPack(string packId);
+    Task<PromptPack> LoadBuiltInPackAsync(string packId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads a user pack from the specified path.
+    /// </summary>
+    /// <param name="path">The path to the pack directory.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The loaded prompt pack.</returns>
+    Task<PromptPack> LoadUserPackAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Attempts to load a pack, returning success/failure without throwing.
+    /// </summary>
+    /// <param name="path">The path to the pack directory.</param>
+    /// <param name="pack">The loaded pack if successful.</param>
+    /// <param name="errorMessage">The error message if unsuccessful.</param>
+    /// <returns><c>true</c> if the pack was loaded; otherwise, <c>false</c>.</returns>
+    bool TryLoadPack(string path, out PromptPack? pack, out string? errorMessage);
 }

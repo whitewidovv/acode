@@ -1,302 +1,320 @@
-using System.Text;
 using Acode.Domain.PromptPacks;
+using Acode.Domain.PromptPacks.Exceptions;
 using Acode.Infrastructure.PromptPacks;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Acode.Infrastructure.Tests.PromptPacks;
 
 /// <summary>
-/// Tests for <see cref="PromptPackLoader"/>.
+/// Tests for PromptPackLoader.
 /// </summary>
 public class PromptPackLoaderTests : IDisposable
 {
-    private readonly string _testPacksRoot;
+    private readonly string _tempDir;
+    private readonly PromptPackLoader _loader;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PromptPackLoaderTests"/> class.
+    /// </summary>
     public PromptPackLoaderTests()
     {
-        _testPacksRoot = Path.Combine(Path.GetTempPath(), $"acode-test-packs-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_testPacksRoot);
+        _tempDir = Path.Combine(Path.GetTempPath(), $"acode-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(_tempDir);
+
+        var parser = new ManifestParser();
+        var hasher = new ContentHasher();
+        var embeddedProvider = new EmbeddedPackProvider(parser, NullLogger<EmbeddedPackProvider>.Instance);
+        _loader = new PromptPackLoader(parser, hasher, embeddedProvider, NullLogger<PromptPackLoader>.Instance);
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
-        if (Directory.Exists(_testPacksRoot))
+        if (Directory.Exists(_tempDir))
         {
-            Directory.Delete(_testPacksRoot, recursive: true);
+            Directory.Delete(_tempDir, true);
         }
+
+        GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// Test that a valid pack is loaded correctly.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
     [Fact]
-    public void LoadPack_ValidPack_ShouldLoadSuccessfully()
+    public async Task Should_Load_Valid_Pack()
     {
         // Arrange
-        var packPath = CreateTestPack("test-pack", "1.0.0", new Dictionary<string, string>
-        {
-            ["roles/coder.md"] = "You are a coding assistant.",
-        });
-
-        var hasher = new ContentHasher();
-        var loader = new PromptPackLoader(hasher);
-
-        // Act
-        var pack = loader.LoadPack(packPath);
-
-        // Assert
-        pack.Should().NotBeNull();
-        pack.Manifest.Id.Should().Be("test-pack");
-        pack.Manifest.Version.Should().Be(PackVersion.Parse("1.0.0"));
-        pack.Components.Should().HaveCount(1);
-        pack.Components.Should().ContainKey("roles/coder.md");
-    }
-
-    [Fact]
-    public void LoadPack_MissingManifest_ShouldThrowPackLoadException()
-    {
-        // Arrange
-        var packPath = Path.Combine(_testPacksRoot, "missing-manifest-pack");
-        Directory.CreateDirectory(packPath);
-
-        var hasher = new ContentHasher();
-        var loader = new PromptPackLoader(hasher);
-
-        // Act
-        var act = () => loader.LoadPack(packPath);
-
-        // Assert
-        act.Should().Throw<PackLoadException>()
-            .WithMessage("*manifest.yml*not found*");
-    }
-
-    [Fact]
-    public void LoadPack_InvalidYaml_ShouldThrowPackLoadException()
-    {
-        // Arrange
-        var packPath = Path.Combine(_testPacksRoot, "invalid-yaml-pack");
-        Directory.CreateDirectory(packPath);
-        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), "invalid: yaml: content:");
-
-        var hasher = new ContentHasher();
-        var loader = new PromptPackLoader(hasher);
-
-        // Act
-        var act = () => loader.LoadPack(packPath);
-
-        // Assert
-        act.Should().Throw<PackLoadException>()
-            .WithMessage("*parse*manifest.yml*");
-    }
-
-    [Fact]
-    public void LoadPack_ComponentWithTraversalPath_ShouldThrowPackLoadException()
-    {
-        // Arrange
-        var dummyHash = "a".PadRight(64, '1');
-        var manifestContent = $@"
+        var packPath = CreatePackDirectory("test-pack");
+        var manifest = @"
 format_version: '1.0'
-id: malicious-pack
+id: test-pack
 version: 1.0.0
-name: Malicious Pack
-description: Pack with path traversal
-content_hash: {dummyHash}
-created_at: 2024-01-15T10:30:00Z
+name: Test Pack
+description: Test prompt pack
+created_at: 2025-01-01T00:00:00Z
+components:
+  - path: system.md
+    type: system
+";
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifest);
+        File.WriteAllText(Path.Combine(packPath, "system.md"), "You are a coding assistant.");
+
+        // Act
+        var result = await _loader.LoadPackAsync(packPath);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Id.Should().Be("test-pack");
+        result.Version.ToString().Should().Be("1.0.0");
+        result.Name.Should().Be("Test Pack");
+        result.Description.Should().Be("Test prompt pack");
+        result.Components.Should().HaveCount(1);
+        result.Components[0].Path.Should().Be("system.md");
+        result.Components[0].Type.Should().Be(ComponentType.System);
+        result.Components[0].Content.Should().Be("You are a coding assistant.");
+    }
+
+    /// <summary>
+    /// Test that missing manifest throws appropriate exception.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    [Fact]
+    public async Task Should_Fail_On_Missing_Manifest()
+    {
+        // Arrange
+        var packPath = CreatePackDirectory("missing-manifest");
+
+        // Act
+        var act = () => _loader.LoadPackAsync(packPath);
+
+        // Assert
+        await act.Should().ThrowAsync<PackLoadException>()
+            .Where(ex => ex.ErrorCode == "ACODE-PKL-001")
+            .Where(ex => ex.PackPath == packPath);
+    }
+
+    /// <summary>
+    /// Test that invalid YAML throws appropriate exception.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    [Fact]
+    public async Task Should_Fail_On_Invalid_YAML()
+    {
+        // Arrange
+        var packPath = CreatePackDirectory("bad-yaml");
+        var invalidYaml = "id: test\nversion: [this is not valid";
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), invalidYaml);
+
+        // Act
+        var act = () => _loader.LoadPackAsync(packPath);
+
+        // Assert
+        await act.Should().ThrowAsync<PackLoadException>()
+            .Where(ex => ex.ErrorCode == "ACODE-PKL-002");
+    }
+
+    /// <summary>
+    /// Test that missing component file throws appropriate exception.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    [Fact]
+    public async Task Should_Fail_On_Missing_Component()
+    {
+        // Arrange
+        var packPath = CreatePackDirectory("missing-component");
+        var manifest = @"
+format_version: '1.0'
+id: test
+version: 1.0.0
+name: Test
+description: Test
+created_at: 2025-01-01T00:00:00Z
+components:
+  - path: missing.md
+    type: system
+";
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifest);
+
+        // Act
+        var act = () => _loader.LoadPackAsync(packPath);
+
+        // Assert
+        await act.Should().ThrowAsync<PackLoadException>()
+            .Where(ex => ex.ErrorCode == "ACODE-PKL-003")
+            .Where(ex => ex.Message.Contains("missing.md"));
+    }
+
+    /// <summary>
+    /// Test that multiple components are loaded correctly.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    [Fact]
+    public async Task Should_Load_All_Components()
+    {
+        // Arrange
+        var packPath = CreatePackDirectory("multi-component");
+        Directory.CreateDirectory(Path.Combine(packPath, "roles"));
+
+        var manifest = @"
+format_version: '1.0'
+id: multi
+version: 1.0.0
+name: Multi Component
+description: Multiple components
+created_at: 2025-01-01T00:00:00Z
+components:
+  - path: system.md
+    type: system
+  - path: roles/planner.md
+    type: role
+  - path: roles/coder.md
+    type: role
+";
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifest);
+        File.WriteAllText(Path.Combine(packPath, "system.md"), "System prompt");
+        File.WriteAllText(Path.Combine(packPath, "roles", "planner.md"), "Planner prompt");
+        File.WriteAllText(Path.Combine(packPath, "roles", "coder.md"), "Coder prompt");
+
+        // Act
+        var result = await _loader.LoadPackAsync(packPath);
+
+        // Assert
+        result.Components.Should().HaveCount(3);
+        result.Components.Should().Contain(c => c.Path == "system.md");
+        result.Components.Should().Contain(c => c.Path == "roles/planner.md");
+        result.Components.Should().Contain(c => c.Path == "roles/coder.md");
+    }
+
+    /// <summary>
+    /// Test that path traversal attempts are blocked.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    [Fact]
+    public async Task Should_Block_Path_Traversal()
+    {
+        // Arrange
+        var packPath = CreatePackDirectory("attack-pack");
+        var manifest = @"
+format_version: '1.0'
+id: attack
+version: 1.0.0
+name: Attack Pack
+description: Path traversal attempt
+created_at: 2025-01-01T00:00:00Z
 components:
   - path: ../../../etc/passwd
     type: system
 ";
-        var packPath = Path.Combine(_testPacksRoot, "malicious-pack");
-        Directory.CreateDirectory(packPath);
-        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifestContent);
-
-        var hasher = new ContentHasher();
-        var loader = new PromptPackLoader(hasher);
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifest);
 
         // Act
-        var act = () => loader.LoadPack(packPath);
+        var act = () => _loader.LoadPackAsync(packPath);
 
         // Assert
-        act.Should().Throw<PackLoadException>()
-            .WithMessage("*path traversal*");
+        await act.Should().ThrowAsync<PathTraversalException>();
     }
 
+    /// <summary>
+    /// Test that TryLoadPack returns false on error.
+    /// </summary>
     [Fact]
-    public void LoadPack_MissingComponentFile_ShouldThrowPackLoadException()
+    public void TryLoadPack_Should_Return_False_On_Error()
     {
         // Arrange
-        var dummyHash = "b".PadRight(64, '2');
-        var manifestContent = $@"
+        var packPath = CreatePackDirectory("error-pack");
+
+        // Act
+        var result = _loader.TryLoadPack(packPath, out var pack, out var errorMessage);
+
+        // Assert
+        result.Should().BeFalse();
+        pack.Should().BeNull();
+        errorMessage.Should().NotBeNullOrEmpty();
+    }
+
+    /// <summary>
+    /// Test that TryLoadPack returns true on success.
+    /// </summary>
+    [Fact]
+    public void TryLoadPack_Should_Return_True_On_Success()
+    {
+        // Arrange
+        var packPath = CreatePackDirectory("success-pack");
+        var manifest = @"
 format_version: '1.0'
-id: incomplete-pack
+id: success
 version: 1.0.0
-name: Incomplete Pack
-description: Pack with missing component file
-content_hash: {dummyHash}
-created_at: 2024-01-15T10:30:00Z
+name: Success Pack
+description: Should load
+created_at: 2025-01-01T00:00:00Z
 components:
-  - path: roles/missing.md
-    type: role
-    role: missing
+  - path: system.md
+    type: system
 ";
-        var packPath = Path.Combine(_testPacksRoot, "incomplete-pack");
-        Directory.CreateDirectory(packPath);
-        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifestContent);
-
-        var hasher = new ContentHasher();
-        var loader = new PromptPackLoader(hasher);
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifest);
+        File.WriteAllText(Path.Combine(packPath, "system.md"), "System prompt");
 
         // Act
-        var act = () => loader.LoadPack(packPath);
+        var result = _loader.TryLoadPack(packPath, out var pack, out var errorMessage);
 
         // Assert
-        act.Should().Throw<PackLoadException>()
-            .WithMessage("*component file*not found*");
-    }
-
-    [Fact]
-    public void LoadPack_MultipleComponents_ShouldLoadAll()
-    {
-        // Arrange
-        var packPath = CreateTestPack("multi-pack", "2.0.0", new Dictionary<string, string>
-        {
-            ["system/core.md"] = "Core system prompt.",
-            ["roles/architect.md"] = "Software architect role.",
-            ["languages/python.md"] = "Python guidelines.",
-        });
-
-        var hasher = new ContentHasher();
-        var loader = new PromptPackLoader(hasher);
-
-        // Act
-        var pack = loader.LoadPack(packPath);
-
-        // Assert
-        pack.Components.Should().HaveCount(3);
-        pack.Components.Should().ContainKey("system/core.md");
-        pack.Components.Should().ContainKey("roles/architect.md");
-        pack.Components.Should().ContainKey("languages/python.md");
-        pack.Components["system/core.md"].Content.Should().Be("Core system prompt.");
-    }
-
-    [Fact]
-    public void LoadPack_HashMismatch_ShouldLoadWithWarning()
-    {
-        // Arrange - Create pack with intentionally wrong hash
-        var components = new Dictionary<string, string>
-        {
-            ["roles/coder.md"] = "You are a coding assistant.",
-        };
-        var packPath = CreateTestPackWithWrongHash("hash-mismatch-pack", "1.0.0", components);
-
-        var hasher = new ContentHasher();
-        var loader = new PromptPackLoader(hasher);
-
-        // Act - Should load successfully despite hash mismatch (warning, not error)
-        var pack = loader.LoadPack(packPath);
-
-        // Assert
+        result.Should().BeTrue();
         pack.Should().NotBeNull();
-        pack.Manifest.Id.Should().Be("hash-mismatch-pack");
-
-        // Note: In a real implementation, we'd capture warnings via ILogger
-        // For now, we verify the pack loads successfully
+        pack!.Id.Should().Be("success");
+        errorMessage.Should().BeNull();
     }
 
+    /// <summary>
+    /// Test that pack source is set correctly.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
     [Fact]
-    public void LoadPack_NormalizesPaths_ShouldConvertBackslashes()
+    public async Task Should_Set_PackSource_To_User()
     {
-        // Arrange - Create manifest with backslashes
-        var dummyHash = "c".PadRight(64, '3');
-        var manifestContent = $@"
+        // Arrange
+        var packPath = CreatePackDirectory("user-pack");
+        var manifest = @"
 format_version: '1.0'
-id: backslash-pack
+id: user-pack
 version: 1.0.0
-name: Backslash Pack
-description: Pack with backslash paths
-content_hash: {dummyHash}
-created_at: 2024-01-15T10:30:00Z
+name: User Pack
+description: User pack test
+created_at: 2025-01-01T00:00:00Z
 components:
-  - path: roles\coder.md
-    type: role
-    role: coder
+  - path: system.md
+    type: system
 ";
-        var packPath = Path.Combine(_testPacksRoot, "backslash-pack");
-        Directory.CreateDirectory(packPath);
-        Directory.CreateDirectory(Path.Combine(packPath, "roles"));
-        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifestContent);
-        File.WriteAllText(Path.Combine(packPath, "roles", "coder.md"), "Content");
-
-        var hasher = new ContentHasher();
-        var loader = new PromptPackLoader(hasher);
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifest);
+        File.WriteAllText(Path.Combine(packPath, "system.md"), "System");
 
         // Act
-        var pack = loader.LoadPack(packPath);
+        var result = await _loader.LoadUserPackAsync(packPath);
 
         // Assert
-        pack.Components.Should().ContainKey("roles/coder.md");
+        result.Source.Should().Be(PackSource.User);
     }
 
-    private string CreateTestPack(string id, string version, Dictionary<string, string> components)
+    /// <summary>
+    /// Test that LoadBuiltInPackAsync throws for non-existent pack.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    [Fact]
+    public async Task LoadBuiltInPackAsync_Should_Throw_PackNotFoundException()
     {
-        var packPath = Path.Combine(_testPacksRoot, id);
+        // Act
+        var act = () => _loader.LoadBuiltInPackAsync("nonexistent-pack");
+
+        // Assert
+        await act.Should().ThrowAsync<PackNotFoundException>();
+    }
+
+    private string CreatePackDirectory(string name)
+    {
+        var packPath = Path.Combine(_tempDir, name);
         Directory.CreateDirectory(packPath);
-
-        // Compute correct content hash
-        var hasher = new ContentHasher();
-        var contentHash = hasher.Compute(components);
-
-        // Create manifest
-        var manifestBuilder = new StringBuilder();
-        manifestBuilder.AppendLine();
-        manifestBuilder.AppendLine("format_version: '1.0'");
-        manifestBuilder.AppendLine($"id: {id}");
-        manifestBuilder.AppendLine($"version: {version}");
-        manifestBuilder.AppendLine("name: Test Pack");
-        manifestBuilder.AppendLine("description: Test pack for unit tests");
-        manifestBuilder.AppendLine($"content_hash: {contentHash.Value}");
-        manifestBuilder.AppendLine("created_at: 2024-01-15T10:30:00Z");
-        manifestBuilder.AppendLine("components:");
-
-        foreach (var (path, content) in components)
-        {
-            var normalizedPath = path.Replace('\\', '/');
-            var parts = normalizedPath.Split('/');
-            var componentType = parts[0] switch
-            {
-                "system" => "system",
-                "roles" => "role",
-                "languages" => "language",
-                "frameworks" => "framework",
-                _ => "custom",
-            };
-
-            manifestBuilder.AppendLine();
-            manifestBuilder.AppendLine($"  - path: {normalizedPath}");
-            manifestBuilder.AppendLine($"    type: {componentType}");
-            if (componentType == "role" && parts.Length > 1)
-            {
-                manifestBuilder.AppendLine($"    role: {Path.GetFileNameWithoutExtension(parts[1])}");
-            }
-
-            // Create component file
-            var componentPath = Path.Combine(packPath, normalizedPath.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(componentPath)!);
-            File.WriteAllText(componentPath, content);
-        }
-
-        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifestBuilder.ToString());
-        return packPath;
-    }
-
-    private string CreateTestPackWithWrongHash(string id, string version, Dictionary<string, string> components)
-    {
-        var packPath = CreateTestPack(id, version, components);
-
-        // Overwrite manifest with wrong hash
-        var manifestPath = Path.Combine(packPath, "manifest.yml");
-        var manifestContent = File.ReadAllText(manifestPath);
-        var wrongHash = "a".PadRight(64, '1');
-        manifestContent = manifestContent.Replace("content_hash:", $"content_hash: {wrongHash}  # Wrong hash", StringComparison.Ordinal);
-
-        File.WriteAllText(manifestPath, manifestContent);
         return packPath;
     }
 }

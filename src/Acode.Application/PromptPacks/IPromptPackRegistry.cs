@@ -3,55 +3,45 @@ using Acode.Domain.PromptPacks;
 namespace Acode.Application.PromptPacks;
 
 /// <summary>
-/// Registry for discovering, indexing, and retrieving prompt packs.
+/// Interface for the prompt pack registry that indexes and provides access to packs.
 /// </summary>
 public interface IPromptPackRegistry
 {
     /// <summary>
-    /// Initializes the registry by discovering and indexing all available packs.
+    /// Gets a pack by ID.
     /// </summary>
-    /// <remarks>
-    /// Discovery sources:
-    /// - Built-in packs from embedded resources.
-    /// - User packs from {workspace}/.acode/prompts/.
-    ///
-    /// User packs override built-in packs with the same ID.
-    /// </remarks>
-    void Initialize();
-
-    /// <summary>
-    /// Gets metadata for all available packs.
-    /// </summary>
-    /// <returns>Collection of pack metadata.</returns>
-    IReadOnlyList<PromptPackInfo> ListPacks();
-
-    /// <summary>
-    /// Gets a specific pack by ID.
-    /// </summary>
-    /// <param name="packId">The pack ID to retrieve.</param>
-    /// <returns>The requested pack.</returns>
-    /// <exception cref="PackNotFoundException">Thrown when the pack is not found.</exception>
+    /// <param name="packId">The pack ID.</param>
+    /// <returns>The prompt pack.</returns>
+    /// <exception cref="Acode.Domain.PromptPacks.Exceptions.PackNotFoundException">Thrown when the pack is not found.</exception>
     PromptPack GetPack(string packId);
+
+    /// <summary>
+    /// Tries to get a pack by ID without throwing.
+    /// </summary>
+    /// <param name="packId">The pack ID.</param>
+    /// <returns>The pack if found; otherwise, <c>null</c>.</returns>
+    PromptPack? TryGetPack(string packId);
+
+    /// <summary>
+    /// Lists all available packs.
+    /// </summary>
+    /// <returns>The list of pack information.</returns>
+    IReadOnlyList<PromptPackInfo> ListPacks();
 
     /// <summary>
     /// Gets the currently active pack based on configuration.
     /// </summary>
-    /// <returns>The active pack.</returns>
-    /// <remarks>
-    /// Configuration precedence:
-    /// 1. ACODE_PROMPT_PACK environment variable (highest).
-    /// 2. .agent/config.yml prompts.pack_id setting.
-    /// 3. "acode-standard" default (lowest).
-    ///
-    /// If the configured pack is not found, falls back to "acode-standard" with a warning.
-    /// </remarks>
+    /// <returns>The active prompt pack.</returns>
     PromptPack GetActivePack();
 
     /// <summary>
-    /// Refreshes the registry by re-discovering and reloading all packs.
+    /// Gets the ID of the currently active pack.
     /// </summary>
-    /// <remarks>
-    /// This is useful for hot-reloading packs during development without restarting the application.
-    /// </remarks>
+    /// <returns>The active pack ID.</returns>
+    string GetActivePackId();
+
+    /// <summary>
+    /// Refreshes the registry by re-discovering packs and clearing cache.
+    /// </summary>
     void Refresh();
 }

@@ -1,244 +1,194 @@
-using System.Text;
 using Acode.Application.PromptPacks;
 using Acode.Domain.PromptPacks;
-using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.NamingConventions;
+using Acode.Domain.PromptPacks.Exceptions;
+using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.PromptPacks;
 
 /// <summary>
-/// Loads prompt packs from disk or embedded resources.
+/// Loads prompt packs from filesystem and embedded resources.
 /// </summary>
 public sealed class PromptPackLoader : IPromptPackLoader
 {
-    private readonly IContentHasher _contentHasher;
-    private readonly IDeserializer _yamlDeserializer;
+    private readonly ManifestParser _manifestParser;
+    private readonly ContentHasher _contentHasher;
+    private readonly EmbeddedPackProvider _embeddedPackProvider;
+    private readonly ILogger<PromptPackLoader> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PromptPackLoader"/> class.
     /// </summary>
-    /// <param name="contentHasher">Content hasher for verifying pack integrity.</param>
-    public PromptPackLoader(IContentHasher contentHasher)
+    /// <param name="manifestParser">The manifest parser.</param>
+    /// <param name="contentHasher">The content hasher.</param>
+    /// <param name="embeddedPackProvider">The embedded pack provider.</param>
+    /// <param name="logger">The logger.</param>
+    public PromptPackLoader(
+        ManifestParser manifestParser,
+        ContentHasher contentHasher,
+        EmbeddedPackProvider embeddedPackProvider,
+        ILogger<PromptPackLoader> logger)
     {
-        ArgumentNullException.ThrowIfNull(contentHasher);
-
+        _manifestParser = manifestParser;
         _contentHasher = contentHasher;
-        _yamlDeserializer = new DeserializerBuilder()
-            .WithNamingConvention(UnderscoredNamingConvention.Instance)
-            .Build();
+        _embeddedPackProvider = embeddedPackProvider;
+        _logger = logger;
     }
 
     /// <inheritdoc/>
-    public PromptPack LoadPack(string packPath)
+    public async Task<PromptPack> LoadPackAsync(string path, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(packPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        if (!Directory.Exists(packPath))
-        {
-            throw new PackLoadException("unknown", $"Pack directory not found: {packPath}");
-        }
+        var manifestPath = Path.Combine(path, "manifest.yml");
 
-        // Load and parse manifest
-        var manifestPath = Path.Combine(packPath, "manifest.yml");
         if (!File.Exists(manifestPath))
         {
-            throw new PackLoadException("unknown", $"manifest.yml not found in pack directory: {packPath}");
+            throw new PackLoadException(
+                "ACODE-PKL-001",
+                $"manifest.yml not found at {manifestPath}",
+                path);
         }
 
-        PackManifest manifest;
+        _logger.LogInformation("Loading pack from {Path}", path);
+
         try
         {
-            var manifestYaml = File.ReadAllText(manifestPath, Encoding.UTF8);
-            var manifestDto = _yamlDeserializer.Deserialize<ManifestDto>(manifestYaml);
-            manifest = ConvertToPackManifest(manifestDto, packPath);
+            var manifest = _manifestParser.ParseFile(manifestPath, PackSource.User);
+            var components = await LoadComponentsAsync(path, manifest.Components, cancellationToken)
+                .ConfigureAwait(false);
+
+            var pack = new PromptPack(
+                manifest.Id,
+                manifest.Version,
+                manifest.Name,
+                manifest.Description,
+                manifest.Source,
+                manifest.PackPath,
+                manifest.ContentHash,
+                components);
+
+            await VerifyHashAsync(pack, cancellationToken).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Loaded pack {PackId} v{Version} with {ComponentCount} components",
+                pack.Id,
+                pack.Version,
+                pack.Components.Count);
+
+            return pack;
         }
-        catch (Exception ex) when (ex is not PackLoadException)
+        catch (ManifestParseException ex)
         {
-            throw new PackLoadException("unknown", $"Failed to parse manifest.yml: {ex.Message}", ex);
+            throw new PackLoadException(
+                "ACODE-PKL-002",
+                $"Failed to parse manifest: {ex.Message}",
+                path,
+                ex);
         }
-
-        // Load component files
-        var componentContents = new Dictionary<string, string>();
-        var loadedComponents = new List<PackComponent>();
-
-        foreach (var component in manifest.Components)
-        {
-            // Validate and normalize path
-            string normalizedPath;
-            try
-            {
-                normalizedPath = PathNormalizer.NormalizeAndValidate(component.Path);
-            }
-            catch (PathTraversalException ex)
-            {
-                throw new PackLoadException(
-                    manifest.Id,
-                    $"Component path '{component.Path}' contains path traversal sequences",
-                    ex);
-            }
-
-            // Construct absolute file path and validate it's within pack root
-            var componentFilePath = Path.Combine(packPath, normalizedPath.Replace('/', Path.DirectorySeparatorChar));
-            var fullComponentPath = Path.GetFullPath(componentFilePath);
-            var fullPackPath = Path.GetFullPath(packPath);
-
-            if (!fullComponentPath.StartsWith(fullPackPath, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new PackLoadException(
-                    manifest.Id,
-                    $"Component path '{component.Path}' resolves outside pack directory (path traversal attempt)");
-            }
-
-            // Check file exists
-            if (!File.Exists(fullComponentPath))
-            {
-                throw new PackLoadException(
-                    manifest.Id,
-                    $"Component file not found: {component.Path}");
-            }
-
-            // Load content
-            var content = File.ReadAllText(fullComponentPath, Encoding.UTF8);
-            componentContents[normalizedPath] = content;
-
-            // Create loaded component with normalized path and content
-            loadedComponents.Add(component with { Path = normalizedPath, Content = content });
-        }
-
-        // Verify content hash (warning if mismatch, not error)
-        var actualHash = _contentHasher.Compute(componentContents);
-        if (!actualHash.Equals(manifest.ContentHash))
-        {
-            // In production, this would log a warning via ILogger
-            // For now, we just continue loading (dev workflow support)
-            Console.WriteLine($"WARNING: Content hash mismatch for pack '{manifest.Id}'. Expected: {manifest.ContentHash.Value}, Actual: {actualHash.Value}");
-        }
-
-        // Construct PromptPack
-        return new PromptPack
-        {
-            Manifest = manifest with { Components = loadedComponents },
-            Components = loadedComponents.ToDictionary(c => c.Path, c => c),
-            Source = PackSource.User,
-        };
     }
 
     /// <inheritdoc/>
-    public PromptPack LoadBuiltInPack(string packId)
+    public Task<PromptPack> LoadBuiltInPackAsync(string packId, CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException("Built-in pack loading from embedded resources not yet implemented");
+        ArgumentException.ThrowIfNullOrWhiteSpace(packId);
+
+        return _embeddedPackProvider.LoadPackAsync(packId, cancellationToken);
     }
 
-    private static ComponentType ParseComponentType(string? type)
+    /// <inheritdoc/>
+    public Task<PromptPack> LoadUserPackAsync(string path, CancellationToken cancellationToken = default)
     {
-        return type?.ToLowerInvariant() switch
-        {
-            "system" => ComponentType.System,
-            "role" => ComponentType.Role,
-            "language" => ComponentType.Language,
-            "framework" => ComponentType.Framework,
-            "custom" => ComponentType.Custom,
-            _ => ComponentType.Custom,
-        };
+        return LoadPackAsync(path, cancellationToken);
     }
 
-    private PackManifest ConvertToPackManifest(ManifestDto dto, string packPath)
+    /// <inheritdoc/>
+    public bool TryLoadPack(string path, out PromptPack? pack, out string? errorMessage)
     {
-        if (string.IsNullOrWhiteSpace(dto.Id))
-        {
-            throw new PackLoadException("unknown", "Manifest 'id' field is required");
-        }
-
-        if (string.IsNullOrWhiteSpace(dto.Version))
-        {
-            throw new PackLoadException(dto.Id, "Manifest 'version' field is required");
-        }
-
-        PackVersion version;
         try
         {
-            version = PackVersion.Parse(dto.Version);
+            pack = LoadPackAsync(path).GetAwaiter().GetResult();
+            errorMessage = null;
+            return true;
         }
         catch (Exception ex)
         {
-            throw new PackLoadException(dto.Id, $"Invalid version format '{dto.Version}': {ex.Message}", ex);
+            pack = null;
+            errorMessage = ex.Message;
+            return false;
         }
+    }
 
-        ContentHash contentHash;
-        try
-        {
-            contentHash = new ContentHash(dto.ContentHash ?? string.Empty);
-        }
-        catch (Exception ex)
-        {
-            throw new PackLoadException(dto.Id, $"Invalid content_hash format: {ex.Message}", ex);
-        }
+    private async Task<IReadOnlyList<LoadedComponent>> LoadComponentsAsync(
+        string packPath,
+        IReadOnlyList<PackComponent> componentDefs,
+        CancellationToken cancellationToken)
+    {
+        var components = new List<LoadedComponent>();
 
-        var components = new List<PackComponent>();
-        if (dto.Components != null)
+        foreach (var def in componentDefs)
         {
-            foreach (var componentDto in dto.Components)
+            PathNormalizer.EnsurePathSafe(def.Path);
+
+            var fullPath = Path.Combine(packPath, def.Path.Replace('/', Path.DirectorySeparatorChar));
+
+            if (!File.Exists(fullPath))
             {
-                components.Add(new PackComponent
-                {
-                    Path = componentDto.Path ?? string.Empty,
-                    Type = ParseComponentType(componentDto.Type),
-                    Role = componentDto.Role,
-                    Language = componentDto.Language,
-                    Framework = componentDto.Framework,
-                });
+                throw new PackLoadException(
+                    "ACODE-PKL-003",
+                    $"Component file not found: {def.Path}",
+                    packPath);
             }
+
+            // Check for symlinks
+            var fileInfo = new FileInfo(fullPath);
+            if (fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                _logger.LogError("SYMLINK_REJECTED: {Path}", def.Path);
+                throw new PackLoadException(
+                    "ACODE-PKL-004",
+                    $"Symlink rejected: {def.Path}",
+                    packPath);
+            }
+
+            var content = await File.ReadAllTextAsync(fullPath, cancellationToken)
+                .ConfigureAwait(false);
+
+            var metadata = def.Metadata is null
+                ? null
+                : def.Metadata.ToDictionary(k => k.Key, v => v.Value);
+
+            components.Add(new LoadedComponent(
+                def.Path,
+                def.Type,
+                content,
+                metadata?.AsReadOnly()));
         }
 
-        return new PackManifest
+        return components.AsReadOnly();
+    }
+
+    private async Task VerifyHashAsync(PromptPack pack, CancellationToken cancellationToken)
+    {
+        if (pack.ContentHash is null)
         {
-            FormatVersion = dto.FormatVersion ?? "1.0",
-            Id = dto.Id,
-            Version = version,
-            Name = dto.Name ?? dto.Id,
-            Description = dto.Description ?? string.Empty,
-            ContentHash = contentHash,
-            CreatedAt = dto.CreatedAt ?? DateTime.UtcNow,
-            UpdatedAt = dto.UpdatedAt,
-            Author = dto.Author,
-            Components = components,
-        };
-    }
+            return;
+        }
 
-    // DTOs for YAML deserialization
-    private sealed class ManifestDto
-    {
-        public string? FormatVersion { get; set; }
+        var componentData = pack.Components
+            .Select(c => (c.Path, c.Content))
+            .ToArray();
 
-        public string? Id { get; set; }
+        var actualHash = _contentHasher.ComputeHash(componentData);
 
-        public string? Version { get; set; }
+        if (!pack.ContentHash.Matches(actualHash))
+        {
+            _logger.LogWarning(
+                "Content hash mismatch for pack {PackId}. Expected: {Expected}, Actual: {Actual}",
+                pack.Id,
+                pack.ContentHash,
+                actualHash);
+        }
 
-        public string? Name { get; set; }
-
-        public string? Description { get; set; }
-
-        public string? ContentHash { get; set; }
-
-        public DateTime? CreatedAt { get; set; }
-
-        public DateTime? UpdatedAt { get; set; }
-
-        public string? Author { get; set; }
-
-        public List<ComponentDto>? Components { get; set; }
-    }
-
-    private sealed class ComponentDto
-    {
-        public string? Path { get; set; }
-
-        public string? Type { get; set; }
-
-        public string? Role { get; set; }
-
-        public string? Language { get; set; }
-
-        public string? Framework { get; set; }
+        await Task.CompletedTask.ConfigureAwait(false);
     }
 }

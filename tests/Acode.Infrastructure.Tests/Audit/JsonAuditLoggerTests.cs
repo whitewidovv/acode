@@ -53,7 +53,7 @@ public sealed class JsonAuditLoggerTests : IDisposable
 
         // Assert
         File.Exists(_testLogPath).Should().BeTrue();
-        var content = await File.ReadAllTextAsync(_testLogPath);
+        var content = await ReadFileWithShareAsync(_testLogPath);
         content.Should().Contain("session_start"); // snake_case from JSON serializer
         content.Should().Contain("\"test\":\"value\"");
     }
@@ -71,7 +71,8 @@ public sealed class JsonAuditLoggerTests : IDisposable
         await _logger.FlushAsync();
 
         // Assert
-        var lines = (await File.ReadAllLinesAsync(_testLogPath)).Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
+        var content = await ReadFileWithShareAsync(_testLogPath);
+        var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         lines.Should().HaveCount(2);
     }
 
@@ -105,5 +106,13 @@ public sealed class JsonAuditLoggerTests : IDisposable
             OperatingMode = "local-only",
             Data = new Dictionary<string, object>()
         };
+    }
+
+    private static async Task<string> ReadFileWithShareAsync(string path)
+    {
+        // Open with FileShare.ReadWrite to allow reading while the logger has the file open
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        return await reader.ReadToEndAsync();
     }
 }

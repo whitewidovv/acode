@@ -2,294 +2,273 @@ using Acode.Application.PromptPacks;
 using Acode.Domain.PromptPacks;
 using Acode.Infrastructure.PromptPacks;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
+
+#pragma warning disable SA1615 // Element return value should be documented - not needed for xUnit tests
 
 namespace Acode.Infrastructure.Tests.PromptPacks;
 
 /// <summary>
-/// Tests for <see cref="PromptComposer"/>.
+/// Unit tests for PromptComposer from Task 008 parent spec (Tests 9-16).
 /// </summary>
 public class PromptComposerTests
 {
+    /// <summary>
+    /// Test 9: Should Compose Base System Prompt Only.
+    /// </summary>
     [Fact]
-    public void Compose_BaseSystemPromptOnly_ReturnsSystemPrompt()
+    public async Task Should_Compose_Base_System_Prompt_Only()
     {
         // Arrange
-        var templateEngine = Substitute.For<ITemplateEngine>();
-        templateEngine.Substitute(Arg.Any<string>(), Arg.Any<Dictionary<string, string>>())
-            .Returns(call => call.Arg<string>()); // Return template unchanged
-
+        var pack = CreatePack(
+            new LoadedComponent("system.md", ComponentType.System, "You are a coding assistant.", null));
+        var templateEngine = CreatePassThroughTemplateEngine();
         var composer = new PromptComposer(templateEngine);
-
-        var pack = CreatePackWithComponents(
-            ("system.md", "This is the system prompt."));
-
-        var context = new CompositionContext();
 
         // Act
-        var result = composer.Compose(pack, context);
+        var result = await composer.ComposeAsync(pack, new CompositionContext());
 
         // Assert
-        result.Should().Be("This is the system prompt.");
+        result.Should().Be("You are a coding assistant.");
     }
 
+    /// <summary>
+    /// Test 10: Should Compose Base Plus Role Prompt.
+    /// </summary>
     [Fact]
-    public void Compose_WithRole_IncludesRoleComponent()
+    public async Task Should_Compose_Base_Plus_Role_Prompt()
     {
         // Arrange
-        var templateEngine = Substitute.For<ITemplateEngine>();
-        templateEngine.Substitute(Arg.Any<string>(), Arg.Any<Dictionary<string, string>>())
-            .Returns(call => call.Arg<string>());
-
+        var pack = CreatePack(
+            new LoadedComponent("system.md", ComponentType.System, "You are a coding assistant.", null),
+            new LoadedComponent(
+                "roles/coder.md",
+                ComponentType.Role,
+                "Focus on clean, testable code.",
+                new Dictionary<string, string> { ["role"] = "coder" }));
+        var templateEngine = CreatePassThroughTemplateEngine();
         var composer = new PromptComposer(templateEngine);
-
-        var pack = CreatePackWithComponents(
-            ("system.md", "System prompt."),
-            ("roles/coder.md", "Coder role guidance."));
-
-        var context = CompositionContext.ForRole("coder");
+        var context = new CompositionContext { Role = "coder" };
 
         // Act
-        var result = composer.Compose(pack, context);
+        var result = await composer.ComposeAsync(pack, context);
 
         // Assert
-        result.Should().Contain("System prompt.");
-        result.Should().Contain("Coder role guidance.");
-        result.Should().Contain("\n\n"); // Components separated by double newline
+        result.Should().Contain("You are a coding assistant.");
+        result.Should().Contain("Focus on clean, testable code.");
     }
 
+    /// <summary>
+    /// Test 11: Should Compose Full Stack With Language And Framework.
+    /// </summary>
     [Fact]
-    public void Compose_FullStack_IncludesAllComponents()
+    public async Task Should_Compose_Full_Stack_With_Language_And_Framework()
     {
         // Arrange
-        var templateEngine = Substitute.For<ITemplateEngine>();
-        templateEngine.Substitute(Arg.Any<string>(), Arg.Any<Dictionary<string, string>>())
-            .Returns(call => call.Arg<string>());
-
+        var pack = CreatePack(
+            new LoadedComponent("system.md", ComponentType.System, "Base system prompt.", null),
+            new LoadedComponent(
+                "roles/coder.md",
+                ComponentType.Role,
+                "Role: coder guidance.",
+                new Dictionary<string, string> { ["role"] = "coder" }),
+            new LoadedComponent(
+                "languages/csharp.md",
+                ComponentType.Language,
+                "C# conventions.",
+                new Dictionary<string, string> { ["language"] = "csharp" }),
+            new LoadedComponent(
+                "frameworks/aspnetcore.md",
+                ComponentType.Framework,
+                "ASP.NET Core patterns.",
+                new Dictionary<string, string> { ["framework"] = "aspnetcore" }));
+        var templateEngine = CreatePassThroughTemplateEngine();
         var composer = new PromptComposer(templateEngine);
-
-        var pack = CreatePackWithComponents(
-            ("system.md", "System."),
-            ("roles/coder.md", "Coder."),
-            ("languages/csharp.md", "C# guidance."),
-            ("frameworks/aspnetcore.md", "ASP.NET Core."));
-
-        var context = new CompositionContext(
-            Role: "coder",
-            Language: "csharp",
-            Framework: "aspnetcore");
-
-        // Act
-        var result = composer.Compose(pack, context);
-
-        // Assert
-        result.Should().Contain("System.");
-        result.Should().Contain("Coder.");
-        result.Should().Contain("C# guidance.");
-        result.Should().Contain("ASP.NET Core.");
-    }
-
-    [Fact]
-    public void Compose_MissingOptionalComponent_SkipsGracefully()
-    {
-        // Arrange
-        var templateEngine = Substitute.For<ITemplateEngine>();
-        templateEngine.Substitute(Arg.Any<string>(), Arg.Any<Dictionary<string, string>>())
-            .Returns(call => call.Arg<string>());
-
-        var composer = new PromptComposer(templateEngine);
-
-        var pack = CreatePackWithComponents(
-            ("system.md", "System prompt."));
-
-        var context = CompositionContext.ForRole("nonexistent");
-
-        // Act
-        var result = composer.Compose(pack, context);
-
-        // Assert
-        result.Should().Be("System prompt.");
-    }
-
-    [Fact]
-    public void Compose_WithVariables_CallsTemplateEngineWithVariables()
-    {
-        // Arrange
-        var templateEngine = Substitute.For<ITemplateEngine>();
-        var composer = new PromptComposer(templateEngine);
-
-        var pack = CreatePackWithComponents(
-            ("system.md", "Hello {{name}}!"));
-
-        var variables = new Dictionary<string, string>
+        var context = new CompositionContext
         {
-            ["name"] = "World",
+            Role = "coder",
+            Language = "csharp",
+            Framework = "aspnetcore",
         };
-        var context = CompositionContext.WithVariables(variables);
-
-        templateEngine.Substitute("Hello {{name}}!", Arg.Any<Dictionary<string, string>>())
-            .Returns("Hello World!");
 
         // Act
-        var result = composer.Compose(pack, context);
+        var result = await composer.ComposeAsync(pack, context);
 
         // Assert
-        result.Should().Be("Hello World!");
-        templateEngine.Received(1).Substitute("Hello {{name}}!", Arg.Is<Dictionary<string, string>>(
-            d => d.GetValueOrDefault("name") == "World"));
+        result.Should().Contain("Base system prompt.");
+        result.Should().Contain("Role: coder guidance.");
+        result.Should().Contain("C# conventions.");
+        result.Should().Contain("ASP.NET Core patterns.");
     }
 
+    /// <summary>
+    /// Test 12: Should Skip Optional Missing Components.
+    /// </summary>
     [Fact]
-    public void Compose_ExceedsMaxLength_TruncatesWithWarning()
+    public async Task Should_Skip_Optional_Missing_Components()
     {
         // Arrange
-        var templateEngine = Substitute.For<ITemplateEngine>();
-        templateEngine.Substitute(Arg.Any<string>(), Arg.Any<Dictionary<string, string>>())
-            .Returns(call => call.Arg<string>());
-
+        var pack = CreatePack(
+            new LoadedComponent("system.md", ComponentType.System, "Base prompt.", null));
+        var templateEngine = CreatePassThroughTemplateEngine();
         var composer = new PromptComposer(templateEngine);
-
-        var longContent = new string('a', 35000); // Exceeds 32,000 char limit
-        var pack = CreatePackWithComponents(
-            ("system.md", longContent));
-
-        var context = new CompositionContext();
+        var context = new CompositionContext
+        {
+            Role = "coder", // Requested but not available
+            Language = "python", // Requested but not available
+        };
 
         // Act
-        var result = composer.Compose(pack, context);
+        var result = await composer.ComposeAsync(pack, context);
+
+        // Assert
+        result.Should().Be("Base prompt.");
+    }
+
+    /// <summary>
+    /// Test 13: Should Deduplicate Repeated Sections.
+    /// </summary>
+    [Fact]
+    public async Task Should_Deduplicate_Repeated_Sections()
+    {
+        // Arrange
+        var pack = CreatePack(
+            new LoadedComponent(
+                "system.md",
+                ComponentType.System,
+                "# Code Quality\n\nWrite clean code.\n\n# Testing\n\nWrite tests.",
+                null),
+            new LoadedComponent(
+                "roles/coder.md",
+                ComponentType.Role,
+                "\n\n# Code Quality\n\nWrite clean code.\n\n# Additional Guidance\n\nUse TDD.",
+                new Dictionary<string, string> { ["role"] = "coder" }));
+        var templateEngine = CreatePassThroughTemplateEngine();
+        var composer = new PromptComposer(templateEngine);
+        var context = new CompositionContext { Role = "coder" };
+
+        // Act
+        var result = await composer.ComposeAsync(pack, context);
+
+        // Assert
+        result.Should().Contain("# Code Quality");
+        result.Should().Contain("Write clean code.");
+        result.Should().Contain("# Testing");
+        result.Should().Contain("# Additional Guidance");
+
+        // Should not contain duplicate "# Code Quality" section
+        var codeQualityCount = System.Text.RegularExpressions.Regex.Matches(result, "# Code Quality").Count;
+        codeQualityCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// Test 14: Should Enforce Maximum Prompt Length.
+    /// </summary>
+    [Fact]
+    public async Task Should_Enforce_Maximum_Prompt_Length()
+    {
+        // Arrange
+        var largeContent = new string('x', 20000);
+        var pack = CreatePack(
+            new LoadedComponent("system.md", ComponentType.System, largeContent, null),
+            new LoadedComponent(
+                "roles/coder.md",
+                ComponentType.Role,
+                largeContent,
+                new Dictionary<string, string> { ["role"] = "coder" }));
+        var templateEngine = CreatePassThroughTemplateEngine();
+        var composer = new PromptComposer(templateEngine, maxLength: 32000);
+        var context = new CompositionContext { Role = "coder" };
+
+        // Act
+        var result = await composer.ComposeAsync(pack, context);
 
         // Assert
         result.Length.Should().BeLessOrEqualTo(32000);
     }
 
+    /// <summary>
+    /// Test 15: Should Log Composition Hash.
+    /// </summary>
     [Fact]
-    public void Compose_ComponentsSeparatedByDoubleNewline()
+    public async Task Should_Log_Composition_Hash()
     {
         // Arrange
-        var templateEngine = Substitute.For<ITemplateEngine>();
-        templateEngine.Substitute(Arg.Any<string>(), Arg.Any<Dictionary<string, string>>())
-            .Returns(call => call.Arg<string>());
-
-        var composer = new PromptComposer(templateEngine);
-
-        var pack = CreatePackWithComponents(
-            ("system.md", "First."),
-            ("roles/planner.md", "Second."));
-
-        var context = CompositionContext.ForRole("planner");
+        var pack = CreatePack(
+            new LoadedComponent("system.md", ComponentType.System, "Test prompt.", null));
+        var templateEngine = CreatePassThroughTemplateEngine();
+        var logger = Substitute.For<ILogger<PromptComposer>>();
+        var composer = new PromptComposer(templateEngine, logger: logger);
 
         // Act
-        var result = composer.Compose(pack, context);
+        await composer.ComposeAsync(pack, new CompositionContext());
 
-        // Assert
-        result.Should().Be("First.\n\nSecond.");
+        // Assert - verify logger was called
+        logger.ReceivedCalls().Should().NotBeEmpty();
     }
 
+    /// <summary>
+    /// Test 16: Should Apply Template Variables During Composition.
+    /// </summary>
     [Fact]
-    public void Compose_EmptySystemPrompt_ReturnsEmptyAfterSubstitution()
+    public async Task Should_Apply_Template_Variables_During_Composition()
     {
         // Arrange
+        var pack = CreatePack(
+            new LoadedComponent(
+                "system.md",
+                ComponentType.System,
+                "Working on {{workspace_name}} using {{language}}.",
+                null));
         var templateEngine = Substitute.For<ITemplateEngine>();
-        templateEngine.Substitute(Arg.Any<string>(), Arg.Any<Dictionary<string, string>>())
-            .Returns(string.Empty);
-
-        var composer = new PromptComposer(templateEngine);
-
-        var pack = CreatePackWithComponents(
-            ("system.md", string.Empty));
-
-        var context = new CompositionContext();
-
-        // Act
-        var result = composer.Compose(pack, context);
-
-        // Assert
-        result.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Compose_NullContextVariables_UsesEmptyDictionary()
-    {
-        // Arrange
-        var templateEngine = Substitute.For<ITemplateEngine>();
-        templateEngine.Substitute(Arg.Any<string>(), Arg.Any<Dictionary<string, string>>())
-            .Returns(call => call.Arg<string>());
-
-        var composer = new PromptComposer(templateEngine);
-
-        var pack = CreatePackWithComponents(
-            ("system.md", "Test."));
-
-        var context = new CompositionContext();
-
-        // Act
-        var result = composer.Compose(pack, context);
-
-        // Assert
-        result.Should().Be("Test.");
-        templateEngine.Received().Substitute("Test.", Arg.Any<Dictionary<string, string>>());
-    }
-
-    private static PromptPack CreatePackWithComponents(params (string Path, string Content)[] components)
-    {
-        var packComponents = new Dictionary<string, PackComponent>();
-        var componentsList = new List<PackComponent>();
-
-        foreach (var (path, content) in components)
-        {
-            var type = DetermineComponentType(path);
-            var component = new PackComponent
+        templateEngine
+            .Substitute(Arg.Any<string>(), Arg.Any<CompositionContext>())
+            .Returns(callInfo =>
             {
-                Path = path,
-                Type = type,
-                Content = content,
-            };
-            packComponents[path] = component;
-            componentsList.Add(component);
-        }
+                var content = callInfo.ArgAt<string>(0);
+                return content
+                    .Replace("{{workspace_name}}", "MyProject", StringComparison.Ordinal)
+                    .Replace("{{language}}", "csharp", StringComparison.Ordinal);
+            });
 
-        var manifest = new PackManifest
+        var composer = new PromptComposer(templateEngine);
+        var context = new CompositionContext
         {
-            FormatVersion = "1.0",
-            Id = "test-pack",
-            Version = PackVersion.Parse("1.0.0"),
-            Name = "Test Pack",
-            Description = "Test pack for composer tests",
-            ContentHash = new ContentHash("0000000000000000000000000000000000000000000000000000000000000000"),
-            CreatedAt = DateTime.UtcNow,
-            Components = componentsList,
+            Variables = new Dictionary<string, string>
+            {
+                ["workspace_name"] = "MyProject",
+                ["language"] = "csharp",
+            },
         };
 
-        return new PromptPack
-        {
-            Manifest = manifest,
-            Components = packComponents,
-            Source = PackSource.User,
-        };
+        // Act
+        var result = await composer.ComposeAsync(pack, context);
+
+        // Assert
+        result.Should().Be("Working on MyProject using csharp.");
+        templateEngine.Received(1).Substitute(Arg.Any<string>(), context);
     }
 
-    private static ComponentType DetermineComponentType(string path)
+    private static PromptPack CreatePack(params LoadedComponent[] components)
     {
-        if (path.Equals("system.md", StringComparison.OrdinalIgnoreCase))
-        {
-            return ComponentType.System;
-        }
+        return new PromptPack(
+            "test-pack",
+            new PackVersion(1, 0, 0),
+            "Test Pack",
+            null,
+            PackSource.BuiltIn,
+            "/test",
+            null,
+            components.ToList().AsReadOnly());
+    }
 
-        if (path.StartsWith("roles/", StringComparison.OrdinalIgnoreCase))
-        {
-            return ComponentType.Role;
-        }
-
-        if (path.StartsWith("languages/", StringComparison.OrdinalIgnoreCase))
-        {
-            return ComponentType.Language;
-        }
-
-        if (path.StartsWith("frameworks/", StringComparison.OrdinalIgnoreCase))
-        {
-            return ComponentType.Framework;
-        }
-
-        return ComponentType.Custom;
+    private static ITemplateEngine CreatePassThroughTemplateEngine()
+    {
+        var templateEngine = Substitute.For<ITemplateEngine>();
+        templateEngine
+            .Substitute(Arg.Any<string>(), Arg.Any<CompositionContext>())
+            .Returns(callInfo => callInfo.ArgAt<string>(0));
+        return templateEngine;
     }
 }
