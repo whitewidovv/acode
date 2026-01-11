@@ -86,7 +86,7 @@ public sealed class ConfigValidator : IConfigValidator
             // Only version 1.0.0 is currently supported
             errors.Add(new ValidationError
             {
-                Code = ConfigErrorCodes.UnsupportedVersion,
+                Code = ConfigErrorCodes.SchemaVersionUnsupported,
                 Message = $"Schema version '{config.SchemaVersion}' is not supported. Supported versions: 1.0.0",
                 Severity = ValidationSeverity.Error,
                 Path = "schema_version",

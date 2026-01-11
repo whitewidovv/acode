@@ -21,12 +21,12 @@ public class MitigationIdTests
     }
 
     [Theory]
-    [InlineData("MIT-01")]    // Too few digits
-    [InlineData("MIT-1000")]  // Too many digits
-    [InlineData("mit-001")]   // Lowercase
-    [InlineData("RISK-001")]  // Wrong prefix
-    [InlineData("MIT_001")]   // Wrong delimiter
-    [InlineData("M-001")]     // Wrong prefix
+    [InlineData("MIT-01")] // Too few digits
+    [InlineData("MIT-1000")] // Too many digits
+    [InlineData("mit-001")] // Lowercase
+    [InlineData("RISK-001")] // Wrong prefix
+    [InlineData("MIT_001")] // Wrong delimiter
+    [InlineData("M-001")] // Wrong prefix
     public void Should_Reject_Invalid_Mitigation_IDs(string mitId)
     {
         // Act
@@ -50,7 +50,7 @@ public class MitigationIdTests
     public void Should_Reject_Empty_Mitigation_ID()
     {
         // Act
-        Action act = () => new MitigationId("");
+        Action act = () => new MitigationId(string.Empty);
 
         // Assert
         act.Should().Throw<ArgumentException>();
