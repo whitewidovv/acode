@@ -382,7 +382,11 @@ public sealed class SemanticValidator
         {
             foreach (var pattern in config.Paths.Source)
             {
-                if (pattern.Contains('*', StringComparison.Ordinal) && !IsValidGlobPattern(pattern))
+                // Check if pattern contains glob characters or brackets
+                if ((pattern.Contains('*', StringComparison.Ordinal) ||
+                     pattern.Contains('[', StringComparison.Ordinal) ||
+                     pattern.Contains('{', StringComparison.Ordinal)) &&
+                    !IsValidGlobPattern(pattern))
                 {
                     errors.Add(new ValidationError
                     {
@@ -399,7 +403,11 @@ public sealed class SemanticValidator
         {
             foreach (var pattern in config.Paths.Tests)
             {
-                if (pattern.Contains('*', StringComparison.Ordinal) && !IsValidGlobPattern(pattern))
+                // Check if pattern contains glob characters or brackets
+                if ((pattern.Contains('*', StringComparison.Ordinal) ||
+                     pattern.Contains('[', StringComparison.Ordinal) ||
+                     pattern.Contains('{', StringComparison.Ordinal)) &&
+                    !IsValidGlobPattern(pattern))
                 {
                     errors.Add(new ValidationError
                     {
