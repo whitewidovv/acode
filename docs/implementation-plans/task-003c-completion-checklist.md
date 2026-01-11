@@ -406,7 +406,7 @@ IDisposable BeginSpan(string operation);
 ---
 
 ### Gap #11: Infrastructure - AuditExporter
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Infrastructure/Audit/AuditExporter.cs`
 
 **Why Needed**: Implementation Prompt line 5168 lists this as required infrastructure component. Required for `audit export` CLI command.
@@ -425,7 +425,19 @@ IDisposable BeginSpan(string operation);
 - Filtering works as expected
 - Exported data is valid and complete
 
-**Evidence**: [To be filled when complete]
+**Evidence**: All 7 tests passed
+- AuditExportOptions.cs (46 lines) with Format, FromDate, ToDate, SessionId, EventType, MinSeverity, RedactSensitiveData
+- AuditExporter.cs (248 lines) with ExportAsync, ReadEventsAsync, ApplyFilters, ExportToJsonAsync, ExportToCsvAsync, ExportToTextAsync, CsvEscape, RedactEvent
+- AuditExporterTests.cs (285 lines) with 7 test methods covering:
+  - JSON export format (indented, snake_case)
+  - CSV export format with header and escaping
+  - Text export format (human-readable)
+  - Date range filtering
+  - Severity filtering
+  - Empty log handling
+  - Non-existent log handling
+- Uses JsonStringEnumConverter to export enums as strings (not numbers)
+- Integrates with AuditRedactor for sensitive data redaction
 
 ---
 
@@ -867,13 +879,13 @@ Each command should:
 ## Summary
 
 **Total Gaps**: 28
-**Completed**: 6 (Gaps 1-6) ✅
-**In Progress**: 1 (Gap #7 - FileAuditWriter stashed)
-**Remaining**: 21
+**Completed**: 11 (Gaps 1-11) ✅
+**In Progress**: 1 (Gap #12 - AuditConfigurationLoader)
+**Remaining**: 17
 
-**Completion**: 21.4% (6/28 gaps)
-**Tests Passing**: 55+ (all domain layer)
-**Commits**: 12+ on feature/task-003c-audit-baseline
+**Completion**: 39.3% (11/28 gaps)
+**Tests Passing**: 62+ (domain + infrastructure phase 1 & 2)
+**Commits**: 13+ on feature/task-003c-audit-baseline
 
 ## Next Steps
 
