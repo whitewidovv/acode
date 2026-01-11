@@ -119,8 +119,11 @@ public sealed class GlobMatcher : IPathMatcher
         // Check for ** (recursive wildcard)
         if (pi + 1 < plen && pattern[pi] == '*' && pattern[pi + 1] == '*')
         {
-            // Skip past **
-            pi += 2;
+            // Skip past all consecutive * (including **)
+            while (pi < plen && pattern[pi] == '*')
+            {
+                pi++;
+            }
 
             // Skip optional /
             if (pi < plen && pattern[pi] == '/')
