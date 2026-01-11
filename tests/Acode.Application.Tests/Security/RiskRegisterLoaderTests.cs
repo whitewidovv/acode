@@ -183,8 +183,7 @@ public class RiskRegisterLoaderTests
             last_updated: "2025-01-03T10:00:00Z"
             risks:
               - id: RISK-I-001
-                category: information_disclosure
-                  invalid indentation here
+                category: [invalid: unclosed: bracket
             """;
         var loader = new RiskRegisterLoader();
 
