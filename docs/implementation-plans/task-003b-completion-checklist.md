@@ -39,8 +39,8 @@ This checklist identifies ONLY what is MISSING or INCOMPLETE for task-003b (Defi
 ## GAPS IDENTIFIED (What's Missing - Implementation Order)
 
 ### Gap #1: DefaultDenylistTests.cs - Comprehensive Test Suite
-**Status**: [ ]
-**File to Create**: `tests/Acode.Domain.Tests/Security/PathProtection/DefaultDenylistTests.cs`
+**Status**: [✅]
+**File Created**: `tests/Acode.Domain.Tests/Security/PathProtection/DefaultDenylistTests.cs`
 **Why Needed**: Testing Requirements lines 817-1125 require 15+ tests verifying all denylist entries
 **Required Tests** (from spec lines 820-836):
 1. `Should_Include_All_SSH_Paths()` - Verify all 11+ SSH patterns (spec lines 855-882)
@@ -65,13 +65,13 @@ This checklist identifies ONLY what is MISSING or INCOMPLETE for task-003b (Defi
 
 **Implementation Pattern**: See spec lines 840-1125 for full test code
 **Success Criteria**: All 19 tests pass, verifying 100+ denylist entries
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Created 479-line test file with all 19 tests. Commit: feat(task-003b): create DefaultDenylistTests with 19 comprehensive tests (Gap #1 - RED phase)
 
 ---
 
 ### Gap #2: Add Missing Denylist Entries to DefaultDenylist.cs
-**Status**: [ ]
-**File to Modify**: `src/Acode.Domain/Security/PathProtection/DefaultDenylist.cs`
+**Status**: [✅]
+**File Modified**: `src/Acode.Domain/Security/PathProtection/DefaultDenylist.cs`
 **Why Needed**: Currently has 84 entries, spec requires >= 100 (AC-119 line 809)
 **Required Additional Entries** (minimum 16+):
 - Additional package manager paths (Bundler, Hex, Mix, etc.)
@@ -97,7 +97,7 @@ entries.Add(new DenylistEntry
 ```
 
 **Success Criteria**: Count >= 100 entries, Gap #1 tests pass
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Added 23 entries (84→106). Added: 5 cloud credentials (DigitalOcean, Heroku, Linode, Terraform, Pulumi), 4 database credentials (PostgreSQL .pgpass, MySQL .my.cnf, MongoDB, Redis), 4 browser credentials (Chrome/Firefox on Windows and Unix), 3 secret file extensions (.cer, .crt, .der), 3 dev tools (Docker, Kubernetes, Helm), 3 package managers (Bundler, Hex, Composer). All 19 tests pass. Commit: feat(task-003b): add 23 denylist entries, reach 106 total (Gap #2 - GREEN phase)
 
 ---
 
