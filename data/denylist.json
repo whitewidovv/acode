@@ -1,0 +1,61 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-01-11",
+  "patterns": [
+    {
+      "pattern": "api.openai.com",
+      "type": "exact",
+      "description": "OpenAI API"
+    },
+    {
+      "pattern": "*.openai.com",
+      "type": "wildcard",
+      "description": "OpenAI subdomains"
+    },
+    {
+      "pattern": "api.anthropic.com",
+      "type": "exact",
+      "description": "Anthropic API"
+    },
+    {
+      "pattern": "*.anthropic.com",
+      "type": "wildcard",
+      "description": "Anthropic subdomains"
+    },
+    {
+      "pattern": ".*\\.openai\\.azure\\.com",
+      "type": "regex",
+      "description": "Azure OpenAI endpoints"
+    },
+    {
+      "pattern": "generativelanguage.googleapis.com",
+      "type": "exact",
+      "description": "Google AI API"
+    },
+    {
+      "pattern": "bedrock.*\\.amazonaws\\.com",
+      "type": "regex",
+      "description": "AWS Bedrock"
+    },
+    {
+      "pattern": "api.cohere.ai",
+      "type": "exact",
+      "description": "Cohere API"
+    },
+    {
+      "pattern": "api-inference.huggingface.co",
+      "type": "exact",
+      "description": "Hugging Face Inference"
+    },
+    {
+      "pattern": "api.together.xyz",
+      "type": "exact",
+      "description": "Together.ai"
+    },
+    {
+      "pattern": "api.replicate.com",
+      "type": "exact",
+      "description": "Replicate"
+    }
+  ]
+}

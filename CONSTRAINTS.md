@@ -1,7 +1,7 @@
 # Acode Constraints Reference
 
-**Version:** 1.0.0
-**Last Updated:** 2026-01-06
+**Version:** 1.0.1
+**Last Updated:** 2026-01-11
 **Owner:** Acode Security Team
 **Status:** Approved
 
@@ -276,7 +276,8 @@ Soft constraints represent best practices and recommendations that SHOULD be fol
 ## Enforcement Mechanisms
 
 ### Code-Level Enforcement
-- **ModeMatrix** (`src/Acode.Domain/Modes/ModeMatrix.cs`) - 81 mode-capability entries ✅
+- **ModeMatrix** (`src/Acode.Domain/Modes/ModeMatrix.cs`) - 78 mode-capability entries ✅ (corrected from 81 in v1.0.1; actual count is 3 modes × 26 capabilities = 78)
+- **Validation Rules** (Task 001.b) - Comprehensive validation rules for mode transitions, configuration, and security
 - **LlmApiDenylist** (`src/Acode.Domain/Validation/LlmApiDenylist.cs`) - Immutable denylist ✅
 - **Default Mode** - LocalOnly is enum value 0 ✅
 
@@ -324,17 +325,55 @@ Soft constraints represent best practices and recommendations that SHOULD be fol
 
 ---
 
+## Code Documentation Standards
+
+All constraint-related code must follow these documentation standards:
+
+### XML Documentation (/// comments)
+- All public types (classes, enums, interfaces) must have XML docs
+- All public members must have XML docs
+- XML docs must reference relevant constraint IDs (e.g., "Enforces HC-01")
+
+### Inline Comments
+- Constraint checks must have comments explaining "why"
+- Comments should reference constraint ID (e.g., "// HC-02: Airgapped blocks all network")
+- Complex logic should have inline explanations
+
+### Test Documentation
+- Test class names should indicate what constraints they verify
+- Test methods should reference constraint IDs in name or doc comment
+- Example: `[Fact] public void LocalOnly_DeniesExternalLlm_PerHC01() { ... }`
+
+### Error Messages
+- Error messages should include constraint ID
+- Example: "Operation blocked: HC-01 prohibits external LLM API in LocalOnly mode"
+- Include remediation guidance where possible
+
+### Logging
+- Constraint violations must be logged with constraint ID
+- Example: `logger.LogError("HC-06: Constraint violation - {ConstraintId}", "HC-01");`
+
+For examples, see:
+- `src/Acode.Domain/Modes/OperatingMode.cs` - Enum with HC-01, HC-02, HC-03 references
+- `src/Acode.Domain/Modes/ModeMatrix.cs` - Comprehensive XML docs with rationale
+- `tests/Acode.Domain.Tests/Modes/` - Test files with constraint ID references
+
+---
+
 ## Change History
 
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0.0 | 2026-01-03 | Initial version: HC-01 through HC-07 defined |
+| 1.0.1 | 2026-01-11 | Corrected mode-capability entry count from 81 to 78 (3 modes × 26 capabilities); added validation rules reference, code documentation standards |
 
 ---
 
 **END OF CONSTRAINTS REFERENCE**
 
 For implementation details, see:
-- Task 001.a: Mode Matrix
+- Task 001.a: Mode Matrix (`src/Acode.Domain/Modes/ModeMatrix.cs`, `docs/mode-matrix.md`)
 - Task 001.b: Validation Rules
-- Task 003: Threat Model
+- Task 003: Threat Model (Future)
+- [ADR Index](docs/adr/README.md): Architecture Decision Records
+- [Security Audit Checklist](docs/security-audit-checklist.md): Verification procedures
