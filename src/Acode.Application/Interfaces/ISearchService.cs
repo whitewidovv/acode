@@ -54,6 +54,22 @@ public interface ISearchService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Task representing the async operation.</returns>
     Task RebuildIndexAsync(IProgress<int>? progress, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Rebuilds the search index for a specific chat.
+    /// </summary>
+    /// <param name="chatId">The chat ID to rebuild the index for.</param>
+    /// <param name="progress">Optional progress reporter for tracking rebuild progress.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Task representing the async operation.</returns>
+    Task RebuildIndexAsync(ChatId chatId, IProgress<int>? progress, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Optimizes the search index by merging FTS5 segments.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Task representing the async operation.</returns>
+    Task OptimizeIndexAsync(CancellationToken cancellationToken);
 }
 
 /// <summary>

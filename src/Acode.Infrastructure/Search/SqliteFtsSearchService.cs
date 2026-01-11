@@ -345,19 +345,123 @@ public sealed class SqliteFtsSearchService : ISearchService
     /// <inheritdoc />
     public async Task RebuildIndexAsync(IProgress<int>? progress, CancellationToken cancellationToken)
     {
+        // Get total message count first
+        int totalMessages;
+        using (var countCmd = _connection.CreateCommand())
+        {
+            countCmd.CommandText = "SELECT COUNT(*) FROM conv_messages";
+            totalMessages = Convert.ToInt32(await countCmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+        }
+
+        // Delete existing index entries
+        using (var deleteCmd = _connection.CreateCommand())
+        {
+            deleteCmd.CommandText = "DELETE FROM conversation_search";
+            await deleteCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        // Process in batches of 100 for progress reporting
+        const int batchSize = 100;
+        int processedCount = 0;
+
+        while (processedCount < totalMessages)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = @"
+                INSERT INTO conversation_search (message_id, chat_id, run_id, created_at, role, content, chat_title, tags)
+                SELECT m.id, r.chat_id, m.run_id, m.created_at, m.role, m.content, c.title, c.tags
+                FROM conv_messages m
+                INNER JOIN conv_runs r ON m.run_id = r.id
+                INNER JOIN conv_chats c ON r.chat_id = c.id
+                LIMIT @batchSize OFFSET @offset
+            ";
+
+            cmd.Parameters.AddWithValue("@batchSize", batchSize);
+            cmd.Parameters.AddWithValue("@offset", processedCount);
+
+            var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            processedCount += rowsAffected;
+
+            progress?.Report(processedCount);
+
+            if (rowsAffected < batchSize)
+            {
+                break;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task RebuildIndexAsync(ChatId chatId, IProgress<int>? progress, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(chatId);
+
+        // Get total message count for this chat
+        int totalMessages;
+        using (var countCmd = _connection.CreateCommand())
+        {
+            countCmd.CommandText = @"
+                SELECT COUNT(*)
+                FROM conv_messages m
+                INNER JOIN conv_runs r ON m.run_id = r.id
+                WHERE r.chat_id = @chatId
+            ";
+            countCmd.Parameters.AddWithValue("@chatId", chatId.Value);
+            totalMessages = Convert.ToInt32(await countCmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+        }
+
+        // Delete existing index entries for this chat
+        using (var deleteCmd = _connection.CreateCommand())
+        {
+            deleteCmd.CommandText = "DELETE FROM conversation_search WHERE chat_id = @chatId";
+            deleteCmd.Parameters.AddWithValue("@chatId", chatId.Value);
+            await deleteCmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        // Process in batches of 100 for progress reporting
+        const int batchSize = 100;
+        int processedCount = 0;
+
+        while (processedCount < totalMessages)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = @"
+                INSERT INTO conversation_search (message_id, chat_id, run_id, created_at, role, content, chat_title, tags)
+                SELECT m.id, r.chat_id, m.run_id, m.created_at, m.role, m.content, c.title, c.tags
+                FROM conv_messages m
+                INNER JOIN conv_runs r ON m.run_id = r.id
+                INNER JOIN conv_chats c ON r.chat_id = c.id
+                WHERE r.chat_id = @chatId
+                LIMIT @batchSize OFFSET @offset
+            ";
+
+            cmd.Parameters.AddWithValue("@chatId", chatId.Value);
+            cmd.Parameters.AddWithValue("@batchSize", batchSize);
+            cmd.Parameters.AddWithValue("@offset", processedCount);
+
+            var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            processedCount += rowsAffected;
+
+            progress?.Report(processedCount);
+
+            if (rowsAffected < batchSize)
+            {
+                break;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task OptimizeIndexAsync(CancellationToken cancellationToken)
+    {
+        // Run FTS5 optimize command to merge segments
         using var cmd = _connection.CreateCommand();
-        cmd.CommandText = @"
-            DELETE FROM conversation_search;
-
-            INSERT INTO conversation_search (message_id, chat_id, run_id, created_at, role, content, chat_title, tags)
-            SELECT m.id, r.chat_id, m.run_id, m.created_at, m.role, m.content, c.title, c.tags
-            FROM conv_messages m
-            INNER JOIN conv_runs r ON m.run_id = r.id
-            INNER JOIN conv_chats c ON r.chat_id = c.id;
-        ";
-
-        var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        progress?.Report(rowsAffected);
+        cmd.CommandText = "INSERT INTO conversation_search(conversation_search) VALUES('optimize')";
+        await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

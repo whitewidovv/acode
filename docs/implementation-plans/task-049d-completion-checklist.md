@@ -1157,7 +1157,7 @@ Currently ISearchService has methods but not exposed via CLI.
 
 ### P5.1: Implement `acode search index status` Command (AC-106, AC-107, AC-108, AC-109, AC-110)
 
-**Status**: [🔄] IN PROGRESS
+**Status**: [✅] COMPLETE
 
 **What to Implement**:
 
@@ -1246,7 +1246,7 @@ acode search index status
 
 ### P5.2: Implement `acode search index rebuild` Command (AC-101, AC-102, AC-103, AC-104, AC-105)
 
-**Status**: [ ]
+**Status**: [🔄] IN PROGRESS (simplified - no progress bar yet)
 
 **What to Implement**:
 
