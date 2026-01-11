@@ -56,6 +56,10 @@ public sealed class SqliteFtsSearchService : ISearchService
 
         var stopwatch = Stopwatch.StartNew();
 
+        // Create linked cancellation token with timeout (P4.2 - AC-122)
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(query.Timeout);
+
         // Parse and sanitize query
         var ftsQuery = _queryParser.ParseQuery(query.QueryText);
         if (!ftsQuery.IsValid)
@@ -95,45 +99,56 @@ public sealed class SqliteFtsSearchService : ISearchService
         // Build SQL query (includes title and tag filters from ftsQuery)
         var sql = BuildSearchQuery(query, ftsQuery, out var parameters);
 
-        // Execute search
+        // Execute search with timeout enforcement (P4.2 - AC-122)
         var allResults = new List<SearchResult>();
 
-        using (var cmd = _connection.CreateCommand())
+        try
         {
-            cmd.CommandText = sql;
-            foreach (var (name, value) in parameters)
+            using (var cmd = _connection.CreateCommand())
             {
-                cmd.Parameters.AddWithValue(name, value);
-            }
-
-            using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                var messageId = MessageId.From(reader.GetString(0));
-                var chatId = ChatId.From(reader.GetString(1));
-                var chatTitle = reader.GetString(2);
-                var role = Enum.Parse<MessageRole>(reader.GetString(3), ignoreCase: true);
-                var createdAt = DateTime.Parse(reader.GetString(4));
-                var content = reader.GetString(5);
-
-                // Calculate BM25 score with recency boost
-                var score = _ranker.CalculateScore(query.QueryText, content, createdAt);
-
-                // Generate snippet with highlighted terms
-                var snippet = _snippetGenerator.GenerateSnippet(content, query.QueryText);
-
-                allResults.Add(new SearchResult
+                cmd.CommandText = sql;
+                foreach (var (name, value) in parameters)
                 {
-                    MessageId = messageId,
-                    ChatId = chatId,
-                    ChatTitle = chatTitle,
-                    Role = role,
-                    CreatedAt = createdAt,
-                    Snippet = snippet,
-                    Score = score,
-                    Matches = Array.Empty<MatchLocation>()
-                });
+                    cmd.Parameters.AddWithValue(name, value);
+                }
+
+                using var reader = await cmd.ExecuteReaderAsync(timeoutCts.Token).ConfigureAwait(false);
+                while (await reader.ReadAsync(timeoutCts.Token).ConfigureAwait(false))
+                {
+                    var messageId = MessageId.From(reader.GetString(0));
+                    var chatId = ChatId.From(reader.GetString(1));
+                    var chatTitle = reader.GetString(2);
+                    var role = Enum.Parse<MessageRole>(reader.GetString(3), ignoreCase: true);
+                    var createdAt = DateTime.Parse(reader.GetString(4));
+                    var content = reader.GetString(5);
+
+                    // Calculate BM25 score with recency boost
+                    var score = _ranker.CalculateScore(query.QueryText, content, createdAt);
+
+                    // Generate snippet with highlighted terms
+                    var snippet = _snippetGenerator.GenerateSnippet(content, query.QueryText);
+
+                    allResults.Add(new SearchResult
+                    {
+                        MessageId = messageId,
+                        ChatId = chatId,
+                        ChatTitle = chatTitle,
+                        Role = role,
+                        CreatedAt = createdAt,
+                        Snippet = snippet,
+                        Score = score,
+                        Matches = Array.Empty<MatchLocation>()
+                    });
+                }
             }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Timeout occurred (not user cancellation)
+            throw new SearchException(
+                SearchErrorCodes.QueryTimeout,
+                $"Search query exceeded timeout of {query.Timeout.TotalSeconds}s",
+                "Simplify your query, add more specific terms, or use filters to narrow results");
         }
 
         // Rank results

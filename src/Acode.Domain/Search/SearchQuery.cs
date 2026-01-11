@@ -50,6 +50,11 @@ public sealed record SearchQuery
     public SortOrder SortBy { get; init; } = SortOrder.Relevance;
 
     /// <summary>
+    /// Gets the maximum query execution timeout (default 5 seconds, range 1-60 seconds).
+    /// </summary>
+    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Validates the search query.
     /// </summary>
     /// <returns>A validation result indicating success or failure.</returns>
@@ -70,6 +75,12 @@ public sealed record SearchQuery
         if (PageSize < 1 || PageSize > 100)
         {
             errors.Add("Page size must be between 1 and 100");
+        }
+
+        // Timeout validation (P4.2 - AC-122)
+        if (Timeout < TimeSpan.FromSeconds(1) || Timeout > TimeSpan.FromSeconds(60))
+        {
+            errors.Add("Timeout must be between 1 and 60 seconds");
         }
 
         // Date validation (P4.3 - AC-123)

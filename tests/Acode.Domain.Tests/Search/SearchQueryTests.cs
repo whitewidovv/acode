@@ -219,4 +219,69 @@ public class SearchQueryTests
         result.IsValid.Should().BeTrue();
         result.Errors.Should().BeEmpty();
     }
+
+    // TIMEOUT VALIDATION TESTS (P4.2)
+    [Fact]
+    public void Validate_TimeoutTooShort_ReturnsFailure()
+    {
+        // Arrange
+        var query = new SearchQuery
+        {
+            QueryText = "test",
+            Timeout = TimeSpan.FromMilliseconds(500)
+        };
+
+        // Act
+        var result = query.Validate();
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("Timeout") && e.Contains("1"));
+    }
+
+    [Fact]
+    public void Validate_TimeoutTooLong_ReturnsFailure()
+    {
+        // Arrange
+        var query = new SearchQuery
+        {
+            QueryText = "test",
+            Timeout = TimeSpan.FromSeconds(61)
+        };
+
+        // Act
+        var result = query.Validate();
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("Timeout") && e.Contains("60"));
+    }
+
+    [Fact]
+    public void Validate_ValidTimeout_ReturnsSuccess()
+    {
+        // Arrange
+        var query = new SearchQuery
+        {
+            QueryText = "test",
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+
+        // Act
+        var result = query.Validate();
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Timeout_DefaultsTo5Seconds()
+    {
+        // Arrange & Act
+        var query = new SearchQuery { QueryText = "test" };
+
+        // Assert
+        query.Timeout.Should().Be(TimeSpan.FromSeconds(5));
+    }
 }
