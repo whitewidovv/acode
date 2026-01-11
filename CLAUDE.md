@@ -11,7 +11,9 @@ As Claude Code, you normally have internal biases for speed and token efficiency
 
 1. ## Section 1. Notifications
 
-**CRITICAL: You MUST notify the user at the end of EVERY response where you are awaiting input.**
+**CRITICAL: You MUST notify the user as the ABSOLUTE LAST ACTION in EVERY response where you are awaiting input.**
+
+**DO NOT announce that you need input and then continue generating output. The notification is the FINAL action after ALL output is complete.**
 
 This repository uses worktrees (e.g., `/mnt/c/Users/neilo/source/local coding agent.worktrees/1`, `.../2`, etc.), and multiple Claude agents may be running simultaneously in different worktrees. To help the user manage multiple windows efficiently, you must:
 
@@ -26,16 +28,18 @@ Extract the worktree identifier from your current working directory and use it i
 
 Use Windows Speech Synthesizer for all notifications. You must announce different messages based on context:
 
-#### 1. Awaiting Input (REQUIRED at end of EVERY response)
+#### 1. Awaiting Input (REQUIRED as LAST ACTION of EVERY response)
+**Only execute this AFTER all your output, status reports, and summaries are complete.**
+
 When you are ready to continue or need user input, notify using:
 ```bash
 powershell.exe -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('Window [X] Needs Input')"
 ```
 Replace `[X]` with the worktree identifier extracted from your working directory.
 
-**Example for worktree 1:**
+**Example for worktree 3:**
 ```bash
-powershell.exe -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('Window 1 Needs Input')"
+powershell.exe -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('Window 3 Needs Input')"
 ```
 
 #### 2. Deferral Request
@@ -64,10 +68,11 @@ If you can make the terminal flash or request attention until it receives focus,
 
 ### Additional Guidelines
 
+- **The notification MUST be the absolute last action** - complete ALL status reports, summaries, and output FIRST, then notify
 - **Wait at least 10 seconds** between multiple notifications in succession to avoid overwhelming the user
 - **Low context notifications** (<5k tokens remaining): Include the exact file and line number where you stopped, and a brief prompt for continuation (conversation may be compacted, so be specific)
 - **Always use the dynamic worktree identifier**—never hardcode "Window 1" or "Window 2"
-- **Remember**: You must notify at the END of every response where you're awaiting input. This is not optional.
+- **Remember**: Notification is not optional, but it must be the FINAL action after all output is generated
 
 2. ## Section 2. Autonomous Work and Asynchronous Communication
 
