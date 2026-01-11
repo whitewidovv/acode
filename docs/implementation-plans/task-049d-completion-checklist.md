@@ -1970,32 +1970,41 @@ private DateTime? ParseDate(string input)
 
 ### P7.9: Tests for Ranking - Title Boost and Phrase Matches (AC-048, AC-049)
 
-**Status**: [ ]
+**Status**: [✅] PARTIAL - AC-048 complete, AC-049 deferred
 
-**Tests to Create**:
-- tests/Acode.Integration.Tests/Search/SearchE2ETests.cs (ADD 2 NEW):
+**Tests Created**:
+- tests/Acode.Infrastructure.Tests/Search/BM25RankerTests.cs (ADDED 2 NEW):
+  - `CalculateScore_WithTitleMatch_Applies2xBoost` ✅
+  - `CalculateScore_WithBothTitleAndBodyMatch_CombinesScores` ✅
 
-  - `Should_Rank_TitleMatches_2xHigher` (AC-048)
-    - Create message1: title="JWT", content="authentication"
-    - Create message2: title="auth", content="JWT authentication"
-    - Search: "JWT"
-    - Expect: message1 ranked higher (title match 2x boost)
+- tests/Acode.Integration.Tests/Search/SearchE2ETests.cs (ADDED 1 NEW):
+  - `Should_BoostTitleMatches_2xOverBodyMatches` ✅
 
-  - `Should_Rank_PhraseMatches_Higher` (AC-049)
-    - Create message1: "JWT token validation"
-    - Create message2: "validation of JWT and token separately"
-    - Search: '"JWT token"'
-    - Expect: message1 ranked higher (exact phrase)
+**Implementation**:
+- BM25Ranker.CalculateScore overload with title parameter ✅
+- CalculateFieldScore helper method ✅
+- SqliteFtsSearchService updated to pass chatTitle ✅
+- Title matches weighted 2x over body matches ✅
 
-**Note**: Requires:
-1. BM25Ranker.ApplyFieldBoost implemented
-2. Phrase detection in ranking algorithm
+**Deferred**:
+- AC-049 (Phrase match boost): Not implemented - would require phrase detection in BM25Ranker
+- Phrase match ranking test: Deferred until AC-049 prioritized
 
 **Success Criteria**:
-- [✅] Title boost implemented
-- [✅] Phrase match boost implemented
-- [✅] 2 new tests passing
-- [✅] AC-048, AC-049 marked ✅ in audit report
+- [✅] Title boost implemented (AC-048)
+- [ ] Phrase match boost implemented (AC-049) - DEFERRED
+- [✅] 3 new tests passing (2 unit, 1 E2E)
+- [✅] AC-048 marked ✅ in audit report
+- [ ] AC-049 marked ✅ - DEFERRED
+
+**Test Output**:
+```
+BM25RankerTests: 17 passing (2 new)
+SearchE2ETests: 28 passing (1 new)
+Total search tests: 166 passing
+```
+
+**Commit**: 7e52642
 
 **Evidence Required**: Paste test output
 
@@ -2170,7 +2179,7 @@ acode search "test" --json
 - [✅] Priority 4: Error Codes (7 items) - COMPLETE
 - [✅] Priority 5: CLI Index Commands (3 items) - COMPLETE
 - [✅] Priority 6: Configurable Settings (4 items) - COMPLETE
-- [🔄] Priority 7: Missing Tests - PARTIAL (P7.4, P7.10 complete; 7 new tests added)
+- [🔄] Priority 7: Missing Tests - PARTIAL (P7.4, P7.9 [AC-048 only], P7.10 complete; 10 new tests added)
 
 **Total New Tests Expected**: ~100+ tests
 **Total New AC Coverage**: 105 AC (to reach 132 total)
