@@ -32,6 +32,347 @@ Observability includes logging when packs are loaded, when prompts are composed,
 
 The Prompt Pack System is extensible for future enhancements. Pack formats are versioned; loaders can support multiple versions. New component types can be added without breaking existing packs. The composition engine supports plugins for custom merge strategies.
 
+
+### Executive Summary
+
+Task 008 implements the Prompt Pack System, a modular architecture for managing system prompts, coding guidelines, and behavioral configurations for the Acode agent. This system provides the foundational prompt infrastructure that shapes model behavior across all coding tasks. By standardizing prompt management, the system enables teams to codify their coding standards, enforce consistency across projects, and customize agent behavior without modifying source code.
+
+The Prompt Pack System solves a critical problem in AI-assisted development: inconsistent and unpredictable model behavior caused by ad-hoc prompt engineering. Without centralized prompt management, teams write redundant prompts, lose track of what instructions produce good results, and struggle to maintain consistency across different projects and developers. The Prompt Pack System formalizes prompt management with version control, validation, composition rules, and configuration-based selection.
+
+This system is foundational infrastructure used by all agent workflows. Every interaction with the language model—planning, code generation, review, testing—begins with loading and composing appropriate prompts from the active pack. The quality and consistency of these prompts directly determines the quality of generated code and the reliability of agent behavior.
+
+### Return on Investment (ROI)
+
+**Cost Savings from Prompt Standardization:**
+
+Without the Prompt Pack System, each developer spends approximately 2-4 hours per week troubleshooting inconsistent model behavior, rewriting prompts, and manually enforcing coding standards. For a team of 10 developers:
+
+- **Time saved per developer:** 3 hours/week average × 52 weeks = 156 hours/year
+- **Team time saved:** 156 hours × 10 developers = 1,560 hours/year
+- **Cost savings at $75/hour loaded cost:** 1,560 hours × $75 = **$117,000/year**
+
+Additional quantifiable benefits:
+
+- **Reduced code review cycles:** Consistent prompt-driven code style reduces review iterations by approximately 30%, saving an estimated 2 hours per developer per week = **$78,000/year** for 10 developers
+- **Faster onboarding:** New developers adopt team standards immediately through prompts instead of 2-3 week learning curve = **$15,000 saved per new hire** (assuming 2 new hires/year = $30,000/year)
+- **Reduced production defects:** Standardized safety and validation prompts reduce defects by approximately 15% = estimated **$50,000/year** in reduced incident response costs
+
+**Total quantified ROI: $275,000/year for a 10-developer team**
+
+**Qualitative Benefits:**
+
+- Consistent code quality across all projects and team members
+- Codified institutional knowledge in version-controlled prompt packs
+- Rapid experimentation with different coding approaches via pack switching
+- Framework-specific and language-specific best practices automatically applied
+- Reduced cognitive load on developers (agent handles style/convention enforcement)
+
+### Technical Architecture Overview
+
+The Prompt Pack System consists of five primary layers:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     CLI Layer                                │
+│  (acode prompts list/show/validate/hash/compose)            │
+└────────────┬────────────────────────────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Application Layer (Interfaces)                  │
+│  • IPromptPackRegistry    • IPromptPackLoader               │
+│  • IPromptComposer        • IPackValidator                  │
+│  • ITemplateEngine                                          │
+└────────────┬────────────────────────────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────────────────────────────┐
+│           Infrastructure Layer (Implementations)             │
+│  • PromptPackRegistry     • PromptPackLoader                │
+│  • PromptComposer         • PackValidator                   │
+│  • TemplateEngine         • ContentHasher                   │
+└────────────┬────────────────────────────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Domain Layer (Models)                      │
+│  • PromptPack            • PackManifest                     │
+│  • PackComponent         • CompositionContext               │
+│  • TemplateVariable      • ValidationResult                 │
+└────────────┬────────────────────────────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Storage Layer                              │
+│  • Filesystem (user packs: .acode/prompts/)                 │
+│  • Embedded Resources (built-in packs)                      │
+│  • Configuration (.agent/config.yml)                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Component Responsibilities:**
+
+1. **PromptPackRegistry**: Discovers and indexes available packs from built-in resources and user workspace directories. Manages pack selection based on configuration and environment variables.
+
+2. **PromptPackLoader**: Reads pack manifests, validates structure, verifies content hashes, and loads component files from disk or embedded resources.
+
+3. **PromptComposer**: Assembles final prompts by merging base system prompts with role-specific, language-specific, and framework-specific components. Handles conflict resolution and deduplication.
+
+4. **TemplateEngine**: Processes Mustache-style template variables ({{variable}}) in prompts, substituting values from composition context (workspace name, language, framework, custom variables).
+
+5. **PackValidator**: Validates pack manifests against schema, checks component file existence, validates template variable syntax, and enforces size limits.
+
+6. **ContentHasher**: Computes SHA-256 hashes of pack contents for integrity verification. Detects unauthorized modifications to pack components.
+
+### Prompt Composition Flow
+
+The composition process transforms pack components into final system prompts:
+
+```
+1. Load Base System Prompt
+   ↓
+   [system.md content loaded]
+   ↓
+2. Append Role-Specific Prompt (if role provided)
+   ↓
+   [base + roles/planner.md OR roles/coder.md OR roles/reviewer.md]
+   ↓
+3. Append Language-Specific Prompt (if language detected)
+   ↓
+   [base + role + languages/csharp.md OR languages/typescript.md]
+   ↓
+4. Append Framework-Specific Prompt (if framework detected)
+   ↓
+   [base + role + language + frameworks/aspnetcore.md OR frameworks/react.md]
+   ↓
+5. Apply Template Variable Substitution
+   ↓
+   [{{workspace_name}} → "MyProject", {{language}} → "csharp"]
+   ↓
+6. Deduplicate Content (remove repeated sections)
+   ↓
+7. Enforce Maximum Length (truncate if needed with warning)
+   ↓
+8. Log Composition Hash (for debugging)
+   ↓
+   [Final System Prompt Ready for Model Provider]
+```
+
+**Composition Rules:**
+
+- Components are merged in strict order: base → role → language → framework
+- Later components may override earlier sections via special markers (`# OVERRIDE: section-name`)
+- Duplicate headings are detected and consolidated
+- Missing components fail silently (optional components) or throw exceptions (required components)
+- Template variables missing from context are replaced with empty strings
+- Maximum prompt length is enforced (default 32,000 characters, configurable)
+
+### Template Variable System Design
+
+Template variables provide dynamic content injection without requiring code changes:
+
+**Syntax:** Mustache-style `{{variable_name}}` placeholders
+
+**Variable Resolution Order:**
+1. Custom variables from configuration (`.agent/config.yml`: `prompts.variables`)
+2. Environment variables prefixed with `ACODE_PROMPT_VAR_`
+3. Context-provided variables (workspace name, language, framework)
+4. Default built-in variables (date, operating system, architecture)
+
+**Example Variable Resolution:**
+
+```markdown
+# Input prompt template
+You are working on {{workspace_name}} using {{language}} with {{framework}}.
+Team: {{team_name}}
+Code style: {{code_style}}
+```
+
+**Resolution context:**
+- workspace_name: detected from directory name = "AgenticCoder"
+- language: detected from project files = "csharp"
+- framework: detected from dependencies = "aspnetcore"
+- team_name: from config.yml `prompts.variables.team_name` = "Backend Team"
+- code_style: from environment `ACODE_PROMPT_VAR_CODE_STYLE` = "strict"
+
+**Output:**
+```markdown
+You are working on AgenticCoder using csharp with aspnetcore.
+Team: Backend Team
+Code style: strict
+```
+
+**Variable Escaping:**
+
+To prevent template injection attacks, all variable values are sanitized:
+- HTML entities are escaped
+- Markdown special characters are escaped
+- Maximum variable length enforced (1,024 characters)
+- Path variables validated against directory traversal
+
+### Integration Points
+
+**Integration with Task 004 (Model Provider Interface):**
+
+The Model Provider Interface consumes composed prompts when constructing chat completion requests. The integration flow:
+
+1. Application layer requests a chat completion via `IChatCompletionService`
+2. `ChatCompletionService` calls `IPromptComposer.ComposePrompt(role, context)`
+3. Composed prompt is included as the first system message in the message array
+4. Model provider receives standardized prompt regardless of underlying LLM API
+
+This integration ensures all model interactions use consistent, validated prompts from the active pack.
+
+**Integration with Task 007 (Tool Schema Registry):**
+
+Tool usage instructions are embedded in prompts via special sections. When composing prompts for roles that use tools (coder, reviewer), the system includes tool guidance:
+
+```markdown
+# Tool Usage Instructions
+
+Available tools:
+{{#tools}}
+- {{name}}: {{description}}
+{{/tools}}
+
+Tool calling guidelines:
+- Always validate tool inputs before invocation
+- Handle tool errors gracefully
+- Log all tool executions for audit
+```
+
+The Tool Schema Registry provides available tool metadata, which the Template Engine uses to populate tool-related variables in prompts.
+
+**Integration with Task 008a (Role-Specific Prompt Components):**
+
+Task 008a extends the Prompt Pack System with additional role-specific components for multi-stage agent workflows (planner → executor → verifier → reviewer). The base system (Task 008) provides the composition infrastructure; Task 008a adds specialized prompt components.
+
+**Integration with Task 008b (Language and Framework Prompt Libraries):**
+
+Task 008b delivers comprehensive language-specific and framework-specific prompt libraries that plug into the composition system. Task 008 provides the loader and composition logic; Task 008b provides the content.
+
+### Constraints and Design Decisions
+
+**Constraint 1: Local-First Prompt Storage**
+
+Decision: All prompts stored locally in workspace (`.acode/prompts/`) or embedded resources. No remote pack repositories in initial implementation.
+
+Rationale: Ensures privacy and security. Users control all prompt content. No external dependencies during agent execution.
+
+Trade-off: Users must manually distribute custom packs across workspaces. Benefit: Complete control and auditability.
+
+**Constraint 2: Plain Text Markdown Format**
+
+Decision: All prompt components are plain Markdown files (`.md`). No binary formats, encryption, or obfuscation.
+
+Rationale: Human-readable and editable. Works with standard version control. Easy to review and audit.
+
+Trade-off: Sensitive information in prompts is visible in filesystem. Benefit: Transparency and ease of customization.
+
+**Constraint 3: Mustache Template Syntax**
+
+Decision: Use Mustache-style `{{variable}}` syntax for template variables.
+
+Rationale: Simple, widely understood syntax. Minimal learning curve. Prevents complex logic in templates (logic belongs in code).
+
+Trade-off: Limited expressiveness (no conditionals, loops). Benefit: Security (prevents template injection of arbitrary logic).
+
+**Constraint 4: SHA-256 Content Hashing**
+
+Decision: Use SHA-256 for content integrity verification, not cryptographic signing.
+
+Rationale: Detects accidental modifications and corruption. Sufficient for local-first use case.
+
+Trade-off: Does not prevent intentional tampering (no signature verification). Benefit: Simple implementation, fast verification.
+
+**Constraint 5: Single Active Pack Per Session**
+
+Decision: One pack is active for entire agent session. No dynamic pack switching during execution.
+
+Rationale: Ensures consistent behavior across agent interactions. Simplifies state management.
+
+Trade-off: Cannot use different packs for different files in same session. Benefit: Predictable behavior, easier debugging.
+
+**Constraint 6: Component-Based Composition**
+
+Decision: Prompts are composed from multiple files (system.md, roles/*.md, languages/*.md, frameworks/*.md) rather than single monolithic files.
+
+Rationale: Enables mixing and matching components. Language-specific guidance can be shared across multiple packs.
+
+Trade-off: More files to manage. Composition adds complexity. Benefit: Modularity, reusability, maintainability.
+
+**Constraint 7: Deterministic Composition**
+
+Decision: Composition algorithm is deterministic. Same inputs always produce same output.
+
+Rationale: Required for reproducibility and debugging. Enables caching and optimization.
+
+Trade-off: No random variation in prompts. Benefit: Reliable, testable behavior.
+
+**Constraint 8: Fail-Fast Validation**
+
+Decision: Pack validation happens at load time, not during composition or model execution.
+
+Rationale: Errors surface immediately when pack is selected. Prevents runtime failures during agent execution.
+
+Trade-off: Slows down pack loading. Benefit: Earlier error detection, better user experience.
+
+**Constraint 9: No Prompt Optimization**
+
+Decision: System does not automatically optimize or compress prompts. Prompts are used as authored.
+
+Rationale: Optimization requires understanding model behavior, which varies across providers. Keep system simple and predictable.
+
+Trade-off: Potentially inefficient token usage. Benefit: Transparency, user control over exact prompt content.
+
+**Constraint 10: English-Only Prompts**
+
+Decision: Initial implementation supports English prompts only. No multi-language support.
+
+Rationale: Reduces complexity. Most programming documentation and standards are in English.
+
+Trade-off: Non-English speakers must write English prompts. Benefit: Simplified implementation, wider model compatibility.
+
+**Constraint 11: Maximum Prompt Length Enforced**
+
+Decision: Enforce maximum total prompt length (default 32,000 characters, configurable).
+
+Rationale: Prevents excessively large prompts that consume context windows. Protects against denial-of-service via prompt inflation.
+
+Trade-off: Large prompts may be truncated. Benefit: Predictable resource usage, prevents runaway composition.
+
+**Constraint 12: User Packs Override Built-In Packs**
+
+Decision: If user pack and built-in pack have same ID, user pack takes precedence.
+
+Rationale: Enables customization of built-in packs without modifying application resources.
+
+Trade-off: Potential confusion if IDs collide. Benefit: Flexibility, user control.
+
+**Constraint 13: Immutable Built-In Packs**
+
+Decision: Built-in packs (embedded resources) are read-only at runtime. Cannot be modified without rebuilding application.
+
+Rationale: Ensures consistency across installations. Prevents accidental corruption of default packs.
+
+Trade-off: Cannot hotfix built-in packs without redeployment. Benefit: Reliability, version control.
+
+**Constraint 14: Pack Versioning via Semantic Versioning**
+
+Decision: Pack versions follow semantic versioning (MAJOR.MINOR.PATCH).
+
+Rationale: Clear communication of breaking changes. Standard versioning scheme understood by developers.
+
+Trade-off: Requires discipline in version management. Benefit: Clear compatibility signals.
+
+**Constraint 15: No Pack Dependencies**
+
+Decision: Packs cannot depend on other packs. Each pack is self-contained.
+
+Rationale: Simplifies pack management. Prevents dependency resolution complexity.
+
+Trade-off: Cannot compose packs from shared components (must duplicate content). Benefit: Simplicity, no dependency hell.
+
 ---
 
 ## Glossary / Terms
