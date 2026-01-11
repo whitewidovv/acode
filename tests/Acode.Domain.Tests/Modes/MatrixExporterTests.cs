@@ -254,14 +254,11 @@ public sealed class MatrixExporterTests
 
         conditionalEntries.Should().NotBeEmpty("matrix should have conditional entries");
 
-        foreach (var entry in conditionalEntries)
+        foreach (var entry in conditionalEntries.Where(e => !string.IsNullOrEmpty(e.Prerequisite)))
         {
-            if (!string.IsNullOrEmpty(entry.Prerequisite))
-            {
-                markdown.Should().Contain(
-                    entry.Prerequisite,
-                    $"conditional entry {entry.Mode}/{entry.Capability} should show prerequisite");
-            }
+            markdown.Should().Contain(
+                entry.Prerequisite,
+                $"conditional entry {entry.Mode}/{entry.Capability} should show prerequisite");
         }
     }
 
