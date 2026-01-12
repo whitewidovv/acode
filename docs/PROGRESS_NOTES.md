@@ -1,8 +1,8 @@
 # Progress Notes
 
-## Task 004c - Session 2026-01-11
+## Task 004c - Session 2026-01-12
 
-**Status**: 43% Complete (15/35 gaps done)
+**Status**: 57% Complete (20/35 gaps done)
 
 ### Completed Work
 
@@ -11,30 +11,41 @@
 - Gap #2: ProviderType enum (Local, Remote, Embedded)
 - Gap #3: ProviderEndpoint with URL/timeout/retry config
 - Gap #4: ProviderConfig with health check settings
-- Gap #5: RetryPolicy with exponential backoff
+- Gap #5: RetryPolicy with exponential backoff + None property
 - Gap #6: ProviderHealth with status tracking
 - Gap #7: HealthStatus enum (Unknown, Healthy, Degraded, Unhealthy)
 
-**Phase 2: Application Layer** ✅
+**Phase 2: Application Layer (Gaps #8-15)** ✅
 - Gap #8: IProviderRegistry interface (10 tests)
 - Gap #9: IProviderSelector interface (3 tests)
 - Gap #10: DefaultProviderSelector (7 tests)
 - Gap #11: CapabilityProviderSelector (8 tests)
+- Gap #12: ProviderRegistry implementation (14 tests)
 - Gaps #13-15: Exception types (3 classes)
 
+**Phase 3: Unit Tests (Gaps #16-20)** ✅
+- Gap #16: ProviderDescriptor tests (10 tests)
+- Gap #17: ProviderCapabilities tests (11 tests)
+- Gap #18: ProviderEndpoint tests (18 tests)
+- Gap #19: RetryPolicy tests (18 tests)
+- Gap #20: ProviderHealth tests (18 tests)
+
 ### Test Summary
-- **ProviderDescriptor**: 10/10 passing
-- **IProviderRegistry**: 10/10 passing
-- **IProviderSelector**: 3/3 passing
-- **DefaultProviderSelector**: 7/7 passing
-- **CapabilityProviderSelector**: 8/8 passing
-- **Total**: 38/38 tests passing ✅
+- **Total Provider Tests**: 107/107 passing ✅
+- **ProviderDescriptor**: 10 tests
+- **ProviderEndpoint**: 18 tests
+- **RetryPolicy**: 18 tests (added None property)
+- **ProviderHealth**: 18 tests
+- **ProviderCapabilities**: 11 tests
+- **IProviderRegistry**: 10 tests
+- **ProviderRegistry**: 14 tests
+- **Selectors**: 18 tests (IProviderSelector, Default, Capability)
 - **Build**: Clean (no warnings, no errors) ✅
 
 ### Next Steps
-- Gap #12: ProviderRegistry implementation (in progress)
-- Gaps #16-28: Comprehensive testing phase
-- Gaps #29-35: Polish, documentation, final audit
+- Gaps #21-24: Selector tests (may already be complete)
+- Gaps #25-28: Integration tests (config loading, health checks, mode validation, E2E)
+- Gaps #29-35: Polish, documentation, CLI stub, audit
 
 ---
 
