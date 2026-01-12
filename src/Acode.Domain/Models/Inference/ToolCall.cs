@@ -33,7 +33,7 @@ public sealed record ToolCall(string Id, string Name, JsonElement Arguments)
     public string Name { get; init; } = ValidateName(Name);
 
     /// <summary>
-    /// Gets the JSON-encoded arguments for the tool call.
+    /// Gets the arguments for the tool call as a <see cref="JsonElement"/> object.
     /// </summary>
     [JsonPropertyName("arguments")]
     public JsonElement Arguments { get; init; } = ValidateArguments(Arguments);
