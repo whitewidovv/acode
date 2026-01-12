@@ -1,3 +1,27 @@
+# Task 004a Progress Notes
+
+## Session 2026-01-11
+
+### Completed
+- ✅ Gap Analysis: Identified 9 gaps in task-004a implementation
+- ✅ Gap #3 & #4: ToolCallDelta.cs with tests (FR-004a-91 to FR-004a-100)
+- ✅ TDD: RED → GREEN → REFACTOR complete
+- ✅ Committed and pushed to feature/task-004a-capability-configuration
+
+### In Progress
+- ConversationHistory implementation (Gaps #5 & #6)
+
+### Summary
+Task-004a Define Message/Tool-Call Types. Most types exist (MessageRole, ChatMessage, ToolCall, ToolResult, ToolDefinition). Gaps: ToolCallDelta (complete), ConversationHistory (next), plus refinements.
+
+### Next Steps
+- Implement ConversationHistory.cs + tests
+- Fix ToolCall.Arguments type (JsonElement)
+- Add ToolDefinition.CreateFromType<T>
+- Complete remaining gaps per checklist
+
+---
+
 # Task 003a Progress Notes
 
 ## Session 2026-01-11
