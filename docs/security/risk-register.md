@@ -24,16 +24,46 @@ This document provides a comprehensive enumeration of security risks and their m
 
 | ID | Title | Severity | DREAD | Status | Mitigations |
 |----|-------|----------|-------|--------|-------------|
-| RISK-S-001 | Malicious LLM impersonating local model | Medium | 5.8 | Active | MIT-001, MIT-004, MIT-005 |
-| RISK-S-002 | Config file replacement attack | Medium | 6.4 | Active | MIT-006, MIT-007, MIT-008 |
-| RISK-S-003 | Dependency confusion attack | Medium | 7.0 | Active | None |
-| RISK-S-004 | Process impersonation | Medium | 6.0 | Active | None |
-| RISK-S-005 | Git remote impersonation | Medium | 6.4 | Active | MIT-015 |
-| RISK-S-006 | User identity spoofing in audit logs | Medium | 6.2 | Active | MIT-020 |
+| RISK-S-001 | Malicious config file injection | Medium | 6.4 | Active | MIT-006, MIT-007, MIT-008 |
+| RISK-S-002 | Fake LLM provider endpoint | Medium | 5.8 | Active | MIT-001, MIT-004, MIT-005 |
+| RISK-S-003 | Spoofed environment variables | Medium | 6.4 | Active | None |
+| RISK-S-004 | Impersonated repository | Medium | 6.4 | Active | MIT-015 |
+| RISK-S-005 | Fake Acode binary | Medium | 6.4 | Active | None |
+| RISK-S-006 | Man-in-the-middle on localhost | Medium | 5.6 | Active | None |
 
 #### Detailed Risk Information
 
-##### RISK-S-001: Malicious LLM impersonating local model
+##### RISK-S-001: Malicious config file injection
+
+- **Description**: Attacker with file system access injects or replaces .agent/config.yml with malicious
+configuration containing attacker-controlled values, such as compromised LLM endpoints,
+disabled security features, or modified operating modes.
+
+- **Severity**: Medium
+- **Status**: Active
+- **Owner**: security-team
+- **Created**: 2026-01-03
+- **Last Review**: 2026-01-03
+
+**DREAD Score**:
+- Damage: 8/10
+- Reproducibility: 7/10
+- Exploitability: 6/10
+- Affected Users: 5/10
+- Discoverability: 6/10
+- **Average**: 6.4
+
+**Mitigations**:
+- [MIT-006](#mit-mit-006): Config file integrity checks
+- [MIT-007](#mit-mit-007): File permissions validation on config files
+- [MIT-008](#mit-mit-008): Audit logging of configuration changes
+
+**Residual Risk**: If attacker has filesystem write access, they may have broader compromise capability.
+
+
+---
+
+##### RISK-S-002: Fake LLM provider endpoint
 
 - **Description**: In Burst mode, if an attacker controls DNS or network routing, they could redirect
 LLM API requests to a malicious endpoint that impersonates the intended service,
@@ -63,39 +93,10 @@ capturing prompts containing source code.
 
 ---
 
-##### RISK-S-002: Config file replacement attack
+##### RISK-S-003: Spoofed environment variables
 
-- **Description**: Attacker with file system access replaces .agent/config.yml with malicious
-configuration pointing to attacker-controlled LLM or modifying operating mode.
-
-- **Severity**: Medium
-- **Status**: Active
-- **Owner**: security-team
-- **Created**: 2026-01-03
-- **Last Review**: 2026-01-03
-
-**DREAD Score**:
-- Damage: 8/10
-- Reproducibility: 7/10
-- Exploitability: 6/10
-- Affected Users: 5/10
-- Discoverability: 6/10
-- **Average**: 6.4
-
-**Mitigations**:
-- [MIT-006](#mit-mit-006): Config file integrity checks
-- [MIT-007](#mit-mit-007): File permissions validation on config files
-- [MIT-008](#mit-mit-008): Audit logging of configuration changes
-
-**Residual Risk**: If attacker has filesystem write access, they may have broader compromise capability.
-
-
----
-
-##### RISK-S-003: Dependency confusion attack
-
-- **Description**: Attacker publishes malicious package with same name as internal dependency,
-causing package manager to install malicious version.
+- **Description**: Attacker modifies environment variables to influence Acode behavior (PATH, LD_PRELOAD, etc.),
+potentially causing Acode to execute malicious binaries or load attacker-controlled libraries.
 
 - **Severity**: Medium
 - **Status**: Active
@@ -104,44 +105,22 @@ causing package manager to install malicious version.
 - **Last Review**: 2026-01-03
 
 **DREAD Score**:
-- Damage: 10/10
-- Reproducibility: 8/10
-- Exploitability: 4/10
-- Affected Users: 10/10
-- Discoverability: 3/10
-- **Average**: 7.0
-
-**Residual Risk**: Supply chain attacks remain difficult to detect without comprehensive SBOM analysis.
-
-
----
-
-##### RISK-S-004: Process impersonation
-
-- **Description**: Malicious process impersonates Acode CLI to capture user input or credentials.
-
-- **Severity**: Medium
-- **Status**: Active
-- **Owner**: security-team
-- **Created**: 2026-01-03
-- **Last Review**: 2026-01-03
-
-**DREAD Score**:
-- Damage: 7/10
-- Reproducibility: 5/10
-- Exploitability: 7/10
-- Affected Users: 6/10
+- Damage: 8/10
+- Reproducibility: 6/10
+- Exploitability: 6/10
+- Affected Users: 7/10
 - Discoverability: 5/10
-- **Average**: 6.0
+- **Average**: 6.4
 
-**Residual Risk**: Users may not verify process identity before providing sensitive input.
+**Residual Risk**: LD_PRELOAD and similar attacks may bypass application-level controls.
 
 
 ---
 
-##### RISK-S-005: Git remote impersonation
+##### RISK-S-004: Impersonated repository
 
-- **Description**: Attacker modifies .git/config to point to malicious remote, exfiltrating code during push/pull.
+- **Description**: Attacker modifies .git/config to point to malicious remote, exfiltrating code during push/pull,
+or delivering malicious code during clone/fetch operations.
 
 - **Severity**: Medium
 - **Status**: Active
@@ -165,28 +144,50 @@ causing package manager to install malicious version.
 
 ---
 
-##### RISK-S-006: User identity spoofing in audit logs
+##### RISK-S-005: Fake Acode binary
 
-- **Description**: If audit logs don't capture true user identity, attacker actions may be attributed to legitimate user.
+- **Description**: Attacker replaces legitimate Acode binary with trojanized version that appears authentic
+but contains backdoors, exfiltrates data, or compromises the development environment.
 
 - **Severity**: Medium
 - **Status**: Active
-- **Owner**: audit-team
+- **Owner**: release-team
 - **Created**: 2026-01-03
 - **Last Review**: 2026-01-03
 
 **DREAD Score**:
-- Damage: 6/10
+- Damage: 10/10
+- Reproducibility: 4/10
+- Exploitability: 5/10
+- Affected Users: 10/10
+- Discoverability: 3/10
+- **Average**: 6.4
+
+**Residual Risk**: Users may not verify binary signatures before execution.
+
+
+---
+
+##### RISK-S-006: Man-in-the-middle on localhost
+
+- **Description**: Malicious process listens on localhost ports, intercepting communication between Acode
+components (CLI, LLM server, database) to capture sensitive data or inject malicious responses.
+
+- **Severity**: Medium
+- **Status**: Active
+- **Owner**: infrastructure-team
+- **Created**: 2026-01-03
+- **Last Review**: 2026-01-03
+
+**DREAD Score**:
+- Damage: 7/10
 - Reproducibility: 4/10
 - Exploitability: 6/10
-- Affected Users: 8/10
-- Discoverability: 7/10
-- **Average**: 6.2
+- Affected Users: 6/10
+- Discoverability: 5/10
+- **Average**: 5.6
 
-**Mitigations**:
-- [MIT-020](#mit-mit-020): Tamper-evident audit logs
-
-**Residual Risk**: User identity spoofing at OS level (su, sudo) may still attribute actions incorrectly.
+**Residual Risk**: Localhost TLS adds complexity; process-level security may be sufficient.
 
 
 ---
@@ -197,17 +198,46 @@ causing package manager to install malicious version.
 
 | ID | Title | Severity | DREAD | Status | Mitigations |
 |----|-------|----------|-------|--------|-------------|
-| RISK-T-001 | Source code modification by malicious LLM response | Medium | 7.0 | Active | MIT-021 |
-| RISK-T-002 | Audit log tampering | High | 7.4 | Active | MIT-020 |
-| RISK-T-003 | Configuration tampering to disable security controls | High | 7.6 | Active | MIT-006, MIT-028, MIT-008 |
-| RISK-T-004 | Symlink attack to modify protected files | Medium | 7.0 | Active | MIT-029 |
-| RISK-T-005 | Time-of-check to time-of-use (TOCTOU) race | Medium | 5.2 | Active | None |
-| RISK-T-006 | Environment variable injection | Medium | 6.4 | Active | None |
-| RISK-T-007 | Binary tampering via package manager | Medium | 5.8 | Active | None |
+| RISK-T-001 | Config file modification | High | 7.6 | Active | MIT-006, MIT-028, MIT-008 |
+| RISK-T-002 | LLM response manipulation | Medium | 7.0 | Active | MIT-021 |
+| RISK-T-003 | Command injection via config | High | 7.6 | Active | MIT-104, MIT-105 |
+| RISK-T-004 | Malicious code in repository | Medium | 6.8 | Active | None |
+| RISK-T-005 | Dependency tampering | Medium | 7.0 | Active | None |
+| RISK-T-006 | Log file modification | High | 7.4 | Active | MIT-020 |
+| RISK-T-007 | Output file corruption | Medium | 6.6 | Active | None |
 
 #### Detailed Risk Information
 
-##### RISK-T-001: Source code modification by malicious LLM response
+##### RISK-T-001: Config file modification
+
+- **Description**: Attacker modifies .agent/config.yml to disable protected paths, secret redaction, or audit logging,
+thereby bypassing security controls and enabling further attacks.
+
+- **Severity**: High
+- **Status**: Active
+- **Owner**: security-team
+- **Created**: 2026-01-03
+- **Last Review**: 2026-01-03
+
+**DREAD Score**:
+- Damage: 9/10
+- Reproducibility: 9/10
+- Exploitability: 5/10
+- Affected Users: 10/10
+- Discoverability: 5/10
+- **Average**: 7.6
+
+**Mitigations**:
+- [MIT-006](#mit-mit-006): Config file integrity checks
+- [MIT-028](#mit-mit-028): Security invariants cannot be disabled
+- [MIT-008](#mit-mit-008): Audit logging of configuration changes
+
+**Residual Risk**: If config validation is bypassed, security controls may be disabled.
+
+
+---
+
+##### RISK-T-002: LLM response manipulation
 
 - **Description**: LLM response contains malicious code that, when applied by Acode, introduces
 backdoors, vulnerabilities, or data exfiltration into the codebase.
@@ -234,9 +264,86 @@ backdoors, vulnerabilities, or data exfiltration into the codebase.
 
 ---
 
-##### RISK-T-002: Audit log tampering
+##### RISK-T-003: Command injection via config
 
-- **Description**: Attacker with file system access modifies or deletes audit logs to hide malicious activity.
+- **Description**: Malicious configuration file contains command injection payloads in string values
+that are later executed by Acode without proper sanitization.
+
+- **Severity**: High
+- **Status**: Active
+- **Owner**: security-team
+- **Created**: 2026-01-03
+- **Last Review**: 2026-01-03
+
+**DREAD Score**:
+- Damage: 10/10
+- Reproducibility: 8/10
+- Exploitability: 5/10
+- Affected Users: 10/10
+- Discoverability: 5/10
+- **Average**: 7.6
+
+**Mitigations**:
+- [MIT-104](#mit-mit-104): Safe YAML parsing with no object deserialization
+- [MIT-105](#mit-mit-105): JSON schema validation on config
+
+**Residual Risk**: Novel command injection techniques may bypass input sanitization.
+
+
+---
+
+##### RISK-T-004: Malicious code in repository
+
+- **Description**: Attacker commits malicious code to repository (backdoors, vulnerabilities) that gets
+processed by Acode, potentially exploiting Acode itself or compromising generated output.
+
+- **Severity**: Medium
+- **Status**: Active
+- **Owner**: security-team
+- **Created**: 2026-01-03
+- **Last Review**: 2026-01-03
+
+**DREAD Score**:
+- Damage: 8/10
+- Reproducibility: 7/10
+- Exploitability: 6/10
+- Affected Users: 8/10
+- Discoverability: 5/10
+- **Average**: 6.8
+
+**Residual Risk**: Sophisticated malicious code may evade detection.
+
+
+---
+
+##### RISK-T-005: Dependency tampering
+
+- **Description**: Attacker publishes malicious package with same name as internal dependency,
+causing package manager to install malicious version (dependency confusion attack).
+
+- **Severity**: Medium
+- **Status**: Active
+- **Owner**: infrastructure-team
+- **Created**: 2026-01-03
+- **Last Review**: 2026-01-03
+
+**DREAD Score**:
+- Damage: 10/10
+- Reproducibility: 8/10
+- Exploitability: 4/10
+- Affected Users: 10/10
+- Discoverability: 3/10
+- **Average**: 7.0
+
+**Residual Risk**: Supply chain attacks remain difficult to detect without comprehensive SBOM analysis.
+
+
+---
+
+##### RISK-T-006: Log file modification
+
+- **Description**: Attacker with file system access modifies or deletes audit logs to hide malicious activity,
+removing evidence of security incidents or unauthorized actions.
 
 - **Severity**: High
 - **Status**: Active
@@ -260,125 +367,26 @@ backdoors, vulnerabilities, or data exfiltration into the codebase.
 
 ---
 
-##### RISK-T-003: Configuration tampering to disable security controls
+##### RISK-T-007: Output file corruption
 
-- **Description**: Attacker modifies .agent/config.yml to disable protected paths, secret redaction, or audit logging.
-
-- **Severity**: High
-- **Status**: Active
-- **Owner**: security-team
-- **Created**: 2026-01-03
-- **Last Review**: 2026-01-03
-
-**DREAD Score**:
-- Damage: 9/10
-- Reproducibility: 9/10
-- Exploitability: 5/10
-- Affected Users: 10/10
-- Discoverability: 5/10
-- **Average**: 7.6
-
-**Mitigations**:
-- [MIT-006](#mit-mit-006): Config file integrity checks
-- [MIT-028](#mit-mit-028): Security invariants cannot be disabled
-- [MIT-008](#mit-mit-008): Audit logging of configuration changes
-
-**Residual Risk**: If config validation is bypassed, security controls may be disabled.
-
-
----
-
-##### RISK-T-004: Symlink attack to modify protected files
-
-- **Description**: Attacker creates symlink from allowed path to protected path, bypassing path protection.
+- **Description**: Acode-generated output files (code, documentation, configs) are corrupted due to bugs,
+resource exhaustion, or malicious LLM responses, producing invalid or dangerous results.
 
 - **Severity**: Medium
 - **Status**: Active
-- **Owner**: security-team
-- **Created**: 2026-01-03
-- **Last Review**: 2026-01-03
-
-**DREAD Score**:
-- Damage: 9/10
-- Reproducibility: 7/10
-- Exploitability: 6/10
-- Affected Users: 8/10
-- Discoverability: 5/10
-- **Average**: 7.0
-
-**Mitigations**:
-- [MIT-029](#mit-mit-029): Symlink resolution before path validation
-
-**Residual Risk**: Complex symlink chains may be difficult to detect.
-
-
----
-
-##### RISK-T-005: Time-of-check to time-of-use (TOCTOU) race
-
-- **Description**: Path is validated as safe, but replaced with malicious file before use.
-
-- **Severity**: Medium
-- **Status**: Active
-- **Owner**: infrastructure-team
+- **Owner**: engineering-team
 - **Created**: 2026-01-03
 - **Last Review**: 2026-01-03
 
 **DREAD Score**:
 - Damage: 7/10
-- Reproducibility: 3/10
-- Exploitability: 8/10
-- Affected Users: 6/10
-- Discoverability: 2/10
-- **Average**: 5.2
-
-**Residual Risk**: TOCTOU is inherently difficult to eliminate completely.
-
-
----
-
-##### RISK-T-006: Environment variable injection
-
-- **Description**: Attacker modifies environment variables to influence Acode behavior (PATH, LD_PRELOAD, etc.).
-
-- **Severity**: Medium
-- **Status**: Active
-- **Owner**: infrastructure-team
-- **Created**: 2026-01-03
-- **Last Review**: 2026-01-03
-
-**DREAD Score**:
-- Damage: 8/10
-- Reproducibility: 6/10
+- Reproducibility: 5/10
 - Exploitability: 6/10
-- Affected Users: 7/10
-- Discoverability: 5/10
-- **Average**: 6.4
+- Affected Users: 8/10
+- Discoverability: 7/10
+- **Average**: 6.6
 
-**Residual Risk**: LD_PRELOAD and similar attacks may bypass application-level controls.
-
-
----
-
-##### RISK-T-007: Binary tampering via package manager
-
-- **Description**: Attacker compromises package manager to deliver tampered Acode binaries.
-
-- **Severity**: Medium
-- **Status**: Active
-- **Owner**: release-team
-- **Created**: 2026-01-03
-- **Last Review**: 2026-01-03
-
-**DREAD Score**:
-- Damage: 10/10
-- Reproducibility: 4/10
-- Exploitability: 3/10
-- Affected Users: 10/10
-- Discoverability: 2/10
-- **Average**: 5.8
-
-**Residual Risk**: Supply chain attacks on distribution infrastructure are difficult to prevent.
+**Residual Risk**: Subtle corruption may not be detected by automated validation.
 
 
 ---
