@@ -151,12 +151,12 @@ public sealed class SecurityViolationAuditIntegration
             "PolicyEngine", // TODO: Replace with actual source component name
             data,
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// TODO: Call this method when a protected path access attempt is blocked.
-    /// (This duplicates functionality from FileOperationAuditIntegration for security-specific context)
+    /// (This duplicates functionality from FileOperationAuditIntegration for security-specific context.)
     /// </summary>
     /// <param name="attemptedPath">The path that was attempted to be accessed.</param>
     /// <param name="operation">The operation that was attempted (e.g., "read", "write", "delete").</param>
@@ -192,7 +192,7 @@ public sealed class SecurityViolationAuditIntegration
             "PathValidator", // TODO: Replace with actual source component name
             data,
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -233,7 +233,7 @@ public sealed class SecurityViolationAuditIntegration
             "SecretsScanner", // TODO: Replace with actual source component name
             data,
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -269,7 +269,7 @@ public sealed class SecurityViolationAuditIntegration
                 ["riskLevel"] = "Medium"
             },
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -302,6 +302,6 @@ public sealed class SecurityViolationAuditIntegration
                 ["riskLevel"] = "High"
             },
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 }

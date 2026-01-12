@@ -1,80 +1,20 @@
 namespace Acode.Application.Audit.Integration;
 
 using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
 using Acode.Domain.Audit;
 
 /// <summary>
 /// STUB: Audit integration for file operations.
 /// This is a placeholder showing HOW to integrate audit logging with file operations.
-///
-/// TODO: IMPLEMENT IN TASK-004X (Epic 4 - Execution & Sandboxing) OR TASK-003X (Epic 3 - Repo Intelligence)
-///
-/// INTEGRATION INSTRUCTIONS:
-/// When implementing the file system abstraction layer (likely in Epic 3 or Epic 4), inject this service
-/// (or IAuditLogger directly) into the file system service and call the appropriate methods:
-///
-/// 1. In FileSystemService.ReadFileAsync():
-///    - Call LogFileReadAsync() after successful read
-///    - Include file path, size, and result
-///
-/// 2. In FileSystemService.WriteFileAsync():
-///    - Call LogFileWriteAsync() after successful write
-///    - Include file path, size, operation type (create/update)
-///
-/// 3. In FileSystemService.DeleteFileAsync():
-///    - Call LogFileDeleteAsync() after successful delete
-///    - Include file path
-///
-/// 4. In FileSystemService.CreateDirectoryAsync():
-///    - Call LogDirectoryCreateAsync() after successful creation
-///    - Include directory path
-///
-/// 5. In FileSystemService.DeleteDirectoryAsync():
-///    - Call LogDirectoryDeleteAsync() after successful deletion
-///    - Include directory path, recursive flag
-///
-/// 6. In PathValidator.ValidatePath():
-///    - Call LogProtectedPathBlockedAsync() when protected path access is denied
-///    - Include attempted path, operation, deny reason
-///
-/// STUB LOCATION: src/Acode.Application/Audit/Integration/FileOperationAuditIntegration.cs
-/// CREATED IN: Task-003c (Define Audit Baseline Requirements)
-/// TO BE WIRED UP IN: Task that implements file system abstraction (Epic 3 or Epic 4)
-///
-/// REQUIRED DEPENDENCIES:
-/// - File system abstraction layer (IFileSystemService or similar)
-/// - Path validation service (IPathValidator or similar)
-///
-/// EXAMPLE INTEGRATION (pseudo-code):
-/// <code>
-/// public class FileSystemService : IFileSystemService
-/// {
-///     private readonly IAuditLogger _auditLogger;
-///
-///     public async Task&lt;string&gt; ReadFileAsync(string path, CancellationToken ct)
-///     {
-///         var content = await File.ReadAllTextAsync(path, ct);
-///
-///         await _auditLogger.LogAsync(
-///             AuditEventType.FileRead,
-///             AuditSeverity.Info,
-///             "FileSystemService",
-///             new Dictionary&lt;string, object&gt;
-///             {
-///                 ["path"] = path,
-///                 ["sizeBytes"] = content.Length,
-///                 ["operation"] = "read"
-///             },
-///             null,
-///             ct);
-///
-///         return content;
-///     }
-/// }
-/// </code>
+/// TODO: IMPLEMENT IN TASK-004X (Epic 4 - Execution &amp; Sandboxing) OR TASK-003X (Epic 3 - Repo Intelligence).
+/// TO BE WIRED UP IN: Task that implements file system abstraction (Epic 3 or Epic 4).
 /// </summary>
+/// <remarks>
+/// See detailed TODO comments in source file for integration instructions.
+/// Stub location: src/Acode.Application/Audit/Integration/FileOperationAuditIntegration.cs.
+/// Created in: Task-003c (Define Audit Baseline Requirements).
+/// </remarks>
 public sealed class FileOperationAuditIntegration
 {
     private readonly IAuditLogger _auditLogger;
@@ -108,7 +48,7 @@ public sealed class FileOperationAuditIntegration
                 ["operation"] = "read"
             },
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -132,7 +72,7 @@ public sealed class FileOperationAuditIntegration
                 ["operation"] = operation
             },
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -153,7 +93,7 @@ public sealed class FileOperationAuditIntegration
                 ["operation"] = "delete"
             },
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -174,7 +114,7 @@ public sealed class FileOperationAuditIntegration
                 ["operation"] = "create"
             },
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -197,7 +137,7 @@ public sealed class FileOperationAuditIntegration
                 ["recursive"] = recursive
             },
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -228,6 +168,6 @@ public sealed class FileOperationAuditIntegration
                 ["denylistRule"] = denylistRule
             },
             null,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 }
