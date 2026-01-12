@@ -12,7 +12,7 @@ This checklist tracks ONLY the gaps (missing or incomplete items) needed to comp
 6. Move to next gap
 7. When all gaps are [✅], run final audit per docs/AUDIT-GUIDELINES.md
 
-**Progress: 14/28 gaps complete (50.0%)**
+**Progress: 16/28 gaps complete (57.1%)**
 
 ## WHAT EXISTS (Already Complete)
 
@@ -555,7 +555,7 @@ IDisposable BeginSpan(string operation);
 ---
 
 ### Gap #15: Application - AuditService
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Application/Audit/Services/AuditService.cs`
 
 **Why Needed**: Implementation Prompt line 5159 lists this as required application service.
@@ -573,12 +573,19 @@ IDisposable BeginSpan(string operation);
 - Session lifecycle managed properly
 - Integration with commands/queries
 
-**Evidence**: [To be filled when complete]
+**Evidence**: All 8 AuditService tests passing
+- AuditService.cs (152 lines): Orchestration service
+- Optional handler injection for flexibility
+- StartSessionAsync/EndSessionAsync for lifecycle
+- LogEventAsync for event coordination
+- CleanupLogsAsync for cleanup operations
+- Active session tracking (GetActiveSessionId)
+- AuditServiceTests.cs: 8 tests (session start/end, logging, cleanup, active session tracking)
 
 ---
 
 ### Gap #16: Application - CorrelationService
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Application/Audit/Services/CorrelationService.cs`
 
 **Why Needed**: Implementation Prompt line 5160 lists this as required application service.
@@ -596,7 +603,14 @@ IDisposable BeginSpan(string operation);
 - Scopes nest properly
 - Disposal cleans up correctly
 
-**Evidence**: [To be filled when complete]
+**Evidence**: All 8 CorrelationService tests passing
+- CorrelationService.cs (87 lines): AsyncLocal-based correlation management
+- BeginCorrelation() with explicit or auto-generated ID
+- GetCurrentCorrelationId() retrieves ambient ID
+- CorrelationScope inner class with disposal restoration
+- Nested scope support via previous scope chain
+- Thread-safe task isolation
+- CorrelationServiceTests.cs: 8 tests (scope creation, async propagation, nesting, task isolation)
 
 ---
 
