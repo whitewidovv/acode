@@ -1,5 +1,6 @@
 namespace Acode.Infrastructure.Ollama.ToolCall;
 
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.Ollama.ToolCall.Models;
@@ -150,7 +151,9 @@ public sealed class ToolCallParser
 
         try
         {
-            var toolCall = new ToolCall(id, toolName, repairResult.RepairedJson);
+            using var doc = JsonDocument.Parse(repairResult.RepairedJson);
+            var argumentsElement = doc.RootElement.Clone();
+            var toolCall = new ToolCall(id, toolName, argumentsElement);
             return new SingleParseResult(toolCall, null, repairResult.WasRepaired ? repairResult : null);
         }
         catch (ArgumentException ex)

@@ -28,7 +28,7 @@ public class ChatMessageTests
         var message1 = new ChatMessage(MessageRole.User, "Hello", null, null);
         var toolCalls = new List<ToolCall>
         {
-            new ToolCall("id1", "get_weather", "{\"city\":\"Seattle\"}"),
+            new ToolCall("id1", "get_weather", CreateJsonElement("{\"city\":\"Seattle\"}")),
         };
         var message2 = new ChatMessage(MessageRole.Assistant, null, toolCalls, null);
 
@@ -42,7 +42,7 @@ public class ChatMessageTests
         // FR-004a-15, FR-004a-18: ChatMessage MUST have ToolCalls property (nullable, IReadOnlyList)
         var toolCalls = new List<ToolCall>
         {
-            new ToolCall("id1", "get_weather", "{\"city\":\"Seattle\"}"),
+            new ToolCall("id1", "get_weather", CreateJsonElement("{\"city\":\"Seattle\"}")),
         };
 
         var message1 = new ChatMessage(MessageRole.Assistant, null, toolCalls, null);
@@ -125,7 +125,7 @@ public class ChatMessageTests
         // FR-004a-19: Content OR ToolCalls MUST be non-null for Assistant
         var toolCalls = new List<ToolCall>
         {
-            new ToolCall("id1", "get_weather", "{\"city\":\"Seattle\"}"),
+            new ToolCall("id1", "get_weather", CreateJsonElement("{\"city\":\"Seattle\"}")),
         };
 
         var message = new ChatMessage(MessageRole.Assistant, null, toolCalls, null);
@@ -140,7 +140,7 @@ public class ChatMessageTests
         // FR-004a-19: Content OR ToolCalls MUST be non-null for Assistant
         var toolCalls = new List<ToolCall>
         {
-            new ToolCall("id1", "get_weather", "{\"city\":\"Seattle\"}"),
+            new ToolCall("id1", "get_weather", CreateJsonElement("{\"city\":\"Seattle\"}")),
         };
 
         var message = new ChatMessage(MessageRole.Assistant, "I'll check the weather", toolCalls, null);
@@ -246,7 +246,7 @@ public class ChatMessageTests
         // FR-004a-27, FR-004a-30: ChatMessage MUST have factory: CreateAssistant(content, toolCalls)
         var toolCalls = new List<ToolCall>
         {
-            new ToolCall("id1", "get_weather", "{\"city\":\"Seattle\"}"),
+            new ToolCall("id1", "get_weather", CreateJsonElement("{\"city\":\"Seattle\"}")),
         };
 
         var message = ChatMessage.CreateAssistant(null, toolCalls);
@@ -263,7 +263,7 @@ public class ChatMessageTests
         // FR-004a-27, FR-004a-30: ChatMessage MUST have factory: CreateAssistant(content, toolCalls)
         var toolCalls = new List<ToolCall>
         {
-            new ToolCall("id1", "get_weather", "{\"city\":\"Seattle\"}"),
+            new ToolCall("id1", "get_weather", CreateJsonElement("{\"city\":\"Seattle\"}")),
         };
 
         var message = ChatMessage.CreateAssistant("Let me check", toolCalls);
@@ -326,7 +326,7 @@ public class ChatMessageTests
         // FR-004a-18: ToolCalls MUST be IReadOnlyList<ToolCall>
         var toolCalls = new List<ToolCall>
         {
-            new ToolCall("id1", "get_weather", "{\"city\":\"Seattle\"}"),
+            new ToolCall("id1", "get_weather", CreateJsonElement("{\"city\":\"Seattle\"}")),
         };
 
         var message = new ChatMessage(MessageRole.Assistant, null, toolCalls, null);
@@ -356,5 +356,14 @@ public class ChatMessageTests
         var message = new ChatMessage(MessageRole.User, string.Empty, null, null);
 
         message.Content.Should().Be(string.Empty);
+    }
+
+    /// <summary>
+    /// Helper method to create JsonElement from JSON string for testing.
+    /// </summary>
+    private static JsonElement CreateJsonElement(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 }
