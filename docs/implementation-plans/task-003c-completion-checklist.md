@@ -12,7 +12,7 @@ This checklist tracks ONLY the gaps (missing or incomplete items) needed to comp
 6. Move to next gap
 7. When all gaps are [✅], run final audit per docs/AUDIT-GUIDELINES.md
 
-**Progress: 18/28 gaps complete (64.3%)**
+**Progress: 19/28 gaps complete (67.9%)**
 
 ## WHAT EXISTS (Already Complete)
 
@@ -784,7 +784,7 @@ Each command should:
 ---
 
 ### Gap #22: Documentation - Audit Event Schema
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `docs/audit-event-schema.md`
 
 **Why Needed**: Implementation Prompt line 5449-5465 defines the complete event schema. This should be documented for users.
@@ -800,7 +800,20 @@ Each command should:
 - Examples are valid JSON
 - All fields documented
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- File: `docs/audit-event-schema.md` (522 lines)
+- Comprehensive documentation covering:
+  - Overview of audit event system
+  - All 13 schema fields with types, formats, validation rules, and examples
+  - Complete list of 25 event types with descriptions
+  - JSON serialization format (JSONL)
+  - 10 detailed event examples covering different event types (SessionStart, ConfigLoad, FileWrite, SecurityViolation, CommandEnd, ProtectedPathBlocked, ApprovalRequest, ApprovalResponse, CodeGenerated, TestExecution, SessionEnd)
+  - Field validation rules for all required and optional fields
+  - Format validation patterns (evt_, sess_, corr_, span_ prefixes)
+  - Enum validation for EventType, Severity, OperatingMode
+  - Integrity verification system (checksums)
+  - Storage format and file naming conventions
+  - Related documentation links
 
 ---
 
