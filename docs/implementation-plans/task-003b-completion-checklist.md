@@ -204,7 +204,7 @@ public sealed class GlobMatcher : IPathMatcher
 ---
 
 ### Gap #6: IPathNormalizer Interface
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Domain/Security/PathProtection/IPathNormalizer.cs`
 **Why Needed**: Spec lines 4638-4639 define interface for path normalization
 **Required Methods**:
@@ -226,12 +226,12 @@ public interface IPathNormalizer
 
 **Implementation Pattern**: See spec lines 4638-4640
 **Success Criteria**: Interface compiles
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Created IPathNormalizer.cs with Normalize method. Interface compiles successfully. Gap #6 COMPLETE
 
 ---
 
 ### Gap #7: PathNormalizerTests.cs
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `tests/Acode.Domain.Tests/Security/PathProtection/PathNormalizerTests.cs`
 **Why Needed**: Testing Requirements lines 1391-1403, 1405-1550 require 11+ normalization tests
 **Required Tests** (from spec lines 1392-1402):
@@ -249,12 +249,12 @@ public interface IPathNormalizer
 
 **Implementation Pattern**: See spec lines 1405-1550 for full test code
 **Success Criteria**: All 11 tests written (will fail until Gap #8 implemented)
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Created PathNormalizerTests.cs with 14 test methods covering all spec requirements. Tests compile successfully. Gap #7 COMPLETE (TDD RED phase)
 
 ---
 
 ### Gap #8: PathNormalizer Implementation
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Domain/Security/PathProtection/PathNormalizer.cs`
 **Why Needed**: Spec lines 4638-4640 require path normalization for consistent matching
 **Required Features**:
@@ -355,7 +355,7 @@ public sealed class PathNormalizer : IPathNormalizer
 ```
 
 **Success Criteria**: All Gap #7 tests pass
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Created PathNormalizer.cs (235 lines) with complete implementation. All 31 PathNormalizerTests pass in 3.02s. Handles tilde expansion, env vars, .., ., slash collapsing, trailing slashes, platform separators, long paths, Unicode, special characters, null bytes. Fixed test data inconsistency (relative path test). Gap #8 COMPLETE (TDD GREEN phase)
 
 ---
 
