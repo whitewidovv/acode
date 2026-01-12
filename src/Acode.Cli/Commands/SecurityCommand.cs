@@ -75,10 +75,11 @@ public sealed class SecurityCommand
         if (result.IsProtected)
         {
             Console.WriteLine($"BLOCKED: {path}");
-            Console.WriteLine($"  Pattern:  {result.MatchedPattern}");
-            Console.WriteLine($"  Category: {result.Category}");
-            Console.WriteLine($"  Risk ID:  {result.RiskId}");
-            Console.WriteLine($"  Reason:   {result.Reason}");
+            Console.WriteLine($"  Error Code: {result.Error?.ErrorCode ?? "UNKNOWN"}");
+            Console.WriteLine($"  Pattern:    {result.MatchedPattern}");
+            Console.WriteLine($"  Category:   {result.Category}");
+            Console.WriteLine($"  Risk ID:    {result.RiskId}");
+            Console.WriteLine($"  Reason:     {result.Reason}");
             return 1;
         }
 

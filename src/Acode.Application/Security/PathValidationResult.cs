@@ -33,6 +33,11 @@ public sealed record PathValidationResult
     public PathCategory? Category { get; init; }
 
     /// <summary>
+    /// Gets the detailed error information (if protected).
+    /// </summary>
+    public ProtectedPathError? Error { get; init; }
+
+    /// <summary>
     /// Creates an allowed result (path not protected).
     /// </summary>
     /// <returns>Validation result indicating path is allowed.</returns>
@@ -54,7 +59,8 @@ public sealed record PathValidationResult
             MatchedPattern = entry.Pattern,
             Reason = entry.Reason,
             RiskId = entry.RiskId,
-            Category = entry.Category
+            Category = entry.Category,
+            Error = ProtectedPathError.FromDenylistEntry(entry)
         };
     }
 }
