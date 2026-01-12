@@ -124,15 +124,10 @@ public sealed class PathNormalizer : IPathNormalizer
     /// </summary>
     private static string GetHomeDirectory()
     {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        }
-        else
-        {
-            return Environment.GetEnvironmentVariable("HOME")
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            : Environment.GetEnvironmentVariable("HOME")
                 ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        }
     }
 
     /// <summary>
