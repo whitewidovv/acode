@@ -151,7 +151,8 @@ public sealed class ToolCallParser
 
         try
         {
-            var argumentsElement = JsonDocument.Parse(repairResult.RepairedJson).RootElement;
+            using var doc = JsonDocument.Parse(repairResult.RepairedJson);
+            var argumentsElement = doc.RootElement.Clone();
             var toolCall = new ToolCall(id, toolName, argumentsElement);
             return new SingleParseResult(toolCall, null, repairResult.WasRepaired ? repairResult : null);
         }
