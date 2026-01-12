@@ -84,8 +84,8 @@ public sealed class DefaultProviderSelector : IProviderSelector
             return false;
         }
 
-        // Only Healthy status is considered healthy
-        // Degraded, Unhealthy, Unknown are all treated as unhealthy
-        return health.Status == HealthStatus.Healthy;
+        // Healthy and Unknown are acceptable (Unknown = not checked yet)
+        // Degraded and Unhealthy are not acceptable
+        return health.Status == HealthStatus.Healthy || health.Status == HealthStatus.Unknown;
     }
 }

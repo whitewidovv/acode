@@ -82,4 +82,12 @@ public sealed record RetryPolicy
     /// Gets the backoff multiplier for exponential backoff.
     /// </summary>
     public double BackoffMultiplier { get; init; }
+
+    /// <summary>
+    /// Gets a retry policy with no retries (MaxAttempts = 0).
+    /// </summary>
+    /// <remarks>
+    /// Use this for operations that should not be retried.
+    /// </remarks>
+    public static RetryPolicy None { get; } = new RetryPolicy(maxAttempts: 0);
 }
