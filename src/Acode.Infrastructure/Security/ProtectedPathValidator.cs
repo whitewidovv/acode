@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Acode.Application.Security;
 using Acode.Domain.Security.PathProtection;
 
@@ -5,26 +6,49 @@ namespace Acode.Infrastructure.Security;
 
 /// <summary>
 /// Validates file paths against the default denylist of protected paths.
+/// Uses GlobMatcher for pattern matching, PathNormalizer for normalization,
+/// and SymlinkResolver for symlink resolution to prevent bypass attacks.
 /// </summary>
 public sealed class ProtectedPathValidator : IProtectedPathValidator
 {
     private readonly IReadOnlyList<DenylistEntry> _denylist;
+    private readonly IPathMatcher _pathMatcher;
+    private readonly IPathNormalizer _pathNormalizer;
+    private readonly ISymlinkResolver _symlinkResolver;
+    private readonly Platform _currentPlatform;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProtectedPathValidator"/> class.
     /// </summary>
-    public ProtectedPathValidator()
+    /// <param name="pathMatcher">Path pattern matcher (GlobMatcher).</param>
+    /// <param name="pathNormalizer">Path normalizer.</param>
+    /// <param name="symlinkResolver">Symlink resolver.</param>
+    public ProtectedPathValidator(
+        IPathMatcher pathMatcher,
+        IPathNormalizer pathNormalizer,
+        ISymlinkResolver symlinkResolver)
+        : this(DefaultDenylist.Entries, pathMatcher, pathNormalizer, symlinkResolver)
     {
-        _denylist = DefaultDenylist.Entries;
     }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ProtectedPathValidator"/> class with custom denylist.
     /// </summary>
     /// <param name="denylist">Custom denylist entries.</param>
-    public ProtectedPathValidator(IReadOnlyList<DenylistEntry> denylist)
+    /// <param name="pathMatcher">Path pattern matcher (GlobMatcher).</param>
+    /// <param name="pathNormalizer">Path normalizer.</param>
+    /// <param name="symlinkResolver">Symlink resolver.</param>
+    public ProtectedPathValidator(
+        IReadOnlyList<DenylistEntry> denylist,
+        IPathMatcher pathMatcher,
+        IPathNormalizer pathNormalizer,
+        ISymlinkResolver symlinkResolver)
     {
         _denylist = denylist ?? throw new ArgumentNullException(nameof(denylist));
+        _pathMatcher = pathMatcher ?? throw new ArgumentNullException(nameof(pathMatcher));
+        _pathNormalizer = pathNormalizer ?? throw new ArgumentNullException(nameof(pathNormalizer));
+        _symlinkResolver = symlinkResolver ?? throw new ArgumentNullException(nameof(symlinkResolver));
+        _currentPlatform = DetectPlatform();
     }
 
     /// <inheritdoc/>
@@ -32,10 +56,29 @@ public sealed class ProtectedPathValidator : IProtectedPathValidator
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path, nameof(path));
 
-        // Check against denylist patterns
+        // 1. Normalize path (expand ~, resolve .., ., etc.)
+        var normalizedPath = _pathNormalizer.Normalize(path);
+
+        // 2. Resolve symlinks to prevent bypass attacks
+        var symlinkResult = _symlinkResolver.Resolve(normalizedPath);
+        var realPath = symlinkResult.IsSuccess
+            ? symlinkResult.ResolvedPath!
+            : normalizedPath; // If symlink resolution fails, use normalized path
+
+        // 3. Check against platform-appropriate denylist entries
         foreach (var entry in _denylist)
         {
-            if (PathMatchesPattern(path, entry.Pattern))
+            // Skip entries that don't apply to current platform
+            if (!EntryAppliesToPlatform(entry, _currentPlatform))
+            {
+                continue;
+            }
+
+            // Normalize the pattern as well
+            var normalizedPattern = _pathNormalizer.Normalize(entry.Pattern);
+
+            // Use GlobMatcher for pattern matching
+            if (_pathMatcher.Matches(normalizedPattern, realPath))
             {
                 return PathValidationResult.Blocked(entry);
             }
@@ -52,66 +95,31 @@ public sealed class ProtectedPathValidator : IProtectedPathValidator
         return Validate(path);
     }
 
-    private static bool PathMatchesPattern(string path, string pattern)
+    private static Platform DetectPlatform()
     {
-        // Normalize path separators
-        var normalizedPath = path.Replace('\\', '/');
-        var normalizedPattern = pattern.Replace('\\', '/');
-
-        // Handle tilde expansion
-        if (normalizedPattern.StartsWith("~/", StringComparison.Ordinal))
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            normalizedPattern = normalizedPattern[2..]; // Remove ~/
+            return Platform.Windows;
         }
 
-        // Handle **/ prefix (matches any depth)
-        if (normalizedPattern.StartsWith("**/", StringComparison.Ordinal))
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            normalizedPattern = normalizedPattern[3..]; // Remove **/
-            return normalizedPath.Contains(normalizedPattern, StringComparison.OrdinalIgnoreCase) ||
-                   normalizedPath.EndsWith(normalizedPattern, StringComparison.OrdinalIgnoreCase);
+            return Platform.Linux;
         }
 
-        // Handle * wildcard
-        if (normalizedPattern.Contains('*', StringComparison.Ordinal))
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            // Simple wildcard matching
-            return SimpleWildcardMatch(normalizedPath, normalizedPattern);
+            return Platform.MacOS;
         }
 
-        // Exact match or starts-with for directory patterns
-        if (normalizedPattern.EndsWith('/'))
-        {
-            return normalizedPath.StartsWith(normalizedPattern, StringComparison.OrdinalIgnoreCase) ||
-                   normalizedPath.Equals(normalizedPattern.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
-        }
-
-        // Check if path contains or equals the pattern
-        return normalizedPath.Contains(normalizedPattern, StringComparison.OrdinalIgnoreCase) ||
-               normalizedPath.Equals(normalizedPattern, StringComparison.OrdinalIgnoreCase);
+        // Default to All if unknown
+        return Platform.All;
     }
 
-    private static bool SimpleWildcardMatch(string path, string pattern)
+    private static bool EntryAppliesToPlatform(DenylistEntry entry, Platform currentPlatform)
     {
-        // Split on * and check if all parts exist in order
-        var parts = pattern.Split('*', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0)
-        {
-            return true; // Pattern is just "*"
-        }
-
-        var currentIndex = 0;
-        foreach (var part in parts)
-        {
-            var index = path.IndexOf(part, currentIndex, StringComparison.OrdinalIgnoreCase);
-            if (index == -1)
-            {
-                return false;
-            }
-
-            currentIndex = index + part.Length;
-        }
-
-        return true;
+        // Entry applies if it targets All platforms or the current platform
+        return entry.Platforms.Contains(Platform.All) ||
+               entry.Platforms.Contains(currentPlatform);
     }
 }

@@ -16,7 +16,12 @@ public sealed class SecurityCommand
     /// </summary>
     public SecurityCommand()
     {
-        _pathValidator = new ProtectedPathValidator();
+        // Create dependencies for ProtectedPathValidator
+        var pathMatcher = new GlobMatcher(caseSensitive: false); // Case-insensitive for security
+        var pathNormalizer = new PathNormalizer();
+        var symlinkResolver = new SymlinkResolver();
+
+        _pathValidator = new ProtectedPathValidator(pathMatcher, pathNormalizer, symlinkResolver);
     }
 
     /// <summary>

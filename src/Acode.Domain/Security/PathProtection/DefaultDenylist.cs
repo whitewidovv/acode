@@ -202,6 +202,25 @@ public static class DefaultDenylist
             Platforms = new[] { Platform.Windows }
         });
 
+        // GPG Keys - Glob patterns (match anywhere in path)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.gnupg/",
+            Reason = "GPG directory anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.GpgKeys,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.gnupg/**",
+            Reason = "Any file inside .gnupg directory",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.GpgKeys,
+            Platforms = new[] { Platform.All }
+        });
+
         // Cloud Credentials (FR-003b-33 to FR-003b-39)
         // AC-027 to AC-036
         entries.Add(new DenylistEntry
