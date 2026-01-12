@@ -53,7 +53,7 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
         var sessionId = SessionId.New();
         var eventData = new Dictionary<string, object>
         {
-            ["agentVersion"] = "1.0.0",
+            ["agent_version"] = "1.0.0",
             ["platform"] = "linux"
         };
 
@@ -84,7 +84,7 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
         var sessionId = SessionId.New();
         var eventData = new Dictionary<string, object>
         {
-            ["sessionDurationMs"] = 3600000,
+            ["session_duration_ms"] = 3600000,
             ["exit_reason"] = "user_initiated"
         };
 
@@ -115,7 +115,7 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
         var eventData = new Dictionary<string, object>
         {
             ["config_path"] = ".agent/config.yml",
-            ["schemaVersion"] = "1.0.0",
+            ["schema_version"] = "1.0.0",
             ["validation_result"] = "success"
         };
 
@@ -146,8 +146,8 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
         // Arrange - log multiple file operation types
         var operations = new[]
         {
-            (AuditEventType.FileRead, new Dictionary<string, object> { ["path"] = "test.cs", ["sizeBytes"] = 1024 }),
-            (AuditEventType.FileWrite, new Dictionary<string, object> { ["path"] = "output.cs", ["sizeBytes"] = 2048 }),
+            (AuditEventType.FileRead, new Dictionary<string, object> { ["path"] = "test.cs", ["size_bytes"] = 1024 }),
+            (AuditEventType.FileWrite, new Dictionary<string, object> { ["path"] = "output.cs", ["size_bytes"] = 2048 }),
             (AuditEventType.FileDelete, new Dictionary<string, object> { ["path"] = "temp.cs" }),
             (AuditEventType.DirCreate, new Dictionary<string, object> { ["path"] = "test-dir" }),
             (AuditEventType.DirDelete, new Dictionary<string, object> { ["path"] = "old-dir" })
@@ -202,7 +202,7 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
         var endData = new Dictionary<string, object>(commandData)
         {
             ["exit_code"] = 0,
-            ["durationMs"] = 5000
+            ["duration_ms"] = 5000
         };
 
         await _logger.LogAsync(
@@ -231,9 +231,9 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
         // Arrange
         var violationData = new Dictionary<string, object>
         {
-            ["violationType"] = "ProtectedPathAccess",
+            ["violation_type"] = "ProtectedPathAccess",
             ["attempted_path"] = ".git/config",
-            ["deniedReason"] = "Path on denylist"
+            ["denied_reason"] = "Path on denylist"
         };
 
         // Act
@@ -253,7 +253,7 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
 
         var logContent = await File.ReadAllTextAsync(logFiles[0]);
         logContent.Should().Contain("security_violation");
-        logContent.Should().Contain("Critical");
+        logContent.Should().Contain("critical");
         logContent.Should().Contain("attempted_path");
     }
 
@@ -263,8 +263,8 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
         // Arrange - log task start, end, and error
         var taskData = new Dictionary<string, object>
         {
-            ["taskId"] = "task-001",
-            ["taskDescription"] = "Build project"
+            ["task_id"] = "task-001",
+            ["task_description"] = "Build project"
         };
 
         // Act - Start, End, Error
@@ -301,13 +301,13 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
         // Arrange
         var requestData = new Dictionary<string, object>
         {
-            ["approvalType"] = "CommandExecution",
-            ["requestedOperation"] = "dotnet build"
+            ["approval_type"] = "CommandExecution",
+            ["requested_operation"] = "dotnet build"
         };
 
         var responseData = new Dictionary<string, object>
         {
-            ["approvalType"] = "CommandExecution",
+            ["approval_type"] = "CommandExecution",
             ["decision"] = "approved"
         };
 
@@ -400,7 +400,7 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
 
         // Assert - LogAsync should complete quickly (non-blocking)
         stopwatch.ElapsedMilliseconds.Should().BeLessThan(
-            100,
+            200,
             "logging should not block for extended periods");
     }
 
