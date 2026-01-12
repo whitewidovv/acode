@@ -511,7 +511,7 @@ public class ConfigCommandTests
         var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
         // Assert
-        exitCode.Should().Be(ExitCode.GeneralError, "strict mode should treat warnings as errors");
+        exitCode.Should().Be(ExitCode.ConfigurationError, "strict mode should treat warnings as errors");
         output.ToString().Should().Contain("Unknown field", "warning message should be shown");
     }
 
@@ -588,7 +588,7 @@ public class ConfigCommandTests
         var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
         // Assert
-        exitCode.Should().Be(ExitCode.GeneralError, "validation errors should return error code");
+        exitCode.Should().Be(ExitCode.ConfigurationError, "validation errors should return error code");
         var outputText = output.ToString();
         outputText.Should().Contain(".agent/config.yml:10:5", "should show file:line:column format");
         outputText.Should().Contain("[ERROR]", "should show severity");
@@ -637,7 +637,7 @@ public class ConfigCommandTests
         var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
 
         // Assert
-        exitCode.Should().Be(ExitCode.GeneralError, "validation errors should return error code");
+        exitCode.Should().Be(ExitCode.ConfigurationError, "validation errors should return error code");
         var outputText = output.ToString();
         outputText.Should().Contain("[ERROR]", "should show severity");
         outputText.Should().Contain("ACODE-CFG-010", "should show error code");

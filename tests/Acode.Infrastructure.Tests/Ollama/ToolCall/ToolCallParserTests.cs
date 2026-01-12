@@ -68,7 +68,7 @@ public sealed class ToolCallParserTests
         result.ToolCalls.Should().HaveCount(1);
         result.ToolCalls[0].Id.Should().Be("call_123");
         result.ToolCalls[0].Name.Should().Be("read_file");
-        result.ToolCalls[0].Arguments.Should().Be("{\"path\": \"README.md\"}");
+        result.ToolCalls[0].Arguments.GetRawText().Should().Be("{\"path\": \"README.md\"}");
     }
 
     [Fact]
@@ -351,7 +351,7 @@ public sealed class ToolCallParserTests
 
         // Assert
         result.AllSucceeded.Should().BeTrue();
-        result.ToolCalls[0].Arguments.Should().Be("{}");
+        result.ToolCalls[0].Arguments.GetRawText().Should().Be("{}");
     }
 
     [Fact]
@@ -458,6 +458,6 @@ public sealed class ToolCallParserTests
         // Assert
         result.AllSucceeded.Should().BeTrue();
         result.Repairs.Should().BeEmpty();
-        result.ToolCalls[0].Arguments.Should().Be(originalArgs);
+        result.ToolCalls[0].Arguments.GetRawText().Should().Be(originalArgs);
     }
 }

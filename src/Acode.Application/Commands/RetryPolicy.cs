@@ -62,8 +62,9 @@ public static class RetryPolicy
 
         // Check if retries remaining
         // attemptCount is 1-based (1 = initial attempt, 2 = first retry, etc.)
-        // So: attemptCount <= maxRetries + 1
+        // So: attemptCount < maxRetries + 1 (strict less than)
         // Example: maxRetries=3 means we can make up to 4 attempts total (initial + 3 retries)
-        return attemptCount <= maxRetries + 1;
+        // After 4th attempt (attemptCount=4), should NOT retry: 4 < 4 = false
+        return attemptCount < maxRetries + 1;
     }
 }

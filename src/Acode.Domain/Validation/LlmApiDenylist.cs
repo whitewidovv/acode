@@ -24,8 +24,11 @@ public static class LlmApiDenylist
             // OpenAI - wildcard for all subdomains (chat, platform, beta, etc.)
             new() { Pattern = "*.openai.com", Type = PatternType.Wildcard, Description = "OpenAI subdomains" },
 
-            // Azure OpenAI - regex pattern covers both root domain (openai.azure.com) and custom instances (*.openai.azure.com)
-            new() { Pattern = @".*\.openai\.azure\.com", Type = PatternType.Regex, Description = "Azure OpenAI (root and custom instances)" },
+            // Azure OpenAI - exact root domain
+            new() { Pattern = "openai.azure.com", Type = PatternType.Exact, Description = "Azure OpenAI root domain" },
+
+            // Azure OpenAI - regex pattern for custom instances (*.openai.azure.com)
+            new() { Pattern = @".*\.openai\.azure\.com", Type = PatternType.Regex, Description = "Azure OpenAI custom instances" },
 
             // Anthropic - exact API endpoint
             new() { Pattern = "api.anthropic.com", Type = PatternType.Exact, Description = "Anthropic API" },
