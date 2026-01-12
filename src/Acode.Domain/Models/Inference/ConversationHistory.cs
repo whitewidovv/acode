@@ -75,7 +75,7 @@ public sealed class ConversationHistory : IEnumerable<ChatMessage>
                 if (message.Role != MessageRole.System)
                 {
                     throw new InvalidOperationException(
-                        "The first message in a conversation must be a System message.");
+                        "The system message must be first.");
                 }
 
                 this._messages.Add(message);
@@ -159,7 +159,7 @@ public sealed class ConversationHistory : IEnumerable<ChatMessage>
                 if (message.Role != MessageRole.Assistant)
                 {
                     throw new InvalidOperationException(
-                        "After a User message, the next message must be an Assistant message.");
+                        "User and Assistant messages must alternate.");
                 }
 
                 // Initialize pending tool calls if Assistant has ToolCalls

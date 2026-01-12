@@ -279,7 +279,7 @@ public sealed class ConversationHistoryTests
             var messages = history.GetMessages();
             var count = history.Count;
             var last = history.LastMessage;
-            return (messages.Count, count, last);
+            return (messagesCount: messages.Count, count, last);
         }));
 
         var results = await Task.WhenAll(tasks);
@@ -287,7 +287,7 @@ public sealed class ConversationHistoryTests
         // Assert
         results.Should().AllSatisfy(r =>
         {
-            r.Item1.Should().Be(3);
+            r.messagesCount.Should().Be(3);
             r.count.Should().Be(3);
         });
     }
@@ -299,18 +299,17 @@ public sealed class ConversationHistoryTests
         var history = new ConversationHistory();
         history.Add(ChatMessage.CreateSystem("System"));
 
-        // We'll add user/assistant pairs concurrently but need to handle ordering
         var addLock = new object();
 
-        // Act - simulate multiple threads trying to add (some will fail due to ordering)
+        // Act
         var tasks = Enumerable.Range(0, 10).Select(async i =>
         {
             await Task.Delay(System.Random.Shared.Next(0, 10));
             try
             {
-                lock (addLock) // Serializing for order validation
+                lock (addLock)
                 {
-                    if (history.Count % 2 == 1) // After system or assistant
+                    if (history.Count % 2 == 1)
                     {
                         history.Add(ChatMessage.CreateUser($"User {i}"));
                     }

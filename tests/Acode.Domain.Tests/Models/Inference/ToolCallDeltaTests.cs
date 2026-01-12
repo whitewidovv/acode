@@ -1,8 +1,8 @@
 namespace Acode.Domain.Tests.Models.Inference;
 
+using System.Linq;
 using Acode.Domain.Models.Inference;
 using FluentAssertions;
-using System.Linq;
 
 /// <summary>
 /// Tests for ToolCallDelta record.

@@ -120,7 +120,7 @@ public static ToolDefinition CreateFromType<T>(string name, string description, 
 ---
 
 ### Gap #3: ToolCallDelta Record Missing
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Domain/Models/Inference/ToolCallDelta.cs`
 **Why Needed**: FR-004a-91 to FR-004a-100 require ToolCallDelta for streaming tool calls
 **Required Properties**:
@@ -184,7 +184,7 @@ public sealed record ToolCallDelta
 ---
 
 ### Gap #4: ToolCallDelta Tests Missing
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `tests/Acode.Domain.Tests/Models/Inference/ToolCallDeltaTests.cs`
 **Why Needed**: Testing Requirements section lines 1159-1432 specify comprehensive tests
 **Required Tests** (from spec):
@@ -216,7 +216,7 @@ public sealed record ToolCallDelta
 ---
 
 ### Gap #5: ConversationHistory Class Missing
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Domain/Models/Inference/ConversationHistory.cs`
 **Why Needed**: FR-004a-101 to FR-004a-115 require ConversationHistory for managing message sequences
 **Required Functionality**:
@@ -280,7 +280,7 @@ public sealed class ConversationHistory : IEnumerable<ChatMessage>
 ---
 
 ### Gap #6: ConversationHistory Tests Missing
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `tests/Acode.Domain.Tests/Models/Inference/ConversationHistoryTests.cs`
 **Why Needed**: Testing Requirements section lines 1447-1862 specify comprehensive tests
 **Required Tests** (from spec):
@@ -318,7 +318,7 @@ public sealed class ConversationHistory : IEnumerable<ChatMessage>
 ---
 
 ### Gap #7: Integration Tests Missing
-**Status**: [ ]
+**Status**: [✅]
 **Directory to Create**: `tests/Acode.Integration.Tests/Models/Messages/`
 **File to Create**: `tests/Acode.Integration.Tests/Models/Messages/SerializationCompatibilityTests.cs`
 **Why Needed**: Testing Requirements section lines 1866-1998 specify integration tests for provider compatibility
@@ -370,7 +370,7 @@ public sealed class ConversationHistory : IEnumerable<ChatMessage>
 ---
 
 ### Gap #9: JSON Source Generator Context Missing
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Domain/Models/Inference/Serialization/MessageJsonContext.cs`
 **Why Needed**: NFR-004a-10 requires System.Text.Json source generators for performance
 **Required Implementation**:
