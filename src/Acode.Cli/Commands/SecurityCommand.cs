@@ -131,17 +131,9 @@ public sealed class SecurityCommand
 
         try
         {
-            IReadOnlyList<Risk> risks;
-
-            if (category.HasValue)
-            {
-                risks = await _riskRegister.GetRisksByCategoryAsync(category.Value).ConfigureAwait(false);
-            }
-            else
-            {
-                risks = await _riskRegister.GetAllRisksAsync().ConfigureAwait(false);
-            }
-
+            IReadOnlyList<Risk> risks = category.HasValue
+                ? await _riskRegister.GetRisksByCategoryAsync(category.Value).ConfigureAwait(false)
+                : await _riskRegister.GetAllRisksAsync().ConfigureAwait(false);
             if (severity.HasValue)
             {
                 risks = risks.Where(r => r.Severity == severity.Value).ToList();
