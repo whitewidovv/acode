@@ -570,8 +570,8 @@ public sealed class ProtectedPathValidator : IProtectedPathValidator
 ---
 
 ### Gap #13: Enhanced ProtectedPathValidatorTests
-**Status**: [ ]
-**File to Modify**: `tests/Acode.Infrastructure.Tests/Security/ProtectedPathValidatorTests.cs`
+**Status**: [✅]
+**File Modified**: `tests/Acode.Infrastructure.Tests/Security/ProtectedPathValidatorTests.cs`
 **Why Needed**: Current tests are minimal (3 tests), spec requires comprehensive coverage
 **Required Additional Tests**:
 1. Test normalization integration (path with ~, .., //)
@@ -585,7 +585,7 @@ public sealed class ProtectedPathValidator : IProtectedPathValidator
 
 **Implementation Pattern**: Add tests similar to spec lines 1700-2000
 **Success Criteria**: 15+ comprehensive integration tests, all passing
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Enhanced ProtectedPathValidatorTests.cs with 12 test methods (39 total test cases with theory data): (1) Validate_ProtectedPath_ReturnsBlocked (5 test cases - SSH, env, AWS), (2) Validate_AllowedPath_ReturnsAllowed (4 test cases - source files), (3) Validate_InvalidPath_ThrowsArgumentException (2 test cases - null/empty), (4) Validate_WithFileOperation_ReturnsCorrectResult (1 test), (5) Validate_NormalizationIntegration_HandlesPathVariations (4 test cases - tilde, ./, //, ./), (6) Validate_WildcardPatterns_ExistInDenylist (6 test cases - verifies glob patterns in denylist), (7) Validate_MajorCategories_AllBlocked (4 test cases - SSH, GPG, Cloud, Env), (8) Validate_PathTraversal_NormalizedAndBlocked (3 test cases - ../ traversal), (9) Validate_Performance_CompletesUnder10Milliseconds (100 iterations performance test), (10) Validate_FileExtensionPatterns_MatchCorrectly (5 test cases - .pem, .key, .env, .p12, .jks), (11) Validate_PlatformFiltering_OnlyAppliesToCurrentPlatform (platform-specific pattern verification), (12) Validate_CaseSensitivity_DependsOnPlatform (3 test cases - case variations). All 41 Infrastructure PathProtection tests pass in 2.3s. Gap #13 COMPLETE
 
 ---
 
