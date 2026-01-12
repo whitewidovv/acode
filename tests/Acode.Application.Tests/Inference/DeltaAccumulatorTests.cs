@@ -140,9 +140,9 @@ public class DeltaAccumulatorTests
         // FR-069: Merge ToolCallDelta by Index into complete ToolCalls
         var accumulator = new DeltaAccumulator();
 
-        accumulator.Append(new ResponseDelta(0, null, "{\"id\":\""));
-        accumulator.Append(new ResponseDelta(1, null, "call_123\",\"name\":\""));
-        accumulator.Append(new ResponseDelta(2, null, "get_weather\"}"));
+        accumulator.Append(new ResponseDelta(0, null, new ToolCallDelta(Index: 0, ArgumentsDelta: "{\"id\":\"")));
+        accumulator.Append(new ResponseDelta(1, null, new ToolCallDelta(Index: 0, ArgumentsDelta: "call_123\",\"name\":\"")));
+        accumulator.Append(new ResponseDelta(2, null, new ToolCallDelta(Index: 0, ArgumentsDelta: "get_weather\"}")));
         accumulator.Append(new ResponseDelta(3, null, null, FinishReason.ToolCalls));
 
         var response = accumulator.Build();
@@ -158,7 +158,7 @@ public class DeltaAccumulatorTests
         var accumulator = new DeltaAccumulator();
 
         accumulator.Append(new ResponseDelta(0, "Calling function: "));
-        accumulator.Append(new ResponseDelta(1, null, "{\"id\":\"call_1\"}"));
+        accumulator.Append(new ResponseDelta(1, null, new ToolCallDelta(Index: 0, ArgumentsDelta: "{\"id\":\"call_1\"}")));
         accumulator.Append(new ResponseDelta(2, null, null, FinishReason.ToolCalls));
 
         var response = accumulator.Build();

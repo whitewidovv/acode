@@ -16,6 +16,7 @@ using Acode.Domain.Models.Inference;
 [JsonSerializable(typeof(UsageInfo))]
 [JsonSerializable(typeof(ResponseMetadata))]
 [JsonSerializable(typeof(ResponseDelta))]
+[JsonSerializable(typeof(ToolCallDelta))]
 [JsonSerializable(typeof(ContentFilterResult))]
 [JsonSerializable(typeof(FilterCategory))]
 [JsonSerializable(typeof(FilterSeverity))]

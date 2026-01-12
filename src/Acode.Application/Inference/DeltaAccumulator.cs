@@ -101,7 +101,12 @@ public sealed class DeltaAccumulator
 
             if (delta.ToolCallDelta is not null)
             {
-                this.toolCallBuilder.Append(delta.ToolCallDelta);
+                // FR-004b-069: Merge ToolCallDelta by Index into complete ToolCalls
+                // For now, concatenate ArgumentsDelta to build up the complete arguments JSON
+                if (delta.ToolCallDelta.ArgumentsDelta is not null)
+                {
+                    this.toolCallBuilder.Append(delta.ToolCallDelta.ArgumentsDelta);
+                }
             }
 
             if (delta.FinishReason is not null)

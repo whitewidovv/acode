@@ -25,7 +25,7 @@ public class ResponseDeltaTests
     {
         // FR-004b-058: ResponseDelta MUST include optional ContentDelta property (string?)
         var delta1 = new ResponseDelta(0, "Hello");
-        var delta2 = new ResponseDelta(1, null, "tool_call_fragment");
+        var delta2 = new ResponseDelta(1, null, new ToolCallDelta(Index: 0, ArgumentsDelta: "{\"query\":"));
 
         delta1.ContentDelta.Should().Be("Hello");
         delta2.ContentDelta.Should().BeNull();
@@ -79,10 +79,11 @@ public class ResponseDeltaTests
     public void ResponseDelta_AllowsToolCallDeltaOnly()
     {
         // FR-004b-063: Allow ToolCallDelta only
-        var delta = new ResponseDelta(0, null, "partial_tool_call");
+        var toolCallDelta = new ToolCallDelta(Index: 0, ArgumentsDelta: "partial_tool_call");
+        var delta = new ResponseDelta(0, null, toolCallDelta);
 
         delta.ContentDelta.Should().BeNull();
-        delta.ToolCallDelta.Should().Be("partial_tool_call");
+        delta.ToolCallDelta.Should().Be(toolCallDelta);
     }
 
     [Fact]
