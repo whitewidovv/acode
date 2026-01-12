@@ -12,7 +12,7 @@ This checklist tracks ONLY the gaps (missing or incomplete items) needed to comp
 6. Move to next gap
 7. When all gaps are [✅], run final audit per docs/AUDIT-GUIDELINES.md
 
-**Progress: 20/28 gaps complete (71.4%)**
+**Progress: 21/28 gaps complete (75.0%)**
 
 ## WHAT EXISTS (Already Complete)
 
@@ -859,7 +859,7 @@ Each command should:
 ---
 
 ### Gap #24: Error Codes Definition
-**Status**: [ ]
+**Status**: [✅]
 **File to Create or Modify**: `src/Acode.Application/Audit/AuditErrorCodes.cs`
 
 **Why Needed**: Implementation Prompt line 5423-5436 defines 10 error codes.
@@ -881,7 +881,26 @@ Each command should:
 - Error messages are clear
 - Codes used in appropriate places
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- File: `src/Acode.Application/Audit/AuditErrorCodes.cs` (143 lines)
+- All 10 error codes defined as constants with format ACODE-AUD-XXX
+- Error codes:
+  1. InitializationFailed (ACODE-AUD-001)
+  2. WriteFailed (ACODE-AUD-002)
+  3. DirectoryNotWritable (ACODE-AUD-003)
+  4. DiskFull (ACODE-AUD-004)
+  5. RotationFailed (ACODE-AUD-005)
+  6. IntegrityVerificationFailed (ACODE-AUD-006)
+  7. ChecksumMismatch (ACODE-AUD-007)
+  8. SessionNotFound (ACODE-AUD-008)
+  9. ExportFailed (ACODE-AUD-009)
+  10. InvalidQueryParameters (ACODE-AUD-010)
+- Helper methods:
+  - GetErrorMessage(errorCode) - Returns human-readable error messages
+  - GetResolution(errorCode) - Returns suggested resolutions
+  - GetSeverity(errorCode) - Returns severity level (Critical/Error/Warning)
+- Clear XML documentation for all codes
+- Ready for integration with error handling throughout audit system
 
 ---
 
