@@ -88,14 +88,9 @@ public sealed class PathNormalizer : IPathNormalizer
         if (path.StartsWith("~/") || path.StartsWith("~\\") || path == "~")
         {
             var home = GetHomeDirectory();
-            if (path.Length == 1)
-            {
-                path = home;
-            }
-            else
-            {
-                path = home + path.Substring(1);
-            }
+            path = path.Length == 1
+                ? home
+                : home + path.Substring(1);
         }
 
         // Expand $HOME on Unix-like systems
