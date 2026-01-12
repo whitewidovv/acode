@@ -73,17 +73,46 @@ public sealed class SymlinkResolver : ISymlinkResolver
     {
         try
         {
-            // Check if path is a reparse point (symlink, junction, etc.)
+            // SECURITY FIX: Cross-platform symlink detection
+            // FileAttributes.ReparsePoint only works reliably on Windows.
+            // On Linux/macOS, we must check LinkTarget property instead.
+
+            // Try as file first
             var fileInfo = new FileInfo(path);
             if (fileInfo.Exists)
             {
-                return fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint);
+                // Cross-platform: if LinkTarget is not null, it's a symlink
+                if (fileInfo.LinkTarget != null)
+                {
+                    return true;
+                }
+
+                // Windows fallback: check ReparsePoint for junctions/symlinks
+                if (fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return true;
+                }
+
+                return false;
             }
 
+            // Try as directory
             var dirInfo = new DirectoryInfo(path);
             if (dirInfo.Exists)
             {
-                return dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint);
+                // Cross-platform: if LinkTarget is not null, it's a symlink
+                if (dirInfo.LinkTarget != null)
+                {
+                    return true;
+                }
+
+                // Windows fallback: check ReparsePoint for junctions/symlinks
+                if (dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return true;
+                }
+
+                return false;
             }
 
             return false;

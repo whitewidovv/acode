@@ -119,25 +119,21 @@ public sealed class UserDenylistExtensionLoader
             return new[] { Platform.All };
         }
 
-        var result = new List<Platform>();
-        foreach (var platform in platforms)
-        {
-            var parsed = platform.ToLowerInvariant() switch
+        // Map platform strings to Platform enum values
+        var result = platforms
+            .Select(platform => platform.ToLowerInvariant() switch
             {
                 "all" => Platform.All,
                 "windows" => Platform.Windows,
                 "linux" => Platform.Linux,
                 "macos" or "mac" or "osx" => Platform.MacOS,
                 _ => (Platform?)null
-            };
+            })
+            .Where(parsed => parsed.HasValue)
+            .Select(parsed => parsed!.Value)
+            .ToArray();
 
-            if (parsed.HasValue)
-            {
-                result.Add(parsed.Value);
-            }
-        }
-
-        return result.Count > 0 ? result.ToArray() : new[] { Platform.All };
+        return result.Length > 0 ? result : new[] { Platform.All };
     }
 
     // Internal config DTOs for YAML deserialization

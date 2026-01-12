@@ -74,11 +74,14 @@ public sealed class ProtectedPathValidator : IProtectedPathValidator
                 continue;
             }
 
-            // Normalize the pattern as well
-            var normalizedPattern = _pathNormalizer.Normalize(entry.Pattern);
+            // SECURITY FIX: Expand environment variables in patterns (~ %VAR%)
+            // but preserve trailing slashes. Patterns like "/etc/" or "**/secrets/"
+            // have semantic meaning with trailing slashes (directory prefix match).
+            // Full normalization would strip trailing slashes and break protection.
+            var expandedPattern = ExpandPatternEnvironmentVariables(entry.Pattern);
 
-            // Use GlobMatcher for pattern matching
-            if (_pathMatcher.Matches(normalizedPattern, realPath))
+            // Use GlobMatcher for pattern matching (expanded pattern vs normalized path)
+            if (_pathMatcher.Matches(expandedPattern, realPath))
             {
                 return PathValidationResult.Blocked(entry);
             }
@@ -121,5 +124,72 @@ public sealed class ProtectedPathValidator : IProtectedPathValidator
         // Entry applies if it targets All platforms or the current platform
         return entry.Platforms.Contains(Platform.All) ||
                entry.Platforms.Contains(currentPlatform);
+    }
+
+    /// <summary>
+    /// Expands environment variables in a pattern while preserving trailing slashes.
+    /// SECURITY: Preserves trailing slashes which have semantic meaning for directory
+    /// prefix matching (e.g., "/etc/" means "match everything under /etc").
+    /// </summary>
+    /// <param name="pattern">Pattern that may contain ~ or %VAR% environment variables.</param>
+    /// <returns>Pattern with environment variables expanded, trailing slashes preserved.</returns>
+    private static string ExpandPatternEnvironmentVariables(string pattern)
+    {
+        if (string.IsNullOrEmpty(pattern))
+        {
+            return pattern;
+        }
+
+        // Remember if pattern had trailing slash
+        var hadTrailingSlash = pattern.EndsWith('/') || pattern.EndsWith('\\');
+
+        var expanded = pattern;
+
+        // Expand tilde (~) to home directory
+        if (expanded.StartsWith("~/") || expanded.StartsWith("~\\") || expanded == "~")
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            expanded = expanded.Length == 1
+                ? home
+                : home + expanded.Substring(1);
+        }
+
+        // Expand $HOME on Unix-like systems
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) &&
+            expanded.Contains("$HOME", StringComparison.Ordinal))
+        {
+            var home = Environment.GetEnvironmentVariable("HOME")
+                ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            expanded = expanded.Replace("$HOME", home, StringComparison.Ordinal);
+        }
+
+        // Expand %VARNAME% environment variables
+        try
+        {
+            expanded = Environment.ExpandEnvironmentVariables(expanded);
+        }
+        catch (Exception)
+        {
+            // If expansion fails, continue with unexpanded pattern
+        }
+
+        // Normalize separators to platform-specific
+        var separator = Path.DirectorySeparatorChar;
+        var altSeparator = Path.AltDirectorySeparatorChar;
+        if (separator != altSeparator)
+        {
+            expanded = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? expanded.Replace(altSeparator, separator)
+                : expanded.Replace('\\', '/');
+        }
+
+        // SECURITY: Restore trailing slash if original had one
+        // Trailing slashes indicate "match this directory and everything inside"
+        if (hadTrailingSlash && !expanded.EndsWith('/') && !expanded.EndsWith('\\'))
+        {
+            expanded += separator;
+        }
+
+        return expanded;
     }
 }
