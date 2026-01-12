@@ -392,7 +392,7 @@ public sealed class ConversationHistoryTests
     /// </summary>
     private static JsonElement CreateJsonElement(string json)
     {
-        var doc = JsonDocument.Parse(json);
+        using var doc = JsonDocument.Parse(json);
         return doc.RootElement.Clone();
     }
 }
