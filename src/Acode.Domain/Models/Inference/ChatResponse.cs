@@ -136,6 +136,150 @@ public sealed record ChatResponse(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ContentFilterResult>? ContentFilterResults { get; init; }
 
+    /// <summary>
+    /// Creates a successful completion response.
+    /// </summary>
+    /// <param name="message">The response message.</param>
+    /// <param name="usage">Token usage information.</param>
+    /// <param name="model">The model identifier.</param>
+    /// <param name="metadata">Optional metadata (will generate default if null).</param>
+    /// <returns>A ChatResponse with FinishReason.Stop.</returns>
+    /// <remarks>
+    /// FR-004b-110: ChatResponse MUST provide Success factory method.
+    /// </remarks>
+    public static ChatResponse Success(
+        ChatMessage message,
+        UsageInfo usage,
+        string model,
+        ResponseMetadata? metadata = null)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+        return new ChatResponse(
+            Id: Guid.NewGuid().ToString(),
+            Message: message,
+            FinishReason: FinishReason.Stop,
+            Usage: usage,
+            Metadata: metadata ?? CreateDefaultMetadata(model, usage.CompletionTokens),
+            Created: DateTimeOffset.UtcNow,
+            Model: model);
+    }
+
+    /// <summary>
+    /// Creates a truncated response (max length reached).
+    /// </summary>
+    /// <param name="message">The partial response message.</param>
+    /// <param name="usage">Token usage information.</param>
+    /// <param name="model">The model identifier.</param>
+    /// <param name="metadata">Optional metadata (will generate default if null).</param>
+    /// <returns>A ChatResponse with FinishReason.Length.</returns>
+    /// <remarks>
+    /// FR-004b-111: ChatResponse MUST provide Truncated factory method.
+    /// </remarks>
+    public static ChatResponse Truncated(
+        ChatMessage message,
+        UsageInfo usage,
+        string model,
+        ResponseMetadata? metadata = null)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+        return new ChatResponse(
+            Id: Guid.NewGuid().ToString(),
+            Message: message,
+            FinishReason: FinishReason.Length,
+            Usage: usage,
+            Metadata: metadata ?? CreateDefaultMetadata(model, usage.CompletionTokens),
+            Created: DateTimeOffset.UtcNow,
+            Model: model);
+    }
+
+    /// <summary>
+    /// Creates a response indicating tool calls are required.
+    /// </summary>
+    /// <param name="message">The message containing tool calls.</param>
+    /// <param name="usage">Token usage information.</param>
+    /// <param name="model">The model identifier.</param>
+    /// <param name="metadata">Optional metadata (will generate default if null).</param>
+    /// <returns>A ChatResponse with FinishReason.ToolCalls.</returns>
+    /// <remarks>
+    /// FR-004b-112: ChatResponse MUST provide ToolCallsRequired factory method.
+    /// </remarks>
+    public static ChatResponse ToolCallsRequired(
+        ChatMessage message,
+        UsageInfo usage,
+        string model,
+        ResponseMetadata? metadata = null)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+        return new ChatResponse(
+            Id: Guid.NewGuid().ToString(),
+            Message: message,
+            FinishReason: FinishReason.ToolCalls,
+            Usage: usage,
+            Metadata: metadata ?? CreateDefaultMetadata(model, usage.CompletionTokens),
+            Created: DateTimeOffset.UtcNow,
+            Model: model);
+    }
+
+    /// <summary>
+    /// Creates a response for a refused request.
+    /// </summary>
+    /// <param name="refusalMessage">The refusal explanation.</param>
+    /// <param name="usage">Token usage information.</param>
+    /// <param name="model">The model identifier.</param>
+    /// <param name="metadata">Optional metadata (will generate default if null).</param>
+    /// <returns>A ChatResponse with Refusal set and empty message.</returns>
+    /// <remarks>
+    /// FR-004b-113: ChatResponse MUST provide Refused factory method.
+    /// </remarks>
+    public static ChatResponse Refused(
+        string refusalMessage,
+        UsageInfo usage,
+        string model,
+        ResponseMetadata? metadata = null)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+        return new ChatResponse(
+            Id: Guid.NewGuid().ToString(),
+            Message: ChatMessage.CreateAssistant(string.Empty),
+            FinishReason: FinishReason.Stop,
+            Usage: usage,
+            Metadata: metadata ?? CreateDefaultMetadata(model, usage.CompletionTokens),
+            Created: DateTimeOffset.UtcNow,
+            Model: model,
+            Refusal: refusalMessage);
+    }
+
+    /// <summary>
+    /// Creates an error response.
+    /// </summary>
+    /// <param name="errorMessage">The error message.</param>
+    /// <param name="model">The model identifier.</param>
+    /// <param name="metadata">Optional metadata (will generate default if null).</param>
+    /// <returns>A ChatResponse with FinishReason.Error and empty usage.</returns>
+    /// <remarks>
+    /// FR-004b-114: ChatResponse MUST provide Error factory method.
+    /// </remarks>
+    public static ChatResponse Error(
+        string errorMessage,
+        string model,
+        ResponseMetadata? metadata = null) => new(
+            Id: Guid.NewGuid().ToString(),
+            Message: ChatMessage.CreateAssistant(string.Empty),
+            FinishReason: FinishReason.Error,
+            Usage: UsageInfo.Empty,
+            Metadata: metadata ?? CreateDefaultMetadata(model, 0),
+            Created: DateTimeOffset.UtcNow,
+            Model: model,
+            Refusal: errorMessage);
+
+    private static ResponseMetadata CreateDefaultMetadata(string model, int completionTokens) => new(
+        ProviderId: "unknown",
+        ModelId: model,
+        RequestDuration: TimeSpan.Zero,
+        TimeToFirstToken: null,
+        CompletionTokenCount: completionTokens,
+        Extensions: null);
+
     private static string ValidateNonEmpty(string value, string paramName)
     {
         if (string.IsNullOrWhiteSpace(value))
