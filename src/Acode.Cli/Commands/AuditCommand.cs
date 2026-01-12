@@ -125,21 +125,19 @@ Options vary by subcommand. Use 'acode audit <subcommand> --help' for details.";
         // Parse optional --from and --to flags
         for (int i = 1; i < context.Args.Length; i++)
         {
-            if (context.Args[i] == "--from" && i + 1 < context.Args.Length)
+            if (context.Args[i] == "--from"
+                && i + 1 < context.Args.Length
+                && DateTimeOffset.TryParse(context.Args[i + 1], out var parsedFrom))
             {
-                if (DateTimeOffset.TryParse(context.Args[i + 1], out var parsed))
-                {
-                    fromDate = parsed;
-                    i++;
-                }
+                fromDate = parsedFrom;
+                i++;
             }
-            else if (context.Args[i] == "--to" && i + 1 < context.Args.Length)
+            else if (context.Args[i] == "--to"
+                && i + 1 < context.Args.Length
+                && DateTimeOffset.TryParse(context.Args[i + 1], out var parsedTo))
             {
-                if (DateTimeOffset.TryParse(context.Args[i + 1], out var parsed))
-                {
-                    toDate = parsed;
-                    i++;
-                }
+                toDate = parsedTo;
+                i++;
             }
         }
 
