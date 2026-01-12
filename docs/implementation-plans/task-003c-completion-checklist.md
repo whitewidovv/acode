@@ -481,7 +481,7 @@ IDisposable BeginSpan(string operation);
 ---
 
 ### Gap #13: Application - Audit Commands
-**Status**: [ ]
+**Status**: [✅]
 **Files to Create**:
 - `src/Acode.Application/Audit/Commands/StartAuditSessionCommand.cs`
 - `src/Acode.Application/Audit/Commands/EndAuditSessionCommand.cs`
@@ -503,7 +503,15 @@ IDisposable BeginSpan(string operation);
 - Handlers work correctly
 - Integration with domain layer
 
-**Evidence**: [To be filled when complete]
+**Evidence**: All 23 command tests passing
+- StartAuditSessionCommand.cs (86 lines) + Handler, 7 tests (session creation, logging, validation)
+- EndAuditSessionCommand.cs (88 lines) + Handler, 6 tests (session end, metrics, validation)
+- LogEventCommand.cs (102 lines) + Handler, 5 tests (event logging, context passing)
+- CleanupLogsCommand.cs (102 lines) + Handler, 5 tests (cleanup, storage limits, validation)
+- ILogCleanupService.cs: Interface for log cleanup (Clean Architecture)
+- CQRS pattern: Command records + Handler classes with HandleAsync methods
+- CancellationToken support throughout
+- No Infrastructure dependencies (uses interfaces)
 
 ---
 
