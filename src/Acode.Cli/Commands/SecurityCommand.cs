@@ -65,12 +65,15 @@ public sealed class SecurityCommand
     /// Checks if a path is protected.
     /// </summary>
     /// <param name="path">Path to check.</param>
+    /// <param name="operation">Optional file operation to validate against.</param>
     /// <returns>Exit code (0 = allowed, 1 = blocked).</returns>
-    public int CheckPath(string path)
+    public int CheckPath(string path, FileOperation? operation = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path, nameof(path));
 
-        var result = _pathValidator.Validate(path);
+        var result = operation.HasValue
+            ? _pathValidator.Validate(path, operation.Value)
+            : _pathValidator.Validate(path);
 
         if (result.IsProtected)
         {

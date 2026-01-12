@@ -296,6 +296,44 @@ public static class DefaultDenylist
             Platforms = new[] { Platform.All }
         });
 
+        // Azure - Glob patterns (match anywhere in path)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.azure/",
+            Reason = "Azure directory anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.azure/**",
+            Reason = "Any file inside .azure directory",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        // GCloud - Glob patterns (match anywhere in path)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.gcloud/",
+            Reason = "GCloud directory anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.gcloud/**",
+            Reason = "Any file inside .gcloud directory",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
         entries.Add(new DenylistEntry
         {
             Pattern = "~/.azure/",
