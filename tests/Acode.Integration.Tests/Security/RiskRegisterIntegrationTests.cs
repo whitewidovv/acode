@@ -252,9 +252,6 @@ public class RiskRegisterIntegrationTests
         // Arrange
         var nonexistentPath = "/nonexistent/path/risk-register.yaml";
 
-        // Act
-        Action act = () => _ = new YamlRiskRegisterRepository(nonexistentPath);
-
         // Assert - should throw when trying to access data
         var repo = new YamlRiskRegisterRepository(nonexistentPath);
         Func<Task> getDataAct = async () => await repo.GetAllRisksAsync();
