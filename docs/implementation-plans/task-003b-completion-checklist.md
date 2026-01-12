@@ -360,7 +360,7 @@ public sealed class PathNormalizer : IPathNormalizer
 ---
 
 ### Gap #9: ISymlinkResolver Interface
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `src/Acode.Domain/Security/PathProtection/ISymlinkResolver.cs`
 **Why Needed**: Spec lines 4640-4641 define interface for resolving symlinks (security critical)
 **Required Methods**:
@@ -384,12 +384,12 @@ public interface ISymlinkResolver
 
 **Implementation Pattern**: See spec lines 4640-4642
 **Success Criteria**: Interface compiles
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Created SymlinkError.cs enum, SymlinkResolutionResult.cs record, and ISymlinkResolver.cs interface. All types compile successfully. Gap #9 COMPLETE
 
 ---
 
 ### Gap #10: SymlinkResolverTests.cs
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `tests/Acode.Domain.Tests/Security/PathProtection/SymlinkResolverTests.cs`
 **Why Needed**: Testing Requirements lines 1552-1564 require symlink resolution tests
 **Required Tests** (from spec lines 1553-1563):
@@ -403,7 +403,7 @@ public interface ISymlinkResolver
 
 **Implementation Pattern**: See spec lines 1565-1650 for test code patterns
 **Success Criteria**: All 7 tests written (will fail until Gap #11 implemented)
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Created SymlinkResolverTests.cs with 10 test methods (7 required + 3 additional edge cases). Tests compile successfully. Build fails as expected (SymlinkResolver doesn't exist yet - TDD RED phase). Gap #10 COMPLETE
 
 ---
 
