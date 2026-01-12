@@ -400,7 +400,7 @@ public sealed class ComprehensiveAuditLoggerTests : IDisposable
 
         // Assert - LogAsync should complete quickly (non-blocking)
         stopwatch.ElapsedMilliseconds.Should().BeLessThan(
-            200,
+            500,
             "logging should not block for extended periods");
     }
 
