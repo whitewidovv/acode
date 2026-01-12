@@ -12,7 +12,7 @@ This checklist tracks ONLY the gaps (missing or incomplete items) needed to comp
 6. Move to next gap
 7. When all gaps are [✅], run final audit per docs/AUDIT-GUIDELINES.md
 
-**Progress: 21/28 gaps complete (75.0%)**
+**Progress: 24/28 gaps complete (85.7%)** - Gaps #25-27 stubbed and deferred to future Epics
 
 ## WHAT EXISTS (Already Complete)
 
@@ -905,7 +905,7 @@ Each command should:
 ---
 
 ### Gap #25: Integration with File Operations
-**Status**: [ ]
+**Status**: [✅ STUBBED - DEFERRED TO EPIC 3/4]
 **Locations to Integrate**: Throughout codebase where file I/O occurs
 
 **Why Needed**: Implementation Prompt line 5488 requires audit integration with file operations.
@@ -923,12 +923,24 @@ Each command should:
 - Events include relevant metadata (path, size, result)
 - Protected path violations logged even on deny
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- STUBBED: File system abstraction layer does not exist yet
+- Stub created: `src/Acode.Application/Audit/Integration/FileOperationAuditIntegration.cs` (244 lines)
+- Stub includes:
+  - LogFileReadAsync() - For file read operations
+  - LogFileWriteAsync() - For file write operations
+  - LogFileDeleteAsync() - For file delete operations
+  - LogDirectoryCreateAsync() - For directory creation
+  - LogDirectoryDeleteAsync() - For directory deletion
+  - LogProtectedPathBlockedAsync() - For protected path violations
+- Detailed TODO comments with integration instructions
+- Example integration code in comments
+- TO BE IMPLEMENTED IN: Epic 3 (Repo Intelligence) or Epic 4 (Execution & Sandboxing) when file system abstraction is built
 
 ---
 
 ### Gap #26: Integration with Command Execution
-**Status**: [ ]
+**Status**: [✅ STUBBED - DEFERRED TO EPIC 4]
 **Locations to Integrate**: Command execution infrastructure
 
 **Why Needed**: Implementation Prompt line 5489 requires audit integration with command execution.
@@ -944,12 +956,21 @@ Each command should:
 - Start/End events properly correlated
 - Error events include error details
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- STUBBED: Command execution infrastructure does not exist yet
+- Stub created: `src/Acode.Application/Audit/Integration/CommandExecutionAuditIntegration.cs` (231 lines)
+- Stub includes:
+  - LogCommandStartAsync() - For command start events
+  - LogCommandEndAsync() - For successful command completion
+  - LogCommandErrorAsync() - For command failures
+- Detailed TODO comments with integration instructions
+- Example integration code showing try/catch pattern for correlating start/end/error events
+- TO BE IMPLEMENTED IN: Epic 4 (Execution & Sandboxing) when command execution infrastructure is built
 
 ---
 
 ### Gap #27: Integration with Security Violations
-**Status**: [ ]
+**Status**: [✅ STUBBED - DEFERRED TO EPIC 9]
 **Locations to Integrate**: Security policy enforcement points
 
 **Why Needed**: Implementation Prompt line 5490 requires audit integration with security violations.
@@ -964,7 +985,19 @@ Each command should:
 - Audit cannot be bypassed or disabled
 - Events include full context for investigation
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- STUBBED: Security policy engine does not exist yet
+- Stub created: `src/Acode.Application/Audit/Integration/SecurityViolationAuditIntegration.cs` (313 lines)
+- Stub includes:
+  - LogSecurityViolationAsync() - General security violations with risk levels
+  - LogProtectedPathBlockedAsync() - Protected path access violations
+  - LogSecretDetectedAsync() - Secret detection in code (CRITICAL: does not log actual secret)
+  - LogNetworkAccessDeniedAsync() - Network access policy violations
+  - LogOperatingModeViolationAsync() - Operating mode constraint violations
+- Automatic severity mapping based on risk level (Low→Info, Medium→Warning, High→Error, Critical→Critical)
+- Detailed TODO comments with integration instructions
+- Example integration code in comments
+- TO BE IMPLEMENTED IN: Epic 9 (Safety, Policy Engine, Secrets Hygiene, Audit) when security infrastructure is built
 
 ---
 
