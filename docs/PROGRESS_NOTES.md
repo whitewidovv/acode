@@ -1,8 +1,8 @@
 # Progress Notes
 
-## 2026-01-11 - Window 2 - Task 003b In Progress (Phase 3 COMPLETE ✅)
+## 2026-01-11 - Window 2 - Task 003b In Progress (Gap #12 COMPLETE ✅)
 
-### Current Status: Phase 1 COMPLETE ✅, Phase 2 COMPLETE ✅, Phase 3 COMPLETE ✅
+### Current Status: Phases 1-3 COMPLETE ✅, Gap #12 COMPLETE ✅
 
 **Phase 1 (Core Pattern Matching) - COMPLETE**:
 - ✅ Gap #1: DefaultDenylistTests.cs (19 tests) - All passing
@@ -20,6 +20,13 @@
 - ✅ Gap #9: SymlinkError enum, SymlinkResolutionResult record, ISymlinkResolver interface
 - ✅ Gap #10: SymlinkResolverTests.cs (10 tests)
 - ✅ Gap #11: SymlinkResolver.cs (197 lines) - All 10 tests pass in 5.66s!
+
+**Phase 4 (Integration) - IN PROGRESS**:
+- ✅ Gap #12: ProtectedPathValidator integration verified + added 6 glob patterns
+  - ProtectedPathValidator already correctly uses all components (GlobMatcher, PathNormalizer, SymlinkResolver)
+  - Added missing glob patterns: **/.ssh/, **/.ssh/**, **/.ssh/id_*, **/.aws/, **/.aws/**, **/.aws/credentials
+  - Fixed failing tests for relative paths (.ssh/id_rsa, .aws/credentials)
+  - All 12 ProtectedPathValidatorTests pass, all 127 Domain PathProtection tests pass
 
 **CRITICAL FIX**: Fixed blocking error in task-002b ConfigValidator.cs (line 89) - typo in error code constant was preventing ALL tests from running.
 
@@ -93,7 +100,7 @@ Following TDD strictly, implementing in 8 phases:
 7. CLI & Tests (Gaps 25-27) - PENDING
 8. Documentation & Finalization (Gaps 28-33) - PENDING
 
-**Progress**: 11 of 33 gaps complete (33%)
+**Progress**: 12 of 33 gaps complete (36%)
 
 ### Next Steps
 - ✅ DONE: Gap #1 - DefaultDenylistTests (RED)

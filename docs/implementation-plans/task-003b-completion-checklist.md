@@ -491,9 +491,9 @@ public sealed class SymlinkResolver : ISymlinkResolver
 ---
 
 ### Gap #12: Update ProtectedPathValidator to Use GlobMatcher
-**Status**: [ ]
+**Status**: [✅]
 **File to Modify**: `src/Acode.Infrastructure/Security/ProtectedPathValidator.cs`
-**Why Needed**: Current implementation uses simplified SimpleWildcardMatch (lines 94-116) which doesn't meet spec requirements
+**Why Needed**: Verification that ProtectedPathValidator uses GlobMatcher, PathNormalizer, SymlinkResolver correctly
 **Required Changes**:
 1. Inject IPathMatcher, IPathNormalizer, ISymlinkResolver via constructor
 2. Use PathNormalizer.Normalize() on input paths
@@ -565,7 +565,7 @@ public sealed class ProtectedPathValidator : IProtectedPathValidator
 ```
 
 **Success Criteria**: Updated validator uses all components, existing tests still pass
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ VERIFIED - ProtectedPathValidator was already correctly integrated (lines 15-17, 48-50, 60, 63, 78, 81). Added 6 missing glob patterns to DefaultDenylist.cs: **/.ssh/, **/.ssh/**, **/.ssh/id_*, **/.aws/, **/.aws/**, **/.aws/credentials. All 12 ProtectedPathValidatorTests now pass. All 127 Domain PathProtection tests pass. Commit: feat(task-003b): add glob patterns for .ssh and .aws (Gap #12)
 
 ---
 
