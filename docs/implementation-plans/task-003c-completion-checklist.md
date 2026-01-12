@@ -12,7 +12,7 @@ This checklist tracks ONLY the gaps (missing or incomplete items) needed to comp
 6. Move to next gap
 7. When all gaps are [✅], run final audit per docs/AUDIT-GUIDELINES.md
 
-**Progress: 16/28 gaps complete (57.1%)**
+**Progress: 18/28 gaps complete (64.3%)**
 
 ## WHAT EXISTS (Already Complete)
 
@@ -615,7 +615,7 @@ IDisposable BeginSpan(string operation);
 ---
 
 ### Gap #17: CLI - Audit Commands Directory
-**Status**: [ ]
+**Status**: [✅]
 **Directory to Create**: `src/Acode.Cli/Commands/Audit/`
 
 **Files to Create**:
@@ -646,7 +646,16 @@ Each command should:
 - Output is user-friendly
 - Error handling is robust
 
-**Evidence**: [To be filled when complete]
+**Evidence**: AuditCommand.cs complete (417 lines)
+- Single ICommand with 8 subcommands (list, show, search, verify, export, stats, tail, cleanup)
+- Date range filtering (--from, --to)
+- Multi-criteria search (--type, --severity, --text)
+- Export format selection (--format json|csv|text)
+- Retention policy (--retention-days)
+- Optional handler injection for flexibility
+- Comprehensive help text with examples
+- Error handling with appropriate ExitCode values
+- Integration with Application Queries and Commands
 
 ---
 
@@ -735,7 +744,7 @@ Each command should:
 ---
 
 ### Gap #21: Update Config Schema for Audit
-**Status**: [ ]
+**Status**: [✅]
 **File to Modify**: `data/config-schema.json`
 
 **Why Needed**: Integration point with Task 002 (Config Contract). Audit section must be defined in schema.
@@ -763,7 +772,14 @@ Each command should:
 - Default values provided
 - Validation catches invalid configs
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- File: `data/config-schema.json` lines 497-544
+- Added audit to root properties (line 41-43)
+- Added audit to first definitions block (line 79-81)
+- Added full audit schema definition (lines 497-544)
+- Includes all required properties: enabled, log_level, log_directory, retention_days, rotation_size_mb, rotation_interval, export_formats
+- All properties have correct types, defaults, and validation constraints
+- Schema follows JSON Schema Draft 2020-12 format
 
 ---
 
