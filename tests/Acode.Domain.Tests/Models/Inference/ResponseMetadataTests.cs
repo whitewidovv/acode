@@ -74,7 +74,7 @@ public class ResponseMetadataTests
             ["quantization"] = JsonDocument.Parse("\"q4_0\"").RootElement,
         };
 
-        var metadata = new ResponseMetadata("ollama", "llama2", TimeSpan.FromSeconds(1), null, extensions);
+        var metadata = new ResponseMetadata("ollama", "llama2", TimeSpan.FromSeconds(1), null, null, extensions);
 
         metadata.Extensions.Should().NotBeNull();
         metadata.Extensions.Should().HaveCount(2);
@@ -91,7 +91,7 @@ public class ResponseMetadataTests
             ["numeric_field"] = JsonDocument.Parse("42").RootElement,
         };
 
-        var metadata = new ResponseMetadata("vllm", "model", TimeSpan.FromSeconds(1), null, extensions);
+        var metadata = new ResponseMetadata("vllm", "model", TimeSpan.FromSeconds(1), null, null, extensions);
 
         metadata.Extensions.Should().ContainKey("custom_field");
         metadata.Extensions.Should().ContainKey("numeric_field");
@@ -187,5 +187,61 @@ public class ResponseMetadataTests
         json.Should().Contain("\"providerId\":");
         json.Should().Contain("\"modelId\":");
         json.Should().Contain("\"requestDuration\":");
+    }
+
+    [Fact]
+    public void Should_Compute_TokensPerSecond()
+    {
+        // FR-004b-047: TokensPerSecond computed from CompletionTokenCount / Duration
+        var duration = TimeSpan.FromSeconds(2);
+        var metadata = new ResponseMetadata(
+            "ollama",
+            "llama2",
+            duration,
+            TimeToFirstToken: null,
+            CompletionTokenCount: 100);
+
+        // Assert
+        metadata.TokensPerSecond.Should().Be(50.0); // 100 tokens / 2 seconds = 50 tokens/sec
+    }
+
+    [Fact]
+    public void Should_Handle_Zero_Duration()
+    {
+        // Zero duration should return null for TokensPerSecond (avoid divide by zero)
+        var metadata = new ResponseMetadata(
+            "ollama",
+            "model",
+            TimeSpan.Zero,
+            TimeToFirstToken: null,
+            CompletionTokenCount: 100);
+
+        metadata.TokensPerSecond.Should().BeNull();
+    }
+
+    [Fact]
+    public void Should_Handle_Null_CompletionTokenCount()
+    {
+        // Null CompletionTokenCount should return null for TokensPerSecond
+        var metadata = new ResponseMetadata(
+            "ollama",
+            "model",
+            TimeSpan.FromSeconds(2));
+
+        metadata.TokensPerSecond.Should().BeNull();
+    }
+
+    [Fact]
+    public void Should_Handle_Zero_Tokens()
+    {
+        // Zero tokens is valid (e.g., error responses)
+        var metadata = new ResponseMetadata(
+            "ollama",
+            "model",
+            TimeSpan.FromSeconds(1),
+            TimeToFirstToken: null,
+            CompletionTokenCount: 0);
+
+        metadata.TokensPerSecond.Should().Be(0.0);
     }
 }

@@ -19,6 +19,7 @@ public sealed record ResponseMetadata(
     string ModelId,
     TimeSpan RequestDuration,
     TimeSpan? TimeToFirstToken = null,
+    int? CompletionTokenCount = null,
     IReadOnlyDictionary<string, JsonElement>? Extensions = null)
 {
     /// <summary>
@@ -63,14 +64,28 @@ public sealed record ResponseMetadata(
     public TimeSpan? TimeToFirstToken { get; init; } = TimeToFirstToken;
 
     /// <summary>
-    /// Gets the tokens per second rate (placeholder - needs completion tokens).
+    /// Gets the number of completion tokens (used for TokensPerSecond computation).
+    /// </summary>
+    /// <remarks>
+    /// Optional completion token count for computing throughput metrics.
+    /// </remarks>
+    [JsonPropertyName("completionTokenCount")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? CompletionTokenCount { get; init; } = CompletionTokenCount;
+
+    /// <summary>
+    /// Gets the tokens per second rate.
     /// </summary>
     /// <remarks>
     /// FR-004b-047: ResponseMetadata MUST include TokensPerSecond computed property.
-    /// Note: This will be computed from CompletionTokens / Duration in ChatResponse.
+    /// Computed as CompletionTokenCount / RequestDuration.TotalSeconds when both available.
     /// </remarks>
     [JsonPropertyName("tokensPerSecond")]
-    public double? TokensPerSecond => null; // Will be computed in ChatResponse with Usage data
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? TokensPerSecond =>
+        this.CompletionTokenCount.HasValue && this.RequestDuration.TotalSeconds > 0
+            ? this.CompletionTokenCount.Value / this.RequestDuration.TotalSeconds
+            : null;
 
     /// <summary>
     /// Gets arbitrary provider-specific fields.
@@ -100,6 +115,7 @@ public sealed record ResponseMetadata(
             && this.ModelId == other.ModelId
             && this.RequestDuration == other.RequestDuration
             && this.TimeToFirstToken == other.TimeToFirstToken
+            && this.CompletionTokenCount == other.CompletionTokenCount
             && DictionariesEqual(this.Extensions, other.Extensions);
     }
 
@@ -110,6 +126,7 @@ public sealed record ResponseMetadata(
         hash.Add(this.ModelId);
         hash.Add(this.RequestDuration);
         hash.Add(this.TimeToFirstToken);
+        hash.Add(this.CompletionTokenCount);
 
         // Include extensions in hash
         foreach (var kvp in this.Extensions.OrderBy(x => x.Key))

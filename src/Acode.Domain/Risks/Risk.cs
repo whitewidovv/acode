@@ -44,4 +44,29 @@ public sealed record Risk
     /// Gets the attack vectors associated with this risk.
     /// </summary>
     public IReadOnlyList<string>? AttackVectors { get; init; }
+
+    /// <summary>
+    /// Gets the residual risk remaining after mitigations are applied.
+    /// </summary>
+    public string? ResidualRisk { get; init; }
+
+    /// <summary>
+    /// Gets the team or individual responsible for this risk.
+    /// </summary>
+    public required string Owner { get; init; }
+
+    /// <summary>
+    /// Gets the current status of this risk.
+    /// </summary>
+    public required RiskStatus Status { get; init; }
+
+    /// <summary>
+    /// Gets the date and time when this risk was created.
+    /// </summary>
+    public required DateTimeOffset Created { get; init; }
+
+    /// <summary>
+    /// Gets the date and time when this risk was last reviewed.
+    /// </summary>
+    public required DateTimeOffset LastReview { get; init; }
 }

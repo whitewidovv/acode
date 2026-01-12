@@ -64,6 +64,7 @@ If you can make the terminal flash or request attention until it receives focus,
 
 ### Additional Guidelines
 
+- **CRITICAL: Notification MUST be the absolute LAST action** - Complete ALL status reporting, output generation, and thinking BEFORE calling the notification tool. The user should never wait while you generate output after notifying them.
 - **Wait at least 10 seconds** between multiple notifications in succession to avoid overwhelming the user
 - **Low context notifications** (<5k tokens remaining): Include the exact file and line number where you stopped, and a brief prompt for continuation (conversation may be compacted, so be specific)
 - **Always use the dynamic worktree identifier**—never hardcode "Window 1" or "Window 2"

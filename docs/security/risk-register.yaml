@@ -7,6 +7,7 @@ review_cycle: quarterly
 # Each risk scored using DREAD methodology (Damage, Reproducibility, Exploitability, Affected Users, Discoverability)
 # DREAD scale: 1-10 for each factor, aggregated for severity classification
 
+
 risks:
   # ===================================================================
   # SPOOFING RISKS (RISK-S-001 to RISK-S-006)
@@ -14,7 +15,32 @@ risks:
 
   - id: RISK-S-001
     category: spoofing
-    title: Malicious LLM impersonating local model
+    title: Malicious config file injection
+    description: |
+      Attacker with file system access injects or replaces .agent/config.yml with malicious
+      configuration containing attacker-controlled values, such as compromised LLM endpoints,
+      disabled security features, or modified operating modes.
+    dread:
+      damage: 8
+      reproducibility: 7
+      exploitability: 6
+      affected_users: 5
+      discoverability: 6
+    severity: high
+    mitigations:
+      - MIT-006  # Config file integrity checks
+      - MIT-007  # File permissions validation
+      - MIT-008  # Audit logging of config changes
+    residual_risk: |
+      If attacker has filesystem write access, they may have broader compromise capability.
+    owner: security-team
+    status: active
+    created: "2026-01-03"
+    last_review: "2026-01-03"
+
+  - id: RISK-S-002
+    category: spoofing
+    title: Fake LLM provider endpoint
     description: |
       In Burst mode, if an attacker controls DNS or network routing, they could redirect
       LLM API requests to a malicious endpoint that impersonates the intended service,
@@ -37,49 +63,25 @@ risks:
     created: "2026-01-03"
     last_review: "2026-01-03"
 
-  - id: RISK-S-002
-    category: spoofing
-    title: Config file replacement attack
-    description: |
-      Attacker with file system access replaces .agent/config.yml with malicious
-      configuration pointing to attacker-controlled LLM or modifying operating mode.
-    dread:
-      damage: 8
-      reproducibility: 7
-      exploitability: 6
-      affected_users: 5
-      discoverability: 6
-    severity: high
-    mitigations:
-      - MIT-006  # Config file integrity checks
-      - MIT-007  # File permissions validation
-      - MIT-008  # Audit logging of config changes
-    residual_risk: |
-      If attacker has filesystem write access, they may have broader compromise capability.
-    owner: security-team
-    status: active
-    created: "2026-01-03"
-    last_review: "2026-01-03"
-
   - id: RISK-S-003
     category: spoofing
-    title: Dependency confusion attack
+    title: Spoofed environment variables
     description: |
-      Attacker publishes malicious package with same name as internal dependency,
-      causing package manager to install malicious version.
+      Attacker modifies environment variables to influence Acode behavior (PATH, LD_PRELOAD, etc.),
+      potentially causing Acode to execute malicious binaries or load attacker-controlled libraries.
     dread:
-      damage: 10
-      reproducibility: 8
-      exploitability: 4
-      affected_users: 10
-      discoverability: 3
+      damage: 8
+      reproducibility: 6
+      exploitability: 6
+      affected_users: 7
+      discoverability: 5
     severity: high
     mitigations:
-      - MIT-009  # Package hash verification
-      - MIT-010  # Private package registry priority
-      - MIT-011  # Dependency pinning in lock files
+      - MIT-035  # Environment variable sanitization
+      - MIT-036  # Explicit PATH for spawned processes
+      - MIT-037  # Audit logging of environment at startup
     residual_risk: |
-      Supply chain attacks remain difficult to detect without comprehensive SBOM analysis.
+      LD_PRELOAD and similar attacks may bypass application-level controls.
     owner: infrastructure-team
     status: active
     created: "2026-01-03"
@@ -87,32 +89,10 @@ risks:
 
   - id: RISK-S-004
     category: spoofing
-    title: Process impersonation
+    title: Impersonated repository
     description: |
-      Malicious process impersonates Acode CLI to capture user input or credentials.
-    dread:
-      damage: 7
-      reproducibility: 5
-      exploitability: 7
-      affected_users: 6
-      discoverability: 5
-    severity: medium
-    mitigations:
-      - MIT-012  # Code signing
-      - MIT-013  # Process integrity verification
-      - MIT-014  # User education on verifying process identity
-    residual_risk: |
-      Users may not verify process identity before providing sensitive input.
-    owner: security-team
-    status: active
-    created: "2026-01-03"
-    last_review: "2026-01-03"
-
-  - id: RISK-S-005
-    category: spoofing
-    title: Git remote impersonation
-    description: |
-      Attacker modifies .git/config to point to malicious remote, exfiltrating code during push/pull.
+      Attacker modifies .git/config to point to malicious remote, exfiltrating code during push/pull,
+      or delivering malicious code during clone/fetch operations.
     dread:
       damage: 9
       reproducibility: 6
@@ -131,25 +111,51 @@ risks:
     created: "2026-01-03"
     last_review: "2026-01-03"
 
+  - id: RISK-S-005
+    category: spoofing
+    title: Fake Acode binary
+    description: |
+      Attacker replaces legitimate Acode binary with trojanized version that appears authentic
+      but contains backdoors, exfiltrates data, or compromises the development environment.
+    dread:
+      damage: 10
+      reproducibility: 4
+      exploitability: 5
+      affected_users: 10
+      discoverability: 3
+    severity: high
+    mitigations:
+      - MIT-038  # Binary code signing
+      - MIT-012  # Code signing verification
+      - MIT-013  # Process integrity verification
+      - MIT-014  # User education on verifying binary authenticity
+    residual_risk: |
+      Users may not verify binary signatures before execution.
+    owner: release-team
+    status: active
+    created: "2026-01-03"
+    last_review: "2026-01-03"
+
   - id: RISK-S-006
     category: spoofing
-    title: User identity spoofing in audit logs
+    title: Man-in-the-middle on localhost
     description: |
-      If audit logs don't capture true user identity, attacker actions may be attributed to legitimate user.
+      Malicious process listens on localhost ports, intercepting communication between Acode
+      components (CLI, LLM server, database) to capture sensitive data or inject malicious responses.
     dread:
-      damage: 6
+      damage: 7
       reproducibility: 4
       exploitability: 6
-      affected_users: 8
-      discoverability: 7
+      affected_users: 6
+      discoverability: 5
     severity: medium
     mitigations:
-      - MIT-018  # Session ID and correlation ID in all audit events
-      - MIT-019  # Operating system user context capture
-      - MIT-020  # Tamper-evident audit logs
+      - MIT-125  # TLS for localhost communication (future)
+      - MIT-126  # Port binding validation
+      - MIT-127  # Process authentication
     residual_risk: |
-      User identity spoofing at OS level (su, sudo) may still attribute actions incorrectly.
-    owner: audit-team
+      Localhost TLS adds complexity; process-level security may be sufficient.
+    owner: infrastructure-team
     status: active
     created: "2026-01-03"
     last_review: "2026-01-03"
@@ -160,7 +166,31 @@ risks:
 
   - id: RISK-T-001
     category: tampering
-    title: Source code modification by malicious LLM response
+    title: Config file modification
+    description: |
+      Attacker modifies .agent/config.yml to disable protected paths, secret redaction, or audit logging,
+      thereby bypassing security controls and enabling further attacks.
+    dread:
+      damage: 9
+      reproducibility: 9
+      exploitability: 5
+      affected_users: 10
+      discoverability: 5
+    severity: high
+    mitigations:
+      - MIT-006  # Config integrity checks
+      - MIT-028  # Security invariants (cannot be disabled via config)
+      - MIT-008  # Audit logging of config changes
+    residual_risk: |
+      If config validation is bypassed, security controls may be disabled.
+    owner: security-team
+    status: active
+    created: "2026-01-03"
+    last_review: "2026-01-03"
+
+  - id: RISK-T-002
+    category: tampering
+    title: LLM response manipulation
     description: |
       LLM response contains malicious code that, when applied by Acode, introduces
       backdoors, vulnerabilities, or data exfiltration into the codebase.
@@ -183,11 +213,86 @@ risks:
     created: "2026-01-03"
     last_review: "2026-01-03"
 
-  - id: RISK-T-002
+  - id: RISK-T-003
     category: tampering
-    title: Audit log tampering
+    title: Command injection via config
     description: |
-      Attacker with file system access modifies or deletes audit logs to hide malicious activity.
+      Malicious configuration file contains command injection payloads in string values
+      that are later executed by Acode without proper sanitization.
+    dread:
+      damage: 10
+      reproducibility: 8
+      exploitability: 5
+      affected_users: 10
+      discoverability: 5
+    severity: high
+    mitigations:
+      - MIT-104  # Safe YAML parsing
+      - MIT-105  # JSON schema validation
+      - MIT-106  # Command whitelist
+      - MIT-107  # Input sanitization for all config values
+    residual_risk: |
+      Novel command injection techniques may bypass input sanitization.
+    owner: security-team
+    status: active
+    created: "2026-01-03"
+    last_review: "2026-01-03"
+
+  - id: RISK-T-004
+    category: tampering
+    title: Malicious code in repository
+    description: |
+      Attacker commits malicious code to repository (backdoors, vulnerabilities) that gets
+      processed by Acode, potentially exploiting Acode itself or compromising generated output.
+    dread:
+      damage: 8
+      reproducibility: 7
+      exploitability: 6
+      affected_users: 8
+      discoverability: 5
+    severity: high
+    mitigations:
+      - MIT-128  # Code review requirements
+      - MIT-023  # Static analysis on repository code
+      - MIT-129  # Sandboxing for code execution
+      - MIT-130  # Repository integrity verification
+    residual_risk: |
+      Sophisticated malicious code may evade detection.
+    owner: security-team
+    status: active
+    created: "2026-01-03"
+    last_review: "2026-01-03"
+
+  - id: RISK-T-005
+    category: tampering
+    title: Dependency tampering
+    description: |
+      Attacker publishes malicious package with same name as internal dependency,
+      causing package manager to install malicious version (dependency confusion attack).
+    dread:
+      damage: 10
+      reproducibility: 8
+      exploitability: 4
+      affected_users: 10
+      discoverability: 3
+    severity: high
+    mitigations:
+      - MIT-009  # Package hash verification
+      - MIT-010  # Private package registry priority
+      - MIT-011  # Dependency pinning in lock files
+    residual_risk: |
+      Supply chain attacks remain difficult to detect without comprehensive SBOM analysis.
+    owner: infrastructure-team
+    status: active
+    created: "2026-01-03"
+    last_review: "2026-01-03"
+
+  - id: RISK-T-006
+    category: tampering
+    title: Log file modification
+    description: |
+      Attacker with file system access modifies or deletes audit logs to hide malicious activity,
+      removing evidence of security incidents or unauthorized actions.
     dread:
       damage: 8
       reproducibility: 8
@@ -207,122 +312,30 @@ risks:
     created: "2026-01-03"
     last_review: "2026-01-03"
 
-  - id: RISK-T-003
-    category: tampering
-    title: Configuration tampering to disable security controls
-    description: |
-      Attacker modifies .agent/config.yml to disable protected paths, secret redaction, or audit logging.
-    dread:
-      damage: 9
-      reproducibility: 9
-      exploitability: 5
-      affected_users: 10
-      discoverability: 5
-    severity: high
-    mitigations:
-      - MIT-006  # Config integrity checks
-      - MIT-028  # Security invariants (cannot be disabled via config)
-      - MIT-008  # Audit logging of config changes
-    residual_risk: |
-      If config validation is bypassed, security controls may be disabled.
-    owner: security-team
-    status: active
-    created: "2026-01-03"
-    last_review: "2026-01-03"
-
-  - id: RISK-T-004
-    category: tampering
-    title: Symlink attack to modify protected files
-    description: |
-      Attacker creates symlink from allowed path to protected path, bypassing path protection.
-    dread:
-      damage: 9
-      reproducibility: 7
-      exploitability: 6
-      affected_users: 8
-      discoverability: 5
-    severity: high
-    mitigations:
-      - MIT-029  # Symlink resolution before path validation
-      - MIT-030  # Max symlink depth limit (40)
-      - MIT-031  # Circular symlink detection
-    residual_risk: |
-      Complex symlink chains may be difficult to detect.
-    owner: security-team
-    status: active
-    created: "2026-01-03"
-    last_review: "2026-01-03"
-
-  - id: RISK-T-005
-    category: tampering
-    title: Time-of-check to time-of-use (TOCTOU) race
-    description: |
-      Path is validated as safe, but replaced with malicious file before use.
-    dread:
-      damage: 7
-      reproducibility: 3
-      exploitability: 8
-      affected_users: 6
-      discoverability: 2
-    severity: medium
-    mitigations:
-      - MIT-032  # Atomic file operations where possible
-      - MIT-033  # Re-validation immediately before use
-      - MIT-034  # File handle caching
-    residual_risk: |
-      TOCTOU is inherently difficult to eliminate completely.
-    owner: infrastructure-team
-    status: active
-    created: "2026-01-03"
-    last_review: "2026-01-03"
-
-  - id: RISK-T-006
-    category: tampering
-    title: Environment variable injection
-    description: |
-      Attacker modifies environment variables to influence Acode behavior (PATH, LD_PRELOAD, etc.).
-    dread:
-      damage: 8
-      reproducibility: 6
-      exploitability: 6
-      affected_users: 7
-      discoverability: 5
-    severity: high
-    mitigations:
-      - MIT-035  # Environment variable sanitization
-      - MIT-036  # Explicit PATH for spawned processes
-      - MIT-037  # Audit logging of environment at startup
-    residual_risk: |
-      LD_PRELOAD and similar attacks may bypass application-level controls.
-    owner: infrastructure-team
-    status: active
-    created: "2026-01-03"
-    last_review: "2026-01-03"
-
   - id: RISK-T-007
     category: tampering
-    title: Binary tampering via package manager
+    title: Output file corruption
     description: |
-      Attacker compromises package manager to deliver tampered Acode binaries.
+      Acode-generated output files (code, documentation, configs) are corrupted due to bugs,
+      resource exhaustion, or malicious LLM responses, producing invalid or dangerous results.
     dread:
-      damage: 10
-      reproducibility: 4
-      exploitability: 3
-      affected_users: 10
-      discoverability: 2
-    severity: high
+      damage: 7
+      reproducibility: 5
+      exploitability: 6
+      affected_users: 8
+      discoverability: 7
+    severity: medium
     mitigations:
-      - MIT-038  # Binary code signing
-      - MIT-039  # Package checksum verification
-      - MIT-040  # Software Bill of Materials (SBOM)
-      - MIT-041  # Reproducible builds
+      - MIT-131  # Output validation and verification
+      - MIT-132  # Atomic file writes (write to temp, then rename)
+      - MIT-133  # Checksums for generated files
+      - MIT-024  # Git worktree isolation for rollback
     residual_risk: |
-      Supply chain attacks on distribution infrastructure are difficult to prevent.
-    owner: release-team
+      Subtle corruption may not be detected by automated validation.
+    owner: engineering-team
     status: active
     created: "2026-01-03"
     last_review: "2026-01-03"
-
   # ===================================================================
   # REPUDIATION RISKS (RISK-R-001 to RISK-R-005)
   # ===================================================================

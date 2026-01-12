@@ -9,12 +9,28 @@ public sealed record Mitigation
     /// Gets the unique mitigation identifier.
     /// Format: MIT-NNN.
     /// </summary>
-    public required string MitigationId { get; init; }
+    public required MitigationId Id { get; init; }
 
     /// <summary>
-    /// Gets the description of the mitigation strategy.
+    /// Gets the short title of this mitigation.
+    /// </summary>
+    public required string Title { get; init; }
+
+    /// <summary>
+    /// Gets the detailed description of the mitigation strategy.
     /// </summary>
     public required string Description { get; init; }
+
+    /// <summary>
+    /// Gets the implementation details or location.
+    /// References code files, configuration, or procedures.
+    /// </summary>
+    public required string Implementation { get; init; }
+
+    /// <summary>
+    /// Gets the test name that verifies this mitigation is working correctly.
+    /// </summary>
+    public string? VerificationTest { get; init; }
 
     /// <summary>
     /// Gets the implementation status of this mitigation.
@@ -22,8 +38,7 @@ public sealed record Mitigation
     public required MitigationStatus Status { get; init; }
 
     /// <summary>
-    /// Gets the implementation details or location.
-    /// Optional - may reference code files, configuration, or procedures.
+    /// Gets the date and time when this mitigation was last verified.
     /// </summary>
-    public string? Implementation { get; init; }
+    public required DateTimeOffset LastVerified { get; init; }
 }

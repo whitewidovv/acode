@@ -15,7 +15,7 @@ public sealed record ResponseDelta
     public ResponseDelta(
         int index,
         string? contentDelta = null,
-        string? toolCallDelta = null,
+        ToolCallDelta? toolCallDelta = null,
         FinishReason? finishReason = null,
         UsageInfo? usage = null)
     {
@@ -56,11 +56,10 @@ public sealed record ResponseDelta
     /// </summary>
     /// <remarks>
     /// FR-004b-059: ResponseDelta MUST include optional ToolCallDelta property (ToolCallDelta? from 004.a).
-    /// Note: Simplified to string for now - full ToolCallDelta type would be more complex.
     /// </remarks>
     [JsonPropertyName("toolCallDelta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? ToolCallDelta { get; init; }
+    public ToolCallDelta? ToolCallDelta { get; init; }
 
     /// <summary>
     /// Gets the finish reason (present only on final delta).
