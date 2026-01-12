@@ -12,6 +12,8 @@ This checklist tracks ONLY the gaps (missing or incomplete items) needed to comp
 6. Move to next gap
 7. When all gaps are [✅], run final audit per docs/AUDIT-GUIDELINES.md
 
+**Progress: 14/28 gaps complete (50.0%)**
+
 ## WHAT EXISTS (Already Complete)
 
 ### Domain Layer - Existing Files
@@ -516,7 +518,7 @@ IDisposable BeginSpan(string operation);
 ---
 
 ### Gap #14: Application - Audit Queries
-**Status**: [ ]
+**Status**: [✅]
 **Files to Create**:
 - `src/Acode.Application/Audit/Queries/ListSessionsQuery.cs`
 - `src/Acode.Application/Audit/Queries/GetSessionEventsQuery.cs`
@@ -538,7 +540,17 @@ IDisposable BeginSpan(string operation);
 - Handlers return correct data
 - Filtering works as expected
 
-**Evidence**: [To be filled when complete]
+**Evidence**: All 19 query tests passing
+- ListSessionsQuery.cs (66 lines) + Handler, 5 tests (session listing, date filtering, ordering)
+- GetSessionEventsQuery.cs (60 lines) + Handler, 5 tests (event retrieval, ordering)
+- SearchEventsQuery.cs (97 lines) + Handler, 5 tests (multi-criteria search with filters)
+- GetAuditStatsQuery.cs (51 lines) + Handler, 4 tests (statistics aggregation)
+- IAuditSessionRepository: Session/event retrieval
+- IAuditEventSearchRepository: Event searching
+- IAuditStatsRepository: Statistics retrieval
+- AuditSessionInfo: Session summary record
+- AuditStatistics: Stats record with counts by type/severity
+- CQRS pattern with immutable query records + QueryHandler classes
 
 ---
 
