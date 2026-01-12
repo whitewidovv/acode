@@ -102,8 +102,17 @@ public sealed record ToolCall(string Id, string Name, JsonElement Arguments)
     /// <param name="other">The other ToolCall instance to compare with.</param>
     /// <returns>True if both instances have the same Id, Name, and Arguments JSON content; otherwise false.</returns>
     /// <remarks>
+    /// <para>
     /// FR-004a-55: ToolCall MUST have value equality (record semantics).
     /// JsonElement doesn't have value equality by default, so we compare the raw JSON text.
+    /// </para>
+    /// <para>
+    /// IMPORTANT: This performs textual equality comparison, not semantic JSON equality.
+    /// Two ToolCalls with semantically equivalent but differently formatted JSON
+    /// (e.g., {"a":1,"b":2} vs {"b":2,"a":1}) are considered NOT equal.
+    /// This is intentional to ensure deterministic behavior and exact matches
+    /// when comparing tool calls, which is critical for tool result correlation.
+    /// </para>
     /// </remarks>
     public bool Equals(ToolCall? other)
     {

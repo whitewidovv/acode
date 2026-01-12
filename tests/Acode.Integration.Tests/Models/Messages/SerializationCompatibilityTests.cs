@@ -40,7 +40,7 @@ public sealed class SerializationCompatibilityTests
     public void Should_Match_Ollama_ToolCall_Format()
     {
         // Arrange - tool call with proper structure
-        var args = CreateJsonElement(JsonSerializer.Serialize(new { path = "/test.cs" }));
+        var args = CreateJsonElement(JsonSerializer.Serialize(new { path = "/test.cs" }, Options));
         var toolCall = new ToolCall(
             Id: "call_123",
             Name: "read_file",
@@ -91,7 +91,7 @@ public sealed class SerializationCompatibilityTests
     public void Should_Handle_Provider_Extensions()
     {
         // Arrange - message with all optional fields
-        var args = CreateJsonElement(JsonSerializer.Serialize(new { param = "value" }));
+        var args = CreateJsonElement(JsonSerializer.Serialize(new { param = "value" }, Options));
         var toolCall = new ToolCall(
             Id: "call_abc",
             Name: "my_tool",
@@ -206,7 +206,7 @@ public sealed class SerializationCompatibilityTests
     /// </summary>
     private static JsonElement CreateJsonElement(string json)
     {
-        var doc = JsonDocument.Parse(json);
+        using var doc = JsonDocument.Parse(json);
         return doc.RootElement.Clone();
     }
 }
