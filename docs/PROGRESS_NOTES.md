@@ -1,8 +1,8 @@
 # Progress Notes
 
-## 2026-01-11 - Window 2 - Task 003b In Progress (Gap #12 COMPLETE ✅)
+## 2026-01-11 - Window 2 - Task 003b In Progress (Phase 4 COMPLETE ✅)
 
-### Current Status: Phases 1-3 COMPLETE ✅, Gap #12 COMPLETE ✅
+### Current Status: Phases 1-4 COMPLETE ✅ (15 of 33 gaps, 45%)
 
 **Phase 1 (Core Pattern Matching) - COMPLETE**:
 - ✅ Gap #1: DefaultDenylistTests.cs (19 tests) - All passing
@@ -21,12 +21,27 @@
 - ✅ Gap #10: SymlinkResolverTests.cs (10 tests)
 - ✅ Gap #11: SymlinkResolver.cs (197 lines) - All 10 tests pass in 5.66s!
 
-**Phase 4 (Integration) - IN PROGRESS**:
+**Phase 4 (Integration) - COMPLETE**:
 - ✅ Gap #12: ProtectedPathValidator integration verified + added 6 glob patterns
   - ProtectedPathValidator already correctly uses all components (GlobMatcher, PathNormalizer, SymlinkResolver)
   - Added missing glob patterns: **/.ssh/, **/.ssh/**, **/.ssh/id_*, **/.aws/, **/.aws/**, **/.aws/credentials
+  - Added 2 glob patterns for .gnupg: **/.gnupg/, **/.gnupg/**
   - Fixed failing tests for relative paths (.ssh/id_rsa, .aws/credentials)
-  - All 12 ProtectedPathValidatorTests pass, all 127 Domain PathProtection tests pass
+  - All 12 original ProtectedPathValidatorTests pass
+- ✅ Gap #13: Enhanced ProtectedPathValidatorTests
+  - Added 27 comprehensive integration tests (total 39 tests)
+  - Coverage: normalization, wildcards, categories, traversal, performance, extensions, platform, case sensitivity
+  - Performance test: <10ms avg for 100 validations
+  - All 39 tests passing
+- ✅ Gap #14: ProtectedPathError class
+  - Created src/Acode.Domain/Security/PathProtection/ProtectedPathError.cs
+  - Properties: ErrorCode, Message, Pattern, RiskId, Category
+  - FromDenylistEntry() factory method
+  - GetErrorCode() maps all 9 PathCategory values to ACODE-SEC-003-XXX codes
+- ✅ Gap #15: Update PathValidationResult
+  - Added Error property (ProtectedPathError?)
+  - Blocked() method creates Error from DenylistEntry
+  - SecurityCommand.cs displays ErrorCode in output
 
 **CRITICAL FIX**: Fixed blocking error in task-002b ConfigValidator.cs (line 89) - typo in error code constant was preventing ALL tests from running.
 
@@ -100,7 +115,7 @@ Following TDD strictly, implementing in 8 phases:
 7. CLI & Tests (Gaps 25-27) - PENDING
 8. Documentation & Finalization (Gaps 28-33) - PENDING
 
-**Progress**: 12 of 33 gaps complete (36%)
+**Progress**: 15 of 33 gaps complete (45%)
 
 ### Next Steps
 - ✅ DONE: Gap #1 - DefaultDenylistTests (RED)

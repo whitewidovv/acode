@@ -590,8 +590,8 @@ public sealed class ProtectedPathValidator : IProtectedPathValidator
 ---
 
 ### Gap #14: ProtectedPathError Class
-**Status**: [ ]
-**File to Create**: `src/Acode.Domain/Security/PathProtection/ProtectedPathError.cs`
+**Status**: [✅]
+**File Created**: `src/Acode.Domain/Security/PathProtection/ProtectedPathError.cs`
 **Why Needed**: Spec line 4645 defines error class for protected path violations
 **Required Fields**:
 ```csharp
@@ -628,13 +628,13 @@ public sealed class ProtectedPathError
 
 **Implementation Pattern**: See spec lines 4645, 4906-4917
 **Success Criteria**: Class compiles, used in PathValidationResult
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Created ProtectedPathError.cs with ErrorCode, Message, Pattern, RiskId, Category properties. FromDenylistEntry() factory method. GetErrorCode() maps all 9 PathCategory values to ACODE-SEC-003-XXX codes. Builds successfully. Commit: feat(task-003b): add ProtectedPathError (Gap #14)
 
 ---
 
 ### Gap #15: Update PathValidationResult to Include Error
-**Status**: [ ]
-**File to Modify**: `src/Acode.Application/Security/PathValidationResult.cs`
+**Status**: [✅]
+**File Modified**: `src/Acode.Application/Security/PathValidationResult.cs`
 **Why Needed**: Spec lines 4741-4763 show Error property
 **Required Changes**:
 Add property: `public ProtectedPathError? Error { get; init; }`
@@ -657,7 +657,7 @@ public static PathValidationResult Blocked(DenylistEntry entry)
 ```
 
 **Success Criteria**: PathValidationResult includes Error, tests pass
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Added Error property (ProtectedPathError?). Updated Blocked() method to create Error via ProtectedPathError.FromDenylistEntry(). Updated SecurityCommand.cs to display ErrorCode in output. All 39 ProtectedPathValidatorTests passing. Commit: feat(task-003b): update PathValidationResult (Gap #15). **PHASE 4 (INTEGRATION) 100% COMPLETE!**
 
 ---
 
