@@ -11,6 +11,13 @@ using FluentAssertions;
 /// </summary>
 public sealed class SerializationCompatibilityTests
 {
+    private static readonly JsonSerializerOptions Options = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+    };
+
     [Fact]
     public void Should_Match_Ollama_Format()
     {
@@ -18,8 +25,8 @@ public sealed class SerializationCompatibilityTests
         var message = ChatMessage.CreateUser("Hello, world!");
 
         // Act
-        var json = JsonSerializer.Serialize(message);
-        var deserialized = JsonSerializer.Deserialize<ChatMessage>(json);
+        var json = JsonSerializer.Serialize(message, Options);
+        var deserialized = JsonSerializer.Deserialize<ChatMessage>(json, Options);
 
         // Assert
         json.Should().Contain("\"role\":\"user\"");
@@ -33,16 +40,17 @@ public sealed class SerializationCompatibilityTests
     public void Should_Match_Ollama_ToolCall_Format()
     {
         // Arrange - tool call with proper structure
+        var args = CreateJsonElement(JsonSerializer.Serialize(new { path = "/test.cs" }));
         var toolCall = new ToolCall(
             Id: "call_123",
             Name: "read_file",
-            Arguments: JsonSerializer.Serialize(new { path = "/test.cs" }));
+            Arguments: args);
 
         var message = ChatMessage.CreateAssistant(null, new[] { toolCall });
 
         // Act
-        var json = JsonSerializer.Serialize(message);
-        var deserialized = JsonSerializer.Deserialize<ChatMessage>(json);
+        var json = JsonSerializer.Serialize(message, Options);
+        var deserialized = JsonSerializer.Deserialize<ChatMessage>(json, Options);
 
         // Assert
         json.Should().Contain("\"role\":\"assistant\"");
@@ -66,8 +74,8 @@ public sealed class SerializationCompatibilityTests
         };
 
         // Act
-        var json = JsonSerializer.Serialize(messages);
-        var deserialized = JsonSerializer.Deserialize<List<ChatMessage>>(json);
+        var json = JsonSerializer.Serialize(messages, Options);
+        var deserialized = JsonSerializer.Deserialize<List<ChatMessage>>(json, Options);
 
         // Assert
         json.Should().Contain("\"role\":\"system\"");
@@ -83,15 +91,16 @@ public sealed class SerializationCompatibilityTests
     public void Should_Handle_Provider_Extensions()
     {
         // Arrange - message with all optional fields
+        var args = CreateJsonElement(JsonSerializer.Serialize(new { param = "value" }));
         var toolCall = new ToolCall(
             Id: "call_abc",
             Name: "my_tool",
-            Arguments: JsonSerializer.Serialize(new { param = "value" }));
+            Arguments: args);
 
         var message = ChatMessage.CreateAssistant("Let me help", new[] { toolCall });
 
         // Act
-        var json = JsonSerializer.Serialize(message);
+        var json = JsonSerializer.Serialize(message, Options);
         var parsed = JsonDocument.Parse(json);
 
         // Assert - all fields present
@@ -109,15 +118,15 @@ public sealed class SerializationCompatibilityTests
         // Arrange - create instances of all message types
         var systemMsg = ChatMessage.CreateSystem("System prompt");
         var userMsg = ChatMessage.CreateUser("User input");
-        var toolCall = new ToolCall("call_1", "tool_name", "{}");
+        var toolCall = new ToolCall("call_1", "tool_name", CreateJsonElement("{}"));
         var assistantMsg = ChatMessage.CreateAssistant("Response", new[] { toolCall });
         var toolMsg = ChatMessage.CreateToolResult("call_1", "Result");
 
         var messages = new[] { systemMsg, userMsg, assistantMsg, toolMsg };
 
         // Act
-        var json = JsonSerializer.Serialize(messages);
-        var roundtrip = JsonSerializer.Deserialize<ChatMessage[]>(json);
+        var json = JsonSerializer.Serialize(messages, Options);
+        var roundtrip = JsonSerializer.Deserialize<ChatMessage[]>(json, Options);
 
         // Assert
         roundtrip.Should().NotBeNull();
@@ -146,8 +155,8 @@ public sealed class SerializationCompatibilityTests
         var toolDef = new ToolDefinition("read_file", "Reads a file", parameters);
 
         // Act
-        var json = JsonSerializer.Serialize(toolDef);
-        var deserialized = JsonSerializer.Deserialize<ToolDefinition>(json);
+        var json = JsonSerializer.Serialize(toolDef, Options);
+        var deserialized = JsonSerializer.Deserialize<ToolDefinition>(json, Options);
 
         // Assert
         json.Should().Contain("\"name\":\"read_file\"");
@@ -166,11 +175,8 @@ public sealed class SerializationCompatibilityTests
         var delta2 = new ToolCallDelta(Index: 0, ArgumentsDelta: "{\"query\":\"");
 
         // Act
-        var json1 = JsonSerializer.Serialize(delta1);
-        var json2 = JsonSerializer.Serialize(delta2, new JsonSerializerOptions
-        {
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-        });
+        var json1 = JsonSerializer.Serialize(delta1, Options);
+        var json2 = JsonSerializer.Serialize(delta2, Options);
 
         // Assert
         json1.Should().Contain("\"index\":0");
@@ -187,11 +193,20 @@ public sealed class SerializationCompatibilityTests
         var errorResult = ToolResult.Error("call_2", "Error occurred");
 
         // Act
-        var successJson = JsonSerializer.Serialize(successResult);
-        var errorJson = JsonSerializer.Serialize(errorResult);
+        var successJson = JsonSerializer.Serialize(successResult, Options);
+        var errorJson = JsonSerializer.Serialize(errorResult, Options);
 
         // Assert
         successJson.Should().Contain("\"isError\":false");
         errorJson.Should().Contain("\"isError\":true");
+    }
+
+    /// <summary>
+    /// Helper method to create JsonElement from JSON string for testing.
+    /// </summary>
+    private static JsonElement CreateJsonElement(string json)
+    {
+        var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 }

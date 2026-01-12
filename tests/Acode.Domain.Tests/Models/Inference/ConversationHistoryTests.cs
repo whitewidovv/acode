@@ -114,7 +114,7 @@ public sealed class ConversationHistoryTests
         var toolCall = new ToolCall(
             Id: "call_123",
             Name: "write_file",
-            Arguments: JsonSerializer.Serialize(new { path = "test.cs" }));
+            Arguments: CreateJsonElement(JsonSerializer.Serialize(new { path = "test.cs" })));
         history.Add(ChatMessage.CreateAssistant(null, new[] { toolCall }));
 
         // Act
@@ -154,7 +154,7 @@ public sealed class ConversationHistoryTests
         var toolCall = new ToolCall(
             Id: "call_abc",
             Name: "my_tool",
-            Arguments: JsonSerializer.Serialize(new { }));
+            Arguments: CreateJsonElement(JsonSerializer.Serialize(new { })));
         history.Add(ChatMessage.CreateAssistant(null, new[] { toolCall }));
 
         // Act - tool result with wrong ID
@@ -175,8 +175,8 @@ public sealed class ConversationHistoryTests
 
         var toolCalls = new[]
         {
-            new ToolCall(Id: "call_1", Name: "tool1", Arguments: JsonSerializer.Serialize(new { })),
-            new ToolCall(Id: "call_2", Name: "tool2", Arguments: JsonSerializer.Serialize(new { })),
+            new ToolCall(Id: "call_1", Name: "tool1", Arguments: CreateJsonElement(JsonSerializer.Serialize(new { }))),
+            new ToolCall(Id: "call_2", Name: "tool2", Arguments: CreateJsonElement(JsonSerializer.Serialize(new { }))),
         };
         history.Add(ChatMessage.CreateAssistant(null, toolCalls));
 
@@ -385,5 +385,14 @@ public sealed class ConversationHistoryTests
         // Assert
         deserialized.Should().HaveCount(2);
         deserialized![0].Role.Should().Be(MessageRole.System);
+    }
+
+    /// <summary>
+    /// Helper method to create JsonElement from JSON string for testing.
+    /// </summary>
+    private static JsonElement CreateJsonElement(string json)
+    {
+        var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 }
