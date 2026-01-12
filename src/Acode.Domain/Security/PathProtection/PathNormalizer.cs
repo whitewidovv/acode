@@ -157,18 +157,9 @@ public sealed class PathNormalizer : IPathNormalizer
         }
 
         // Replace alternate separator with primary separator
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            // On Windows: DirectorySeparatorChar = \, AltDirectorySeparatorChar = /
-            // We want to use \ consistently
-            return path.Replace(altSeparator, separator);
-        }
-        else
-        {
-            // On Unix: DirectorySeparatorChar = /, AltDirectorySeparatorChar = /
-            // Convert any backslashes to forward slashes
-            return path.Replace('\\', '/');
-        }
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? path.Replace(altSeparator, separator)
+            : path.Replace('\\', '/');
     }
 
     /// <summary>
