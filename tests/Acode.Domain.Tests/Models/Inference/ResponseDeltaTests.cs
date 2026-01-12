@@ -135,4 +135,67 @@ public class ResponseDeltaTests
 
         delta.ContentDelta.Should().Be(string.Empty);
     }
+
+    [Theory]
+    [InlineData(FinishReason.Stop)]
+    [InlineData(FinishReason.Length)]
+    [InlineData(FinishReason.ToolCalls)]
+    [InlineData(FinishReason.ContentFilter)]
+    [InlineData(FinishReason.Error)]
+    [InlineData(FinishReason.Cancelled)]
+    public void ResponseDelta_IsCompleteForAnyFinishReason(FinishReason finishReason)
+    {
+        // FR-004b-062: Any FinishReason present means IsComplete = true
+        var delta = new ResponseDelta(0, null, null, finishReason);
+
+        delta.IsComplete.Should().BeTrue();
+        delta.FinishReason.Should().Be(finishReason);
+    }
+
+    [Fact]
+    public void ResponseDelta_AllowsBothContentAndToolCallDeltas()
+    {
+        // Some providers may send both content and tool call in same delta
+        var toolCallDelta = new ToolCallDelta(Index: 0, ArgumentsDelta: "{\"query\":");
+        var delta = new ResponseDelta(0, "Thinking...", toolCallDelta);
+
+        delta.ContentDelta.Should().Be("Thinking...");
+        delta.ToolCallDelta.Should().Be(toolCallDelta);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(100)]
+    [InlineData(-1)]
+    [InlineData(int.MaxValue)]
+    [InlineData(int.MinValue)]
+    public void ResponseDelta_AcceptsValidIndexValues(int index)
+    {
+        // Index can be any int value
+        var delta = new ResponseDelta(index, "test");
+
+        delta.Index.Should().Be(index);
+    }
+
+    [Fact]
+    public void ResponseDelta_IncludesUsageOnFinalDelta()
+    {
+        // FR-004b-061: Usage present only on final delta
+        var usage = new UsageInfo(100, 50);
+        var finalDelta = new ResponseDelta(5, null, null, FinishReason.Stop, usage);
+
+        finalDelta.Usage.Should().Be(usage);
+        finalDelta.IsComplete.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ResponseDelta_UsageNullForIntermediateDeltas()
+    {
+        // Intermediate deltas should not have Usage
+        var intermediateDelta = new ResponseDelta(0, "Hello");
+
+        intermediateDelta.Usage.Should().BeNull();
+        intermediateDelta.IsComplete.Should().BeFalse();
+    }
 }
