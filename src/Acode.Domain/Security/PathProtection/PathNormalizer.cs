@@ -51,15 +51,9 @@ public sealed class PathNormalizer : IPathNormalizer
         // But only if the path isn't already absolute
         try
         {
-            if (!Path.IsPathRooted(normalized))
-            {
-                normalized = Path.GetFullPath(normalized);
-            }
-            else
-            {
-                // For already rooted paths, still use GetFullPath to resolve .. and .
-                normalized = Path.GetFullPath(normalized);
-            }
+            // Use GetFullPath to resolve relative segments (./, ../) and also
+            // for already rooted paths to resolve any .. and . components.
+            normalized = Path.GetFullPath(normalized);
         }
         catch (Exception)
         {
