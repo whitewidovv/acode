@@ -1,6 +1,7 @@
 namespace Acode.Domain.Models.Inference;
 
 using System;
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 /// <summary>
@@ -124,6 +125,16 @@ public sealed record ChatResponse(
     /// </remarks>
     [JsonIgnore]
     public bool HasToolCalls => this.Message.ToolCalls is not null && this.Message.ToolCalls.Count > 0;
+
+    /// <summary>
+    /// Gets the content moderation results (optional).
+    /// </summary>
+    /// <remarks>
+    /// FR-004b-094: ChatResponse MUST include optional ContentFilterResults (IReadOnlyList&lt;ContentFilterResult&gt;?).
+    /// </remarks>
+    [JsonPropertyName("contentFilterResults")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ContentFilterResult>? ContentFilterResults { get; init; }
 
     private static string ValidateNonEmpty(string value, string paramName)
     {
