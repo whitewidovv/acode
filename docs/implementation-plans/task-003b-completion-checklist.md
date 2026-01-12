@@ -1087,8 +1087,8 @@ public static class PathProtectionRisks
 ---
 
 ### Gap #31: CLI Exit Codes Documentation
-**Status**: [ ]
-**File to Create/Modify**: `data/exit-codes.json`
+**Status**: [✅]
+**File Modified**: `data/exit-codes.json`
 **Why Needed**: Spec lines 4919-4926 define exit codes for security commands
 **Required Entries**:
 ```json
@@ -1104,7 +1104,7 @@ public static class PathProtectionRisks
 
 **Implementation Pattern**: Add to existing exit-codes.json
 **Success Criteria**: Exit codes documented, CLI uses them
-**Evidence**: [To be filled when complete]
+**Evidence**: ✅ Updated data/exit-codes.json to hierarchical structure with command-specific exit codes. Added three command sections: (1) security_check_path with exit codes 0 (allowed), 1 (blocked), 2 (invalid args), 3 (config error); (2) security_show_denylist with exit codes 0 (success), 3 (config error); (3) security_show_status with exit code 0 (success). Preserved general exit codes in "general" section. JSON validation passes. SecurityCommand.cs already implements these exit codes correctly (CheckPath returns 0 or 1, ShowDenylist/ShowStatus return 0). Gap #31 COMPLETE
 
 ---
 
