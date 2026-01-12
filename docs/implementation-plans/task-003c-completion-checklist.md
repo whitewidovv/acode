@@ -12,7 +12,7 @@ This checklist tracks ONLY the gaps (missing or incomplete items) needed to comp
 6. Move to next gap
 7. When all gaps are [✅], run final audit per docs/AUDIT-GUIDELINES.md
 
-**Progress: 19/28 gaps complete (67.9%)**
+**Progress: 20/28 gaps complete (71.4%)**
 
 ## WHAT EXISTS (Already Complete)
 
@@ -818,7 +818,7 @@ Each command should:
 ---
 
 ### Gap #23: Documentation - CLI Audit Commands
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: `docs/cli-audit-commands.md`
 
 **Why Needed**: Users need documentation for all 8 audit CLI commands.
@@ -834,7 +834,27 @@ Each command should:
 - Examples are runnable
 - Exit codes listed
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- File: `docs/cli-audit-commands.md` (565 lines)
+- Comprehensive documentation for all 8 audit subcommands:
+  1. list - List audit sessions with date filtering
+  2. show - Show events for specific session
+  3. search - Search events with multi-criteria filters
+  4. verify - Verify log integrity (placeholder)
+  5. export - Export logs to JSON/CSV/text formats
+  6. stats - Show audit statistics
+  7. tail - Follow audit log in real-time (placeholder)
+  8. cleanup - Clean up old audit logs
+- Usage syntax and options for each command
+- 20+ runnable examples covering common scenarios
+- Exit codes table (0, 1, 2, 3) with descriptions
+- Common usage patterns section (daily review, security monitoring, error investigation, etc.)
+- Integration examples with Unix tools (wc, jq, watch)
+- Error handling section with common errors and resolutions
+- Troubleshooting guide
+- Configuration reference
+- Security and performance considerations
+- Related documentation links
 
 ---
 
