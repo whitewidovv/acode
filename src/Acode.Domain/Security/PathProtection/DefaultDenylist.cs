@@ -127,6 +127,34 @@ public static class DefaultDenylist
             Platforms = new[] { Platform.Windows }
         });
 
+        // SSH Keys - Glob patterns (match anywhere in path)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.ssh/",
+            Reason = "SSH directory anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SshKeys,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.ssh/**",
+            Reason = "Any file inside .ssh directory",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SshKeys,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.ssh/id_*",
+            Reason = "SSH private keys anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SshKeys,
+            Platforms = new[] { Platform.All }
+        });
+
         // GPG Keys (FR-003b-31 to FR-003b-32)
         // AC-023 to AC-024
         entries.Add(new DenylistEntry
@@ -219,6 +247,34 @@ public static class DefaultDenylist
             RiskId = "RISK-I-003",
             Category = PathCategory.CloudCredentials,
             Platforms = new[] { Platform.Windows }
+        });
+
+        // AWS - Glob patterns (match anywhere in path)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.aws/",
+            Reason = "AWS directory anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.aws/**",
+            Reason = "Any file inside .aws directory",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.aws/credentials",
+            Reason = "AWS credentials file anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
         });
 
         entries.Add(new DenylistEntry
