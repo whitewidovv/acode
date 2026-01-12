@@ -9,6 +9,7 @@ using Acode.Application.Providers;
 using Acode.Application.Providers.Exceptions;
 using Acode.Application.Providers.Selection;
 using Acode.Domain.Models.Inference;
+using Acode.Domain.Modes;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
@@ -275,9 +276,129 @@ public sealed class ProviderRegistryTests
         // Registry should be in disposed state
     }
 
+    [Fact]
+    public void Should_Allow_Local_Endpoint_In_Airgapped_Mode()
+    {
+        // Arrange
+        var registry = CreateRegistry(operatingMode: OperatingMode.Airgapped);
+        var descriptor = CreateDescriptor("test-provider", endpoint: new Uri("http://localhost:11434"));
+
+        // Act
+        Action act = () => registry.Register(descriptor);
+
+        // Assert
+        act.Should().NotThrow();
+        registry.IsRegistered("test-provider").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Should_Reject_External_Endpoint_In_Airgapped_Mode()
+    {
+        // Arrange
+        var registry = CreateRegistry(operatingMode: OperatingMode.Airgapped);
+        var descriptor = CreateDescriptor("test-provider", endpoint: new Uri("https://api.example.com"));
+
+        // Act
+        Action act = () => registry.Register(descriptor);
+
+        // Assert
+        act.Should().Throw<ProviderRegistrationException>()
+            .WithMessage("*external endpoint*not allowed in Airgapped mode*")
+            .Which.ErrorCode.Should().Be("ACODE-PRV-002");
+    }
+
+    [Theory]
+    [InlineData("http://localhost:11434")]
+    [InlineData("http://127.0.0.1:8000")]
+    [InlineData("http://127.0.0.5:8080")]
+    [InlineData("http://[::1]:9000")]
+    [InlineData("http://myserver.local:11434")]
+    public void Should_Allow_Local_Endpoints_In_Airgapped_Mode(string endpointUrl)
+    {
+        // Arrange
+        var registry = CreateRegistry(operatingMode: OperatingMode.Airgapped);
+        var descriptor = CreateDescriptor("test-provider", endpoint: new Uri(endpointUrl));
+
+        // Act
+        Action act = () => registry.Register(descriptor);
+
+        // Assert
+        act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData("https://api.openai.com")]
+    [InlineData("https://api.anthropic.com")]
+    [InlineData("http://192.168.1.100:8000")]
+    [InlineData("https://my-vllm-instance.example.com")]
+    public void Should_Reject_External_Endpoints_In_Airgapped_Mode(string endpointUrl)
+    {
+        // Arrange
+        var registry = CreateRegistry(operatingMode: OperatingMode.Airgapped);
+        var descriptor = CreateDescriptor("test-provider", endpoint: new Uri(endpointUrl));
+
+        // Act
+        Action act = () => registry.Register(descriptor);
+
+        // Assert
+        act.Should().Throw<ProviderRegistrationException>()
+            .WithMessage("*external endpoint*not allowed in Airgapped mode*")
+            .Which.ErrorCode.Should().Be("ACODE-PRV-002");
+    }
+
+    [Fact]
+    public void Should_Allow_Local_Endpoint_In_LocalOnly_Mode()
+    {
+        // Arrange
+        var registry = CreateRegistry(operatingMode: OperatingMode.LocalOnly);
+        var descriptor = CreateDescriptor("test-provider", endpoint: new Uri("http://localhost:11434"));
+
+        // Act
+        Action act = () => registry.Register(descriptor);
+
+        // Assert
+        act.Should().NotThrow();
+        registry.IsRegistered("test-provider").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Should_Allow_External_Endpoint_In_LocalOnly_Mode_With_Warning()
+    {
+        // Arrange - LocalOnly mode allows external endpoints but logs warning
+        var registry = CreateRegistry(operatingMode: OperatingMode.LocalOnly);
+        var descriptor = CreateDescriptor("test-provider", endpoint: new Uri("https://api.example.com"));
+
+        // Act
+        Action act = () => registry.Register(descriptor);
+
+        // Assert - should allow but log warning
+        act.Should().NotThrow();
+        registry.IsRegistered("test-provider").Should().BeTrue();
+    }
+
+    [Fact]
+    public void Should_Allow_All_Endpoints_In_Burst_Mode()
+    {
+        // Arrange
+        var registry = CreateRegistry(operatingMode: OperatingMode.Burst);
+        var localDescriptor = CreateDescriptor("local-provider", endpoint: new Uri("http://localhost:11434"));
+        var externalDescriptor = CreateDescriptor("external-provider", endpoint: new Uri("https://api.example.com"));
+
+        // Act
+        Action actLocal = () => registry.Register(localDescriptor);
+        Action actExternal = () => registry.Register(externalDescriptor);
+
+        // Assert
+        actLocal.Should().NotThrow();
+        actExternal.Should().NotThrow();
+        registry.IsRegistered("local-provider").Should().BeTrue();
+        registry.IsRegistered("external-provider").Should().BeTrue();
+    }
+
     private static ProviderRegistry CreateRegistry(
         Dictionary<string, IModelProvider>? providerInstances = null,
-        string? defaultProviderId = null)
+        string? defaultProviderId = null,
+        OperatingMode operatingMode = OperatingMode.LocalOnly)
     {
         var logger = Substitute.For<ILogger<ProviderRegistry>>();
         var selector = new CapabilityProviderSelector(descriptor =>
@@ -304,10 +425,14 @@ public sealed class ProviderRegistryTests
             };
         }
 
-        return new ProviderRegistry(logger, selector, defaultProviderId, providerFactory);
+        return new ProviderRegistry(logger, selector, defaultProviderId, providerFactory, operatingMode);
     }
 
-    private static ProviderDescriptor CreateDescriptor(string id, bool supportsStreaming = false, bool supportsTools = false)
+    private static ProviderDescriptor CreateDescriptor(
+        string id,
+        bool supportsStreaming = false,
+        bool supportsTools = false,
+        Uri? endpoint = null)
     {
         return new ProviderDescriptor
         {
@@ -317,7 +442,7 @@ public sealed class ProviderRegistryTests
             Capabilities = new ProviderCapabilities(
                 supportsStreaming: supportsStreaming,
                 supportsTools: supportsTools),
-            Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
+            Endpoint = new ProviderEndpoint(endpoint ?? new Uri("http://localhost:11434"))
         };
     }
 

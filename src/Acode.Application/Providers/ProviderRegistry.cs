@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Acode.Application.Inference;
 using Acode.Application.Providers.Exceptions;
 using Acode.Application.Providers.Selection;
+using Acode.Domain.Modes;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -24,6 +25,7 @@ public sealed class ProviderRegistry : IProviderRegistry
     private readonly IProviderSelector _selector;
     private readonly string? _defaultProviderId;
     private readonly Func<ProviderDescriptor, IModelProvider?>? _providerFactory;
+    private readonly OperatingMode _operatingMode;
     private readonly ConcurrentDictionary<string, ProviderRegistration> _providers = new();
     private bool _disposed;
 
@@ -34,16 +36,19 @@ public sealed class ProviderRegistry : IProviderRegistry
     /// <param name="selector">Provider selection strategy.</param>
     /// <param name="defaultProviderId">Optional default provider ID.</param>
     /// <param name="providerFactory">Optional factory for creating provider instances.</param>
+    /// <param name="operatingMode">Operating mode for endpoint validation (defaults to LocalOnly).</param>
     public ProviderRegistry(
         ILogger<ProviderRegistry> logger,
         IProviderSelector selector,
         string? defaultProviderId = null,
-        Func<ProviderDescriptor, IModelProvider?>? providerFactory = null)
+        Func<ProviderDescriptor, IModelProvider?>? providerFactory = null,
+        OperatingMode operatingMode = OperatingMode.LocalOnly)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _selector = selector ?? throw new ArgumentNullException(nameof(selector));
         _defaultProviderId = defaultProviderId;
         _providerFactory = providerFactory;
+        _operatingMode = operatingMode;
     }
 
     /// <inheritdoc/>
@@ -51,6 +56,9 @@ public sealed class ProviderRegistry : IProviderRegistry
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(descriptor, nameof(descriptor));
+
+        // Gap #33: Validate endpoint against operating mode
+        ValidateEndpointForOperatingMode(descriptor);
 
         var registration = new ProviderRegistration(descriptor, _providerFactory);
 
@@ -288,11 +296,83 @@ public sealed class ProviderRegistry : IProviderRegistry
         _disposed = true;
     }
 
+    /// <summary>
+    /// Checks if an endpoint is local (localhost or 127.0.0.1 or ::1).
+    /// </summary>
+    /// <param name="endpoint">Endpoint URI to check.</param>
+    /// <returns>True if endpoint is local, false otherwise.</returns>
+    private static bool IsLocalEndpoint(Uri endpoint)
+    {
+        var host = endpoint.Host.ToLowerInvariant();
+
+        // Handle IPv6 addresses (brackets are included in Host property)
+        if (host.StartsWith("[") && host.EndsWith("]"))
+        {
+            var ipv6 = host.Trim('[', ']');
+            return ipv6 == "::1";
+        }
+
+        return host == "localhost" ||
+               host == "127.0.0.1" ||
+               host == "::1" ||
+               host.StartsWith("127.") ||
+               host.EndsWith(".local");
+    }
+
     private void ThrowIfDisposed()
     {
         if (_disposed)
         {
             throw new ObjectDisposedException(nameof(ProviderRegistry));
+        }
+    }
+
+    /// <summary>
+    /// Validates provider endpoint against operating mode constraints.
+    /// </summary>
+    /// <param name="descriptor">Provider descriptor to validate.</param>
+    /// <exception cref="ProviderRegistrationException">Thrown when endpoint violates operating mode constraints.</exception>
+    /// <remarks>
+    /// Gap #33: Operating mode integration per task-004c spec.
+    /// - Airgapped: REJECT non-local endpoints.
+    /// - LocalOnly: WARN about non-local endpoints.
+    /// - Burst: ALLOW all endpoints.
+    /// </remarks>
+    private void ValidateEndpointForOperatingMode(ProviderDescriptor descriptor)
+    {
+        var endpoint = descriptor.Endpoint.BaseUrl;
+        var isLocal = IsLocalEndpoint(endpoint);
+
+        switch (_operatingMode)
+        {
+            case OperatingMode.Airgapped:
+                if (!isLocal)
+                {
+                    _logger.LogError(
+                        "Provider {ProviderId} rejected: External endpoint {Endpoint} not allowed in Airgapped mode",
+                        descriptor.Id,
+                        endpoint);
+                    throw new ProviderRegistrationException(
+                        $"Provider '{descriptor.Id}' has external endpoint '{endpoint}' which is not allowed in Airgapped mode",
+                        "ACODE-PRV-002");
+                }
+
+                break;
+
+            case OperatingMode.LocalOnly:
+                if (!isLocal)
+                {
+                    _logger.LogWarning(
+                        "Provider {ProviderId} uses external endpoint {Endpoint} in LocalOnly mode. Consider using localhost for privacy.",
+                        descriptor.Id,
+                        endpoint);
+                }
+
+                break;
+
+            case OperatingMode.Burst:
+                // All endpoints allowed in Burst mode
+                break;
         }
     }
 
