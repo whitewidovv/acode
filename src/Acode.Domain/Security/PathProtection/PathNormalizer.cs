@@ -105,13 +105,11 @@ public sealed class PathNormalizer : IPathNormalizer
         }
 
         // Expand $HOME on Unix-like systems
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) &&
+            path.Contains("$HOME", StringComparison.Ordinal))
         {
-            if (path.Contains("$HOME", StringComparison.Ordinal))
-            {
-                var home = Environment.GetEnvironmentVariable("HOME") ?? GetHomeDirectory();
-                path = path.Replace("$HOME", home, StringComparison.Ordinal);
-            }
+            var home = Environment.GetEnvironmentVariable("HOME") ?? GetHomeDirectory();
+            path = path.Replace("$HOME", home, StringComparison.Ordinal);
         }
 
         // Expand %USERPROFILE% and other environment variables
