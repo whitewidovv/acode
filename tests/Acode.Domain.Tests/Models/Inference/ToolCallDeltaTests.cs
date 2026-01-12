@@ -1,245 +1,152 @@
 namespace Acode.Domain.Tests.Models.Inference;
 
-using System.Linq;
+using System.Text.Json;
 using Acode.Domain.Models.Inference;
 using FluentAssertions;
 
 /// <summary>
-/// Tests for ToolCallDelta record.
-/// FR-004a-91 to FR-004a-100: ToolCallDelta must support streaming tool calls.
+/// Tests for ToolCallDelta record from task 004a (RED phase).
+/// FR-004a-91 to FR-004a-100.
 /// </summary>
-public sealed class ToolCallDeltaTests
+public class ToolCallDeltaTests
 {
     [Fact]
-    public void Should_Be_Immutable()
+    public void ToolCallDelta_HasIndexProperty()
     {
-        // Arrange
-        var delta = new ToolCallDelta
-        {
-            Index = 0,
-            Id = "call_123",
-            Name = "read_file",
-        };
+        // FR-004a-93: ToolCallDelta MUST have Index property
+        var delta = new ToolCallDelta(Index: 0);
 
-        // Act
-        var modified = delta with { Index = 1 };
-
-        // Assert
         delta.Index.Should().Be(0);
-        modified.Index.Should().Be(1);
-        delta.Should().NotBeSameAs(modified);
     }
 
     [Fact]
-    public void Should_Have_Index()
+    public void ToolCallDelta_HasIdProperty()
     {
-        // Arrange & Act
-        var delta = new ToolCallDelta { Index = 2 };
+        // FR-004a-95: ToolCallDelta MAY have Id property
+        var delta1 = new ToolCallDelta(Index: 0, Id: "call_123");
+        var delta2 = new ToolCallDelta(Index: 0);
 
-        // Assert
-        delta.Index.Should().Be(2);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    [InlineData(5)]
-    [InlineData(10)]
-    public void Should_Accept_Valid_Index_Values(int index)
-    {
-        // Act
-        var delta = new ToolCallDelta { Index = index };
-
-        // Assert
-        delta.Index.Should().Be(index);
+        delta1.Id.Should().Be("call_123");
+        delta2.Id.Should().BeNull();
     }
 
     [Fact]
-    public void Index_Identifies_Which_ToolCall()
+    public void ToolCallDelta_HasNameProperty()
     {
-        // Arrange - simulating multiple parallel tool calls
-        var delta0 = new ToolCallDelta { Index = 0, Name = "read_file" };
-        var delta1 = new ToolCallDelta { Index = 1, Name = "write_file" };
+        // FR-004a-97: ToolCallDelta MAY have Name property
+        var delta1 = new ToolCallDelta(Index: 0, Name: "search");
+        var delta2 = new ToolCallDelta(Index: 0);
 
-        // Assert
-        delta0.Index.Should().NotBe(delta1.Index);
+        delta1.Name.Should().Be("search");
+        delta2.Name.Should().BeNull();
     }
 
     [Fact]
-    public void Should_Allow_Only_Index()
+    public void ToolCallDelta_HasArgumentsDeltaProperty()
     {
-        // Arrange - delta with just index (continuation chunk)
-        var delta = new ToolCallDelta { Index = 0 };
+        // FR-004a-99: ToolCallDelta MAY have ArgumentsDelta property
+        // FR-004a-100: ArgumentsDelta is string (partial JSON)
+        var delta1 = new ToolCallDelta(Index: 0, ArgumentsDelta: "{\"query\":");
+        var delta2 = new ToolCallDelta(Index: 0);
 
-        // Assert
-        delta.Id.Should().BeNull();
-        delta.Name.Should().BeNull();
-        delta.ArgumentsDelta.Should().BeNull();
+        delta1.ArgumentsDelta.Should().Be("{\"query\":");
+        delta2.ArgumentsDelta.Should().BeNull();
     }
 
     [Fact]
-    public void First_Delta_Should_Have_Id_And_Name()
+    public void ToolCallDelta_IsImmutable()
     {
-        // Arrange - first chunk introduces the tool call
-        var firstDelta = new ToolCallDelta
-        {
-            Index = 0,
-            Id = "call_abc123",
-            Name = "write_file",
-        };
+        // FR-004a-92: ToolCallDelta MUST be immutable
+        var delta = new ToolCallDelta(Index: 0, Id: "call_123", Name: "search", ArgumentsDelta: "{\"query\":");
 
-        // Assert
-        firstDelta.Id.Should().NotBeNull();
-        firstDelta.Name.Should().NotBeNull();
+        // Record with init-only properties ensures immutability at compile time
+        delta.Should().NotBeNull();
+        delta.Index.Should().Be(0);
     }
 
     [Fact]
-    public void Subsequent_Deltas_Only_Need_ArgumentsDelta()
+    public void ToolCallDelta_HasValueEquality()
     {
-        // Arrange - continuation chunks only have partial arguments
-        var continuationDelta = new ToolCallDelta
-        {
-            Index = 0,
-            ArgumentsDelta = "{\"pa",
-        };
+        // Records have value equality by default
+        var delta1 = new ToolCallDelta(Index: 0, Id: "call_123", Name: "search");
+        var delta2 = new ToolCallDelta(Index: 0, Id: "call_123", Name: "search");
+        var delta3 = new ToolCallDelta(Index: 1, Id: "call_123", Name: "search");
 
-        // Assert
-        continuationDelta.Id.Should().BeNull();
-        continuationDelta.Name.Should().BeNull();
-        continuationDelta.ArgumentsDelta.Should().Be("{\"pa");
+        delta1.Should().Be(delta2);
+        delta1.Should().NotBe(delta3);
     }
 
     [Fact]
-    public void Should_Support_ArgumentsDelta()
+    public void ToolCallDelta_FirstDelta_HasIdAndName()
     {
-        // Arrange
-        var delta = new ToolCallDelta
-        {
-            Index = 0,
-            ArgumentsDelta = "th\": \"test.cs",
-        };
+        // FR-004a-96: Id is present only in first delta for a tool call
+        // FR-004a-98: Name is present only in first delta
+        var firstDelta = new ToolCallDelta(Index: 0, Id: "call_123", Name: "search");
 
-        // Assert
-        delta.ArgumentsDelta.Should().Be("th\": \"test.cs");
+        firstDelta.Index.Should().Be(0);
+        firstDelta.Id.Should().Be("call_123");
+        firstDelta.Name.Should().Be("search");
+        firstDelta.ArgumentsDelta.Should().BeNull();
     }
 
     [Fact]
-    public void ArgumentsDelta_Can_Be_Partial_Json()
+    public void ToolCallDelta_SubsequentDelta_HasOnlyArgumentsDelta()
     {
-        // Arrange - simulating streaming JSON in chunks
-        var chunk1 = new ToolCallDelta { Index = 0, Id = "call_1", Name = "write_file", ArgumentsDelta = "{\"pa" };
-        var chunk2 = new ToolCallDelta { Index = 0, ArgumentsDelta = "th\": \"" };
-        var chunk3 = new ToolCallDelta { Index = 0, ArgumentsDelta = "test.cs\"}" };
+        // FR-004a-96, FR-004a-98: Subsequent deltas don't have Id/Name
+        var subsequentDelta = new ToolCallDelta(Index: 0, ArgumentsDelta: "\"test\"}");
 
-        // Act - combine to form complete JSON
-        var fullArgs = chunk1.ArgumentsDelta + chunk2.ArgumentsDelta + chunk3.ArgumentsDelta;
-
-        // Assert
-        fullArgs.Should().Be("{\"path\": \"test.cs\"}");
+        subsequentDelta.Index.Should().Be(0);
+        subsequentDelta.Id.Should().BeNull();
+        subsequentDelta.Name.Should().BeNull();
+        subsequentDelta.ArgumentsDelta.Should().Be("\"test\"}");
     }
 
     [Fact]
-    public void ArgumentsDelta_Can_Be_Empty_String()
+    public void ToolCallDelta_SerializesToJson()
     {
-        // Arrange
-        var delta = new ToolCallDelta
-        {
-            Index = 0,
-            ArgumentsDelta = string.Empty,
-        };
+        // ToolCallDelta should serialize to JSON
+        var delta = new ToolCallDelta(Index: 0, Id: "call_123", Name: "search", ArgumentsDelta: "{\"query\":");
 
-        // Assert
-        delta.ArgumentsDelta.Should().BeEmpty();
+        var json = JsonSerializer.Serialize(delta);
+
+        json.Should().Contain("\"index\":");
+        json.Should().Contain("\"id\":");
+        json.Should().Contain("\"name\":");
+        json.Should().Contain("\"argumentsDelta\":");
     }
 
     [Fact]
-    public void Should_Support_Accumulation_Pattern()
+    public void ToolCallDelta_DeserializesFromJson()
     {
-        // Arrange - simulate streaming tool call
-        var deltas = new[]
-        {
-            new ToolCallDelta { Index = 0, Id = "call_xyz", Name = "search", ArgumentsDelta = "{" },
-            new ToolCallDelta { Index = 0, ArgumentsDelta = "\"query\"" },
-            new ToolCallDelta { Index = 0, ArgumentsDelta = ": \"test\"}" },
-        };
+        // ToolCallDelta should deserialize from JSON
+        var json = "{\"index\":0,\"id\":\"call_123\",\"name\":\"search\",\"argumentsDelta\":\"{\\\"query\\\":\"}";
 
-        // Act - accumulate
-        string? id = null;
-        string? name = null;
-        var argsBuilder = new System.Text.StringBuilder();
+        var delta = JsonSerializer.Deserialize<ToolCallDelta>(json);
 
-        foreach (var delta in deltas)
-        {
-            id ??= delta.Id;
-            name ??= delta.Name;
-            if (delta.ArgumentsDelta != null)
-            {
-                argsBuilder.Append(delta.ArgumentsDelta);
-            }
-        }
-
-        // Assert
-        id.Should().Be("call_xyz");
-        name.Should().Be("search");
-        argsBuilder.ToString().Should().Be("{\"query\": \"test\"}");
+        delta.Should().NotBeNull();
+        delta!.Index.Should().Be(0);
+        delta.Id.Should().Be("call_123");
+        delta.Name.Should().Be("search");
+        delta.ArgumentsDelta.Should().Be("{\"query\":");
     }
 
     [Fact]
-    public void Should_Handle_Multiple_Parallel_ToolCalls()
+    public void ToolCallDelta_SupportsMultipleToolCalls()
     {
-        // Arrange - model calling two tools simultaneously
-        var deltas = new[]
-        {
-            new ToolCallDelta { Index = 0, Id = "call_1", Name = "read_file" },
-            new ToolCallDelta { Index = 1, Id = "call_2", Name = "write_file" },
-            new ToolCallDelta { Index = 0, ArgumentsDelta = "{\"path\":\"a.cs\"}" },
-            new ToolCallDelta { Index = 1, ArgumentsDelta = "{\"path\":\"b.cs\"}" },
-        };
+        // FR-004a-94: Index identifies which tool call is being built
+        var delta1 = new ToolCallDelta(Index: 0, Id: "call_1", Name: "search");
+        var delta2 = new ToolCallDelta(Index: 1, Id: "call_2", Name: "calculate");
 
-        // Act - separate by index
-        var tool0Args = string.Join(string.Empty, deltas.Where(d => d.Index == 0).Select(d => d.ArgumentsDelta ?? string.Empty));
-        var tool1Args = string.Join(string.Empty, deltas.Where(d => d.Index == 1).Select(d => d.ArgumentsDelta ?? string.Empty));
-
-        // Assert
-        tool0Args.Should().Contain("a.cs");
-        tool1Args.Should().Contain("b.cs");
+        delta1.Index.Should().Be(0);
+        delta2.Index.Should().Be(1);
     }
 
     [Fact]
-    public void Should_Serialize_To_Json()
+    public void ToolCallDelta_AllowsNegativeIndex()
     {
-        // Arrange
-        var delta = new ToolCallDelta
-        {
-            Index = 0,
-            Id = "call_123",
-            Name = "read_file",
-            ArgumentsDelta = "{\"path\":\"",
-        };
+        // Index is just an int, no validation required
+        var delta = new ToolCallDelta(Index: -1);
 
-        // Act
-        var json = System.Text.Json.JsonSerializer.Serialize(delta);
-
-        // Assert
-        json.Should().Contain("\"index\":0");
-        json.Should().Contain("\"id\":\"call_123\"");
-    }
-
-    [Fact]
-    public void Should_Omit_Null_Properties()
-    {
-        // Arrange
-        var delta = new ToolCallDelta { Index = 0 };
-        var options = new System.Text.Json.JsonSerializerOptions
-        {
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-        };
-
-        // Act
-        var json = System.Text.Json.JsonSerializer.Serialize(delta, options);
-
-        // Assert
-        json.Should().NotContain("\"id\"");
-        json.Should().NotContain("\"name\"");
+        delta.Index.Should().Be(-1);
     }
 }

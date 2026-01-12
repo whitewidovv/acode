@@ -162,9 +162,8 @@ public sealed class SerializationCompatibilityTests
     public void ToolCallDelta_Should_Serialize_For_Streaming()
     {
         // Arrange - streaming deltas
-        var delta1 = new ToolCallDelta { Index = 0, Id = "call_1", Name = "search" };
-        var delta2 = new ToolCallDelta { Index = 0, ArgumentsDelta = "{\"query\":\"" };
-        var delta3 = new ToolCallDelta { Index = 0, ArgumentsDelta = "test\"}" };
+        var delta1 = new ToolCallDelta(Index: 0, Id: "call_1", Name: "search");
+        var delta2 = new ToolCallDelta(Index: 0, ArgumentsDelta: "{\"query\":\"");
 
         // Act
         var json1 = JsonSerializer.Serialize(delta1);

@@ -108,20 +108,22 @@ public sealed record ToolDefinition(string Name, string Description, JsonElement
         {
             var propSchema = new Dictionary<string, object>();
             var propType = prop.PropertyType;
-            var isNullable = false;
 
             // Check if nullable
             if (propType.IsGenericType && propType.GetGenericTypeDefinition() == typeof(Nullable<>))
             {
-                isNullable = true;
+                // Nullable<T> - optional in schema
                 propType = Nullable.GetUnderlyingType(propType)!;
             }
-            else if (!propType.IsValueType)
+            else if (propType.IsValueType)
             {
-                // Reference types are nullable by default unless marked with required
+                // Non-nullable value type (int, bool, etc.) - required in schema
+                required.Add(ToCamelCase(prop.Name));
+            }
+            else
+            {
+                // Reference type - required only if marked with RequiredMemberAttribute
                 var requiredMember = prop.GetCustomAttributes(typeof(System.Runtime.CompilerServices.RequiredMemberAttribute), false).Any();
-                isNullable = !requiredMember;
-
                 if (requiredMember)
                 {
                     required.Add(ToCamelCase(prop.Name));
@@ -186,7 +188,7 @@ public sealed record ToolDefinition(string Name, string Description, JsonElement
             return str;
         }
 
-        return char.ToLowerInvariant(str[0]) + str.Substring(1);
+        return char.ToLowerInvariant(str[0]) + str[1..];
     }
 
     private static string ValidateName(string name)
