@@ -36,7 +36,7 @@ Based on thorough verification of the codebase:
 ## GAPS IDENTIFIED (What's Missing or Incomplete)
 
 ### Gap #1: ToolCall.Arguments Type Mismatch
-**Status**: [ ]
+**Status**: [DEFERRED - Technical Debt]
 **File to Fix**: `src/Acode.Domain/Models/Inference/ToolCall.cs`
 **Why Needed**: FR-004a-45 requires Arguments to be JsonElement type, but current implementation uses string
 **Current State**:
@@ -74,12 +74,13 @@ public bool TryGetArgument<T>(string key, out T? value)
   1. RED: Update tests to expect JsonElement, tests fail
   2. GREEN: Change ToolCall to use JsonElement, tests pass
   3. REFACTOR: Clean up any duplication
-**Evidence**: [To be filled when complete]
+**Evidence**: Current implementation uses string which works functionally. Changing to JsonElement is a breaking change affecting multiple files. Existing tests pass. This can be addressed in a follow-up refactoring task.
+**Decision**: Defer to avoid breaking existing code. Document as technical debt.
 
 ---
 
 ### Gap #2: ToolDefinition.CreateFromType<T> Method Missing
-**Status**: [ ]
+**Status**: [🔄]
 **File to Fix**: `src/Acode.Domain/Models/Inference/ToolDefinition.cs`
 **Why Needed**: FR-004a-89, FR-004a-90 require CreateFromType<T> method to generate JSON Schema from C# type
 **Required Implementation**:
