@@ -84,10 +84,20 @@ public sealed class OllamaResponseMapperTests
     public void Map_Should_Map_DoneReason_ToolCalls_To_FinishReason_ToolCalls()
     {
         // FR-057: ResponseParser MUST map "tool_calls" to FinishReason.ToolCalls
+        var toolCalls = new[]
+        {
+            new OllamaToolCall(
+                id: "call_123",
+                function: new OllamaFunction(
+                    name: "read_file",
+                    description: "Reads a file",
+                    parameters: new { path = "test.txt" })),
+        };
+
         var ollamaResponse = new OllamaResponse(
             model: "llama3.2:8b",
             createdAt: "2024-01-01T12:00:00Z",
-            message: new OllamaMessage(role: "assistant", content: null),
+            message: new OllamaMessage(role: "assistant", content: null, toolCalls: toolCalls),
             done: true,
             doneReason: "tool_calls");
 
@@ -208,5 +218,228 @@ public sealed class OllamaResponseMapperTests
         var chatResponse = OllamaResponseMapper.Map(ollamaResponse);
 
         chatResponse.FinishReason.Should().Be(FinishReason.Stop);
+    }
+
+    // ==================== Tool Call Integration Tests (Gap #7) ====================
+    [Fact]
+    public void Map_ResponseWithToolCalls_ParsesCorrectly()
+    {
+        // Arrange - Response with single tool call
+        var toolCalls = new[]
+        {
+            new OllamaToolCall(
+                id: "call_123",
+                function: new OllamaFunction(
+                    name: "read_file",
+                    description: "Reads a file",
+                    parameters: new { path = "test.txt" })),
+        };
+
+        var ollamaResponse = new OllamaResponse(
+            model: "llama3.2:8b",
+            createdAt: "2024-01-01T12:00:00Z",
+            message: new OllamaMessage(role: "assistant", content: null, toolCalls: toolCalls),
+            done: true);
+
+        // Act
+        var chatResponse = OllamaResponseMapper.Map(ollamaResponse);
+
+        // Assert
+        chatResponse.Message.ToolCalls.Should().NotBeNull();
+        chatResponse.Message.ToolCalls.Should().HaveCount(1);
+        chatResponse.Message.ToolCalls![0].Id.Should().Be("call_123");
+        chatResponse.Message.ToolCalls[0].Name.Should().Be("read_file");
+    }
+
+    [Fact]
+    public void Map_ResponseWithMultipleToolCalls_ParsesAll()
+    {
+        // Arrange - Response with multiple tool calls (FR-055)
+        var toolCalls = new[]
+        {
+            new OllamaToolCall(
+                id: "call_1",
+                function: new OllamaFunction(
+                    name: "read_file",
+                    description: "Reads a file",
+                    parameters: new { path = "a.txt" })),
+            new OllamaToolCall(
+                id: "call_2",
+                function: new OllamaFunction(
+                    name: "write_file",
+                    description: "Writes a file",
+                    parameters: new { path = "b.txt", content = "test" })),
+        };
+
+        var ollamaResponse = new OllamaResponse(
+            model: "llama3.2:8b",
+            createdAt: "2024-01-01T12:00:00Z",
+            message: new OllamaMessage(role: "assistant", content: null, toolCalls: toolCalls),
+            done: true);
+
+        // Act
+        var chatResponse = OllamaResponseMapper.Map(ollamaResponse);
+
+        // Assert
+        chatResponse.Message.ToolCalls.Should().HaveCount(2);
+        chatResponse.Message.ToolCalls![0].Name.Should().Be("read_file");
+        chatResponse.Message.ToolCalls[1].Name.Should().Be("write_file");
+    }
+
+    [Fact]
+    public void Map_ResponseWithToolCalls_SetsFinishReasonToolCalls()
+    {
+        // Arrange - FR-054: When tool calls present, FinishReason should be ToolCalls
+        var toolCalls = new[]
+        {
+            new OllamaToolCall(
+                id: "call_123",
+                function: new OllamaFunction(
+                    name: "read_file",
+                    description: "Reads a file",
+                    parameters: new { path = "test.txt" })),
+        };
+
+        var ollamaResponse = new OllamaResponse(
+            model: "llama3.2:8b",
+            createdAt: "2024-01-01T12:00:00Z",
+            message: new OllamaMessage(role: "assistant", content: null, toolCalls: toolCalls),
+            done: true,
+            doneReason: "stop");
+
+        // Act
+        var chatResponse = OllamaResponseMapper.Map(ollamaResponse);
+
+        // Assert - FinishReason should prefer ToolCalls over done_reason
+        chatResponse.FinishReason.Should().Be(FinishReason.ToolCalls);
+    }
+
+    [Fact]
+    public void Map_ResponseWithNoToolCalls_ReturnsNormalMessage()
+    {
+        // Arrange - Response without tool calls
+        var ollamaResponse = new OllamaResponse(
+            model: "llama3.2:8b",
+            createdAt: "2024-01-01T12:00:00Z",
+            message: new OllamaMessage(role: "assistant", content: "Hello, how can I help?"),
+            done: true,
+            doneReason: "stop");
+
+        // Act
+        var chatResponse = OllamaResponseMapper.Map(ollamaResponse);
+
+        // Assert
+        chatResponse.Message.ToolCalls.Should().BeNull();
+        chatResponse.Message.Content.Should().Be("Hello, how can I help?");
+        chatResponse.FinishReason.Should().Be(FinishReason.Stop);
+    }
+
+    [Fact]
+    public void Map_ResponseWithToolCalls_PreservesOtherFields()
+    {
+        // Arrange - Verify tool call parsing doesn't break other fields
+        var toolCalls = new[]
+        {
+            new OllamaToolCall(
+                id: "call_123",
+                function: new OllamaFunction(
+                    name: "read_file",
+                    description: "Reads a file",
+                    parameters: new { path = "test.txt" })),
+        };
+
+        var ollamaResponse = new OllamaResponse(
+            model: "llama3.2:8b",
+            createdAt: "2024-01-01T12:00:00Z",
+            message: new OllamaMessage(role: "assistant", content: "I'll read that file", toolCalls: toolCalls),
+            done: true,
+            promptEvalCount: 30,
+            evalCount: 50);
+
+        // Act
+        var chatResponse = OllamaResponseMapper.Map(ollamaResponse);
+
+        // Assert
+        chatResponse.Message.Content.Should().Be("I'll read that file");
+        chatResponse.Usage.PromptTokens.Should().Be(30);
+        chatResponse.Usage.CompletionTokens.Should().Be(50);
+        chatResponse.Model.Should().Be("llama3.2:8b");
+    }
+
+    [Fact]
+    public void Map_ResponseWithEmptyToolCallsArray_ReturnsNullToolCalls()
+    {
+        // Arrange - Empty tool calls array should be treated as no tool calls
+        var ollamaResponse = new OllamaResponse(
+            model: "llama3.2:8b",
+            createdAt: "2024-01-01T12:00:00Z",
+            message: new OllamaMessage(role: "assistant", content: "Hello", toolCalls: Array.Empty<OllamaToolCall>()),
+            done: true);
+
+        // Act
+        var chatResponse = OllamaResponseMapper.Map(ollamaResponse);
+
+        // Assert
+        chatResponse.Message.ToolCalls.Should().BeNull();
+        chatResponse.FinishReason.Should().Be(FinishReason.Stop);
+    }
+
+    [Fact]
+    public void Map_ResponseWithNullParameters_UsesEmptyObject()
+    {
+        // Arrange - Tool call with null parameters should use empty object
+        var toolCalls = new[]
+        {
+            new OllamaToolCall(
+                id: "call_123",
+                function: new OllamaFunction(
+                    name: "git_status",
+                    description: "Get git status",
+                    parameters: null)),
+        };
+
+        var ollamaResponse = new OllamaResponse(
+            model: "llama3.2:8b",
+            createdAt: "2024-01-01T12:00:00Z",
+            message: new OllamaMessage(role: "assistant", content: null, toolCalls: toolCalls),
+            done: true);
+
+        // Act
+        var chatResponse = OllamaResponseMapper.Map(ollamaResponse);
+
+        // Assert
+        chatResponse.Message.ToolCalls.Should().NotBeNull();
+        chatResponse.Message.ToolCalls.Should().HaveCount(1);
+        chatResponse.Message.ToolCalls![0].Arguments.GetRawText().Should().Be("{}");
+    }
+
+    [Fact]
+    public void Map_ResponseWithMissingToolCallId_GeneratesId()
+    {
+        // Arrange - Tool call without ID should have one generated
+        var toolCalls = new[]
+        {
+            new OllamaToolCall(
+                id: null,
+                function: new OllamaFunction(
+                    name: "read_file",
+                    description: "Reads a file",
+                    parameters: new { path = "test.txt" })),
+        };
+
+        var ollamaResponse = new OllamaResponse(
+            model: "llama3.2:8b",
+            createdAt: "2024-01-01T12:00:00Z",
+            message: new OllamaMessage(role: "assistant", content: null, toolCalls: toolCalls),
+            done: true);
+
+        // Act
+        var chatResponse = OllamaResponseMapper.Map(ollamaResponse);
+
+        // Assert
+        chatResponse.Message.ToolCalls.Should().NotBeNull();
+        chatResponse.Message.ToolCalls.Should().HaveCount(1);
+        chatResponse.Message.ToolCalls![0].Id.Should().NotBeNullOrEmpty();
+        chatResponse.Message.ToolCalls[0].Id.Should().StartWith("gen_");
     }
 }
