@@ -60,15 +60,12 @@ public sealed class DefaultProviderSelector : IProviderSelector
         }
 
         // FR-088, FR-089: Fallback to first healthy provider
-        foreach (var descriptor in providers)
+        foreach (var descriptor in providers.Where(descriptor => IsHealthy(descriptor.Id, healthStatus)))
         {
-            if (IsHealthy(descriptor.Id, healthStatus))
+            var provider = _providerFactory(descriptor);
+            if (provider != null)
             {
-                var provider = _providerFactory(descriptor);
-                if (provider != null)
-                {
-                    return provider;
-                }
+                return provider;
             }
         }
 
