@@ -207,6 +207,20 @@ public sealed class FileSystemArtifactStore : IArtifactStore, IDisposable
     }
 
     /// <summary>
+    /// Disposes the artifact store and releases resources.
+    /// </summary>
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        writeLock.Dispose();
+        disposed = true;
+    }
+
+    /// <summary>
     /// Generates a unique artifact ID in the format art_{timestamp}_{random}.
     /// </summary>
     private static string GenerateArtifactId()
@@ -275,19 +289,5 @@ public sealed class FileSystemArtifactStore : IArtifactStore, IDisposable
         {
             Directory.CreateDirectory(artifactDirectory);
         }
-    }
-
-    /// <summary>
-    /// Disposes the artifact store and releases resources.
-    /// </summary>
-    public void Dispose()
-    {
-        if (disposed)
-        {
-            return;
-        }
-
-        writeLock.Dispose();
-        disposed = true;
     }
 }
