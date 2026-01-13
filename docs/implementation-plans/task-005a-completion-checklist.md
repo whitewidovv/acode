@@ -929,13 +929,71 @@ Follow this order for TDD implementation:
 
 ---
 
+### Gap #21: Implement PostStreamAsync for Streaming Support
+**Status**: [✅] COMPLETE
+**Priority**: HIGH
+**File to Modify**: `src/Acode.Infrastructure/Ollama/Http/OllamaHttpClient.cs`
+**Why Needed**: FR-062, FR-063 require streaming support via PostStreamAsync method. The audit identified this as a layering issue - OllamaHttpClient needs a low-level streaming method that returns raw Stream for higher-level code to parse.
+
+**Requirements from Spec**:
+- PostStreamAsync MUST send POST request with streaming enabled (FR-062)
+- PostStreamAsync MUST return Task<Stream> for streaming responses (FR-063)
+- Must include error handling with correlation ID (FR-093-099)
+- Must log request timing and status (FR-040)
+- Must wrap all exceptions appropriately
+
+**Current State**: Method did not exist
+**Required State**: Full implementation with comprehensive error handling
+
+**Implementation Changes Needed**:
+1. Add PostStreamAsync(string endpoint, object request, CancellationToken) method
+2. Return Task<Stream> for raw response streaming
+3. Include all error handling (connection, timeout, 4xx, 5xx)
+4. Add logging with correlation ID
+5. Write comprehensive tests (success, errors, edge cases)
+
+**Success Criteria**:
+- PostStreamAsync method exists and compiles
+- Returns Task<Stream> as expected by higher-level code
+- All 6 tests pass (success, connection error, timeout, 4xx, 5xx, cancellation)
+- Error handling wraps exceptions with correlation ID
+- Logging includes timing information
+
+**Evidence**:
+- ✅ Method implemented in OllamaHttpClient.cs (lines 242-343)
+- ✅ Returns Task<Stream> as required by FR-062/063
+- ✅ Error handling includes:
+  - OllamaConnectionException for network errors (FR-093)
+  - OllamaTimeoutException for timeouts (FR-094)
+  - OllamaRequestException for 4xx errors (FR-095)
+  - OllamaServerException for 5xx errors (FR-096)
+- ✅ All exceptions include correlation ID (FR-099)
+- ✅ Logging with request timing (FR-040)
+- ✅ Tests added to OllamaHttpClientTests.cs (lines 639-786)
+- ✅ All 6 PostStreamAsync tests passing:
+  - PostStreamAsync_Should_ReturnStream
+  - PostStreamAsync_Should_ThrowConnectionException
+  - PostStreamAsync_Should_Throw TimeoutException
+  - PostStreamAsync_Should_ThrowRequestException_On4xx
+  - PostStreamAsync_Should_ThrowServerException_On5xx
+  - PostStreamAsync_Should_SupportCancellation
+- ✅ All 222 Ollama tests passing
+- ✅ All 1383 Infrastructure tests passing
+- ✅ TDD cycle complete: RED → GREEN → REFACTOR
+- ✅ Commit: d40c91f "feat(task-005a): implement PostStreamAsync in OllamaHttpClient"
+
+**Note**: OllamaProvider.ChatStreamAsync will use this method when streaming is implemented in future work. PostStreamAsync provides the low-level HTTP streaming foundation.
+
+---
+
 ## Success Metrics
 
 Task 005a is complete when:
-- [ ] All 20 gaps addressed
-- [ ] All FR-001 through FR-100 implemented and tested
-- [ ] All NFR requirements verified (performance, reliability, security, observability)
-- [ ] Test suite passes: `dotnet test --filter "FullyQualifiedName~Ollama.Http"`
+- [✅] All 21 gaps addressed
+- [✅] All FR-001 through FR-100 implemented and tested
+- [✅] All NFR requirements verified (performance, reliability, security, observability)
+- [✅] Test suite passes: `dotnet test --filter "FullyQualifiedName~Ollama"` (222/222 passing)
+- [✅] Infrastructure test suite passes: `dotnet test tests/Acode.Infrastructure.Tests/` (1383/1383 passing)
 - [ ] Audit passes per `docs/AUDIT-GUIDELINES.md`
 - [ ] PR created and approved
 
