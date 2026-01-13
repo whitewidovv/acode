@@ -1386,3 +1386,67 @@ Continuing with CLI command implementation (Gaps #14-20), then E2E tests, docume
 
 ---
 Last Updated: 2026-01-11 (Session 1)
+
+---
+
+## Session 2026-01-13 - Task 005b STARTED
+
+### Task Status: 🔄 **IN PROGRESS**
+
+**Task**: 005b - Tool Call Parsing + Retry-on-Invalid-JSON (within Epic 01)
+**Branch**: feature/task-005b-tool-output-capture
+
+### Progress Summary
+
+**Phase 1: Core Integration (COMPLETE ✅)**
+- **Gap #1**: Integrated ToolCallParser into OllamaResponseMapper ✅
+- **Gap #2**: Verified ChatMessage tool call support ✅
+- **Gap #7**: OllamaResponseMapper integration tests (8 tests, all passing) ✅
+
+**Phase 2: Retry Logic (COMPLETE ✅)**
+- **Gap #6**: ToolCallRetryHandler tests (10 tests, TDD RED phase) ✅
+- **Gap #3**: Implemented ToolCallRetryHandler (10 tests passing, TDD GREEN) ✅
+- **Gap #4**: Added RetryConfig to OllamaConfiguration ✅
+
+**Phase 3: Streaming (PENDING)**
+- Gap #8: Write streaming tool call tests
+- Gap #5: Implement streaming tool call integration
+
+**Phase 4: Missing Tests (PENDING)**
+- Gap #9: Write JsonRepairer comprehensive tests
+
+**Phase 5: Integration & Documentation (PENDING)**
+- Gap #12: Write end-to-end integration tests
+- Gap #10: Document error codes
+- Gap #11: Document retry configuration
+
+**Discovered Issue**:
+- **Gap #13**: Consolidate duplicate OllamaToolCall types (2 incompatible versions exist)
+
+### Completed Work (6 of 13 gaps = 46%)
+
+1. **OllamaResponseMapper Integration**:
+   - Parses tool calls from Ollama responses
+   - Sets FinishReason.ToolCalls when present (FR-054)
+   - Supports multiple simultaneous tool calls (FR-055)
+   - Type converter bridges duplicate OllamaToolCall types (temporary)
+   - 20 tests passing (12 original + 8 new)
+
+2. **ToolCallRetryHandler**:
+   - Full retry loop with exponential backoff
+   - Custom error prompts from templates
+   - Handles partial failures
+   - Cancellation token support
+   - All 10 tests passing
+
+3. **Configuration**:
+   - ToolCallRetryConfig added to OllamaConfiguration
+   - Sensible defaults: 3 retries, 100ms delay, auto-repair enabled
+
+### Next Steps
+1. Continue with streaming tool call integration (Gaps #5, #8)
+2. Add comprehensive JsonRepairer tests (Gap #9)
+3. Write end-to-end integration tests (Gap #12)
+4. Document error codes and configuration (Gaps #10, #11)
+5. Audit and create PR
+
