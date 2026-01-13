@@ -17,7 +17,7 @@ public sealed record OllamaMessage
     public OllamaMessage(
         string role,
         string? content = null,
-        OllamaToolCall[]? toolCalls = null,
+        OllamaToolCallResponse[]? toolCalls = null,
         string? toolCallId = null)
     {
         this.Role = role;
@@ -44,7 +44,7 @@ public sealed record OllamaMessage
     /// </summary>
     [JsonPropertyName("tool_calls")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public OllamaToolCall[]? ToolCalls { get; init; }
+    public OllamaToolCallResponse[]? ToolCalls { get; init; }
 
     /// <summary>
     /// Gets the tool call ID in tool result messages (optional).

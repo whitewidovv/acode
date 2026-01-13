@@ -86,12 +86,11 @@ public sealed class OllamaResponseMapperTests
         // FR-057: ResponseParser MUST map "tool_calls" to FinishReason.ToolCalls
         var toolCalls = new[]
         {
-            new OllamaToolCall(
+            new OllamaToolCallResponse(
                 id: "call_123",
-                function: new OllamaFunction(
+                function: new OllamaToolCallFunction(
                     name: "read_file",
-                    description: "Reads a file",
-                    parameters: new { path = "test.txt" })),
+                    arguments: "{\"path\":\"test.txt\"}")),
         };
 
         var ollamaResponse = new OllamaResponse(
@@ -227,12 +226,11 @@ public sealed class OllamaResponseMapperTests
         // Arrange - Response with single tool call
         var toolCalls = new[]
         {
-            new OllamaToolCall(
+            new OllamaToolCallResponse(
                 id: "call_123",
-                function: new OllamaFunction(
+                function: new OllamaToolCallFunction(
                     name: "read_file",
-                    description: "Reads a file",
-                    parameters: new { path = "test.txt" })),
+                    arguments: "{\"path\":\"test.txt\"}")),
         };
 
         var ollamaResponse = new OllamaResponse(
@@ -257,18 +255,16 @@ public sealed class OllamaResponseMapperTests
         // Arrange - Response with multiple tool calls (FR-055)
         var toolCalls = new[]
         {
-            new OllamaToolCall(
+            new OllamaToolCallResponse(
                 id: "call_1",
-                function: new OllamaFunction(
+                function: new OllamaToolCallFunction(
                     name: "read_file",
-                    description: "Reads a file",
-                    parameters: new { path = "a.txt" })),
-            new OllamaToolCall(
+                    arguments: "{\"path\":\"a.txt\"}")),
+            new OllamaToolCallResponse(
                 id: "call_2",
-                function: new OllamaFunction(
+                function: new OllamaToolCallFunction(
                     name: "write_file",
-                    description: "Writes a file",
-                    parameters: new { path = "b.txt", content = "test" })),
+                    arguments: "{\"path\":\"b.txt\",\"content\":\"test\"}")),
         };
 
         var ollamaResponse = new OllamaResponse(
@@ -292,12 +288,11 @@ public sealed class OllamaResponseMapperTests
         // Arrange - FR-054: When tool calls present, FinishReason should be ToolCalls
         var toolCalls = new[]
         {
-            new OllamaToolCall(
+            new OllamaToolCallResponse(
                 id: "call_123",
-                function: new OllamaFunction(
+                function: new OllamaToolCallFunction(
                     name: "read_file",
-                    description: "Reads a file",
-                    parameters: new { path = "test.txt" })),
+                    arguments: "{\"path\":\"test.txt\"}")),
         };
 
         var ollamaResponse = new OllamaResponse(
@@ -340,12 +335,11 @@ public sealed class OllamaResponseMapperTests
         // Arrange - Verify tool call parsing doesn't break other fields
         var toolCalls = new[]
         {
-            new OllamaToolCall(
+            new OllamaToolCallResponse(
                 id: "call_123",
-                function: new OllamaFunction(
+                function: new OllamaToolCallFunction(
                     name: "read_file",
-                    description: "Reads a file",
-                    parameters: new { path = "test.txt" })),
+                    arguments: "{\"path\":\"test.txt\"}")),
         };
 
         var ollamaResponse = new OllamaResponse(
@@ -373,7 +367,7 @@ public sealed class OllamaResponseMapperTests
         var ollamaResponse = new OllamaResponse(
             model: "llama3.2:8b",
             createdAt: "2024-01-01T12:00:00Z",
-            message: new OllamaMessage(role: "assistant", content: "Hello", toolCalls: Array.Empty<OllamaToolCall>()),
+            message: new OllamaMessage(role: "assistant", content: "Hello", toolCalls: Array.Empty<OllamaToolCallResponse>()),
             done: true);
 
         // Act
@@ -387,15 +381,14 @@ public sealed class OllamaResponseMapperTests
     [Fact]
     public void Map_ResponseWithNullParameters_UsesEmptyObject()
     {
-        // Arrange - Tool call with null parameters should use empty object
+        // Arrange - Tool call with null/empty arguments should use empty object
         var toolCalls = new[]
         {
-            new OllamaToolCall(
+            new OllamaToolCallResponse(
                 id: "call_123",
-                function: new OllamaFunction(
+                function: new OllamaToolCallFunction(
                     name: "git_status",
-                    description: "Get git status",
-                    parameters: null)),
+                    arguments: "{}")),
         };
 
         var ollamaResponse = new OllamaResponse(
@@ -419,12 +412,11 @@ public sealed class OllamaResponseMapperTests
         // Arrange - Tool call without ID should have one generated
         var toolCalls = new[]
         {
-            new OllamaToolCall(
+            new OllamaToolCallResponse(
                 id: null,
-                function: new OllamaFunction(
+                function: new OllamaToolCallFunction(
                     name: "read_file",
-                    description: "Reads a file",
-                    parameters: new { path = "test.txt" })),
+                    arguments: "{\"path\":\"test.txt\"}")),
         };
 
         var ollamaResponse = new OllamaResponse(

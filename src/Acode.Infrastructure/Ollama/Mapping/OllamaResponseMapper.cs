@@ -103,13 +103,12 @@ public static class OllamaResponseMapper
     /// Converts tool calls from Ollama.Models format to Ollama.ToolCall.Models format.
     /// </summary>
     /// <remarks>
-    /// TODO Gap #13: Consolidate duplicate OllamaToolCall types.
-    /// There are two incompatible OllamaToolCall types in the codebase:
-    /// - Ollama.Models.OllamaToolCall (used in responses, has Description/Parameters)
-    /// - Ollama.ToolCall.Models.OllamaToolCall (used by parser, has Arguments)
-    /// This converter bridges the gap until types are consolidated.
+    /// Converts from API contract types (OllamaToolCallResponse) to internal processing types
+    /// (ToolCall.Models.OllamaToolCall). Both type hierarchies exist by design:
+    /// - Ollama.Models.* - API contract types for serialization/deserialization.
+    /// - Ollama.ToolCall.Models.* - Internal processing types for parsing/retry/streaming.
     /// </remarks>
-    private static ToolCall.Models.OllamaToolCall[] ConvertToolCalls(Models.OllamaToolCall[] toolCalls)
+    private static ToolCall.Models.OllamaToolCall[] ConvertToolCalls(OllamaToolCallResponse[] toolCalls)
     {
         return toolCalls.Select(tc => new ToolCall.Models.OllamaToolCall
         {
@@ -119,13 +118,7 @@ public static class OllamaResponseMapper
                 ? new ToolCall.Models.OllamaFunction
                 {
                     Name = tc.Function.Name,
-
-                    // TODO: The Ollama.Models.OllamaFunction has Description/Parameters/Strict
-                    // but should have Arguments for tool call responses. For now, serialize
-                    // Parameters as JSON arguments. This needs proper fix in Gap #13.
-                    Arguments = tc.Function.Parameters != null
-                        ? System.Text.Json.JsonSerializer.Serialize(tc.Function.Parameters)
-                        : "{}",
+                    Arguments = tc.Function.Arguments, // Direct mapping - both have Arguments field
                 }
                 : null,
         }).ToArray();
