@@ -60,6 +60,9 @@ public sealed class ToolCallRetryHandler
         // First attempt: parse without retry
         var result = parser.Parse(toolCalls);
 
+        // Save repairs from initial parse (important for accumulation across retries)
+        var accumulatedRepairs = result.Repairs.ToList();
+
         if (result.AllSucceeded)
         {
             return result;
@@ -98,7 +101,21 @@ public sealed class ToolCallRetryHandler
             var newToolCalls = ExtractToolCalls(retryResponse, toolCalls);
 
             // Parse new tool calls
-            result = parser.Parse(newToolCalls);
+            var retryResult = parser.Parse(newToolCalls);
+
+            // Accumulate repairs from retry attempts
+            foreach (var repair in retryResult.Repairs)
+            {
+                accumulatedRepairs.Add(repair);
+            }
+
+            // Update result but preserve accumulated repairs
+            result = new ToolCallParseResult
+            {
+                ToolCalls = retryResult.ToolCalls,
+                Errors = retryResult.Errors,
+                Repairs = accumulatedRepairs
+            };
         }
 
         // Check if we succeeded after retries
