@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Acode.Application.Configuration;
+using Acode.Infrastructure.Common;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -216,7 +217,7 @@ Examples:
                 {
                     WriteIndented = true,
                     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-                    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+                    PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
                 };
 
                 var json = JsonSerializer.Serialize(redactedConfig, options);

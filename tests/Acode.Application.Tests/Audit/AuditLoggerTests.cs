@@ -19,12 +19,14 @@ public sealed class AuditLoggerTests
     [Fact]
     public void IAuditLogger_HasLogAsyncMethod()
     {
-        // Act
-        var method = typeof(IAuditLogger).GetMethod("LogAsync");
+        // Act - Get all LogAsync methods (there should be 2 overloads)
+        var methods = typeof(IAuditLogger).GetMethods()
+            .Where(m => m.Name == "LogAsync")
+            .ToList();
 
         // Assert
-        method.Should().NotBeNull();
-        method!.ReturnType.Name.Should().Be("Task");
+        methods.Should().HaveCount(2, "IAuditLogger should have 2 LogAsync overloads");
+        methods.Should().AllSatisfy(m => m.ReturnType.Name.Should().Be("Task"));
     }
 
     [Fact]

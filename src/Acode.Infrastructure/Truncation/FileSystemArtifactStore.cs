@@ -8,12 +8,13 @@ using Acode.Application.Truncation;
 /// File system-based artifact storage implementation.
 /// Stores artifacts in a session-scoped directory.
 /// </summary>
-public sealed class FileSystemArtifactStore : IArtifactStore
+public sealed class FileSystemArtifactStore : IArtifactStore, IDisposable
 {
     private readonly string sessionDirectory;
     private readonly string artifactDirectory;
     private readonly ConcurrentDictionary<string, Artifact> artifacts = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim writeLock = new(1, 1);
+    private bool disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FileSystemArtifactStore"/> class.
@@ -29,6 +30,7 @@ public sealed class FileSystemArtifactStore : IArtifactStore
     /// <inheritdoc />
     public async Task<Artifact> CreateAsync(string content, string sourceTool, string contentType)
     {
+        ObjectDisposedException.ThrowIf(disposed, this);
         ArgumentNullException.ThrowIfNull(content);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceTool);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentType);
@@ -202,6 +204,20 @@ public sealed class FileSystemArtifactStore : IArtifactStore
         }
 
         return Task.FromResult(artifacts.ContainsKey(artifactId));
+    }
+
+    /// <summary>
+    /// Disposes the artifact store and releases resources.
+    /// </summary>
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        writeLock.Dispose();
+        disposed = true;
     }
 
     /// <summary>

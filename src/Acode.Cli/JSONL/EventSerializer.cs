@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Acode.Cli.Events;
+using Acode.Infrastructure.Common;
 
 namespace Acode.Cli.JSONL;
 
@@ -22,7 +23,7 @@ public sealed class EventSerializer : IEventSerializer
     {
         _options = new JsonSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
             WriteIndented = prettyPrint,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };

@@ -40,6 +40,9 @@
     },
     "storage": {
       "$ref": "#/definitions/storage"
+    },
+    "audit": {
+      "$ref": "#/definitions/audit"
     }
   },
   "definitions": {
@@ -81,6 +84,9 @@
     },
     "storage": {
       "$ref": "#/definitions/storage"
+    },
+    "audit": {
+      "$ref": "#/definitions/audit"
     }
   },
   "definitions": {
@@ -560,6 +566,54 @@
               "description": "Conflict resolution: last-write-wins or reject"
             }
           }
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "description": "Audit logging configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable audit logging"
+        },
+        "log_level": {
+          "type": "string",
+          "enum": ["debug", "info", "warning", "error", "critical"],
+          "default": "info",
+          "description": "Minimum severity level for audit events"
+        },
+        "log_directory": {
+          "type": "string",
+          "default": ".acode/logs",
+          "description": "Directory for audit log files"
+        },
+        "retention_days": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 90,
+          "description": "Number of days to retain audit logs"
+        },
+        "rotation_size_mb": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10,
+          "description": "Maximum size in MB before rotating log file"
+        },
+        "rotation_interval": {
+          "type": "string",
+          "enum": ["hourly", "daily", "weekly"],
+          "default": "daily",
+          "description": "Time-based rotation interval"
+        },
+        "export_formats": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["json", "csv", "text"]
+          },
+          "description": "Supported export formats for audit logs"
         }
       }
     }
