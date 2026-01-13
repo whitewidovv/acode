@@ -429,27 +429,46 @@ Each with: description, cause, resolution, example
 ---
 
 ### Gap #11: Configuration Documentation for Retry Settings
-**Status**: [ ]
-**File to Update**: docs/user-manual/ollama-configuration.md or similar
+**Status**: [✅]
+**File to Update**: docs/configuration/providers.md
 **Why Needed**: Users need to know how to configure retry behavior.
 **Required Content**:
-1. tool_call_retry.max_retry_attempts (default: 3)
+1. tool_call_retry.max_retries (default: 3)
 2. tool_call_retry.enable_auto_repair (default: true)
 3. tool_call_retry.retry_delay_ms (default: 100)
 4. tool_call_retry.retry_prompt_template (optional)
+5. tool_call_retry.repair_timeout_ms (default: 100)
+6. tool_call_retry.strict_validation (default: true)
+7. tool_call_retry.max_nesting_depth (default: 64)
+8. tool_call_retry.max_argument_size (default: 1MB)
 
 **Example**:
 ```yaml
 providers:
   ollama:
     tool_call_retry:
-      max_retry_attempts: 3
+      max_retries: 3
       enable_auto_repair: true
       retry_delay_ms: 100
 ```
 
 **Success Criteria**: Configuration documentation complete with examples
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- Added comprehensive "Tool Call Retry Configuration" section to docs/configuration/providers.md
+- All 8 configuration properties documented with:
+  - Type, default, range, and description
+  - YAML configuration examples
+  - Recommendations for different use cases (local models, production, development)
+  - Security considerations for max_nesting_depth and max_argument_size
+- Additional sections:
+  - How It Works (5-step flow)
+  - Complete example configuration
+  - Error code reference table
+  - 4 retry scenarios with examples (repairable, retry needed, exhausted)
+  - Monitoring and telemetry (audit logging, metrics, alerts)
+  - Performance considerations (latency impact, memory usage)
+  - Troubleshooting (high retry rates, exhaustion, slow retries)
+  - Best practices (5 scenarios with YAML examples)
 
 ---
 
