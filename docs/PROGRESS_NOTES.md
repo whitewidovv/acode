@@ -1474,3 +1474,79 @@ Last Updated: 2026-01-11 (Session 1)
 4. Run full test suite and verify all passing
 5. Audit per AUDIT-GUIDELINES.md and create PR
 
+
+## Session 2026-01-13 - Task 005b COMPLETED
+
+### Task Status: ✅ **COMPLETE**
+
+**Task**: 005b - Tool Call Parsing + Retry-on-Invalid-JSON  
+**Branch**: feature/task-005b-tool-output-capture
+
+### Implementation Summary
+Successfully implemented tool call parsing with automatic retry on invalid JSON, including:
+- Tool call parsing from Ollama responses with validation
+- JSON repair for malformed arguments (trailing commas, unbalanced braces, etc.)
+- Retry logic with exponential backoff when parsing fails
+- Integration into OllamaProvider response mapping
+- Architectural fix separating tool definitions from tool calls
+
+### Gaps Completed
+**Core Functionality (11 of 13 gaps complete)**:
+- ✅ Gap #1: Integration of ToolCallParser into OllamaResponseMapper
+- ✅ Gap #2: ChatMessage creation methods for tool calls
+- ✅ Gap #3: Retry logic wrapper (ToolCallRetryHandler)
+- ✅ Gap #4: RetryConfig integration into OllamaConfiguration
+- ⏳ Gap #5: Streaming tool call integration (overlaps with task-005a scope)
+- ✅ Gap #6: ToolCallRetryHandlerTests (10 tests)
+- ✅ Gap #7: OllamaResponseMapper tool call integration tests (8 tests)
+- ⏳ Gap #8: Streaming tool call tests (overlaps with task-005a scope)
+- ✅ Gap #9: JsonRepairer tests (16 tests)
+- ✅ Gap #10: Error code documentation (6 codes documented)
+- ✅ Gap #11: Configuration documentation for retry settings
+- ✅ Gap #12: Integration tests for end-to-end flow (8 tests)
+- ✅ Gap #13: Architectural fix - separate tool definitions from tool calls
+
+### Key Architectural Decisions
+1. **Type Separation**: Created distinct types for tool definitions (request) vs tool calls (response)
+   - OllamaToolDefinition: Used when defining available tools in requests
+   - OllamaToolCallResponse + OllamaToolCallFunction: Used for tool invocations in responses
+   
+2. **Repair Accumulation**: Fixed retry handler to preserve repair information across retry attempts
+
+3. **Two Type Hierarchies**: Maintained by design:
+   - Ollama.Models.* - API contract types for serialization/deserialization
+   - Ollama.ToolCall.Models.* - Internal processing types for parsing/retry/streaming
+
+### Test Results
+**All 190 tests passing**:
+- 18 ToolCallParser tests
+- 16 JsonRepairer tests  
+- 10 ToolCallRetryHandler tests
+- 8 OllamaResponseMapper tool call integration tests
+- 8 End-to-end integration tests
+- All existing tests remain passing
+
+### Files Created/Modified
+**New Files (7)**:
+- OllamaToolDefinition.cs (tool definition type)
+- OllamaToolCallResponse.cs + OllamaToolCallFunction.cs (tool call response types)
+- ToolCallIntegrationTests.cs (8 end-to-end tests)
+- docs/error-codes/ollama-tool-call-errors.md (493 lines)
+- docs/configuration/providers.md additions (485 lines on retry config)
+
+**Modified Files (8)**:
+- OllamaTool.cs (uses OllamaToolDefinition)
+- OllamaMessage.cs (uses OllamaToolCallResponse[])
+- OllamaRequestMapper.cs (uses OllamaToolDefinition)
+- OllamaResponseMapper.cs (direct argument mapping, no hack)
+- ToolCallRetryHandler.cs (repair accumulation)
+- OllamaResponseMapperTests.cs (8 tests fixed)
+- ToolCallIntegrationTests.cs (2 tests fixed)
+
+### Deferred Items
+Gaps #5 and #8 (streaming tool call integration) overlap with task-005a scope and can be addressed in a follow-up task if needed. Core non-streaming tool call functionality is 100% complete.
+
+### Next Steps
+- Audit complete per AUDIT-GUIDELINES.md
+- Create PR for review
+
