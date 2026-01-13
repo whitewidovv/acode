@@ -1,6 +1,7 @@
 namespace Acode.Domain.Audit;
 
 using System.Text.RegularExpressions;
+using Acode.Domain.Common;
 
 /// <summary>
 /// Unique identifier for an audit event.
@@ -38,7 +39,7 @@ public sealed partial record EventId
     /// Creates a new EventId with a generated ID.
     /// </summary>
     /// <returns>New EventId.</returns>
-    public static EventId New() => new($"evt_{EncodeBase62(Guid.NewGuid())}");
+    public static EventId New() => new($"evt_{Base62Encoder.Encode(Guid.NewGuid())}");
 
     /// <summary>
     /// Returns the string representation.
@@ -48,28 +49,4 @@ public sealed partial record EventId
 
     [GeneratedRegex("^evt_[a-zA-Z0-9]+$")]
     private static partial Regex FormatRegex();
-
-    private static string EncodeBase62(Guid guid)
-    {
-        const string alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        var bytes = guid.ToByteArray();
-        var value = new System.Numerics.BigInteger(bytes.Concat(new byte[] { 0 }).ToArray());
-
-        if (value == System.Numerics.BigInteger.Zero)
-        {
-            return "0";
-        }
-
-        var result = new System.Text.StringBuilder();
-        var base62 = new System.Numerics.BigInteger(62);
-
-        while (value > System.Numerics.BigInteger.Zero)
-        {
-            var remainder = (int)(value % base62);
-            result.Insert(0, alphabet[remainder]);
-            value /= base62;
-        }
-
-        return result.ToString();
-    }
 }
