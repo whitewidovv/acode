@@ -88,6 +88,60 @@ function Write-Debug-Verbose {
     }
 }
 
+function Write-Warn {
+    param([string]$Message)
+    if (-not $Quiet) {
+        Write-Host "[WARN] $Message" -ForegroundColor Yellow
+    }
+}
+
+# Version checking function
+function Test-OllamaVersion {
+    Write-Debug-Verbose "Checking Ollama version..."
+
+    try {
+        # Try to get Ollama version
+        $versionOutput = & ollama --version 2>&1
+
+        if ($LASTEXITCODE -eq 0 -and $versionOutput) {
+            # Parse version string (format: "ollama version is 0.1.30")
+            if ($versionOutput -match "(\d+\.\d+\.\d+)") {
+                $version = $matches[1]
+                Write-Debug-Verbose "Detected Ollama version: $version"
+
+                # Parse version components
+                $parts = $version.Split('.')
+                $major = [int]$parts[0]
+                $minor = [int]$parts[1]
+                $patch = [int]$parts[2]
+
+                # Check minimum version (0.1.23)
+                if ($major -lt 0 -or ($major -eq 0 -and $minor -lt 1) -or ($major -eq 0 -and $minor -eq 1 -and $patch -lt 23)) {
+                    Write-Warn "Ollama version $version is below minimum supported version 0.1.23"
+                    Write-Warn "Some features may not work correctly. Please upgrade Ollama."
+                }
+                # Check if above tested maximum (0.1.35)
+                elseif ($major -gt 0 -or ($major -eq 0 -and $minor -gt 1) -or ($major -eq 0 -and $minor -eq 1 -and $patch -gt 35)) {
+                    Write-Warn "Ollama version $version is above tested maximum 0.1.35"
+                    Write-Warn "This version has not been explicitly tested. Please report any issues."
+                }
+                else {
+                    Write-Debug-Verbose "Ollama version $version is within supported range (0.1.23 to 0.1.35)"
+                }
+            }
+            else {
+                Write-Debug-Verbose "Could not parse version from output: $versionOutput"
+            }
+        }
+    }
+    catch {
+        Write-Debug-Verbose "Could not check Ollama version (command may not be available)"
+    }
+
+    # FR-081: Version check failure MUST NOT block tests
+    # Always return without error
+}
+
 # Test functions
 function Test-HealthCheck {
     $testName = "Health Check"
@@ -337,6 +391,9 @@ function Main {
         Write-Host "========================================"
         Write-Host ""
     }
+
+    # Check Ollama version (FR-078 to FR-081)
+    Test-OllamaVersion
 
     # Run tests in order
     # Configuration check tests (exit 2 on failure)
