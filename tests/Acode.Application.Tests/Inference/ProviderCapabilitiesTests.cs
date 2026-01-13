@@ -116,8 +116,8 @@ public class ProviderCapabilitiesTests
         var json = JsonSerializer.Serialize(capabilities);
 
         json.Should().Contain("\"supportsStreaming\":");
-        json.Should().Contain("\"supportsToolCalls\":"); // Actual JSON property name
-        json.Should().Contain("\"maxContextTokens\":"); // Actual JSON property name
+        json.Should().Contain("\"supportsToolCalls\":"); // Property serializes as supportsToolCalls
+        json.Should().Contain("\"maxContextTokens\":"); // Property serializes as maxContextTokens
         json.Should().Contain("\"defaultModel\":");
     }
 
@@ -180,7 +180,7 @@ public class ProviderCapabilitiesTests
 
         // Act & Assert - Context size requirements (OK - 8192 >= 4096)
         var req4 = new CapabilityRequirement { MinContextTokens = 4096 };
-        capabilities.Supports(req4).Should().BeTrue(); // maxContextLength is 8192, meets minimum
+        capabilities.Supports(req4).Should().BeTrue(); // maxContextLength is 8192, which supports 4096
 
         // Act & Assert - Model requirements
         var req5 = new CapabilityRequirement { RequiredModel = "llama2" };
@@ -207,7 +207,8 @@ public class ProviderCapabilitiesTests
             supportsJsonMode: true,
             maxContextLength: 16384,
             maxOutputTokens: 4096,
-            supportedModels: new[] { "model-c", "model-d" });
+            supportedModels: new[] { "model-c", "model-d" },
+            defaultModel: "model-c");
 
         // Act
         var merged = cap1.Merge(cap2);
@@ -220,7 +221,7 @@ public class ProviderCapabilitiesTests
         merged.MaxContextTokens.Should().Be(16384, "should take maximum context size");
         merged.MaxOutputTokens.Should().Be(4096, "should take maximum output size");
 
-        // Assert - Models should be union of all models from both providers
+        // Assert - Models should be union of both sets
         merged.SupportedModels.Should().BeEquivalentTo(new[] { "model-a", "model-b", "model-c", "model-d" });
 
         // Assert - Default model from first if both have it
