@@ -233,8 +233,7 @@ public sealed class ToolCallRetryHandlerTests
     [Fact]
     public async Task ParseWithRetryAsync_ExponentialBackoff_DelaysCorrectly()
     {
-        // Arrange - Track delays
-        var delays = new System.Collections.Generic.List<int>();
+        // Arrange - Configure retry with measurable delay
         var configWithDelay = new RetryConfig { MaxRetries = 3, RetryDelayMs = 50 };
 
         var malformedToolCalls = new[]

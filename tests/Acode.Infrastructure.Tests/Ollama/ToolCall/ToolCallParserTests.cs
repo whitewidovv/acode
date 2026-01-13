@@ -470,7 +470,7 @@ public sealed class ToolCallParserTests
     public void Parse_UnknownTool_ReturnsErrorACODETLP005()
     {
         // Arrange - FR-016: Parser MUST reject tool calls for unknown tools
-        var parser = CreateParserWithRegistry(out var registry);
+        var parserWithRegistry = CreateParserWithRegistry(out var registry);
         registry.IsRegistered("unknown_tool").Returns(false);
 
         var toolCalls = new[]
@@ -487,7 +487,7 @@ public sealed class ToolCallParserTests
         };
 
         // Act
-        var result = parser.Parse(toolCalls);
+        var result = parserWithRegistry.Parse(toolCalls);
 
         // Assert
         result.AllSucceeded.Should().BeFalse();
@@ -502,7 +502,7 @@ public sealed class ToolCallParserTests
     public void Parse_KnownToolWithValidArguments_CallsSchemaValidationAndSucceeds()
     {
         // Arrange - FR-057: Parser MUST validate arguments against tool's JSON Schema
-        var parser = CreateParserWithRegistry(out var registry);
+        var parserWithRegistry = CreateParserWithRegistry(out var registry);
         registry.IsRegistered("read_file").Returns(true);
 
         var validArgs = JsonDocument.Parse("{\"path\": \"test.txt\"}").RootElement;
@@ -532,7 +532,7 @@ public sealed class ToolCallParserTests
         };
 
         // Act
-        var result = parser.Parse(toolCalls);
+        var result = parserWithRegistry.Parse(toolCalls);
 
         // Assert
         result.AllSucceeded.Should().BeTrue();
@@ -552,7 +552,7 @@ public sealed class ToolCallParserTests
     public void Parse_SchemaValidationFailure_ReturnsErrorACODETLP006()
     {
         // Arrange - FR-059: Parser MUST distinguish parse errors from validation errors
-        var parser = CreateParserWithRegistry(out var registry);
+        var parserWithRegistry = CreateParserWithRegistry(out var registry);
         registry.IsRegistered("read_file").Returns(true);
 
         var validationErrors = new[]
@@ -590,7 +590,7 @@ public sealed class ToolCallParserTests
         };
 
         // Act
-        var result = parser.Parse(toolCalls);
+        var result = parserWithRegistry.Parse(toolCalls);
 
         // Assert
         result.AllSucceeded.Should().BeFalse();
@@ -606,7 +606,7 @@ public sealed class ToolCallParserTests
     public void Parse_MultipleValidationErrors_CombinesIntoSingleToolCallError()
     {
         // Arrange - FR-060 through FR-062: Multiple validation errors
-        var parser = CreateParserWithRegistry(out var registry);
+        var parserWithRegistry = CreateParserWithRegistry(out var registry);
         registry.IsRegistered("write_file").Returns(true);
 
         var validationErrors = new[]
@@ -647,7 +647,7 @@ public sealed class ToolCallParserTests
         };
 
         // Act
-        var result = parser.Parse(toolCalls);
+        var result = parserWithRegistry.Parse(toolCalls);
 
         // Assert
         result.AllSucceeded.Should().BeFalse();
@@ -662,7 +662,7 @@ public sealed class ToolCallParserTests
     public void Parse_PartialSuccess_ReturnsSuccessfulCallsAndValidationErrors()
     {
         // Arrange - Mixed success and validation failure
-        var parser = CreateParserWithRegistry(out var registry);
+        var parserWithRegistry = CreateParserWithRegistry(out var registry);
         registry.IsRegistered(Arg.Any<string>()).Returns(true);
 
         var validArgs = JsonDocument.Parse("{\"path\": \"test.txt\"}").RootElement;
@@ -716,7 +716,7 @@ public sealed class ToolCallParserTests
         };
 
         // Act
-        var result = parser.Parse(toolCalls);
+        var result = parserWithRegistry.Parse(toolCalls);
 
         // Assert
         result.AllSucceeded.Should().BeFalse();

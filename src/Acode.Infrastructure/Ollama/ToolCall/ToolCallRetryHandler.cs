@@ -178,24 +178,20 @@ public sealed class ToolCallRetryHandler
     /// Extracts tool calls from retry response.
     /// </summary>
     /// <remarks>
-    /// This is a simplified implementation that returns the original tool calls.
-    /// In a real implementation, would need to:
-    /// 1. Check if response contains tool calls
-    /// 2. Extract them from the response message
-    /// 3. Map back to OllamaToolCall format
-    /// For now, this allows tests to pass by returning what the mock provides.
+    /// Implements FR-048: Retry MUST extract new tool call from response.
+    /// 1. Checks if response contains tool calls via Message.ToolCalls
+    /// 2. Extracts each tool call from the response message
+    /// 3. Maps domain ToolCall back to OllamaToolCall format for re-parsing
+    /// If the model's retry response doesn't contain tool calls (e.g., returned
+    /// a text explanation instead), falls back to the original tool calls for
+    /// another retry attempt.
     /// </remarks>
     private static OllamaToolCall[] ExtractToolCalls(ChatResponse response, OllamaToolCall[] original)
     {
-        // Simplified: In real implementation, would extract from response.Message.ToolCalls
-        // and convert back to OllamaToolCall format.
-        // For testing purposes, the mock provider will return responses that,
-        // when this method is called, will have the corrected tool calls available.
-
-        // Check if response has tool calls
+        // FR-048: Extract new tool calls from retry response
         if (response.Message.ToolCalls != null && response.Message.ToolCalls.Count > 0)
         {
-            // Convert domain ToolCall back to OllamaToolCall
+            // Convert domain ToolCall back to OllamaToolCall for re-parsing
             return response.Message.ToolCalls.Select(tc => new OllamaToolCall
             {
                 Id = tc.Id,
@@ -207,7 +203,8 @@ public sealed class ToolCallRetryHandler
             }).ToArray();
         }
 
-        // Fallback: return original (test mocks handle this differently)
+        // Model didn't return tool calls in retry (e.g., returned text explanation)
+        // Return original for next retry attempt
         return original;
     }
 }
