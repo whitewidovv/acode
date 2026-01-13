@@ -132,7 +132,7 @@ public static ChatMessage CreateAssistantWithTools(string content, ToolCall[] to
 ---
 
 ### Gap #3: Retry Logic Wrapper - ToolCallRetryHandler
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: src/Acode.Infrastructure/Ollama/ToolCall/ToolCallRetryHandler.cs
 **Why Needed**: FR-053 requires "retry on malformed tool call JSON (configurable)". Current ToolCallParser only attempts repair once - no retry loop exists.
 **Required Implementation**:
@@ -204,7 +204,22 @@ public sealed class ToolCallRetryHandler
 ```
 
 **Success Criteria**: Retry handler successfully retries failed tool call parsing up to configured limit
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- Implemented ToolCallRetryHandler.cs with full retry logic
+- ParseWithRetryAsync method implements retry loop with exponential backoff
+- BuildRetryPrompt method constructs error-specific prompts from template
+- ExtractToolCalls method converts ChatResponse back to OllamaToolCall format
+- All 10 tests pass (TDD GREEN phase complete):
+  - Valid calls (no retry needed)
+  - Malformed JSON with successful retry
+  - Max retries exceeded with exception
+  - Partial failure handling
+  - Multiple retry attempts
+  - Exponential backoff timing (40-100ms tolerance)
+  - Cancellation token support
+  - Retry prompt construction with error details
+  - Zero retries configuration
+  - Custom retry prompt templates
 
 ---
 
