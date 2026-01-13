@@ -19,7 +19,7 @@ Request timeout in seconds (default: 30)
 .PARAMETER SkipToolTest
 Skip tool calling test (default: $true - requires Task 007d)
 
-.PARAMETER Verbose
+.PARAMETER Detail
 Show detailed output
 
 .PARAMETER Quiet
@@ -29,7 +29,7 @@ Minimal output (CI mode)
 .\scripts\smoke-test-ollama.ps1
 
 .EXAMPLE
-.\scripts\smoke-test-ollama.ps1 -Endpoint "http://localhost:11434" -Model "llama3.2:3b" -Verbose
+.\scripts\smoke-test-ollama.ps1 -Endpoint "http://localhost:11434" -Model "llama3.2:3b" -Detail
 
 .NOTES
 Exit Codes:
@@ -44,7 +44,7 @@ param(
     [string]$Model = "llama3.2:latest",
     [int]$Timeout = 30,
     [switch]$SkipToolTest = $true,
-    [switch]$Verbose,
+    [switch]$Detail,
     [switch]$Quiet
 )
 
@@ -83,7 +83,7 @@ function Write-Skip {
 
 function Write-Debug-Verbose {
     param([string]$Message)
-    if ($Verbose) {
+    if ($Detail) {
         Write-Host "[DEBUG] $Message" -ForegroundColor Cyan
     }
 }
