@@ -45,6 +45,40 @@ public sealed class OllamaHttpClient : IDisposable
     }
 
     /// <summary>
+    /// Initializes a new instance of the <see cref="OllamaHttpClient"/> class using IHttpClientFactory.
+    /// </summary>
+    /// <param name="httpClientFactory">The HTTP client factory.</param>
+    /// <param name="configuration">The Ollama configuration.</param>
+    /// <remarks>
+    /// FR-003: OllamaHttpClient MUST use IHttpClientFactory for HttpClient creation.
+    /// FR-005: Configure timeout from configuration.
+    /// </remarks>
+    public OllamaHttpClient(IHttpClientFactory httpClientFactory, OllamaConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        // FR-003: Create HttpClient from factory
+        this._httpClient = httpClientFactory.CreateClient("Ollama");
+
+        // FR-004: Configure base address from configuration
+        this._baseAddress = configuration.BaseUrl;
+        if (this._httpClient.BaseAddress is null)
+        {
+            this._httpClient.BaseAddress = new Uri(this._baseAddress);
+        }
+
+        // FR-005: Configure timeout from configuration
+        this._httpClient.Timeout = configuration.RequestTimeout;
+
+        // FR-007: Expose correlation ID for request tracing
+        this.CorrelationId = Guid.NewGuid().ToString();
+
+        // Factory-created HttpClient should be disposed
+        this._ownsHttpClient = true;
+    }
+
+    /// <summary>
     /// Gets the base address of the Ollama API.
     /// </summary>
     public string BaseAddress => this._baseAddress;

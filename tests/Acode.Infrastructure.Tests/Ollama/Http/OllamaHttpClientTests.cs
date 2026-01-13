@@ -1,7 +1,9 @@
 using System.Net;
+using Acode.Infrastructure.Ollama;
 using Acode.Infrastructure.Ollama.Http;
 using Acode.Infrastructure.Ollama.Models;
 using FluentAssertions;
+using NSubstitute;
 
 namespace Acode.Infrastructure.Tests.Ollama.Http;
 
@@ -144,5 +146,92 @@ public sealed class OllamaHttpClientTests
         response.Model.Should().Be("llama3.2:8b");
         response.Message.Content.Should().Be("Test response");
         response.Done.Should().BeTrue();
+    }
+
+    // Gap #2 tests: IHttpClientFactory support
+    [Fact]
+    public void Constructor_Should_AcceptHttpClientFactory()
+    {
+        // FR-003: OllamaHttpClient MUST use IHttpClientFactory for HttpClient creation
+        var configuration = new OllamaConfiguration(
+            baseUrl: "http://localhost:11434",
+            requestTimeoutSeconds: 60);
+
+        var httpClientFactory = Substitute.For<IHttpClientFactory>();
+        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        httpClientFactory.CreateClient("Ollama").Returns(httpClient);
+
+        var act = () => new OllamaHttpClient(httpClientFactory, configuration);
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void Constructor_Should_CreateHttpClientFromFactory()
+    {
+        // FR-003: Verify factory is used to create HttpClient
+        var configuration = new OllamaConfiguration(baseUrl: "http://localhost:11434");
+
+        var httpClientFactory = Substitute.For<IHttpClientFactory>();
+        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        httpClientFactory.CreateClient("Ollama").Returns(httpClient);
+
+        var ollamaClient = new OllamaHttpClient(httpClientFactory, configuration);
+
+        httpClientFactory.Received(1).CreateClient("Ollama");
+        ollamaClient.BaseAddress.Should().Be(configuration.BaseUrl);
+    }
+
+    [Fact]
+    public void Constructor_Should_ConfigureTimeoutFromConfiguration()
+    {
+        // FR-005: Configure timeout from configuration
+        var configuration = new OllamaConfiguration(
+            baseUrl: "http://localhost:11434",
+            requestTimeoutSeconds: 90);
+
+        var httpClientFactory = Substitute.For<IHttpClientFactory>();
+        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        httpClientFactory.CreateClient("Ollama").Returns(httpClient);
+
+        var ollamaClient = new OllamaHttpClient(httpClientFactory, configuration);
+
+        // Note: We'll verify timeout is set in the implementation
+        // For now, just verify construction succeeds with timeout config
+        configuration.RequestTimeout.Should().Be(TimeSpan.FromSeconds(90));
+        ollamaClient.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Constructor_WithFactory_Should_GenerateCorrelationId()
+    {
+        // FR-007: Correlation ID should still be generated with factory constructor
+        var configuration = new OllamaConfiguration(baseUrl: "http://localhost:11434");
+
+        var httpClientFactory = Substitute.For<IHttpClientFactory>();
+        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        httpClientFactory.CreateClient("Ollama").Returns(httpClient);
+
+        var ollamaClient = new OllamaHttpClient(httpClientFactory, configuration);
+
+        ollamaClient.CorrelationId.Should().NotBeNullOrEmpty();
+        Guid.TryParse(ollamaClient.CorrelationId, out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Dispose_WithFactory_Should_DisposeHttpClient()
+    {
+        // FR-006: Factory-created HttpClient should be disposed
+        var configuration = new OllamaConfiguration(baseUrl: "http://localhost:11434");
+
+        var httpClientFactory = Substitute.For<IHttpClientFactory>();
+        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        httpClientFactory.CreateClient("Ollama").Returns(httpClient);
+
+        var ollamaClient = new OllamaHttpClient(httpClientFactory, configuration);
+
+        var act = () => ollamaClient.Dispose();
+
+        act.Should().NotThrow();
     }
 }

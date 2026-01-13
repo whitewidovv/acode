@@ -45,7 +45,7 @@ This checklist identifies ALL gaps between the task 005a specification and curre
 ## GAPS IDENTIFIED (What's Missing or Incomplete)
 
 ### Gap #1: Missing JSON Source Generator (OllamaJsonContext)
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 **Priority**: HIGH
 **File to Create**: `src/Acode.Infrastructure/Ollama/Serialization/OllamaJsonContext.cs`
 **Why Needed**: FR-009 requires "RequestSerializer MUST use System.Text.Json source generators", NFR-008 requires "JSON serialization MUST use source generators (no reflection)"
@@ -76,7 +76,22 @@ internal partial class OllamaJsonContext : JsonSerializerContext
 - Source generator produces code at compile time
 - Serialization/deserialization works with the context
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- ✅ File created: `src/Acode.Infrastructure/Ollama/Serialization/OllamaJsonContext.cs`
+- ✅ Registered 8 types: OllamaRequest, OllamaResponse, OllamaStreamChunk, OllamaMessage, OllamaOptions, OllamaTool, OllamaToolCall, OllamaFunction
+- ✅ Configured snake_case naming: `JsonKnownNamingPolicy.SnakeCaseLower`
+- ✅ Configured null omission: `JsonIgnoreCondition.WhenWritingNull`
+- ✅ Test file created: `tests/Acode.Infrastructure.Tests/Ollama/Serialization/OllamaJsonContextTests.cs`
+- ✅ All 7 tests passing:
+  - OllamaJsonContext_Should_SerializeRequest
+  - OllamaJsonContext_Should_DeserializeResponse
+  - OllamaJsonContext_Should_UseSnakeCaseNaming
+  - OllamaJsonContext_Should_OmitNullValues
+  - OllamaJsonContext_Should_SerializeStreamChunk
+  - OllamaJsonContext_Should_SerializeComplexRequest
+  - OllamaJsonContext_Should_RoundtripRequest
+- ✅ Commit: e49c5ee "feat(task-005a): implement Gap #1 - create OllamaJsonContext source generator"
+- ⚠️ Note: OllamaFunction.Parameters type is `object?` which blocks full source generation. Will be addressed in Gap #7 (model verification).
 
 ---
 
