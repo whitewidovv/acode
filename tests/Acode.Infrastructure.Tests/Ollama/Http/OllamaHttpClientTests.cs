@@ -3,6 +3,7 @@ using Acode.Infrastructure.Ollama;
 using Acode.Infrastructure.Ollama.Http;
 using Acode.Infrastructure.Ollama.Models;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 
 namespace Acode.Infrastructure.Tests.Ollama.Http;
@@ -231,6 +232,111 @@ public sealed class OllamaHttpClientTests
         var ollamaClient = new OllamaHttpClient(httpClientFactory, configuration);
 
         var act = () => ollamaClient.Dispose();
+
+        act.Should().NotThrow();
+    }
+
+    // Gap #4 tests: Logging support
+    [Fact]
+    public void Constructor_Should_AcceptLogger()
+    {
+        // FR-040: OllamaHttpClient should accept ILogger for observability
+        var httpClientFactory = Substitute.For<IHttpClientFactory>();
+        var configuration = new OllamaConfiguration(baseUrl: "http://localhost:11434");
+        var logger = Substitute.For<ILogger<OllamaHttpClient>>();
+
+        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        httpClientFactory.CreateClient("Ollama").Returns(httpClient);
+
+        var act = () => new OllamaHttpClient(httpClientFactory, configuration, logger);
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public async Task PostChatAsync_Should_LogRequestTiming()
+    {
+        // FR-040: PostAsync MUST log request and response timing
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(@"{
+                ""model"": ""llama3.2:8b"",
+                ""created_at"": ""2024-01-01T12:00:00Z"",
+                ""message"": { ""role"": ""assistant"", ""content"": ""Hello!"" },
+                ""done"": true
+            }"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        var logger = Substitute.For<ILogger<OllamaHttpClient>>();
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434", logger: logger);
+
+        var request = new OllamaRequest(
+            model: "llama3.2:8b",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        await ollamaClient.PostChatAsync(request, CancellationToken.None);
+
+        // Verify logging occurred (at least one log call for timing)
+        logger.Received().Log(
+            LogLevel.Debug,
+            Arg.Any<EventId>(),
+            Arg.Is<object>(o => o.ToString()!.Contains("POST")),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Fact]
+    public async Task PostChatAsync_Should_LogWithCorrelationId()
+    {
+        // FR-040 + NFR-019-022: Logging should include correlation ID
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(@"{
+                ""model"": ""llama3.2:8b"",
+                ""created_at"": ""2024-01-01T12:00:00Z"",
+                ""message"": { ""role"": ""assistant"", ""content"": ""Hello!"" },
+                ""done"": true
+            }"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        var logger = Substitute.For<ILogger<OllamaHttpClient>>();
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434", logger: logger);
+
+        var request = new OllamaRequest(
+            model: "llama3.2:8b",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        await ollamaClient.PostChatAsync(request, CancellationToken.None);
+
+        // Verify BeginScope was called with CorrelationId
+        logger.Received().BeginScope(Arg.Is<object>(o => o.ToString()!.Contains(ollamaClient.CorrelationId)));
+    }
+
+    [Fact]
+    public void Constructor_WithLogger_Should_StoreLogger()
+    {
+        // Verify logger can be passed to both constructors
+        var httpClient = new HttpClient { BaseAddress = new Uri("http://localhost:11434") };
+        var logger = Substitute.For<ILogger<OllamaHttpClient>>();
+
+        var act = () => new OllamaHttpClient(httpClient, "http://localhost:11434", logger: logger);
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void Constructor_WithoutLogger_Should_AllowNullLogger()
+    {
+        // Logger should be optional (nullable)
+        var httpClient = new HttpClient { BaseAddress = new Uri("http://localhost:11434") };
+
+        var act = () => new OllamaHttpClient(httpClient, "http://localhost:11434", logger: null);
 
         act.Should().NotThrow();
     }

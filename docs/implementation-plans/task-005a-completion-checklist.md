@@ -126,7 +126,7 @@ internal partial class OllamaJsonContext : JsonSerializerContext
 ---
 
 ### Gap #3: Missing OllamaHttpClientFactory Class
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 **Priority**: MEDIUM
 **File to Create**: `src/Acode.Infrastructure/Ollama/Http/OllamaHttpClientFactory.cs`
 **Why Needed**: Spec file structure (line 673) shows this file should exist; provides factory pattern for creating configured OllamaHttpClient instances

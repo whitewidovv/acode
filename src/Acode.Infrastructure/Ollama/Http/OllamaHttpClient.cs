@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Acode.Infrastructure.Ollama.Models;
+using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.Ollama.Http;
 
@@ -16,6 +18,7 @@ public sealed class OllamaHttpClient : IDisposable
     private readonly HttpClient _httpClient;
     private readonly string _baseAddress;
     private readonly bool _ownsHttpClient;
+    private readonly ILogger<OllamaHttpClient>? _logger;
     private bool _disposed;
 
     /// <summary>
@@ -24,7 +27,12 @@ public sealed class OllamaHttpClient : IDisposable
     /// <param name="httpClient">The HTTP client instance.</param>
     /// <param name="baseAddress">The Ollama API base address.</param>
     /// <param name="ownsHttpClient">Whether this instance owns the HttpClient and should dispose it.</param>
-    public OllamaHttpClient(HttpClient httpClient, string baseAddress, bool ownsHttpClient = false)
+    /// <param name="logger">Optional logger for observability.</param>
+    public OllamaHttpClient(
+        HttpClient httpClient,
+        string baseAddress,
+        bool ownsHttpClient = false,
+        ILogger<OllamaHttpClient>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(baseAddress);
@@ -33,6 +41,7 @@ public sealed class OllamaHttpClient : IDisposable
         this._httpClient = httpClient;
         this._baseAddress = baseAddress;
         this._ownsHttpClient = ownsHttpClient;
+        this._logger = logger;
 
         // FR-004: Configure base address from configuration
         if (this._httpClient.BaseAddress is null)
@@ -49,11 +58,16 @@ public sealed class OllamaHttpClient : IDisposable
     /// </summary>
     /// <param name="httpClientFactory">The HTTP client factory.</param>
     /// <param name="configuration">The Ollama configuration.</param>
+    /// <param name="logger">Optional logger for observability.</param>
     /// <remarks>
     /// FR-003: OllamaHttpClient MUST use IHttpClientFactory for HttpClient creation.
     /// FR-005: Configure timeout from configuration.
+    /// FR-040: PostAsync MUST log request and response timing.
     /// </remarks>
-    public OllamaHttpClient(IHttpClientFactory httpClientFactory, OllamaConfiguration configuration)
+    public OllamaHttpClient(
+        IHttpClientFactory httpClientFactory,
+        OllamaConfiguration configuration,
+        ILogger<OllamaHttpClient>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -70,6 +84,9 @@ public sealed class OllamaHttpClient : IDisposable
 
         // FR-005: Configure timeout from configuration
         this._httpClient.Timeout = configuration.RequestTimeout;
+
+        // FR-040: Store logger for observability
+        this._logger = logger;
 
         // FR-007: Expose correlation ID for request tracing
         this.CorrelationId = Guid.NewGuid().ToString();
@@ -103,6 +120,12 @@ public sealed class OllamaHttpClient : IDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // FR-040 + NFR-019-022: Begin logging scope with correlation ID
+        using var scope = this._logger?.BeginScope(new { CorrelationId = this.CorrelationId });
+
+        // FR-040: Start timing for observability
+        var stopwatch = Stopwatch.StartNew();
+
         // FR-008 to FR-014: Request serialization (handled by System.Text.Json)
         var jsonOptions = new JsonSerializerOptions
         {
@@ -115,6 +138,12 @@ public sealed class OllamaHttpClient : IDisposable
             request,
             jsonOptions,
             cancellationToken).ConfigureAwait(false);
+
+        // FR-040: Log request timing and status
+        this._logger?.LogDebug(
+            "POST /api/chat completed in {ElapsedMs}ms with status {StatusCode}",
+            stopwatch.ElapsedMilliseconds,
+            (int)response.StatusCode);
 
         response.EnsureSuccessStatusCode();
 
