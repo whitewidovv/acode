@@ -227,6 +227,30 @@ Once checklist created:
 4. Commit after each gap complete
 5. Update checklist with evidence (test output, etc.)
 
+#### Step 5: Resolving Spec Ambiguities
+
+When encountering apparent conflicts or ambiguities in specs:
+
+**DO NOT** rationalize or make assumptions about what the spec "probably meant"
+**DO** look downstream at actual usage:
+
+1. **Search for downstream tasks** that will consume the component
+   ```bash
+   grep -r "EnumName\|ClassName" docs/tasks/refined-tasks/ --include="*.md"
+   ```
+
+2. **Check the Implementation Prompt** in downstream task specs for actual usage examples
+3. **Check existing code** that implements related interfaces to see patterns
+
+**Example**: Task 004c spec said ProviderType enum MUST have Ollama/Vllm/Mock values. Tests were using Local/Remote. Rather than assuming "Local/Remote is better", searched downstream:
+- Task 005 (Ollama) shows: `public ProviderType Type => ProviderType.Ollama;`
+- Task 006 (vLLM) shows: `public ProviderType Type => ProviderType.Vllm;`
+- Conclusion: Spec is correct, tests were semantically wrong
+
+**Why this works**: Downstream tasks show **actual usage**, not just requirements. If downstream code references `ProviderType.Ollama`, that's proof the enum value must exist.
+
+**When in doubt**: Consult future task specs > Make assumptions
+
 #### Example Gap Checklist Structure
 
 See `docs/implementation-plans/task-001a-completion-checklist.md` for example:

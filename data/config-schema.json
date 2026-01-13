@@ -23,6 +23,9 @@
     "model": {
       "$ref": "#/definitions/model"
     },
+    "providers": {
+      "$ref": "#/definitions/providers"
+    },
     "commands": {
       "$ref": "#/definitions/commands"
     },
@@ -51,6 +54,12 @@
     },
     "model_parameters": {
       "$ref": "#/definitions/model_parameters"
+    },
+    "providers": {
+      "$ref": "#/definitions/providers"
+    },
+    "provider_config": {
+      "$ref": "#/definitions/provider_config"
     },
     "commands": {
       "$ref": "#/definitions/commands"
@@ -193,6 +202,72 @@
           "description": "Nucleus sampling threshold"
         }
       }
+    },
+    "providers": {
+      "type": "object",
+      "description": "Model provider registry configuration",
+      "properties": {
+        "default_provider": {
+          "type": "string",
+          "description": "Default provider ID to use when not specified",
+          "examples": ["ollama", "vllm-local"]
+        },
+        "ollama": {
+          "$ref": "#/definitions/provider_config",
+          "description": "Ollama provider configuration"
+        },
+        "vllm": {
+          "$ref": "#/definitions/provider_config",
+          "description": "vLLM provider configuration"
+        }
+      }
+    },
+    "provider_config": {
+      "type": "object",
+      "description": "Configuration for a single model provider",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "Provider endpoint URL",
+          "examples": ["http://localhost:11434", "http://localhost:8000"]
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 300,
+          "description": "Request timeout in seconds"
+        },
+        "connect_timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 5,
+          "description": "Connection timeout in seconds"
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 3,
+          "description": "Maximum number of retry attempts"
+        },
+        "health_check_interval": {
+          "type": "integer",
+          "minimum": 10,
+          "default": 60,
+          "description": "Health check interval in seconds"
+        },
+        "fallback_provider": {
+          "type": "string",
+          "description": "Provider ID to use if this provider fails",
+          "examples": ["vllm", "ollama"]
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this provider is enabled"
+        }
+      },
+      "required": ["endpoint"]
     },
     "commands": {
       "type": "object",
