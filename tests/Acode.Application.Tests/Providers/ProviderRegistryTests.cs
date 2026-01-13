@@ -438,7 +438,7 @@ public sealed class ProviderRegistryTests
         {
             Id = id,
             Name = $"Provider {id}",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(
                 supportsStreaming: supportsStreaming,
                 supportsTools: supportsTools),

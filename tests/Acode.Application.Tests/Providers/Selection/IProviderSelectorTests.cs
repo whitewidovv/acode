@@ -79,7 +79,7 @@ public sealed class IProviderSelectorTests
         {
             Id = id,
             Name = "Test Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new System.Uri("http://localhost:11434"))
         };

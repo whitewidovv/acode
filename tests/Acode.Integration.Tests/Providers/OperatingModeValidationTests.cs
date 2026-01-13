@@ -28,7 +28,7 @@ public sealed class OperatingModeValidationTests
         {
             Id = "local",
             Name = "Local Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000"))
         };
@@ -37,7 +37,7 @@ public sealed class OperatingModeValidationTests
         {
             Id = "external",
             Name = "External Provider",
-            Type = ProviderType.Remote,
+            Type = ProviderType.Vllm,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("https://api.example.com"))
         };
@@ -66,7 +66,7 @@ public sealed class OperatingModeValidationTests
         {
             Id = "local",
             Name = "Local Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000"))
         };
@@ -75,7 +75,7 @@ public sealed class OperatingModeValidationTests
         {
             Id = "external",
             Name = "External Provider",
-            Type = ProviderType.Remote,
+            Type = ProviderType.Vllm,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("https://api.example.com"))
         };

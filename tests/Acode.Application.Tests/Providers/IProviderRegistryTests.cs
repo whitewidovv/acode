@@ -177,7 +177,7 @@ public sealed class IProviderRegistryTests
         {
             Id = id,
             Name = "Test Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };

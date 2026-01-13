@@ -1,26 +1,37 @@
 namespace Acode.Application.Providers;
 
+using System.Text.Json.Serialization;
+
 /// <summary>
-/// Type of model provider (local vs remote).
+/// Type of model provider.
 /// </summary>
 /// <remarks>
-/// FR-027 to FR-030 from task-004c spec.
-/// Gap #2 from task-004c completion checklist.
+/// FR-024 to FR-028 from task-004c spec.
 /// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ProviderType
 {
     /// <summary>
-    /// Local provider (Ollama, local vLLM).
+    /// Ollama provider (local inference server).
     /// </summary>
-    Local,
+    /// <remarks>
+    /// FR-025: ProviderType MUST include Ollama value.
+    /// </remarks>
+    Ollama,
 
     /// <summary>
-    /// Remote provider (remote vLLM, other remote endpoints).
+    /// vLLM provider (high-performance inference server).
     /// </summary>
-    Remote,
+    /// <remarks>
+    /// FR-026: ProviderType MUST include Vllm value.
+    /// </remarks>
+    Vllm,
 
     /// <summary>
-    /// Embedded provider (future: embedded models).
+    /// Mock provider (for testing).
     /// </summary>
-    Embedded
+    /// <remarks>
+    /// FR-027: ProviderType MUST include Mock value.
+    /// </remarks>
+    Mock
 }

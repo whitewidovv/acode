@@ -45,7 +45,7 @@ public sealed class ProviderSelectionE2ETests
         {
             Id = "ollama",
             Name = "Ollama",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: true, supportsTools: true),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         });
@@ -93,7 +93,7 @@ public sealed class ProviderSelectionE2ETests
         {
             Id = "streaming",
             Name = "Streaming Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: true, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000"))
         });
@@ -102,7 +102,7 @@ public sealed class ProviderSelectionE2ETests
         {
             Id = "tools",
             Name = "Tools Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: true),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:9000"))
         });
@@ -156,7 +156,7 @@ public sealed class ProviderSelectionE2ETests
         {
             Id = "primary",
             Name = "Primary Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: true, supportsTools: true),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000")),
             FallbackProviderId = "fallback"
@@ -166,7 +166,7 @@ public sealed class ProviderSelectionE2ETests
         {
             Id = "fallback",
             Name = "Fallback Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: true, supportsTools: true),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:9000"))
         });
@@ -211,7 +211,7 @@ public sealed class ProviderSelectionE2ETests
         {
             Id = "non-streaming",
             Name = "Non-Streaming Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000"))
         });

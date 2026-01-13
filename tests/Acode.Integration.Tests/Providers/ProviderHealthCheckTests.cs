@@ -52,7 +52,7 @@ public sealed class ProviderHealthCheckTests
         {
             Id = "healthy",
             Name = "Healthy Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000"))
         });
@@ -61,7 +61,7 @@ public sealed class ProviderHealthCheckTests
         {
             Id = "unhealthy",
             Name = "Unhealthy Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:9000"))
         });
@@ -109,7 +109,7 @@ public sealed class ProviderHealthCheckTests
         {
             Id = "slow",
             Name = "Slow Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000"))
         });
@@ -156,7 +156,7 @@ public sealed class ProviderHealthCheckTests
         {
             Id = "flipflop",
             Name = "FlipFlop Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000"))
         });

@@ -191,7 +191,7 @@ public sealed class DefaultProviderSelectorTests
         {
             Id = id,
             Name = $"Provider {id}",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };

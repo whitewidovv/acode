@@ -111,4 +111,23 @@ public sealed record ProviderDescriptor
     /// Gets or initializes model name mappings (e.g., map "gpt-4" to "llama3").
     /// </summary>
     public Dictionary<string, string>? ModelMappings { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the priority for fallback ordering (lower = preferred).
+    /// </summary>
+    /// <remarks>
+    /// FR-020: Priority property for fallback ordering.
+    /// Used when multiple fallback providers available.
+    /// Lower priority values are preferred (0 is highest priority).
+    /// </remarks>
+    public int Priority { get; init; } = 0;
+
+    /// <summary>
+    /// Gets a value indicating whether this provider is enabled.
+    /// </summary>
+    /// <remarks>
+    /// FR-021: Enabled property to enable/disable providers.
+    /// Disabled providers (Enabled=false) are not available for selection.
+    /// </remarks>
+    public bool Enabled { get; init; } = true;
 }

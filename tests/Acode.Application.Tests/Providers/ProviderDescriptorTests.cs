@@ -21,7 +21,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = null!,
             Name = "Test Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };
@@ -39,7 +39,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = string.Empty,
             Name = "Test Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };
@@ -57,7 +57,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = "Invalid_Provider",
             Name = "Test Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };
@@ -66,7 +66,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = "InvalidProvider",
             Name = "Test Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };
@@ -87,7 +87,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = "ollama-local",
             Name = "Ollama Local",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };
@@ -104,7 +104,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = "test-provider",
             Name = "Test Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };
@@ -151,7 +151,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = "ollama",
             Name = "Ollama Local",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = capabilities,
             Endpoint = endpoint,
             Config = config,
@@ -163,7 +163,7 @@ public sealed class ProviderDescriptorTests
         // Assert
         descriptor.Id.Should().Be("ollama");
         descriptor.Name.Should().Be("Ollama Local");
-        descriptor.Type.Should().Be(ProviderType.Local);
+        descriptor.Type.Should().Be(ProviderType.Ollama);
         descriptor.Capabilities.Should().BeSameAs(capabilities);
         descriptor.Endpoint.Should().BeSameAs(endpoint);
         descriptor.Config.Should().BeSameAs(config);
@@ -180,7 +180,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = "minimal",
             Name = "Minimal Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434")),
             Config = null,
@@ -204,7 +204,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = "test",
             Name = null!,
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };
@@ -222,7 +222,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = "test",
             Name = "Test",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = null!,
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };
@@ -240,7 +240,7 @@ public sealed class ProviderDescriptorTests
         {
             Id = "test",
             Name = "Test",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(),
             Endpoint = null!
         };

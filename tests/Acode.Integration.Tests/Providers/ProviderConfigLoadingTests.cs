@@ -26,7 +26,7 @@ public sealed class ProviderConfigLoadingTests
         {
             Id = "ollama",
             Name = "Ollama Local",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: true, supportsTools: true),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:11434"))
         };
@@ -35,7 +35,7 @@ public sealed class ProviderConfigLoadingTests
         {
             Id = "vllm",
             Name = "vLLM Local",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: true, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000"))
         };
@@ -65,7 +65,7 @@ public sealed class ProviderConfigLoadingTests
         {
             Id = "minimal",
             Name = "Minimal Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:9000"))
 
@@ -98,7 +98,7 @@ public sealed class ProviderConfigLoadingTests
         {
             Id = "ollama",
             Name = "Ollama",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: true, supportsTools: true),
             Endpoint = new ProviderEndpoint(new Uri(finalUrl))
         };
@@ -128,7 +128,7 @@ public sealed class ProviderConfigLoadingTests
         {
             Id = "duplicate",
             Name = "Duplicate",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000"))
         };
@@ -143,7 +143,7 @@ public sealed class ProviderConfigLoadingTests
         {
             Id = "Invalid_ID!", // Uppercase and special chars not allowed
             Name = "Invalid",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: false, supportsTools: false),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:8000"))
         };

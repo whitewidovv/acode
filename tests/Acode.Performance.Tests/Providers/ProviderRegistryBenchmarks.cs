@@ -30,7 +30,7 @@ public class ProviderRegistryBenchmarks
         {
             Id = "ollama",
             Name = "Ollama Local",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(
                 supportsStreaming: true,
                 supportsTools: true,
@@ -42,7 +42,7 @@ public class ProviderRegistryBenchmarks
         {
             Id = "vllm",
             Name = "vLLM Local",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(
                 supportsStreaming: true,
                 supportsTools: false,
@@ -54,7 +54,7 @@ public class ProviderRegistryBenchmarks
         {
             Id = "llamacpp",
             Name = "llama.cpp Local",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(
                 supportsStreaming: false,
                 supportsTools: false,
@@ -94,7 +94,7 @@ public class ProviderRegistryBenchmarks
         {
             Id = $"provider-{Guid.NewGuid()}",
             Name = "Test Provider",
-            Type = ProviderType.Local,
+            Type = ProviderType.Ollama,
             Capabilities = new ProviderCapabilities(supportsStreaming: true, supportsTools: true),
             Endpoint = new ProviderEndpoint(new Uri("http://localhost:9000"))
         };
