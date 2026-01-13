@@ -340,4 +340,152 @@ public sealed class OllamaHttpClientTests
 
         act.Should().NotThrow();
     }
+
+    // Gap #5 tests: Generic PostAsync<TResponse> method
+    [Fact]
+    public async Task PostAsync_Should_SendRequestToSpecifiedEndpoint()
+    {
+        // Gap #5: Generic PostAsync method should accept any endpoint
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(@"{
+                ""model"": ""llama3.2:8b"",
+                ""created_at"": ""2024-01-01T12:00:00Z"",
+                ""message"": { ""role"": ""assistant"", ""content"": ""Hello!"" },
+                ""done"": true
+            }"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "llama3.2:8b",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        var response = await ollamaClient.PostAsync<OllamaResponse>("/api/chat", request, CancellationToken.None);
+
+        response.Should().NotBeNull();
+        handler.LastRequestUri.Should().Be("http://localhost:11434/api/chat");
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_SerializeRequestCorrectly()
+    {
+        // Gap #5: Generic PostAsync should serialize any request type
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(@"{
+                ""model"": ""llama3.2:8b"",
+                ""created_at"": ""2024-01-01T12:00:00Z"",
+                ""message"": { ""role"": ""assistant"", ""content"": ""Response"" },
+                ""done"": true
+            }"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test-model",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        await ollamaClient.PostAsync<OllamaResponse>("/api/chat", request, CancellationToken.None);
+
+        var sentContent = handler.LastRequestContent;
+        sentContent.Should().Contain("\"model\":\"test-model\"");
+        sentContent.Should().Contain("\"stream\":false");
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_DeserializeResponseCorrectly()
+    {
+        // Gap #5: Generic PostAsync should deserialize any response type
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(@"{
+                ""model"": ""llama3.2:8b"",
+                ""created_at"": ""2024-01-01T12:00:00Z"",
+                ""message"": { ""role"": ""assistant"", ""content"": ""Test response"" },
+                ""done"": true,
+                ""done_reason"": ""stop""
+            }"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "llama3.2:8b",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        var response = await ollamaClient.PostAsync<OllamaResponse>("/api/chat", request, CancellationToken.None);
+
+        response.Should().NotBeNull();
+        response.Model.Should().Be("llama3.2:8b");
+        response.Message.Content.Should().Be("Test response");
+        response.DoneReason.Should().Be("stop");
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_WorkWithDifferentEndpoints()
+    {
+        // Gap #5: Should work with any endpoint, not just /api/chat
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(@"{ ""status"": ""ok"" }"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        // Simple request object
+        var request = new { model = "test" };
+
+        await ollamaClient.PostAsync<object>("/api/tags", request, CancellationToken.None);
+
+        handler.LastRequestUri.Should().Be("http://localhost:11434/api/tags");
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_IncludeLoggingWhenLoggerProvided()
+    {
+        // Gap #5: Generic PostAsync should also support logging
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(@"{
+                ""model"": ""llama3.2:8b"",
+                ""created_at"": ""2024-01-01T12:00:00Z"",
+                ""message"": { ""role"": ""assistant"", ""content"": ""Hello!"" },
+                ""done"": true
+            }"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        var logger = Substitute.For<ILogger<OllamaHttpClient>>();
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434", logger: logger);
+
+        var request = new OllamaRequest(
+            model: "llama3.2:8b",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        await ollamaClient.PostAsync<OllamaResponse>("/api/chat", request, CancellationToken.None);
+
+        // Verify logging occurred
+        logger.Received().Log(
+            LogLevel.Debug,
+            Arg.Any<EventId>(),
+            Arg.Is<object>(o => o.ToString()!.Contains("POST")),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
 }

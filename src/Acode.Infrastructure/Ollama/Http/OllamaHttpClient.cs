@@ -109,6 +109,67 @@ public sealed class OllamaHttpClient : IDisposable
     public string CorrelationId { get; }
 
     /// <summary>
+    /// Sends a generic HTTP POST request to the specified endpoint.
+    /// </summary>
+    /// <typeparam name="TResponse">The expected response type.</typeparam>
+    /// <param name="endpoint">The API endpoint (e.g., "/api/chat", "/api/tags").</param>
+    /// <param name="request">The request object to serialize.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The deserialized response.</returns>
+    /// <remarks>
+    /// Gap #5: Generic PostAsync method supporting any endpoint and type.
+    /// Includes logging with correlation ID and request timing.
+    /// </remarks>
+    public async Task<TResponse> PostAsync<TResponse>(
+        string endpoint,
+        object request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(request);
+
+        // FR-040 + NFR-019-022: Begin logging scope with correlation ID
+        using var scope = this._logger?.BeginScope(new { CorrelationId = this.CorrelationId });
+
+        // FR-040: Start timing for observability
+        var stopwatch = Stopwatch.StartNew();
+
+        // Request serialization with camelCase naming
+        var jsonOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        };
+
+        // Send HTTP POST to specified endpoint
+        var response = await this._httpClient.PostAsJsonAsync(
+            endpoint,
+            request,
+            jsonOptions,
+            cancellationToken).ConfigureAwait(false);
+
+        // FR-040: Log request timing and status
+        this._logger?.LogDebug(
+            "POST {Endpoint} completed in {ElapsedMs}ms with status {StatusCode}",
+            endpoint,
+            stopwatch.ElapsedMilliseconds,
+            (int)response.StatusCode);
+
+        response.EnsureSuccessStatusCode();
+
+        // Response deserialization
+        var result = await response.Content.ReadFromJsonAsync<TResponse>(
+            jsonOptions,
+            cancellationToken).ConfigureAwait(false);
+
+        if (result is null)
+        {
+            throw new InvalidOperationException($"Failed to deserialize response from {endpoint}.");
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Sends a chat completion request to the Ollama API.
     /// </summary>
     /// <param name="request">The Ollama request.</param>
