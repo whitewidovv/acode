@@ -218,7 +218,7 @@ _logger.LogDebug("POST {Endpoint} completed in {ElapsedMs}ms with status {Status
 ---
 
 ### Gap #5: OllamaHttpClient Missing PostAsync Generic Method
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 **Priority**: HIGH
 **File to Modify**: `src/Acode.Infrastructure/Ollama/Http/OllamaHttpClient.cs`
 **Why Needed**: Spec Implementation Prompt (lines 701-721) shows PostAsync<TResponse> signature, current implementation only has PostChatAsync returning OllamaResponse
@@ -248,7 +248,22 @@ public async Task<TResponse> PostAsync<TResponse>(
 - Proper serialization/deserialization
 - Tests cover generic usage
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- ✅ Added generic PostAsync<TResponse> method
+- ✅ Accepts string endpoint parameter (any endpoint, not hardcoded)
+- ✅ Accepts object request parameter (any type)
+- ✅ Includes logging with correlation ID via BeginScope
+- ✅ Includes Stopwatch timing and LogDebug call
+- ✅ Uses PostAsJsonAsync for serialization with camelCase
+- ✅ Uses ReadFromJsonAsync<TResponse> for deserialization
+- ✅ Added 5 comprehensive tests to OllamaHttpClientTests.cs:
+  - PostAsync_Should_SendRequestToSpecifiedEndpoint
+  - PostAsync_Should_SerializeRequestCorrectly
+  - PostAsync_Should_DeserializeResponseCorrectly
+  - PostAsync_Should_WorkWithDifferentEndpoints
+  - PostAsync_Should_IncludeLoggingWhenLoggerProvided
+- ✅ All 21 tests passing (16 existing + 5 new)
+- ✅ Commit: 88614eb "feat(task-005a): implement Gap #5 - add PostAsync<TResponse> generic method"
 
 ---
 
