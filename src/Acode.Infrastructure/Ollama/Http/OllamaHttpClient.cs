@@ -240,6 +240,109 @@ public sealed class OllamaHttpClient : IDisposable
     }
 
     /// <summary>
+    /// Sends a streaming HTTP POST request to the specified endpoint.
+    /// </summary>
+    /// <param name="endpoint">The API endpoint (e.g., "/api/chat", "/api/generate").</param>
+    /// <param name="request">The request object to serialize.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A stream containing the response data.</returns>
+    /// <remarks>
+    /// Gap #21: Streaming PostAsync supporting SSE responses.
+    /// FR-062, FR-063: Sends POST request and returns Stream.
+    /// Includes logging with correlation ID and error handling.
+    /// </remarks>
+    public async Task<System.IO.Stream> PostStreamAsync(
+        string endpoint,
+        object request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(request);
+
+        // FR-040 + NFR-019-022: Begin logging scope with correlation ID
+        using var scope = this._logger?.BeginScope(new { CorrelationId = this.CorrelationId });
+
+        // FR-040: Start timing for observability
+        var stopwatch = Stopwatch.StartNew();
+
+        // Request serialization with camelCase naming
+        var jsonOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        };
+
+        HttpResponseMessage response;
+
+        try
+        {
+            // FR-093, FR-094: Wrap network and timeout errors
+            response = await this._httpClient.PostAsJsonAsync(
+                endpoint,
+                request,
+                jsonOptions,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (TaskCanceledException ex)
+        {
+            // FR-094: Timeout errors MUST be wrapped in OllamaTimeoutException
+            // FR-098: Include original exception as InnerException
+            // FR-099: Include correlation ID
+            throw new Exceptions.OllamaTimeoutException(
+                $"Request to {endpoint} timed out (CorrelationId: {this.CorrelationId})",
+                ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            // FR-093: Network errors MUST be wrapped in OllamaConnectionException
+            // FR-098: Include original exception as InnerException
+            // FR-099: Include correlation ID
+            throw new Exceptions.OllamaConnectionException(
+                $"Failed to connect to {endpoint} (CorrelationId: {this.CorrelationId})",
+                ex);
+        }
+
+        // FR-040: Log request timing and status
+        this._logger?.LogDebug(
+            "POST {Endpoint} streaming started in {ElapsedMs}ms with status {StatusCode}",
+            endpoint,
+            stopwatch.ElapsedMilliseconds,
+            (int)response.StatusCode);
+
+        // FR-095, FR-096: Check response status code and wrap errors
+        try
+        {
+            response.EnsureSuccessStatusCode();
+        }
+        catch (HttpRequestException ex)
+        {
+            var statusCode = (int)response.StatusCode;
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            if (statusCode >= 400 && statusCode < 500)
+            {
+                // FR-095: HTTP 4xx errors MUST be wrapped in OllamaRequestException
+                throw new Exceptions.OllamaRequestException(
+                    $"Request to {endpoint} failed with status {statusCode} (CorrelationId: {this.CorrelationId}): {responseBody}",
+                    ex);
+            }
+            else if (statusCode >= 500)
+            {
+                // FR-096: HTTP 5xx errors MUST be wrapped in OllamaServerException
+                throw new Exceptions.OllamaServerException(
+                    $"Server error from {endpoint} with status {statusCode} (CorrelationId: {this.CorrelationId}): {responseBody}",
+                    ex,
+                    statusCode);
+            }
+
+            throw;
+        }
+
+        // Return the response stream
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        return stream;
+    }
+
+    /// <summary>
     /// Sends a chat completion request to the Ollama API.
     /// </summary>
     /// <param name="request">The Ollama request.</param>

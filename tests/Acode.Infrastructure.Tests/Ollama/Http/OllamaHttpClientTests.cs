@@ -635,4 +635,152 @@ public sealed class OllamaHttpClientTests
 
         await act.Should().ThrowAsync<OllamaParseException>();
     }
+
+    // Gap #21 tests: PostStreamAsync for streaming support
+    [Fact]
+    public async Task PostStreamAsync_Should_ReturnStream()
+    {
+        // FR-062, FR-063: PostStreamAsync MUST send POST request and return Stream
+        var responseContent = @"{""model"":""test"",""message"":{""role"":""assistant"",""content"":""chunk1""},""done"":false}
+{""model"":""test"",""message"":{""role"":""assistant"",""content"":""chunk2""},""done"":true}";
+
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseContent),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: true);
+
+        // Act
+        var stream = await ollamaClient.PostStreamAsync("/api/chat", request, CancellationToken.None);
+
+        // Assert
+        stream.Should().NotBeNull();
+        stream.CanRead.Should().BeTrue();
+        handler.LastRequestUri.Should().Be("http://localhost:11434/api/chat");
+    }
+
+    [Fact]
+    public async Task PostStreamAsync_Should_NotDisposeStream()
+    {
+        // FR-064: PostStreamAsync MUST NOT dispose stream (caller responsibility)
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("test"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: true);
+
+        // Act
+        var stream = await ollamaClient.PostStreamAsync("/api/chat", request, CancellationToken.None);
+
+        // Assert - stream should still be readable (not disposed)
+        stream.CanRead.Should().BeTrue();
+
+        // Caller must dispose
+        await stream.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task PostStreamAsync_Should_ThrowOnNonSuccessStatusCode()
+    {
+        // FR-065: PostStreamAsync MUST throw on non-success status codes
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("Bad Request"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: true);
+
+        // Act & Assert
+        var act = async () => await ollamaClient.PostStreamAsync("/api/chat", request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<OllamaRequestException>()
+            .WithMessage("*400*");
+    }
+
+    [Fact]
+    public async Task PostStreamAsync_Should_SupportCancellation()
+    {
+        // FR-066: PostStreamAsync MUST support cancellation
+        var handler = new ThrowingHttpMessageHandler(new TaskCanceledException("Cancelled"));
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: true);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // Act & Assert
+        var act = async () => await ollamaClient.PostStreamAsync("/api/chat", request, cts.Token);
+
+        await act.Should().ThrowAsync<OllamaTimeoutException>();
+    }
+
+    [Fact]
+    public async Task PostStreamAsync_Should_IncludeCorrelationIdInException()
+    {
+        // FR-099: Exceptions must include correlation ID for tracing
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = new StringContent("Server Error"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: true);
+
+        // Act & Assert
+        var act = async () => await ollamaClient.PostStreamAsync("/api/chat", request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<OllamaServerException>()
+            .WithMessage($"*{ollamaClient.CorrelationId}*");
+    }
+
+    [Fact]
+    public async Task PostStreamAsync_Should_WrapConnectionException()
+    {
+        // FR-093: Network errors MUST be wrapped in OllamaConnectionException
+        var handler = new ThrowingHttpMessageHandler(new HttpRequestException("Connection failed"));
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: true);
+
+        // Act & Assert
+        var act = async () => await ollamaClient.PostStreamAsync("/api/chat", request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<OllamaConnectionException>();
+    }
 }
