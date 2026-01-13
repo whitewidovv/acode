@@ -224,7 +224,7 @@ public sealed class ToolCallRetryHandler
 ---
 
 ### Gap #4: RetryConfig Integration into OllamaConfiguration
-**Status**: [ ]
+**Status**: [✅]
 **File to Modify**: src/Acode.Infrastructure/Ollama/OllamaConfiguration.cs
 **Why Needed**: Retry behavior must be configurable per FR-053 "configurable".
 **Required Changes**:
@@ -249,7 +249,12 @@ public sealed class OllamaConfiguration
 ```
 
 **Success Criteria**: OllamaConfiguration exposes retry configuration
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- Added ToolCallRetryConfig property to OllamaConfiguration
+- Initialized with sensible defaults: MaxRetries=3, RetryDelayMs=100, EnableAutoRepair=true
+- Uses property initializer pattern consistent with record style
+- All existing configuration tests still pass
+- Configuration is ready for use by ToolCallRetryHandler
 
 ---
 
