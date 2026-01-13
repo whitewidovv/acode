@@ -320,7 +320,7 @@ public async Task<TResponse> PostAsync<TResponse>(
 ---
 
 ### Gap #7: Verify OllamaRequest Model Completeness
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 **Priority**: HIGH
 **File to Verify**: `src/Acode.Infrastructure/Ollama/Models/OllamaRequest.cs`
 **Why Needed**: Must verify against FR-019 through FR-030 (OllamaRequest requirements)
@@ -348,12 +348,27 @@ public async Task<TResponse> PostAsync<TResponse>(
 - Options type complete
 - Tests verify serialization
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- ✅ FR-019: model (string, required) - Present at line 43
+- ✅ FR-020: messages (OllamaMessage[], required) - Present at line 49
+- ✅ FR-021: stream (bool, required) - Present at line 55
+- ✅ FR-022: tools (OllamaTool[]?, optional) - Present at line 62
+- ✅ FR-023: format (string?, optional) - Present at line 69
+- ✅ FR-024: options (OllamaOptions?, optional) - Present at line 76
+- ✅ FR-025: keep_alive (string?, optional) - Present at line 83 with snake_case JSON name
+- ✅ FR-026: temperature in OllamaOptions - Present at line 36
+- ✅ FR-027: top_p in OllamaOptions - Present at line 42 with snake_case JSON name
+- ✅ FR-028: seed in OllamaOptions - Present at line 49
+- ✅ FR-029: num_ctx in OllamaOptions - Present at line 56 with snake_case JSON name
+- ✅ FR-030: stop in OllamaOptions - Present at line 63
+- ✅ All JSON property names use snake_case where required
+- ✅ All optional properties use JsonIgnore(WhenWritingNull)
+- ✅ Model is complete and compliant with spec
 
 ---
 
 ### Gap #8: Verify OllamaResponse Model Completeness
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 **Priority**: HIGH
 **File to Verify**: `src/Acode.Infrastructure/Ollama/Models/OllamaResponse.cs`
 **Why Needed**: Must verify against FR-041 through FR-051 (OllamaResponse requirements)
@@ -381,7 +396,18 @@ public async Task<TResponse> PostAsync<TResponse>(
 - Correct JSON naming
 - Tests verify deserialization
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- ✅ FR-041: model (string) - Present at line 45
+- ✅ FR-042: created_at (string) - Present at line 51 with snake_case JSON name
+- ✅ FR-043: message (OllamaMessage) - Present at line 57
+- ✅ FR-044: done (bool) - Present at line 63
+- ✅ FR-045: done_reason (string?, optional) - Present at line 70 with snake_case JSON name
+- ✅ FR-046: total_duration (long?, optional) - Present at line 77 with snake_case JSON name, correct type (long)
+- ✅ FR-047: prompt_eval_count (int?, optional) - Present at line 84 with snake_case JSON name
+- ✅ FR-048: eval_count (int?, optional) - Present at line 91 with snake_case JSON name
+- ✅ All snake_case property names correct
+- ✅ All optional properties use JsonIgnore(WhenWritingNull)
+- ✅ Model is complete and compliant with spec
 
 ---
 
