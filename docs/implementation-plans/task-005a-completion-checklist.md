@@ -412,7 +412,7 @@ public async Task<TResponse> PostAsync<TResponse>(
 ---
 
 ### Gap #9: Verify OllamaStreamChunk Model Completeness
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 **Priority**: HIGH
 **File to Verify**: `src/Acode.Infrastructure/Ollama/Models/OllamaStreamChunk.cs`
 **Why Needed**: Must verify against FR-079 through FR-085 (OllamaStreamChunk requirements)
@@ -438,12 +438,22 @@ public async Task<TResponse> PostAsync<TResponse>(
 - Correct JSON naming
 - Tests verify deserialization of chunks
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- ✅ FR-079: model (string) - Present at line 42
+- ✅ FR-080: message (OllamaMessage) - Present at line 48
+- ✅ FR-081: done (bool) - Present at line 54
+- ✅ FR-082: done_reason (string?, optional, final only) - Present at line 61 with snake_case
+- ✅ FR-083: total_duration (long?, optional, final only) - Present at line 68 with snake_case, correct type (long)
+- ✅ FR-084: eval_count (int?, optional, final only) - Present at line 75 with snake_case
+- ✅ FR-085: prompt_eval_count (int?, optional, final only) - Present at line 82 with snake_case
+- ✅ All snake_case property names correct
+- ✅ All optional properties use JsonIgnore(WhenWritingNull)
+- ✅ Model is complete and compliant with streaming spec
 
 ---
 
 ### Gap #10: Verify OllamaRequestMapper Implements All Requirements
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 **Priority**: HIGH
 **File to Verify**: `src/Acode.Infrastructure/Ollama/Mapping/OllamaRequestMapper.cs`
 **Why Needed**: Must implement FR-008 through FR-018 (Request Serialization requirements)
