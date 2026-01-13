@@ -1,8 +1,10 @@
 # Progress Notes
 
-## Task 004c - Session 2026-01-12 (Continued - COMPLETE)
+## Task 004c - Session 2026-01-12 (Continued - ACTUALLY COMPLETE)
 
-**Status**: 100% Complete (35/35 gaps done) - ✅ READY FOR PR
+**Status**: 100% Spec-Compliant (40/40 gaps done) - ✅ TRULY READY FOR PR
+
+**Update**: Fresh gap analysis revealed 5 missing MUST requirements that were previously rationalized away rather than implemented. All gaps now fixed.
 
 ### Completed Work
 
@@ -49,10 +51,29 @@
   - LocalOnly mode warns about external endpoints
   - Burst mode allows all endpoints
 
+**Phase 8: Spec Compliance Fixes (Gaps #36-40)** ✅
+- Gap #36: ProviderDescriptor Priority and Enabled properties (FR-020, FR-021)
+- Gap #37: ProviderType enum fixed to Ollama/Vllm/Mock (FR-025-028)
+- Gap #38: ProviderCapabilities renamed + new properties (FR-032-035)
+  - SupportsTools → SupportsToolCalls
+  - MaxContextLength → MaxContextTokens
+  - Added MaxOutputTokens
+  - Added SupportsJsonMode
+- Gap #39: ProviderCapabilities Supports() and Merge() methods (FR-036-037)
+  - Created CapabilityRequirement record
+  - Full matching logic
+  - Merge with OR/MAX logic
+- Gap #40: Missing required tests (4 new tests)
+  - Should_Check_Supports()
+  - Should_Merge_Capabilities()
+  - Should_Merge_Capabilities_WithNullModels()
+  - Should_Merge_Capabilities_With_Null_Other()
+
 ### Test Summary
-- **Total Provider Tests**: 128/128 passing ✅
-  - Unit Tests: 115 tests (107 original + 8 operating mode)
+- **Total Provider Tests**: 164/164 passing ✅
+  - Unit Tests: 151 tests (122 Application + 29 Infrastructure)
   - Integration Tests: 13 tests (Gaps #25-28)
+  - Additional tests from gap fixes: +36 tests
 - **ProviderDescriptor**: 10 tests
 - **ProviderEndpoint**: 18 tests
 - **RetryPolicy**: 18 tests
