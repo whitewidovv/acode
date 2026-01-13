@@ -268,7 +268,7 @@ public async Task<TResponse> PostAsync<TResponse>(
 ---
 
 ### Gap #6: OllamaHttpClient Missing EnsureSuccessAsync Error Handling
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 **Priority**: HIGH
 **File to Modify**: `src/Acode.Infrastructure/Ollama/Http/OllamaHttpClient.cs`
 **Why Needed**: FR-093 through FR-100 define specific exception types for different error conditions
@@ -298,7 +298,24 @@ public async Task<TResponse> PostAsync<TResponse>(
 - Correlation IDs included in exceptions
 - Tests verify each error type
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- ✅ Wrapped TaskCanceledException in OllamaTimeoutException (FR-094)
+- ✅ Wrapped HttpRequestException (network) in OllamaConnectionException (FR-093)
+- ✅ Wrapped HttpRequestException (4xx) in OllamaRequestException (FR-095)
+- ✅ Wrapped HttpRequestException (5xx) in OllamaServerException (FR-096)
+- ✅ Wrapped JsonException in OllamaParseException (FR-097)
+- ✅ All exceptions include original exception as InnerException (FR-098)
+- ✅ All exceptions include correlation ID in message (FR-099)
+- ✅ Added 6 comprehensive error handling tests:
+  - PostAsync_Should_ThrowOllamaRequestException_On4xxError
+  - PostAsync_Should_ThrowOllamaServerException_On5xxError
+  - PostAsync_Should_IncludeCorrelationIdInException
+  - PostAsync_Should_WrapTimeoutException
+  - PostAsync_Should_IncludeInnerExceptionInWrappedError
+  - PostAsync_Should_WrapParseException
+- ✅ Added ThrowingHttpMessageHandler test helper
+- ✅ All 27 tests passing (21 existing + 6 new)
+- ✅ Commit: b45c7f5 "feat(task-005a): implement Gap #6 - enhanced error handling"
 
 ---
 
