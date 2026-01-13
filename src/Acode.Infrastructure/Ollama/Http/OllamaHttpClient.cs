@@ -140,12 +140,35 @@ public sealed class OllamaHttpClient : IDisposable
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         };
 
-        // Send HTTP POST to specified endpoint
-        var response = await this._httpClient.PostAsJsonAsync(
-            endpoint,
-            request,
-            jsonOptions,
-            cancellationToken).ConfigureAwait(false);
+        HttpResponseMessage response;
+
+        try
+        {
+            // FR-093, FR-094: Wrap network and timeout errors
+            response = await this._httpClient.PostAsJsonAsync(
+                endpoint,
+                request,
+                jsonOptions,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (TaskCanceledException ex)
+        {
+            // FR-094: Timeout errors MUST be wrapped in OllamaTimeoutException
+            // FR-098: Include original exception as InnerException
+            // FR-099: Include correlation ID
+            throw new Exceptions.OllamaTimeoutException(
+                $"Request to {endpoint} timed out (CorrelationId: {this.CorrelationId})",
+                ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            // FR-093: Network errors MUST be wrapped in OllamaConnectionException
+            // FR-098: Include original exception as InnerException
+            // FR-099: Include correlation ID
+            throw new Exceptions.OllamaConnectionException(
+                $"Failed to connect to {endpoint} (CorrelationId: {this.CorrelationId})",
+                ex);
+        }
 
         // FR-040: Log request timing and status
         this._logger?.LogDebug(
@@ -154,19 +177,66 @@ public sealed class OllamaHttpClient : IDisposable
             stopwatch.ElapsedMilliseconds,
             (int)response.StatusCode);
 
-        response.EnsureSuccessStatusCode();
-
-        // Response deserialization
-        var result = await response.Content.ReadFromJsonAsync<TResponse>(
-            jsonOptions,
-            cancellationToken).ConfigureAwait(false);
-
-        if (result is null)
+        // FR-095, FR-096: Check response status code and wrap errors
+        // Use EnsureSuccessStatusCode to get HttpRequestException, then wrap it
+        try
         {
-            throw new InvalidOperationException($"Failed to deserialize response from {endpoint}.");
+            response.EnsureSuccessStatusCode();
+        }
+        catch (HttpRequestException ex)
+        {
+            var statusCode = (int)response.StatusCode;
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            if (statusCode >= 400 && statusCode < 500)
+            {
+                // FR-095: HTTP 4xx errors MUST be wrapped in OllamaRequestException
+                // FR-098: Include original exception as InnerException
+                // FR-099: Include correlation ID
+                throw new Exceptions.OllamaRequestException(
+                    $"Request to {endpoint} failed with status {statusCode} (CorrelationId: {this.CorrelationId}): {responseBody}",
+                    ex);
+            }
+            else if (statusCode >= 500)
+            {
+                // FR-096: HTTP 5xx errors MUST be wrapped in OllamaServerException
+                // FR-098: Include original exception as InnerException
+                // FR-099: Include correlation ID
+                throw new Exceptions.OllamaServerException(
+                    $"Server error from {endpoint} with status {statusCode} (CorrelationId: {this.CorrelationId}): {responseBody}",
+                    ex,
+                    statusCode);
+            }
+
+            // For other non-success status codes, rethrow original exception
+            throw;
         }
 
-        return result;
+        // FR-097: Parse errors MUST be wrapped in OllamaParseException
+        try
+        {
+            var result = await response.Content.ReadFromJsonAsync<TResponse>(
+                jsonOptions,
+                cancellationToken).ConfigureAwait(false);
+
+            if (result is null)
+            {
+                throw new InvalidOperationException($"Failed to deserialize response from {endpoint}.");
+            }
+
+            return result;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            // FR-097: Parse errors MUST be wrapped in OllamaParseException
+            // FR-098: Include original exception as InnerException
+            // FR-099: Include correlation ID
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new Exceptions.OllamaParseException(
+                $"Failed to parse response from {endpoint} (CorrelationId: {this.CorrelationId})",
+                ex,
+                responseBody);
+        }
     }
 
     /// <summary>

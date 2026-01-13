@@ -1,5 +1,6 @@
 using System.Net;
 using Acode.Infrastructure.Ollama;
+using Acode.Infrastructure.Ollama.Exceptions;
 using Acode.Infrastructure.Ollama.Http;
 using Acode.Infrastructure.Ollama.Models;
 using FluentAssertions;
@@ -487,5 +488,151 @@ public sealed class OllamaHttpClientTests
             Arg.Is<object>(o => o.ToString()!.Contains("POST")),
             Arg.Any<Exception>(),
             Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    // Gap #6 tests: Enhanced error handling with custom exceptions
+    [Fact]
+    public async Task PostAsync_Should_ThrowOllamaRequestException_On4xxError()
+    {
+        // Gap #6: HTTP 4xx errors should be wrapped in OllamaRequestException
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("Bad Request"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        var act = async () => await ollamaClient.PostAsync<OllamaResponse>("/api/chat", request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<OllamaRequestException>()
+            .WithMessage("*400*");
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_ThrowOllamaServerException_On5xxError()
+    {
+        // Gap #6: HTTP 5xx errors should be wrapped in OllamaServerException
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = new StringContent("Internal Server Error"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        var act = async () => await ollamaClient.PostAsync<OllamaResponse>("/api/chat", request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<OllamaServerException>()
+            .WithMessage("*500*");
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_IncludeCorrelationIdInException()
+    {
+        // Gap #6: FR-099 - exceptions must include correlation ID
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("Bad Request"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        var act = async () => await ollamaClient.PostAsync<OllamaResponse>("/api/chat", request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<OllamaRequestException>()
+            .WithMessage($"*{ollamaClient.CorrelationId}*");
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_WrapTimeoutException()
+    {
+        // Gap #6: FR-094 - timeout errors must be wrapped in OllamaTimeoutException
+        // Create a handler that throws TaskCanceledException (simulating timeout)
+        var handler = new ThrowingHttpMessageHandler(new TaskCanceledException("Request timed out"));
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        var act = async () => await ollamaClient.PostAsync<OllamaResponse>("/api/chat", request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<OllamaTimeoutException>();
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_IncludeInnerExceptionInWrappedError()
+    {
+        // Gap #6: FR-098 - exceptions must include original exception as InnerException
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("Bad Request"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        try
+        {
+            await ollamaClient.PostAsync<OllamaResponse>("/api/chat", request, CancellationToken.None);
+            Assert.Fail("Should have thrown exception");
+        }
+        catch (OllamaRequestException ex)
+        {
+            ex.InnerException.Should().NotBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_WrapParseException()
+    {
+        // Gap #6: FR-097 - parse errors must be wrapped in OllamaParseException
+        var handler = new TestHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{invalid json}"),
+        });
+
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+
+        var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
+
+        var request = new OllamaRequest(
+            model: "test",
+            messages: new[] { new OllamaMessage(role: "user", content: "Test") },
+            stream: false);
+
+        var act = async () => await ollamaClient.PostAsync<OllamaResponse>("/api/chat", request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<OllamaParseException>();
     }
 }

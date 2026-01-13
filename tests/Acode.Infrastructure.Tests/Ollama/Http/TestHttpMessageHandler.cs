@@ -27,3 +27,21 @@ internal sealed class TestHttpMessageHandler : HttpMessageHandler
         return this._response;
     }
 }
+
+/// <summary>
+/// Test HTTP message handler that throws exceptions for testing error handling.
+/// </summary>
+internal sealed class ThrowingHttpMessageHandler : HttpMessageHandler
+{
+    private readonly Exception _exception;
+
+    public ThrowingHttpMessageHandler(Exception exception)
+    {
+        this._exception = exception;
+    }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        throw this._exception;
+    }
+}
