@@ -129,8 +129,9 @@ remember:
 **Before writing any code, you MUST perform gap analysis and create a checklist of what's MISSING.**
 
 #### What is Gap Analysis?
+**READ docs\GAP_ANALYSIS_METHODOLOGY.md and docs\tasks\implement assigned task prompt.md completely before proceeding. We implement tasks according to the assigned task prompt, whilst also following the gap analysis methodology to ensure we capture everything and miss nothing. **
 
-Gap analysis means:
+a quick summary of Gap analysis is:
 1. Reading the spec's Implementation Prompt and Testing Requirements sections completely
 2. Checking what files/features ACTUALLY exist in the codebase
 3. Creating a checklist of ONLY what's missing or incomplete
@@ -188,35 +189,27 @@ Document: ✅ Complete, ⚠️ Partial (has stubs), or ❌ Missing
 
 Create `docs/implementation-plans/task-XXX-completion-checklist.md` with:
 
-**Format**:
-```markdown
-# Task XXX - Gap Analysis and Implementation Checklist
+read this file in its entirety, its long, ~2k+ lines, but is extremely important and relevant to the current task: 
 
-## WHAT EXISTS (Already Complete)
-[List all files that exist and are complete]
+docs\implementation-plans\task-049d-completion-checklist.md 
 
-## GAPS IDENTIFIED (What's Missing)
+we created that document, a comprehensive, self-contained
+  implementation checklist that guided completion of task-number to 100% specification compliance. we created it by going through the docs\GAP_ANALYSIS_METHODOLOGY.md and docs\tasks\implement assigned task prompt.md and
+  looking specifically at the "Implementation Prompt" and Testing Requirements sections at the bottom of the 
+  task file, and also looking at the Acceptance Criteria, the Functional Requirements, and description, for the subtask and its parent, documenting absolutely everything that still
+  needs to be done (doesn't exist, or is not semantically complete) before writing any code, and documenting it to such a high degree that a clean slate claude agent could pick up the 
+  completion-checklist file you're going to create, read the instructions you're going to add to the top based on the instructions in
+  docs\implementation-plans\task-049d-completion-checklist.md
 
-### Gap #1: [Missing File Name]
-**Status**: [ ]
-**File to Create**: tests/path/to/FileTests.cs
-**Why Needed**: Testing Requirements line 123 requires X tests
-**Required Tests**:
-1. Test_Name_One - verifies behavior X
-2. Test_Name_Two - verifies behavior Y
-...
+  you should have read above.  the clean slate agent should be able to pick up the document, read it, and get started implementing things one by one checking them off in order from the checklist you're going to create, going down the
+  checklist, and when they are done, the entire feature will be implemented. 
 
-**Implementation Pattern**: [Code example from spec]
-**Success Criteria**: [How to verify it's done]
-**Evidence**: [To be filled when complete]
-
-### Gap #2: [Another Missing File]
-...
-```
+  when you have that document created, and every thing that needs to be done to reach 100% completion is documented to such a degree that each individual item has enough information and instruction to find where it comes from in the documentation, and what you should do to implement it, clear enough that the clean-context claude agent would not be confused as to what you're talking about and could easily implement it... when you have that document created, move to step 4, implementing from the gaps you've identified and documented.
+  
 
 **Key Points**:
 - List ONLY what's missing (not what exists)
-- Order gaps for TDD implementation (tests before prod code if both missing)
+- Order gaps for TDD implementation in the order they should be worked on (tests before prod code if both missing)
 - Include clear instructions for a fresh agent at top
 - Include spec line numbers for reference
 - Show code examples from spec

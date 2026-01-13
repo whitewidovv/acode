@@ -2,13 +2,13 @@
 
 **BEFORE WRITING ANY CODE, YOU MUST:**
 
-1. **Read the FULL "Implementation Prompt" section** at the end of EACH task file
+1. **Read the FULL "Implementation Prompt" section** at the end of the task file
    - This section contains complete, working code examples for ALL classes and methods
    - It shows the EXACT file structure, interfaces, and implementations expected
    - It includes error codes, exception hierarchies, and result types
    - **Skipping this wastes massive amounts of time and context**
 
-2. **Read the FULL "Testing Requirements" section** in EACH task file
+2. **Read the FULL "Testing Requirements" section** in the task file
    - This section contains complete test code for ALL scenarios
    - It shows which testing framework to use (MSTest vs xUnit)
    - It defines all test cases you need to implement
@@ -33,28 +33,11 @@
 
 ---
 
-Your next task is to review docs\TDD_INSTRUCTIONS.md and claude.md, then read every part of every one of these files
-
-{
-docs\tasks\refined-tasks\Epic 02\epic-02-cli-agent-orchestration-core.md
-
-docs\tasks\refined-tasks\Epic 02\task-050-workspace-database-foundation.md
-docs\tasks\refined-tasks\Epic 02\task-050a-workspace-db-layout-migration-strategy.md
-docs\tasks\refined-tasks\Epic 02\task-050b-db-access-layer-connection-management.md
-docs\tasks\refined-tasks\Epic 02\task-050c-migration-runner-startup-bootstrapping.md
-docs\tasks\refined-tasks\Epic 02\task-050d-health-checks-diagnostics.md
-docs\tasks\refined-tasks\Epic 02\task-050e-backup-export-hooks.md
-}. keep in mind that You MUST follow strict Test-Driven Development with no exceptions. when you have a comprehensive, complete understanding of the task suite, come up with a strategic, phase-based implementation plan to implement the entirety of task suite
-
-{
-050
-},
-
-the whole task, including ALL PARTS of the parent task and EACH ONE OF ITS subtasks. the task is not done if any of the subtasks are not done, as per CLAUDE.md. in the implementation plan, include auditing and ensuring that the ENTIRE SUITE is implemented as per the critical guidelines in claude.md regarding definition of done.
+Your next task is to review docs\TDD_INSTRUCTIONS.md and be sure claude.md is fresh in context. keep in mind that You MUST follow strict Test-Driven Development with no exceptions. when you have a comprehensive, complete understanding of the assigned task, come up with a strategic, phase-based implementation plan to implement the entirety of task following CLAUDE.md instructions i nsection 3 ( ## Section 3. Core Working Principles). we must implement the whole task. the task is not done if any of the requirements (FRs, ACs, NFRs, imlementation prompt code, testing requirements) are not done, as per CLAUDE.md, without deferring anything except future-slated work. in the implementation plan checklist, include auditing (including a fresh, brand new gap analysis, from scratch, as if it had never been performed, to make a final pass to try to catch everything, avoiding confirmation bias).  we must do this to ensure that the ENTIRE TASK is implemented as per the guidelines in claude.md
 
 put the implementation plan in writing as instructed in claude.md, create a new feature branch for it, and begin implementation.
 
- be sure to commit as each subtask is completed, if not more often at your discretion. work autonomously until feature is complete or you are under 5k tokens remaining for context. it is preferable that you do not monitor or change behavior on account of tokens at all, and instead work through them all until you run out and are forced to stop. that is why it is important to keep the implementation plan updated as you proceed, so we can pick up and resume seamlessly. remember to audit when you think you are done following docs\AUDIT-GUIDELINES.md and claude.md guidelines, and remember that you are not to decide to defer anything that is in these tasks. remember, and this is critically important -- there is NOTHING that is optional. it is all in scope, if it is in these documents. if it is not possible to complete due to down-the-line dependencies, then the task doesn't belong where it is, and raise the issue with me and we will move the task / subtask to where it belongs, as per the instructions in Claude.md.
+ be sure to commit as each phase is completed, if not more often at your discretion. work autonomously until the task is complete. final reminders:  remember to audit when you think you are done following the gap analysis methodology, docs\AUDIT-GUIDELINES.md and claude.md guidelines, and remember that you are not to decide to defer anything that is in this task unless you discover a future-task dependency, and then you stop, bring it to my attention, and suggest moving it from where it is to reside within that future task that it is dependent upon as a new subtask therein. remember, and this is critically important -- there is NOTHING that is optional, nice to have, or deferrable. it is all in scope, if it is in these documents. if it is not possible to complete due to down-the-line dependencies, then the task doesn't belong where it is, and raise the issue with me and we will move the task / subtask to where it belongs, as per the instructions in Claude.md. i know i seem to be repeating myself here, but you continually violate this rule, so i want to be absolutely clear and call attention to this process and requirement. 
 
 ---
 
@@ -205,15 +188,14 @@ put the implementation plan in writing as instructed in claude.md, create a new 
 ## Key Reminders for All Implementations
 
 1. **Read TDD_INSTRUCTIONS.md and CLAUDE.md FIRST** - They contain critical workflow requirements
-2. **Verify ALL subtasks exist** - `find docs/tasks/refined-tasks -name "task-XXX*.md"`
-3. **Create implementation plan BEFORE coding** - Save to `docs/implementation-plans/task-XXX-plan.md`
-4. **Write tests FIRST (RED), then code (GREEN), then refactor (REFACTOR)** - No exceptions
-5. **Update implementation plan as you progress** - Mark ✅/🔄/- for completed/in-progress/pending
-6. **Commit after EVERY logical unit** - Don't batch commits
-7. **Run build + tests before EVERY commit** - Catch issues early
-8. **Update TodoWrite frequently** - Helps with context recovery
-9. **Audit BEFORE creating PR** - Use docs/AUDIT-GUIDELINES.md checklist
-10. **Create audit report in docs/audits/** - Permanent record of what was delivered
+2. **Create implementation plan BEFORE coding** - Break into phases with checklists as per CLAUDE.md section 3.2
+3. **Write tests FIRST (RED), then code (GREEN), then refactor (REFACTOR)** - No exceptions
+4. **Update implementation plan as you progress** - Mark ✅/🔄/- for completed/in-progress/pending
+5. **Commit after EVERY logical unit** - Don't batch commits
+6. **Run build + tests before EVERY commit** - Catch issues early
+7. **Update TodoWrite frequently** - Helps with context recovery
+8. **Audit BEFORE creating PR** - Use docs/AUDIT-GUIDELINES.md checklist and run fresh gap analysis
+9. **Create audit report in docs/audits/** - Permanent record of what was delivered
 
 ---
 
@@ -236,13 +218,13 @@ put the implementation plan in writing as instructed in claude.md, create a new 
 ## Success Criteria Checklist
 
 Before creating PR, verify:
-- [ ] ALL subtasks verified complete (find command shows none remaining)
 - [ ] Implementation plan exists and is up-to-date
 - [ ] Build succeeds with 0 warnings, 0 errors
 - [ ] All tests pass (0 failures, 0 skips)
 - [ ] Every source file has corresponding test file
 - [ ] Audit report created in docs/audits/
 - [ ] Audit checklist 100% complete
+- [ ] Fresh gap analysis performed and documented and 0 issues found
 - [ ] All commits follow Conventional Commits format
 - [ ] Feature branch used (no direct commits to main)
 - [ ] Code pushed to remote
