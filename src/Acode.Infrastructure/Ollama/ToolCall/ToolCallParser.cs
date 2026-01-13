@@ -2,6 +2,7 @@ namespace Acode.Infrastructure.Ollama.ToolCall;
 
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Acode.Application.Tools;
 using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.Ollama.ToolCall.Models;
 
@@ -18,6 +19,7 @@ public sealed class ToolCallParser
     private static readonly Regex NamePattern = new("^[a-zA-Z0-9_]+$", RegexOptions.Compiled);
 
     private readonly JsonRepairer repairer;
+    private readonly IToolSchemaRegistry? schemaRegistry;
     private readonly Func<string> idGenerator;
     private int idCounter;
 
@@ -26,10 +28,18 @@ public sealed class ToolCallParser
     /// </summary>
     /// <param name="repairer">The JSON repairer to use. If null, creates a default repairer.</param>
     /// <param name="idGenerator">Function to generate IDs for tool calls missing an ID.</param>
-    public ToolCallParser(JsonRepairer? repairer = null, Func<string>? idGenerator = null)
+    /// <param name="schemaRegistry">
+    /// The schema registry for tool validation. If null, schema validation is skipped.
+    /// When provided, enables FR-015, FR-016 (unknown tool checking) and FR-057 through FR-063 (schema validation).
+    /// </param>
+    public ToolCallParser(
+        JsonRepairer? repairer = null,
+        Func<string>? idGenerator = null,
+        IToolSchemaRegistry? schemaRegistry = null)
     {
         this.repairer = repairer ?? new JsonRepairer();
         this.idGenerator = idGenerator ?? this.DefaultIdGenerator;
+        this.schemaRegistry = schemaRegistry;
     }
 
     /// <summary>
@@ -113,6 +123,17 @@ public sealed class ToolCallParser
         {
             return SingleParseResult.WithError(new ToolCallError(
                 $"Tool name exceeds maximum length of {MaxNameLength} characters",
+                "ACODE-TLP-007")
+            {
+                ToolName = toolName,
+            });
+        }
+
+        // FR-015, FR-016: Check if tool is registered (if registry available)
+        if (this.schemaRegistry != null && !this.schemaRegistry.IsRegistered(toolName))
+        {
+            return SingleParseResult.WithError(new ToolCallError(
+                $"Unknown tool '{toolName}'. Tool is not registered in the schema registry.",
                 "ACODE-TLP-005")
             {
                 ToolName = toolName,
@@ -153,6 +174,37 @@ public sealed class ToolCallParser
         {
             using var doc = JsonDocument.Parse(repairResult.RepairedJson);
             var argumentsElement = doc.RootElement.Clone();
+
+            // FR-057 through FR-063: Validate arguments against schema (if registry available)
+            if (this.schemaRegistry != null)
+            {
+                var validationSuccess = this.schemaRegistry.TryValidateArguments(
+                    toolName,
+                    argumentsElement,
+                    out var validationErrors,
+                    out var validatedArguments);
+
+                if (!validationSuccess)
+                {
+                    // FR-059: Distinguish parse errors from validation errors (ACODE-TLP-006)
+                    var errorMessage = validationErrors.Count == 1
+                        ? $"schema validation failed for tool '{toolName}': {validationErrors.First().Message}"
+                        : $"schema validation failed for tool '{toolName}' with {validationErrors.Count} validation errors:\n" +
+                          string.Join("\n", validationErrors.Select(e => $"  - {e.Path}: {e.Message}"));
+
+                    return SingleParseResult.WithError(new ToolCallError(
+                        errorMessage,
+                        "ACODE-TLP-006")
+                    {
+                        ToolName = toolName,
+                        RawArguments = rawArguments,
+                    });
+                }
+
+                // Use validated arguments (may have defaults applied)
+                argumentsElement = validatedArguments;
+            }
+
             var toolCall = new ToolCall(id, toolName, argumentsElement);
             return new SingleParseResult(toolCall, null, repairResult.WasRepaired ? repairResult : null);
         }
@@ -160,7 +212,7 @@ public sealed class ToolCallParser
         {
             return SingleParseResult.WithError(new ToolCallError(
                 $"Failed to create tool call: {ex.Message}",
-                "ACODE-TLP-006")
+                "ACODE-TLP-008")
             {
                 ToolName = toolName,
                 RawArguments = rawArguments,

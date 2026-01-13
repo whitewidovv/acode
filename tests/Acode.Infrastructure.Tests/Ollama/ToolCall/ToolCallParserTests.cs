@@ -381,7 +381,7 @@ public sealed class ToolCallParserTests
 
         // Assert
         result.HasErrors.Should().BeTrue();
-        result.Errors[0].ErrorCode.Should().Be("ACODE-TLP-005");
+        result.Errors[0].ErrorCode.Should().Be("ACODE-TLP-007");
     }
 
     [Fact]
