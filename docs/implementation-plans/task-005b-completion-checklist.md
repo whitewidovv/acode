@@ -367,7 +367,7 @@ public static ResponseDelta MapToDelta(OllamaStreamChunk chunk, int index)
 ---
 
 ### Gap #9: JsonRepairer Tests (separate from parser tests)
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: tests/Acode.Infrastructure.Tests/Ollama/ToolCall/JsonRepairerTests.cs
 **Why Needed**: JsonRepairer is a complex component (472 lines) and should have dedicated tests separate from ToolCallParserTests.
 **Required Tests** (minimum 15):
@@ -387,13 +387,17 @@ public static ResponseDelta MapToDelta(OllamaStreamChunk chunk, int index)
 14. TryRepair_ComplexMalformed_Repairs
 15. TryRepair_IrrepairableJson_ReturnsFailure
 
-**Success Criteria**: All JSON repair tests passing
-**Evidence**: [To be filled when complete]
+**Success Criteria**: All JSON repair tests passing (15+ tests)
+**Evidence**:
+- JsonRepairerTests.cs exists with 16 tests (exceeds 15 minimum)
+- All 16 tests pass ✅
+- Coverage includes: valid JSON, null/empty, trailing commas, missing braces/brackets, single quotes, unclosed strings, combined errors, timeout, nested objects, empty collections
+- Tests verify repair heuristics, error handling, and edge cases
 
 ---
 
 ### Gap #10: Error Code Documentation
-**Status**: [ ]
+**Status**: [✅]
 **File to Create**: docs/error-codes/ollama-tool-call-errors.md
 **Why Needed**: Error codes (ACODE-TLP-001 through ACODE-TLP-006) are used but not documented.
 **Required Content**:
@@ -407,7 +411,20 @@ public static ResponseDelta MapToDelta(OllamaStreamChunk chunk, int index)
 Each with: description, cause, resolution, example
 
 **Success Criteria**: Error code documentation complete and accurate
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- Created docs/error-codes/ollama-tool-call-errors.md (comprehensive documentation)
+- All 6 error codes documented with:
+  - Description: Clear explanation of what the error means
+  - Cause: Common scenarios that trigger the error
+  - Resolution: Step-by-step fixes (model side, retry logic, validation)
+  - Example: Invalid and valid JSON examples for each error
+- Additional sections:
+  - Error handling flow diagram (parsing pipeline)
+  - Retry integration documentation
+  - Configuration reference (RetryConfig)
+  - Telemetry and logging guidance with JSONL format example
+  - Testing coverage reference
+  - Related documentation links
 
 ---
 
