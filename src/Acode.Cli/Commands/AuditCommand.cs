@@ -255,9 +255,12 @@ Options vary by subcommand. Use 'acode audit <subcommand> --help' for details.";
 
     private async Task<ExitCode> VerifyAsync(CommandContext context)
     {
-        // Placeholder for log integrity verification
-        await context.Output.WriteLineAsync("Audit log verification not yet implemented.").ConfigureAwait(false);
-        return ExitCode.Success;
+        // CRITICAL: This is a placeholder - NOT a working integrity control
+        // Returns RuntimeError to prevent automation from assuming logs are verified
+        await context.Output.WriteLineAsync("ERROR: Audit log verification is not yet implemented.").ConfigureAwait(false);
+        await context.Output.WriteLineAsync("This command performs NO integrity validation and MUST NOT be used as a security control.").ConfigureAwait(false);
+        await context.Output.WriteLineAsync("Logs are NOT verified for tampering or corruption.").ConfigureAwait(false);
+        return ExitCode.RuntimeError;
     }
 
     private async Task<ExitCode> ExportAsync(CommandContext context)

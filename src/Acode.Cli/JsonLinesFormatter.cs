@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Acode.Infrastructure.Common;
 
 namespace Acode.Cli;
 
@@ -26,7 +27,7 @@ public sealed class JsonLinesFormatter : IOutputFormatter
         _output = output;
         _options = new JsonSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
             WriteIndented = false, // JSONL must be compact (one line per record)
         };
     }

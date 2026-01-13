@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Acode.Domain.Audit;
+using Acode.Infrastructure.Common;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -41,7 +42,7 @@ public sealed class FileAuditWriter : IAuditWriter
         _jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = false, // JSONL requires single-line
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
         };
 
         EnsureDirectoryExists();

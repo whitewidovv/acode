@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Acode.Domain.Audit;
+using Acode.Infrastructure.Common;
 
 /// <summary>
 /// Exports audit logs to various formats (JSON, CSV, Text).
@@ -19,8 +20,8 @@ public sealed class AuditExporter
     private static readonly JsonSerializerOptions ExportJsonOptions = new()
     {
         WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower) },
+        PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(new SnakeCaseNamingPolicy()) },
     };
 
     private readonly AuditRedactor _redactor = new();

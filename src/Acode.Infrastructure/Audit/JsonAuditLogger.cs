@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Acode.Application.Audit;
 using Acode.Application.Audit.Services;
 using Acode.Domain.Audit;
+using Acode.Infrastructure.Common;
 
 namespace Acode.Infrastructure.Audit;
 
@@ -47,10 +48,10 @@ public sealed class JsonAuditLogger : IAuditLogger, IDisposable
         {
             WriteIndented = false, // One line per event
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+            PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
             Converters =
             {
-                new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower)
+                new JsonStringEnumConverter(new SnakeCaseNamingPolicy())
             }
         };
 

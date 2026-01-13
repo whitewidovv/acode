@@ -175,35 +175,37 @@ Found 5 matching event(s):
 
 ### 4. verify - Verify Audit Log Integrity
 
-Verifies the integrity of audit logs using SHA-256 checksums.
+**⚠️ IMPORTANT:** `acode audit verify` is currently a **no-op placeholder**. It does **not** perform any checksum or integrity validation and must **not** be relied on as an integrity control in production or automation. The current implementation only prints an error message and exits with failure.
+
+This subcommand is reserved for a future implementation that may perform log integrity verification. Until that implementation is available and documented, treat this command as informational only and do not use it to make security decisions.
 
 **Usage:**
 ```bash
 acode audit verify
 ```
 
-**Examples:**
-
-Verify all audit logs:
+**Current Behavior:**
 ```bash
 acode audit verify
 ```
 
-**Output Format:**
+**Output:**
 ```
-Audit log verification not yet implemented.
+ERROR: Audit log verification is not yet implemented.
+This command performs NO integrity validation and MUST NOT be used as a security control.
+Logs are NOT verified for tampering or corruption.
 ```
 
-**Note:** This subcommand is currently a placeholder and will be implemented in a future release. When complete, it will:
+**Exit Codes (current behavior):**
+- `3` - RuntimeError (placeholder executed; **does not imply logs are valid or untampered**)
+
+**Planned behavior (subject to change and not yet implemented):**
 - Verify checksum files exist for all JSONL log files
 - Validate each event line against its checksum
 - Report any tampering or corruption detected
+- Exit with code 0 if all integrity checks pass
 - Exit with code 1 if integrity violations found
-
-**Exit Codes:**
-- `0` - Success (currently always returns success)
-- `1` - Integrity violation detected (future)
-- `3` - Configuration error
+- Exit with code 3 for configuration errors
 
 ---
 
@@ -544,9 +546,10 @@ audit:
 - Use appropriate file permissions (e.g., `chmod 600`)
 
 ### Integrity Protection
-- Audit logs include SHA-256 checksum files
-- Use `acode audit verify` to detect tampering
-- Store checksums separately for enhanced security
+- Audit logs include SHA-256 checksum files (`.sha256` sidecar files)
+- ⚠️ **WARNING:** `acode audit verify` is **not yet implemented** and cannot detect tampering
+- Manual verification: Compare `.sha256` file contents with actual file hash (`sha256sum audit-*.jsonl`)
+- Store checksums separately for enhanced security when verification is implemented
 
 ### Data Retention
 - Balance audit visibility with storage costs

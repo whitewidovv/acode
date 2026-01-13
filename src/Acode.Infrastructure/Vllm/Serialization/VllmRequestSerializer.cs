@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Acode.Infrastructure.Common;
 using Acode.Infrastructure.Vllm.Models;
 
 namespace Acode.Infrastructure.Vllm.Serialization;
@@ -11,7 +12,7 @@ public static class VllmRequestSerializer
 {
     private static readonly JsonSerializerOptions Options = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         WriteIndented = false
     };
