@@ -274,21 +274,12 @@ public sealed class FileAuditWriter : IAuditWriter
         var bytes = Encoding.UTF8.GetBytes(json + Environment.NewLine);
         _runningHash!.AppendData(bytes);
 
-        // Write updated checksum to sidecar file
-        // Note: We can't get current hash without resetting, so we compute it separately
-        using var tempHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-
-        // Re-read file and compute hash (inefficient but correct)
-        if (File.Exists(_currentFilePath!))
+        // Write updated checksum to sidecar file using incremental hash
+        // GetCurrentHash() returns the current hash without resetting the state
+        if (_currentFilePath != null)
         {
-            var fileBytes = File.ReadAllBytes(_currentFilePath);
-            tempHash.AppendData(fileBytes);
-
-            // Add the new line we just wrote
-            tempHash.AppendData(bytes);
-
             var checksumPath = _currentFilePath + ".sha256";
-            var hash = tempHash.GetHashAndReset();
+            var hash = _runningHash.GetCurrentHash();
             var hashString = Convert.ToHexString(hash).ToLowerInvariant();
             File.WriteAllText(checksumPath, hashString);
         }
@@ -303,17 +294,12 @@ public sealed class FileAuditWriter : IAuditWriter
 
         var checksumPath = _currentFilePath + ".sha256";
 
-        // Re-read entire file to get final checksum
-        if (File.Exists(_currentFilePath))
-        {
-            using var finalHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var fileBytes = File.ReadAllBytes(_currentFilePath);
-            finalHash.AppendData(fileBytes);
-            var hash = finalHash.GetHashAndReset();
-            var hashString = Convert.ToHexString(hash).ToLowerInvariant();
-            File.WriteAllText(checksumPath, hashString);
+        // Use incremental hash accumulated throughout writes
+        // GetCurrentHash() returns the hash without resetting the state
+        var hash = _runningHash.GetCurrentHash();
+        var hashString = Convert.ToHexString(hash).ToLowerInvariant();
+        File.WriteAllText(checksumPath, hashString);
 
-            _logger.LogDebug("Final checksum written: {ChecksumPath}", checksumPath);
-        }
+        _logger.LogDebug("Final checksum written: {ChecksumPath}", checksumPath);
     }
 }
