@@ -116,8 +116,8 @@ public class ProviderCapabilitiesTests
         var json = JsonSerializer.Serialize(capabilities);
 
         json.Should().Contain("\"supportsStreaming\":");
-        json.Should().Contain("\"supportsTools\":");
-        json.Should().Contain("\"maxContextLength\":");
+        json.Should().Contain("\"supportsToolCalls\":"); // Property serializes as supportsToolCalls
+        json.Should().Contain("\"maxContextTokens\":"); // Property serializes as maxContextTokens
         json.Should().Contain("\"defaultModel\":");
     }
 
@@ -178,9 +178,9 @@ public class ProviderCapabilitiesTests
         var req3 = new CapabilityRequirement { RequiresJsonMode = true };
         capabilities.Supports(req3).Should().BeFalse();
 
-        // Act & Assert - Context size requirements (OK)
+        // Act & Assert - Context size requirements (OK - 8192 >= 4096)
         var req4 = new CapabilityRequirement { MinContextTokens = 4096 };
-        capabilities.Supports(req4).Should().BeFalse(); // maxContextLength was null (0)
+        capabilities.Supports(req4).Should().BeTrue(); // maxContextLength is 8192, which supports 4096
 
         // Act & Assert - Model requirements
         var req5 = new CapabilityRequirement { RequiredModel = "llama2" };
@@ -198,7 +198,8 @@ public class ProviderCapabilitiesTests
             supportsJsonMode: false,
             maxContextLength: 8192,
             maxOutputTokens: 2048,
-            supportedModels: new[] { "model-a", "model-b" });
+            supportedModels: new[] { "model-a", "model-b" },
+            defaultModel: "model-a");
 
         var cap2 = new ProviderCapabilities(
             supportsStreaming: false,
@@ -206,7 +207,8 @@ public class ProviderCapabilitiesTests
             supportsJsonMode: true,
             maxContextLength: 16384,
             maxOutputTokens: 4096,
-            supportedModels: new[] { "model-c", "model-d" });
+            supportedModels: new[] { "model-c", "model-d" },
+            defaultModel: "model-c");
 
         // Act
         var merged = cap1.Merge(cap2);
@@ -219,8 +221,8 @@ public class ProviderCapabilitiesTests
         merged.MaxContextTokens.Should().Be(16384, "should take maximum context size");
         merged.MaxOutputTokens.Should().Be(4096, "should take maximum output size");
 
-        // Assert - Models should be union
-        merged.SupportedModels.Should().BeEquivalentTo(new[] { "model-a", "model-b", "model-c" });
+        // Assert - Models should be union of both sets
+        merged.SupportedModels.Should().BeEquivalentTo(new[] { "model-a", "model-b", "model-c", "model-d" });
 
         // Assert - Default model from first if both have it
         merged.DefaultModel.Should().Be("model-a");
