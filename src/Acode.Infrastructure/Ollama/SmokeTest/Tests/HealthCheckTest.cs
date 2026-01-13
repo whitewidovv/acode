@@ -89,5 +89,17 @@ public sealed class HealthCheckTest : ISmokeTest
                 DiagnosticHint = "Ollama server may be overloaded or unreachable"
             };
         }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            return new TestResult
+            {
+                TestName = this.Name,
+                Passed = false,
+                ElapsedTime = stopwatch.Elapsed,
+                ErrorMessage = $"Unexpected error: {ex.Message}",
+                DiagnosticHint = $"Verify endpoint format is valid: {options.Endpoint}"
+            };
+        }
     }
 }
