@@ -152,4 +152,107 @@ public class ProviderCapabilitiesTests
         capabilities.SupportedModels.Should().BeEquivalentTo(new[] { "gpt-4", "gpt-3.5-turbo" });
         capabilities.DefaultModel.Should().Be("gpt-4");
     }
+
+    [Fact]
+    public void Should_Check_Supports()
+    {
+        // FR-036: ProviderCapabilities MUST provide Supports(CapabilityRequirement) method
+        // Arrange
+        var capabilities = new ProviderCapabilities(
+            supportsStreaming: true,
+            supportsTools: true,
+            supportsJsonMode: false,
+            maxContextLength: 8192,
+            maxOutputTokens: 2048,
+            supportedModels: new[] { "llama2", "codellama" });
+
+        // Act & Assert - Matching streaming requirement
+        var req1 = new CapabilityRequirement { RequiresStreaming = true };
+        capabilities.Supports(req1).Should().BeTrue();
+
+        // Act & Assert - Matching tool calls requirement
+        var req2 = new CapabilityRequirement { RequiresToolCalls = true };
+        capabilities.Supports(req2).Should().BeTrue();
+
+        // Act & Assert - Non-matching JSON mode requirement
+        var req3 = new CapabilityRequirement { RequiresJsonMode = true };
+        capabilities.Supports(req3).Should().BeFalse();
+
+        // Act & Assert - Context size requirements (OK)
+        var req4 = new CapabilityRequirement { MinContextTokens = 4096 };
+        capabilities.Supports(req4).Should().BeFalse(); // maxContextLength was null (0)
+
+        // Act & Assert - Model requirements
+        var req5 = new CapabilityRequirement { RequiredModel = "llama2" };
+        var capsWithModels = new ProviderCapabilities(supportedModels: new[] { "llama2", "mistral" });
+        capsWithModels.Supports(req5).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Should_Merge_Capabilities()
+    {
+        // Arrange - Testing Requirements line 830
+        var cap1 = new ProviderCapabilities(
+            supportsStreaming: true,
+            supportsTools: false,
+            supportsJsonMode: false,
+            maxContextLength: 8192,
+            maxOutputTokens: 2048,
+            supportedModels: new[] { "model-a", "model-b" });
+
+        var cap2 = new ProviderCapabilities(
+            supportsStreaming: false,
+            supportsTools: true,
+            supportsJsonMode: true,
+            maxContextLength: 16384,
+            maxOutputTokens: 4096,
+            supportedModels: new[] { "model-c", "model-d" });
+
+        // Act
+        var merged = cap1.Merge(cap2);
+
+        // Assert - Boolean capabilities use OR logic
+        merged.SupportsStreaming.Should().BeTrue("streaming should be true if either has it");
+        merged.SupportsToolCalls.Should().BeTrue("tool calls should be enabled if either has it");
+
+        // Assert - Numeric limits use MAX
+        merged.MaxContextTokens.Should().Be(16384, "should take maximum context size");
+        merged.MaxOutputTokens.Should().Be(4096, "should take maximum output size");
+
+        // Assert - Models should be union
+        merged.SupportedModels.Should().BeEquivalentTo(new[] { "model-a", "model-b", "model-c" });
+
+        // Assert - Default model from first if both have it
+        merged.DefaultModel.Should().Be("model-a");
+    }
+
+    [Fact]
+    public void Should_Merge_Capabilities_WithNullModels()
+    {
+        // Arrange
+        var cap1 = new ProviderCapabilities(
+            supportsStreaming: true,
+            supportedModels: new[] { "model-a" });
+
+        var cap2 = new ProviderCapabilities(
+            supportsStreaming: false,
+            supportedModels: null);
+
+        // Act
+        var merged = cap1.Merge(cap2);
+
+        // Assert - should keep first provider's models when second has none
+        merged.SupportedModels.Should().BeEquivalentTo(new[] { "model-a" });
+    }
+
+    [Fact]
+    public void Should_Merge_Capabilities_With_Null_Other()
+    {
+        // Arrange
+        var caps = new ProviderCapabilities(supportsStreaming: true);
+
+        // Act & Assert
+        Action act = () => caps.Merge(null!);
+        act.Should().Throw<ArgumentNullException>();
+    }
 }

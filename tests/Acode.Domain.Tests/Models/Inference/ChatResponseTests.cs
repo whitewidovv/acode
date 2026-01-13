@@ -206,7 +206,7 @@ public class ChatResponseTests
     public void ChatResponse_HasToolCallsWhenMessageHasToolCalls()
     {
         // FR-004b-012: ChatResponse MUST provide a bool HasToolCalls property
-        var toolCalls = new[] { new ToolCall("id1", "get_weather", "{\"city\":\"Seattle\"}") };
+        var toolCalls = new[] { new ToolCall("id1", "get_weather", CreateJsonElement("{\"city\":\"Seattle\"}")) };
         var message = ChatMessage.CreateAssistant(null, toolCalls);
         var response = new ChatResponse(
             "resp-123",
@@ -314,5 +314,14 @@ public class ChatResponseTests
             "llama2");
 
         response.Refusal.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Helper method to create JsonElement from JSON string for testing.
+    /// </summary>
+    private static JsonElement CreateJsonElement(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 }

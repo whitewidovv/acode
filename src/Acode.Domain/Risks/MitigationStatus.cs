@@ -6,9 +6,9 @@ namespace Acode.Domain.Risks;
 public enum MitigationStatus
 {
     /// <summary>
-    /// Mitigation planned but not started.
+    /// Mitigation is implemented and active.
     /// </summary>
-    Planned,
+    Implemented,
 
     /// <summary>
     /// Mitigation implementation in progress.
@@ -16,12 +16,12 @@ public enum MitigationStatus
     InProgress,
 
     /// <summary>
-    /// Mitigation implemented and active.
+    /// Mitigation planned but not started.
     /// </summary>
-    Implemented,
+    Pending,
 
     /// <summary>
-    /// Mitigation verified through testing.
+    /// Mitigation not applicable to this risk.
     /// </summary>
-    Verified
+    NotApplicable
 }

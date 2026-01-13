@@ -68,11 +68,11 @@ If you can make the terminal flash or request attention until it receives focus,
 
 ### Additional Guidelines
 
-- **The notification MUST be the absolute last action** - complete ALL status reports, summaries, and output FIRST, then notify
+- **CRITICAL: Notification MUST be the absolute LAST action** - Complete ALL status reporting, output generation, and thinking BEFORE calling the notification tool. The user should never wait while you generate output after notifying them.
 - **Wait at least 10 seconds** between multiple notifications in succession to avoid overwhelming the user
 - **Low context notifications** (<5k tokens remaining): Include the exact file and line number where you stopped, and a brief prompt for continuation (conversation may be compacted, so be specific)
 - **Always use the dynamic worktree identifier**—never hardcode "Window 1" or "Window 2"
-- **Remember**: Notification is not optional, but it must be the FINAL action after all output is generated
+- **CRITICAL**: Notification must be the ABSOLUTE LAST action in your response - do NOT notify and then continue generating output. Complete ALL text generation, analysis, and planning FIRST, then execute the notification command as your final action. This ensures the user can immediately continue when notified.
 
 2. ## Section 2. Autonomous Work and Asynchronous Communication
 
@@ -230,6 +230,30 @@ Once checklist created:
 3. Follow TDD: RED → GREEN → REFACTOR
 4. Commit after each gap complete
 5. Update checklist with evidence (test output, etc.)
+
+#### Step 5: Resolving Spec Ambiguities
+
+When encountering apparent conflicts or ambiguities in specs:
+
+**DO NOT** rationalize or make assumptions about what the spec "probably meant"
+**DO** look downstream at actual usage:
+
+1. **Search for downstream tasks** that will consume the component
+   ```bash
+   grep -r "EnumName\|ClassName" docs/tasks/refined-tasks/ --include="*.md"
+   ```
+
+2. **Check the Implementation Prompt** in downstream task specs for actual usage examples
+3. **Check existing code** that implements related interfaces to see patterns
+
+**Example**: Task 004c spec said ProviderType enum MUST have Ollama/Vllm/Mock values. Tests were using Local/Remote. Rather than assuming "Local/Remote is better", searched downstream:
+- Task 005 (Ollama) shows: `public ProviderType Type => ProviderType.Ollama;`
+- Task 006 (vLLM) shows: `public ProviderType Type => ProviderType.Vllm;`
+- Conclusion: Spec is correct, tests were semantically wrong
+
+**Why this works**: Downstream tasks show **actual usage**, not just requirements. If downstream code references `ProviderType.Ollama`, that's proof the enum value must exist.
+
+**When in doubt**: Consult future task specs > Make assumptions
 
 #### Example Gap Checklist Structure
 

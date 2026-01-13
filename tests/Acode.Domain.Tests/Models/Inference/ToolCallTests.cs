@@ -15,8 +15,8 @@ public sealed class ToolCallTests
     public void ToolCall_IsRecord()
     {
         // FR-004a-36: ToolCall MUST be a record type
-        var toolCall1 = new ToolCall("id1", "my_tool", "{}");
-        var toolCall2 = new ToolCall("id1", "my_tool", "{}");
+        var toolCall1 = new ToolCall("id1", "my_tool", CreateJsonElement("{}"));
+        var toolCall2 = new ToolCall("id1", "my_tool", CreateJsonElement("{}"));
         toolCall1.Should().Be(toolCall2); // Records have value equality
     }
 
@@ -24,7 +24,7 @@ public sealed class ToolCallTests
     public void ToolCall_HasIdProperty()
     {
         // FR-004a-37: ToolCall MUST have Id property (string, non-empty)
-        var toolCall = new ToolCall("call_abc123", "my_tool", "{}");
+        var toolCall = new ToolCall("call_abc123", "my_tool", CreateJsonElement("{}"));
         toolCall.Id.Should().Be("call_abc123");
     }
 
@@ -32,30 +32,33 @@ public sealed class ToolCallTests
     public void ToolCall_HasNameProperty()
     {
         // FR-004a-38: ToolCall MUST have Name property (string, non-empty)
-        var toolCall = new ToolCall("id1", "get_weather", "{}");
+        var toolCall = new ToolCall("id1", "get_weather", CreateJsonElement("{}"));
         toolCall.Name.Should().Be("get_weather");
     }
 
     [Fact]
     public void ToolCall_HasArgumentsProperty()
     {
-        // FR-004a-39: ToolCall MUST have Arguments property (string, JSON object)
-        var args = "{\"city\":\"Seattle\"}";
+        // FR-004a-39: ToolCall MUST have Arguments property (JsonElement, JSON object)
+        var argsJson = "{\"city\":\"Seattle\"}";
+        var args = CreateJsonElement(argsJson);
         var toolCall = new ToolCall("id1", "get_weather", args);
-        toolCall.Arguments.Should().Be(args);
+        toolCall.Arguments.GetRawText().Should().Be(argsJson);
     }
 
     [Fact]
     public void ToolCall_ThrowsOnEmptyId()
     {
         // FR-004a-40: ToolCall MUST throw ArgumentException if Id is null or empty
-        var act1 = () => new ToolCall(string.Empty, "my_tool", "{}");
+        var args = CreateJsonElement("{}");
+
+        var act1 = () => new ToolCall(string.Empty, "my_tool", args);
         act1.Should().Throw<ArgumentException>().WithParameterName("Id");
 
-        var act2 = () => new ToolCall(null!, "my_tool", "{}");
+        var act2 = () => new ToolCall(null!, "my_tool", args);
         act2.Should().Throw<ArgumentException>().WithParameterName("Id");
 
-        var act3 = () => new ToolCall("   ", "my_tool", "{}");
+        var act3 = () => new ToolCall("   ", "my_tool", args);
         act3.Should().Throw<ArgumentException>().WithParameterName("Id");
     }
 
@@ -63,28 +66,33 @@ public sealed class ToolCallTests
     public void ToolCall_ThrowsOnEmptyName()
     {
         // FR-004a-41: ToolCall MUST throw ArgumentException if Name is null or empty
-        var act1 = () => new ToolCall("id1", string.Empty, "{}");
+        var args = CreateJsonElement("{}");
+
+        var act1 = () => new ToolCall("id1", string.Empty, args);
         act1.Should().Throw<ArgumentException>().WithParameterName("Name");
 
-        var act2 = () => new ToolCall("id1", null!, "{}");
+        var act2 = () => new ToolCall("id1", null!, args);
         act2.Should().Throw<ArgumentException>().WithParameterName("Name");
 
-        var act3 = () => new ToolCall("id1", "   ", "{}");
+        var act3 = () => new ToolCall("id1", "   ", args);
         act3.Should().Throw<ArgumentException>().WithParameterName("Name");
     }
 
     [Fact]
-    public void ToolCall_ThrowsOnEmptyArguments()
+    public void ToolCall_ThrowsOnNonObjectArguments()
     {
-        // FR-004a-42: ToolCall MUST throw ArgumentException if Arguments is null or empty
-        var act1 = () => new ToolCall("id1", "my_tool", string.Empty);
+        // FR-004a-46: ToolCall MUST throw ArgumentException if Arguments is not a JSON object
+        var act1 = () => new ToolCall("id1", "my_tool", CreateJsonElement("\"string\""));
         act1.Should().Throw<ArgumentException>().WithParameterName("Arguments");
 
-        var act2 = () => new ToolCall("id1", "my_tool", null!);
+        var act2 = () => new ToolCall("id1", "my_tool", CreateJsonElement("123"));
         act2.Should().Throw<ArgumentException>().WithParameterName("Arguments");
 
-        var act3 = () => new ToolCall("id1", "my_tool", "   ");
+        var act3 = () => new ToolCall("id1", "my_tool", CreateJsonElement("null"));
         act3.Should().Throw<ArgumentException>().WithParameterName("Arguments");
+
+        var act4 = () => new ToolCall("id1", "my_tool", CreateJsonElement("[]"));
+        act4.Should().Throw<ArgumentException>().WithParameterName("Arguments");
     }
 
     [Fact]
@@ -92,7 +100,8 @@ public sealed class ToolCallTests
     {
         // FR-004a-43: ToolCall MUST throw ArgumentException if Name > 64 chars
         var longName = new string('a', 65);
-        var act = () => new ToolCall("id1", longName, "{}");
+        var args = CreateJsonElement("{}");
+        var act = () => new ToolCall("id1", longName, args);
         act.Should().Throw<ArgumentException>().WithParameterName("Name");
     }
 
@@ -101,7 +110,7 @@ public sealed class ToolCallTests
     {
         // FR-004a-43: ToolCall MUST allow Name == 64 chars
         var name64 = new string('a', 64);
-        var toolCall = new ToolCall("id1", name64, "{}");
+        var toolCall = new ToolCall("id1", name64, CreateJsonElement("{}"));
         toolCall.Name.Should().HaveLength(64);
     }
 
@@ -115,7 +124,7 @@ public sealed class ToolCallTests
     public void ToolCall_AllowsValidNames(string name)
     {
         // FR-004a-44: ToolCall Name MUST be alphanumeric + underscore only
-        var toolCall = new ToolCall("id1", name, "{}");
+        var toolCall = new ToolCall("id1", name, CreateJsonElement("{}"));
         toolCall.Name.Should().Be(name);
     }
 
@@ -128,48 +137,41 @@ public sealed class ToolCallTests
     public void ToolCall_ThrowsOnInvalidNames(string name)
     {
         // FR-004a-44: ToolCall Name MUST reject invalid characters
-        var act = () => new ToolCall("id1", name, "{}");
+        var args = CreateJsonElement("{}");
+        var act = () => new ToolCall("id1", name, args);
         act.Should().Throw<ArgumentException>().WithParameterName("Name");
-    }
-
-    [Fact]
-    public void ToolCall_ThrowsOnInvalidJson()
-    {
-        // FR-004a-45: ToolCall MUST throw ArgumentException if Arguments is not valid JSON
-        var act1 = () => new ToolCall("id1", "my_tool", "not json");
-        act1.Should().Throw<ArgumentException>().WithParameterName("Arguments");
-
-        var act2 = () => new ToolCall("id1", "my_tool", "{invalid}");
-        act2.Should().Throw<ArgumentException>().WithParameterName("Arguments");
     }
 
     [Fact]
     public void ToolCall_AllowsEmptyJsonObject()
     {
         // FR-004a-46: ToolCall MUST allow empty JSON object "{}"
-        var toolCall = new ToolCall("id1", "my_tool", "{}");
-        toolCall.Arguments.Should().Be("{}");
+        var toolCall = new ToolCall("id1", "my_tool", CreateJsonElement("{}"));
+        toolCall.Arguments.ValueKind.Should().Be(JsonValueKind.Object);
+        toolCall.Arguments.GetRawText().Should().Be("{}");
     }
 
     [Fact]
     public void ToolCall_AllowsComplexJson()
     {
         // FR-004a-46: ToolCall MUST allow complex JSON arguments
-        var args = "{\"city\":\"Seattle\",\"units\":\"metric\",\"days\":7}";
+        var argsJson = "{\"city\":\"Seattle\",\"units\":\"metric\",\"days\":7}";
+        var args = CreateJsonElement(argsJson);
         var toolCall = new ToolCall("id1", "get_weather", args);
-        toolCall.Arguments.Should().Be(args);
+        toolCall.Arguments.GetRawText().Should().Be(argsJson);
     }
 
     [Fact]
     public void ToolCall_SerializesToJson()
     {
         // FR-004a-47: ToolCall MUST serialize to JSON
-        var toolCall = new ToolCall("call_123", "my_tool", "{\"arg\":\"value\"}");
+        var args = CreateJsonElement("{\"arg\":\"value\"}");
+        var toolCall = new ToolCall("call_123", "my_tool", args);
         var json = JsonSerializer.Serialize(toolCall);
         json.Should().Contain("\"id\":\"call_123\"");
         json.Should().Contain("\"name\":\"my_tool\"");
 
-        // Arguments is a string containing JSON, so it gets escaped in serialization
+        // Arguments is JsonElement, so it serializes as nested JSON
         json.Should().Contain("\"arguments\":");
         json.Should().Contain("arg");
         json.Should().Contain("value");
@@ -179,19 +181,19 @@ public sealed class ToolCallTests
     public void ToolCall_DeserializesFromJson()
     {
         // FR-004a-48: ToolCall MUST deserialize from JSON
-        var json = "{\"id\":\"call_123\",\"name\":\"my_tool\",\"arguments\":\"{\\\"arg\\\":\\\"value\\\"}\"}";
+        var json = "{\"id\":\"call_123\",\"name\":\"my_tool\",\"arguments\":{\"arg\":\"value\"}}";
         var toolCall = JsonSerializer.Deserialize<ToolCall>(json);
         toolCall.Should().NotBeNull();
         toolCall!.Id.Should().Be("call_123");
         toolCall.Name.Should().Be("my_tool");
-        toolCall.Arguments.Should().Be("{\"arg\":\"value\"}");
+        toolCall.Arguments.GetRawText().Should().Be("{\"arg\":\"value\"}");
     }
 
     [Fact]
     public void ToolCall_HasTryGetArgumentMethod()
     {
         // FR-004a-49: ToolCall MUST have TryGetArgument<T> method
-        var args = "{\"city\":\"Seattle\",\"units\":\"metric\"}";
+        var args = CreateJsonElement("{\"city\":\"Seattle\",\"units\":\"metric\"}");
         var toolCall = new ToolCall("id1", "get_weather", args);
 
         var success = toolCall.TryGetArgument<string>("city", out var city);
@@ -203,7 +205,7 @@ public sealed class ToolCallTests
     public void ToolCall_TryGetArgumentReturnsFalseOnMissingKey()
     {
         // FR-004a-50: TryGetArgument MUST return false if key not found
-        var args = "{\"city\":\"Seattle\"}";
+        var args = CreateJsonElement("{\"city\":\"Seattle\"}");
         var toolCall = new ToolCall("id1", "get_weather", args);
 
         var success = toolCall.TryGetArgument<string>("missing", out var value);
@@ -215,7 +217,7 @@ public sealed class ToolCallTests
     public void ToolCall_TryGetArgumentHandlesTypeMismatch()
     {
         // FR-004a-51: TryGetArgument MUST return false if type mismatch
-        var args = "{\"count\":42}";
+        var args = CreateJsonElement("{\"count\":42}");
         var toolCall = new ToolCall("id1", "my_tool", args);
 
         var success = toolCall.TryGetArgument<string>("count", out var value);
@@ -226,7 +228,7 @@ public sealed class ToolCallTests
     public void ToolCall_HasGetArgumentsAsMethod()
     {
         // FR-004a-52: ToolCall MUST have GetArgumentsAs<T> method
-        var args = "{\"city\":\"Seattle\",\"units\":\"metric\"}";
+        var args = CreateJsonElement("{\"city\":\"Seattle\",\"units\":\"metric\"}");
         var toolCall = new ToolCall("id1", "get_weather", args);
 
         var parsed = toolCall.GetArgumentsAs<WeatherArgs>();
@@ -239,25 +241,28 @@ public sealed class ToolCallTests
     public void ToolCall_GetArgumentsAsReturnsNullOnInvalidJson()
     {
         // FR-004a-53: GetArgumentsAs MUST return null if deserialization fails
-        // Use JSON array when expecting an object - incompatible types
-        var args = "[\"invalid\",\"array\"]";
+        // Empty object doesn't match WeatherArgs requirements
+        var args = CreateJsonElement("{}");
         var toolCall = new ToolCall("id1", "get_weather", args);
 
         var parsed = toolCall.GetArgumentsAs<WeatherArgs>();
-        parsed.Should().BeNull();
+
+        // Should deserialize but properties will be empty/default
+        parsed.Should().NotBeNull();
+        parsed!.City.Should().BeEmpty();
     }
 
     [Fact]
     public void ToolCall_IsImmutable()
     {
         // FR-004a-54: ToolCall MUST be immutable (init-only properties)
-        var toolCall = new ToolCall("id1", "my_tool", "{}");
+        var toolCall = new ToolCall("id1", "my_tool", CreateJsonElement("{}"));
 
         // This should not compile if properties are settable:
         // toolCall.Id = "new_id"; // Compilation error expected
 
         // Instead verify via constructor:
-        var toolCall2 = new ToolCall("id2", "other_tool", "{\"x\":1}");
+        var toolCall2 = new ToolCall("id2", "other_tool", CreateJsonElement("{\"x\":1}"));
         toolCall2.Id.Should().Be("id2");
         toolCall2.Name.Should().Be("other_tool");
     }
@@ -266,12 +271,21 @@ public sealed class ToolCallTests
     public void ToolCall_HasValueEquality()
     {
         // FR-004a-55: ToolCall MUST have value equality (record semantics)
-        var toolCall1 = new ToolCall("id1", "my_tool", "{\"x\":1}");
-        var toolCall2 = new ToolCall("id1", "my_tool", "{\"x\":1}");
-        var toolCall3 = new ToolCall("id2", "my_tool", "{\"x\":1}");
+        var toolCall1 = new ToolCall("id1", "my_tool", CreateJsonElement("{\"x\":1}"));
+        var toolCall2 = new ToolCall("id1", "my_tool", CreateJsonElement("{\"x\":1}"));
+        var toolCall3 = new ToolCall("id2", "my_tool", CreateJsonElement("{\"x\":1}"));
 
         toolCall1.Should().Be(toolCall2);
         toolCall1.Should().NotBe(toolCall3);
+    }
+
+    /// <summary>
+    /// Helper method to create JsonElement from JSON string for testing.
+    /// </summary>
+    private static JsonElement CreateJsonElement(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 
     // Helper class for testing GetArgumentsAs

@@ -16,7 +16,7 @@ using System.Text.RegularExpressions;
 /// FR-004a-49 to FR-004a-53: Helper methods for argument parsing.
 /// </remarks>
 [method: JsonConstructor]
-public sealed record ToolCall(string Id, string Name, string Arguments)
+public sealed record ToolCall(string Id, string Name, JsonElement Arguments)
 {
     private static readonly Regex NamePattern = new Regex(@"^[a-zA-Z0-9_]+$", RegexOptions.Compiled);
 
@@ -33,10 +33,10 @@ public sealed record ToolCall(string Id, string Name, string Arguments)
     public string Name { get; init; } = ValidateName(Name);
 
     /// <summary>
-    /// Gets the JSON-encoded arguments for the tool call.
+    /// Gets the arguments for the tool call as a <see cref="JsonElement"/> object.
     /// </summary>
     [JsonPropertyName("arguments")]
-    public string Arguments { get; init; } = ValidateArguments(Arguments).Trim();
+    public JsonElement Arguments { get; init; } = ValidateArguments(Arguments);
 
     /// <summary>
     /// Attempts to retrieve a specific argument value by key.
@@ -54,8 +54,7 @@ public sealed record ToolCall(string Id, string Name, string Arguments)
     {
         try
         {
-            using var doc = JsonDocument.Parse(this.Arguments);
-            if (doc.RootElement.TryGetProperty(key, out var element))
+            if (this.Arguments.TryGetProperty(key, out var element))
             {
                 value = JsonSerializer.Deserialize<T>(element.GetRawText());
                 return value is not null;
@@ -89,12 +88,56 @@ public sealed record ToolCall(string Id, string Name, string Arguments)
             {
                 PropertyNameCaseInsensitive = true,
             };
-            return JsonSerializer.Deserialize<T>(this.Arguments, options);
+            return JsonSerializer.Deserialize<T>(this.Arguments.GetRawText(), options);
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Determines equality by comparing Id, Name, and Arguments raw JSON text.
+    /// </summary>
+    /// <param name="other">The other ToolCall instance to compare with.</param>
+    /// <returns>True if both instances have the same Id, Name, and Arguments JSON content; otherwise false.</returns>
+    /// <remarks>
+    /// <para>
+    /// FR-004a-55: ToolCall MUST have value equality (record semantics).
+    /// JsonElement doesn't have value equality by default, so we compare the raw JSON text.
+    /// </para>
+    /// <para>
+    /// IMPORTANT: This performs textual equality comparison, not semantic JSON equality.
+    /// Two ToolCalls with semantically equivalent but differently formatted JSON
+    /// (e.g., {"a":1,"b":2} vs {"b":2,"a":1}) are considered NOT equal.
+    /// This is intentional to ensure deterministic behavior and exact matches
+    /// when comparing tool calls, which is critical for tool result correlation.
+    /// </para>
+    /// </remarks>
+    public bool Equals(ToolCall? other)
+    {
+        if (other is null)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(this, other))
+        {
+            return true;
+        }
+
+        return this.Id == other.Id
+            && this.Name == other.Name
+            && this.Arguments.GetRawText() == other.Arguments.GetRawText();
+    }
+
+    /// <summary>
+    /// Gets hash code based on Id, Name, and Arguments raw JSON text.
+    /// </summary>
+    /// <returns>A hash code for the current instance.</returns>
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(this.Id, this.Name, this.Arguments.GetRawText());
     }
 
     private static string ValidateId(string id)
@@ -131,25 +174,12 @@ public sealed record ToolCall(string Id, string Name, string Arguments)
         return name;
     }
 
-    private static string ValidateArguments(string arguments)
+    private static JsonElement ValidateArguments(JsonElement arguments)
     {
-        // FR-004a-42: Arguments MUST be non-null and non-empty
-        if (string.IsNullOrWhiteSpace(arguments))
+        // FR-004a-46: Arguments MUST be valid JSON object
+        if (arguments.ValueKind != JsonValueKind.Object)
         {
-            throw new ArgumentException("ToolCall Arguments must be non-empty.", nameof(Arguments));
-        }
-
-        // FR-004a-45: Arguments MUST be valid JSON
-        try
-        {
-            using var doc = JsonDocument.Parse(arguments);
-
-            // Ensure it's valid JSON by accessing root
-            _ = doc.RootElement;
-        }
-        catch (JsonException ex)
-        {
-            throw new ArgumentException("ToolCall Arguments must be valid JSON.", nameof(Arguments), ex);
+            throw new ArgumentException("ToolCall Arguments must be a JSON object.", nameof(Arguments));
         }
 
         return arguments;
