@@ -255,4 +255,55 @@ public sealed class ToolDefinitionTests
         var tool = new ToolDefinition(name, "Description", parameters);
         tool.Name.Should().Be(name);
     }
+
+    [Fact]
+    public void CreateFromType_Should_Generate_Schema_For_Simple_Type()
+    {
+        // Arrange - simple parameter type
+        var tool = ToolDefinition.CreateFromType<SimpleParams>("my_tool", "Test tool");
+
+        // Assert
+        tool.Name.Should().Be("my_tool");
+        tool.Description.Should().Be("Test tool");
+        tool.Parameters.GetProperty("type").GetString().Should().Be("object");
+        tool.Parameters.TryGetProperty("properties", out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public void CreateFromType_Should_Include_Required_Properties()
+    {
+        // Arrange & Act
+        var tool = ToolDefinition.CreateFromType<RequiredParams>("test", "Description");
+
+        // Assert
+        tool.Parameters.TryGetProperty("required", out var required).Should().BeTrue();
+        var requiredArray = required.EnumerateArray().Select(e => e.GetString()).ToArray();
+        requiredArray.Should().Contain("requiredProp");
+    }
+
+    [Fact]
+    public void CreateFromType_Should_Handle_Optional_Properties()
+    {
+        // Arrange & Act
+        var tool = ToolDefinition.CreateFromType<OptionalParams>("test", "Description");
+
+        // Assert
+        tool.Parameters.TryGetProperty("properties", out var props).Should().BeTrue();
+        props.TryGetProperty("optionalProp", out _).Should().BeTrue();
+    }
+
+    // Test parameter types
+    private record SimpleParams(string Name, int Age);
+
+    private record RequiredParams
+    {
+        public required string RequiredProp { get; init; }
+
+        public string? OptionalProp { get; init; }
+    }
+
+    private record OptionalParams
+    {
+        public string? OptionalProp { get; init; }
+    }
 }

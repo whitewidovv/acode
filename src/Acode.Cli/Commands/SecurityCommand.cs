@@ -18,7 +18,12 @@ public sealed class SecurityCommand
     /// </summary>
     public SecurityCommand()
     {
-        _pathValidator = new ProtectedPathValidator();
+        // Create dependencies for ProtectedPathValidator
+        var pathMatcher = new GlobMatcher(caseSensitive: false); // Case-insensitive for security
+        var pathNormalizer = new PathNormalizer();
+        var symlinkResolver = new SymlinkResolver();
+
+        _pathValidator = new ProtectedPathValidator(pathMatcher, pathNormalizer, symlinkResolver);
 
         // Try to load risk register
         try
@@ -49,7 +54,12 @@ public sealed class SecurityCommand
     /// <param name="riskRegister">Optional risk register.</param>
     public SecurityCommand(IRiskRegister? riskRegister)
     {
-        _pathValidator = new ProtectedPathValidator();
+        // Create dependencies for ProtectedPathValidator
+        var pathMatcher = new GlobMatcher(caseSensitive: false); // Case-insensitive for security
+        var pathNormalizer = new PathNormalizer();
+        var symlinkResolver = new SymlinkResolver();
+
+        _pathValidator = new ProtectedPathValidator(pathMatcher, pathNormalizer, symlinkResolver);
         _riskRegister = riskRegister;
     }
 
@@ -94,20 +104,24 @@ public sealed class SecurityCommand
     /// Checks if a path is protected.
     /// </summary>
     /// <param name="path">Path to check.</param>
+    /// <param name="operation">Optional file operation to validate against.</param>
     /// <returns>Exit code (0 = allowed, 1 = blocked).</returns>
-    public int CheckPath(string path)
+    public int CheckPath(string path, FileOperation? operation = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path, nameof(path));
 
-        var result = _pathValidator.Validate(path);
+        var result = operation.HasValue
+            ? _pathValidator.Validate(path, operation.Value)
+            : _pathValidator.Validate(path);
 
         if (result.IsProtected)
         {
             Console.WriteLine($"BLOCKED: {path}");
-            Console.WriteLine($"  Pattern:  {result.MatchedPattern}");
-            Console.WriteLine($"  Category: {result.Category}");
-            Console.WriteLine($"  Risk ID:  {result.RiskId}");
-            Console.WriteLine($"  Reason:   {result.Reason}");
+            Console.WriteLine($"  Error Code: {result.Error?.ErrorCode ?? "UNKNOWN"}");
+            Console.WriteLine($"  Pattern:    {result.MatchedPattern}");
+            Console.WriteLine($"  Category:   {result.Category}");
+            Console.WriteLine($"  Risk ID:    {result.RiskId}");
+            Console.WriteLine($"  Reason:     {result.Reason}");
             return 1;
         }
 

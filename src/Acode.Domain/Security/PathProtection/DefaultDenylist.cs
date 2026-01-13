@@ -127,6 +127,34 @@ public static class DefaultDenylist
             Platforms = new[] { Platform.Windows }
         });
 
+        // SSH Keys - Glob patterns (match anywhere in path)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.ssh/",
+            Reason = "SSH directory anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SshKeys,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.ssh/**",
+            Reason = "Any file inside .ssh directory",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SshKeys,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.ssh/id_*",
+            Reason = "SSH private keys anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SshKeys,
+            Platforms = new[] { Platform.All }
+        });
+
         // GPG Keys (FR-003b-31 to FR-003b-32)
         // AC-023 to AC-024
         entries.Add(new DenylistEntry
@@ -174,6 +202,25 @@ public static class DefaultDenylist
             Platforms = new[] { Platform.Windows }
         });
 
+        // GPG Keys - Glob patterns (match anywhere in path)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.gnupg/",
+            Reason = "GPG directory anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.GpgKeys,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.gnupg/**",
+            Reason = "Any file inside .gnupg directory",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.GpgKeys,
+            Platforms = new[] { Platform.All }
+        });
+
         // Cloud Credentials (FR-003b-33 to FR-003b-39)
         // AC-027 to AC-036
         entries.Add(new DenylistEntry
@@ -219,6 +266,72 @@ public static class DefaultDenylist
             RiskId = "RISK-I-003",
             Category = PathCategory.CloudCredentials,
             Platforms = new[] { Platform.Windows }
+        });
+
+        // AWS - Glob patterns (match anywhere in path)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.aws/",
+            Reason = "AWS directory anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.aws/**",
+            Reason = "Any file inside .aws directory",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.aws/credentials",
+            Reason = "AWS credentials file anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        // Azure - Glob patterns (match anywhere in path)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.azure/",
+            Reason = "Azure directory anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.azure/**",
+            Reason = "Any file inside .azure directory",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        // GCloud - Glob patterns (match anywhere in path)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.gcloud/",
+            Reason = "GCloud directory anywhere in filesystem",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/.gcloud/**",
+            Reason = "Any file inside .gcloud directory",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
         });
 
         entries.Add(new DenylistEntry
@@ -789,6 +902,211 @@ public static class DefaultDenylist
             RiskId = "RISK-E-004",
             Category = PathCategory.SystemFiles,
             Platforms = new[] { Platform.MacOS }
+        });
+
+        // Additional Cloud Credentials - DigitalOcean, Heroku, Linode
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.config/doctl/",
+            Reason = "DigitalOcean CLI credentials",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.netrc",
+            Reason = "Heroku and other service credentials",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.config/linode-cli",
+            Reason = "Linode CLI credentials",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.terraform.d/credentials.tfrc.json",
+            Reason = "Terraform Cloud credentials",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.config/pulumi/",
+            Reason = "Pulumi credentials",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        // Database Credentials
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.pgpass",
+            Reason = "PostgreSQL password file",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.my.cnf",
+            Reason = "MySQL credentials file",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.mongorc.js",
+            Reason = "MongoDB shell configuration with potential credentials",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.rediscli_history",
+            Reason = "Redis CLI history may contain credentials",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.All }
+        });
+
+        // Browser Credentials (Windows)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = @"%LOCALAPPDATA%\Google\Chrome\User Data\",
+            Reason = "Chrome browser data including passwords",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.Windows }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = @"%APPDATA%\Mozilla\Firefox\Profiles\",
+            Reason = "Firefox browser data including passwords",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.Windows }
+        });
+
+        // Browser Credentials (Unix/macOS)
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.config/google-chrome/",
+            Reason = "Chrome browser data including passwords",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.Linux, Platform.MacOS }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.mozilla/firefox/",
+            Reason = "Firefox browser data including passwords",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.Linux, Platform.MacOS }
+        });
+
+        // Additional Secret File Extensions
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/*.cer",
+            Reason = "Certificate files",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/*.crt",
+            Reason = "Certificate files",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "**/*.der",
+            Reason = "DER encoded certificate files",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.SecretFiles,
+            Platforms = new[] { Platform.All }
+        });
+
+        // Additional Development Tool Credentials
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.docker/config.json",
+            Reason = "Docker registry credentials",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.kube/config",
+            Reason = "Kubernetes cluster credentials",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.helm/",
+            Reason = "Helm chart repository credentials",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.CloudCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        // Additional Package Manager Credentials
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.bundle/config",
+            Reason = "Bundler credentials for Ruby gems",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.PackageManagerCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.hex/hex.config",
+            Reason = "Hex package manager credentials for Erlang/Elixir",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.PackageManagerCredentials,
+            Platforms = new[] { Platform.All }
+        });
+
+        entries.Add(new DenylistEntry
+        {
+            Pattern = "~/.config/composer/auth.json",
+            Reason = "Composer authentication for PHP packages",
+            RiskId = "RISK-I-003",
+            Category = PathCategory.PackageManagerCredentials,
+            Platforms = new[] { Platform.All }
         });
 
         return entries.AsReadOnly();

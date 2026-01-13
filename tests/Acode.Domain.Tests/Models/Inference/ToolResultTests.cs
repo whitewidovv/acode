@@ -173,7 +173,7 @@ public sealed class ToolResultTests
     public void ToolResult_ToolCallIdMatchesToolCallId()
     {
         // FR-004a-59: ToolCallId MUST match corresponding ToolCall.Id
-        var toolCall = new ToolCall("call_abc", "my_tool", "{}");
+        var toolCall = new ToolCall("call_abc", "my_tool", CreateJsonElement("{}"));
         var result = ToolResult.Success(toolCall.Id, "Tool executed");
 
         result.ToolCallId.Should().Be(toolCall.Id);
@@ -211,5 +211,14 @@ public sealed class ToolResultTests
         var unicodeResult = "Success: 成功 ✅";
         var result = new ToolResult("call_1", unicodeResult, false);
         result.Result.Should().Be(unicodeResult);
+    }
+
+    /// <summary>
+    /// Helper method to create JsonElement from JSON string for testing.
+    /// </summary>
+    private static JsonElement CreateJsonElement(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 }
