@@ -25,6 +25,6 @@ namespace Acode.Infrastructure.Ollama.Serialization;
 [JsonSerializable(typeof(OllamaTool))]
 [JsonSerializable(typeof(OllamaToolCall))]
 [JsonSerializable(typeof(OllamaFunction))]
-internal partial class OllamaJsonContext : JsonSerializerContext
+public partial class OllamaJsonContext : JsonSerializerContext
 {
 }
