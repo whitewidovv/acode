@@ -96,7 +96,7 @@ internal partial class OllamaJsonContext : JsonSerializerContext
 ---
 
 ### Gap #2: OllamaHttpClient Missing IHttpClientFactory Support
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 **Priority**: HIGH
 **File to Modify**: `src/Acode.Infrastructure/Ollama/Http/OllamaHttpClient.cs`
 **Why Needed**: FR-003 states "OllamaHttpClient MUST use IHttpClientFactory for HttpClient creation"
@@ -121,7 +121,13 @@ internal partial class OllamaJsonContext : JsonSerializerContext
 - Timeout is configured from OllamaConfiguration
 - Tests verify factory usage
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- ✅ Added constructor accepting IHttpClientFactory and OllamaConfiguration
+- ✅ HttpClient created via factory.CreateClient("Ollama")
+- ✅ Timeout configured from configuration.RequestTimeout
+- ✅ Added 6 tests to OllamaHttpClientTests.cs for IHttpClientFactory support
+- ✅ All tests passing
+- ✅ Commit: 5385249 "feat(task-005a): implement Gap #2 - add IHttpClientFactory support"
 
 ---
 
@@ -163,7 +169,7 @@ public sealed class OllamaHttpClientFactory
 ---
 
 ### Gap #4: OllamaHttpClient Missing Logging Support
-**Status**: [ ]
+**Status**: [✅] COMPLETE
 **Priority**: HIGH
 **File to Modify**: `src/Acode.Infrastructure/Ollama/Http/OllamaHttpClient.cs`
 **Why Needed**: FR-040 "PostAsync MUST log request and response timing", NFR-019 through NFR-022 specify observability requirements
@@ -194,7 +200,20 @@ _logger.LogDebug("POST {Endpoint} completed in {ElapsedMs}ms with status {Status
 - Request/response timing is logged
 - Tests verify logging behavior
 
-**Evidence**: [To be filled when complete]
+**Evidence**:
+- ✅ Added ILogger<OllamaHttpClient>? field to class
+- ✅ Added logger parameter (optional, nullable) to both constructors
+- ✅ Enhanced PostChatAsync with BeginScope for correlation ID
+- ✅ Added Stopwatch timing in PostChatAsync
+- ✅ Added LogDebug call with timing and status code
+- ✅ Added 5 comprehensive logging tests to OllamaHttpClientTests.cs:
+  - Constructor_Should_AcceptLogger
+  - PostChatAsync_Should_LogRequestTiming
+  - PostChatAsync_Should_LogWithCorrelationId
+  - Constructor_WithLogger_Should_StoreLogger
+  - Constructor_WithoutLogger_Should_AllowNullLogger
+- ✅ All 16 tests passing (11 existing + 5 new)
+- ✅ Commit: 51fecb9 "feat(task-005a): implement Gap #4 - add logging support"
 
 ---
 
