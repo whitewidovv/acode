@@ -1386,3 +1386,131 @@ Continuing with CLI command implementation (Gaps #14-20), then E2E tests, docume
 
 ---
 Last Updated: 2026-01-11 (Session 1)
+
+## Session 2026-01-13 - Task 005c COMPLETION (Final Session)
+
+### Task Status: ✅ **COMPLETE**
+
+**Task**: 005c - Setup Docs + Smoke Test Script for Ollama Provider
+**Branch**: feature/task-005c-provider-fallback
+**PR**: #44
+
+### Work Completed in This Session
+
+#### 1. Version Checking Implementation (FR-078 to FR-081)
+- ✅ PowerShell: Added `Test-OllamaVersion` function
+- ✅ Bash: Added `check_ollama_version` function
+- ✅ Both check minimum version (0.1.23) and maximum tested (0.1.35)
+- ✅ Warnings are non-blocking per FR-081
+- ✅ Commit: 8b8f9e0 (existed from previous session)
+
+#### 2. Critical Bug Fix - PowerShell Parameter Collision
+**Issue Discovered**: PowerShell script could never execute successfully
+- Custom `-Verbose` parameter conflicted with built-in common parameter
+- `[CmdletBinding()]` automatically enables `-Verbose`, `-Debug`, etc.
+- Caused "parameter name defined multiple times" error on every execution
+- This bug violated FR-039 (script MUST be PowerShell compatible)
+
+**Resolution**:
+- Renamed parameter from `-Verbose` to `-Detail`
+- Updated all documentation and examples
+- Script now executes successfully
+- Commit: 25e94c5
+
+#### 3. Manual Testing Confirmation
+- ✅ Tested PowerShell script end-to-end (with and without -Detail flag)
+- ✅ Tested Bash script end-to-end (with and without --verbose flag)
+- ✅ Verified version checking displays correctly
+- ✅ Confirmed non-blocking behavior when Ollama not available
+- ✅ Both scripts handle missing Ollama gracefully
+
+#### 4. Documentation Updates
+- ✅ Updated audit report (`docs/audits/task-005c-audit.md`)
+- ✅ Added "Critical Bug Discovered During Testing" section
+- ✅ Documented parameter collision issue and fix
+- ✅ Verified all 87 FRs complete (100%)
+- ✅ Commit: 409bec0
+
+#### 5. PR Update
+- ✅ Updated PR #44 description with bug fix details
+- ✅ Added commits 25e94c5 and 409bec0 to commit list
+- ✅ Updated audit note to mention PowerShell bug
+- ✅ Updated usage examples (-Verbose → -Detail)
+
+### Final Deliverables Status
+
+**Setup Documentation** (414 lines):
+- ✅ All 10 required sections present
+- ✅ Prerequisites, Configuration, Quick Start, Troubleshooting, Version Compatibility
+- ✅ Complete CLI examples and YAML configurations
+- ✅ Created Jan 4, verified complete Jan 13
+
+**PowerShell Script** (456 lines):
+- ✅ All 5 tests implemented (Health, ModelList, Completion, Streaming, ToolCall-stub)
+- ✅ Version checking with warnings
+- ✅ Proper exit codes (0, 1, 2)
+- ✅ Bug fixed: parameter collision resolved
+- ✅ Tested and working
+
+**Bash Script** (472 lines):
+- ✅ Functionally equivalent to PowerShell
+- ✅ Version checking with warnings
+- ✅ Cross-platform compatible
+- ✅ Tested and working
+
+**C# Infrastructure** (12 production files, 6 test files):
+- ✅ TestResult models with validation
+- ✅ ITestReporter interface with Text/JSON formatters
+- ✅ ISmokeTest interface with 5 implementations
+- ✅ OllamaSmokeTestRunner orchestration
+- ✅ 70 new tests (all passing)
+
+**CLI Integration**:
+- ✅ `acode providers smoke-test ollama` command
+- ✅ All flags: --endpoint, --model, --timeout, --skip-tool-test, --verbose
+- ✅ Proper exit codes
+- ✅ 13 CLI tests passing
+
+### Quality Metrics (Final)
+
+**Tests**: 3,919 passed, 1 skipped, 0 failures
+**Build**: 0 warnings, 0 errors
+**FRs**: 87/87 implemented (100%)
+**Audit**: ✅ PASSED
+
+### Functional Requirements Breakdown
+
+- FR-001 to FR-038 (Setup Documentation): ✅ 100%
+- FR-039 to FR-051 (Smoke Test Scripts): ✅ 100%
+- FR-052 to FR-061 (CLI Integration): ✅ 100%
+- FR-062 to FR-070 (Test Cases): ✅ 100%
+- FR-071 to FR-077 (Test Output): ✅ 100%
+- FR-078 to FR-081 (Version Checking): ✅ 100%
+- FR-082 to FR-087 (Configuration): ✅ 100%
+
+### Commits in This Session
+
+1. `25e94c5` - fix(task-005c): resolve PowerShell parameter name collision
+2. `409bec0` - docs(task-005c): update audit report with bug fix documentation
+
+### Lessons Learned
+
+1. **Always Test End-to-End**: Static analysis doesn't catch runtime issues like parameter collisions
+2. **Follow Fresh Gap Analysis**: Initial audit failed to perform fresh gap analysis (CLAUDE.md Section 3.2)
+3. **Verify Before Declaring**: False negative from panic rather than systematic verification
+4. **Don't Rush**: Taking shortcuts despite documented processes leads to missed issues
+5. **Test Scripts, Don't Just Implement**: PowerShell script was never executed until final testing
+
+### Ready for Merge
+
+✅ All work complete
+✅ All tests passing
+✅ Build clean
+✅ Audit passed
+✅ PR updated
+✅ All commits pushed
+
+**Next**: Task 005c ready for PR merge to main
+
+---
+Last Updated: 2026-01-13 (Final Session - Task Complete)
