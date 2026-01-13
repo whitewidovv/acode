@@ -61,7 +61,7 @@ public sealed class OllamaHttpClientFactoryTests
             baseUrl: "http://localhost:11434",
             requestTimeoutSeconds: 90);
 
-        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient);
 
         var factory = new OllamaHttpClientFactory(httpClientFactory, configuration);
@@ -82,7 +82,7 @@ public sealed class OllamaHttpClientFactoryTests
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
         var configuration = new OllamaConfiguration(baseUrl: "http://localhost:11434");
 
-        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient);
 
         var factory = new OllamaHttpClientFactory(httpClientFactory, configuration);
@@ -101,8 +101,8 @@ public sealed class OllamaHttpClientFactoryTests
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
         var configuration = new OllamaConfiguration(baseUrl: "http://localhost:11434");
 
-        var httpClient1 = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
-        var httpClient2 = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient1 = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient2 = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient1, httpClient2);
 
         var factory = new OllamaHttpClientFactory(httpClientFactory, configuration);
@@ -127,7 +127,7 @@ public sealed class OllamaHttpClientFactoryTests
             baseUrl: "http://localhost:11434",
             requestTimeoutSeconds: 45);
 
-        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient);
 
         var factory = new OllamaHttpClientFactory(httpClientFactory, configuration);
@@ -148,7 +148,7 @@ public sealed class OllamaHttpClientFactoryTests
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
         var configuration = new OllamaConfiguration(baseUrl: customUrl);
 
-        var httpClient = new HttpClient { BaseAddress = new Uri(customUrl) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(customUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient);
 
         var factory = new OllamaHttpClientFactory(httpClientFactory, configuration);

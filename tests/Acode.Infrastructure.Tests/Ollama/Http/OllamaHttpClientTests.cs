@@ -30,7 +30,7 @@ public sealed class OllamaHttpClientTests
             }"),
         });
 
-        var httpClient = new HttpClient(handler)
+        using var httpClient = new HttpClient(handler)
         {
             BaseAddress = new Uri("http://localhost:11434"),
         };
@@ -52,7 +52,7 @@ public sealed class OllamaHttpClientTests
     public void Constructor_Should_Set_BaseAddress()
     {
         // FR-004: Configure base address from configuration
-        var httpClient = new HttpClient { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -63,7 +63,7 @@ public sealed class OllamaHttpClientTests
     public void Constructor_Should_Generate_CorrelationId()
     {
         // FR-007: Expose correlation ID for request tracing
-        var httpClient = new HttpClient();
+        using var httpClient = new HttpClient();
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -75,7 +75,7 @@ public sealed class OllamaHttpClientTests
     public void Dispose_Should_Cleanup_Resources()
     {
         // FR-006: Implement IDisposable for cleanup
-        var httpClient = new HttpClient();
+        using var httpClient = new HttpClient();
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -98,7 +98,7 @@ public sealed class OllamaHttpClientTests
             }"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -133,7 +133,7 @@ public sealed class OllamaHttpClientTests
             }"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -160,7 +160,7 @@ public sealed class OllamaHttpClientTests
             requestTimeoutSeconds: 60);
 
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
-        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient);
 
         var act = () => new OllamaHttpClient(httpClientFactory, configuration);
@@ -175,7 +175,7 @@ public sealed class OllamaHttpClientTests
         var configuration = new OllamaConfiguration(baseUrl: "http://localhost:11434");
 
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
-        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient);
 
         var ollamaClient = new OllamaHttpClient(httpClientFactory, configuration);
@@ -193,7 +193,7 @@ public sealed class OllamaHttpClientTests
             requestTimeoutSeconds: 90);
 
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
-        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient);
 
         var ollamaClient = new OllamaHttpClient(httpClientFactory, configuration);
@@ -211,7 +211,7 @@ public sealed class OllamaHttpClientTests
         var configuration = new OllamaConfiguration(baseUrl: "http://localhost:11434");
 
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
-        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient);
 
         var ollamaClient = new OllamaHttpClient(httpClientFactory, configuration);
@@ -227,7 +227,7 @@ public sealed class OllamaHttpClientTests
         var configuration = new OllamaConfiguration(baseUrl: "http://localhost:11434");
 
         var httpClientFactory = Substitute.For<IHttpClientFactory>();
-        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient);
 
         var ollamaClient = new OllamaHttpClient(httpClientFactory, configuration);
@@ -246,7 +246,7 @@ public sealed class OllamaHttpClientTests
         var configuration = new OllamaConfiguration(baseUrl: "http://localhost:11434");
         var logger = Substitute.For<ILogger<OllamaHttpClient>>();
 
-        var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
+        using var httpClient = new HttpClient { BaseAddress = new Uri(configuration.BaseUrl) };
         httpClientFactory.CreateClient("Ollama").Returns(httpClient);
 
         var act = () => new OllamaHttpClient(httpClientFactory, configuration, logger);
@@ -268,7 +268,7 @@ public sealed class OllamaHttpClientTests
             }"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var logger = Substitute.For<ILogger<OllamaHttpClient>>();
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434", logger: logger);
@@ -303,7 +303,7 @@ public sealed class OllamaHttpClientTests
             }"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var logger = Substitute.For<ILogger<OllamaHttpClient>>();
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434", logger: logger);
@@ -323,7 +323,7 @@ public sealed class OllamaHttpClientTests
     public void Constructor_WithLogger_Should_StoreLogger()
     {
         // Verify logger can be passed to both constructors
-        var httpClient = new HttpClient { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient { BaseAddress = new Uri("http://localhost:11434") };
         var logger = Substitute.For<ILogger<OllamaHttpClient>>();
 
         var act = () => new OllamaHttpClient(httpClient, "http://localhost:11434", logger: logger);
@@ -335,7 +335,7 @@ public sealed class OllamaHttpClientTests
     public void Constructor_WithoutLogger_Should_AllowNullLogger()
     {
         // Logger should be optional (nullable)
-        var httpClient = new HttpClient { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient { BaseAddress = new Uri("http://localhost:11434") };
 
         var act = () => new OllamaHttpClient(httpClient, "http://localhost:11434", logger: null);
 
@@ -357,7 +357,7 @@ public sealed class OllamaHttpClientTests
             }"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -386,7 +386,7 @@ public sealed class OllamaHttpClientTests
             }"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -417,7 +417,7 @@ public sealed class OllamaHttpClientTests
             }"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -443,7 +443,7 @@ public sealed class OllamaHttpClientTests
             Content = new StringContent(@"{ ""status"": ""ok"" }"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -469,7 +469,7 @@ public sealed class OllamaHttpClientTests
             }"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var logger = Substitute.For<ILogger<OllamaHttpClient>>();
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434", logger: logger);
@@ -500,7 +500,7 @@ public sealed class OllamaHttpClientTests
             Content = new StringContent("Bad Request"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -524,7 +524,7 @@ public sealed class OllamaHttpClientTests
             Content = new StringContent("Internal Server Error"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -548,7 +548,7 @@ public sealed class OllamaHttpClientTests
             Content = new StringContent("Bad Request"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -570,7 +570,7 @@ public sealed class OllamaHttpClientTests
         // Create a handler that throws TaskCanceledException (simulating timeout)
         var handler = new ThrowingHttpMessageHandler(new TaskCanceledException("Request timed out"));
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -593,7 +593,7 @@ public sealed class OllamaHttpClientTests
             Content = new StringContent("Bad Request"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -622,7 +622,7 @@ public sealed class OllamaHttpClientTests
             Content = new StringContent("{invalid json}"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
 
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
@@ -649,7 +649,7 @@ public sealed class OllamaHttpClientTests
             Content = new StringContent(responseContent),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
         var request = new OllamaRequest(
@@ -675,7 +675,7 @@ public sealed class OllamaHttpClientTests
             Content = new StringContent("test"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
         var request = new OllamaRequest(
@@ -702,7 +702,7 @@ public sealed class OllamaHttpClientTests
             Content = new StringContent("Bad Request"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
         var request = new OllamaRequest(
@@ -723,7 +723,7 @@ public sealed class OllamaHttpClientTests
         // FR-066: PostStreamAsync MUST support cancellation
         var handler = new ThrowingHttpMessageHandler(new TaskCanceledException("Cancelled"));
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
         var request = new OllamaRequest(
@@ -749,7 +749,7 @@ public sealed class OllamaHttpClientTests
             Content = new StringContent("Server Error"),
         });
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
         var request = new OllamaRequest(
@@ -770,7 +770,7 @@ public sealed class OllamaHttpClientTests
         // FR-093: Network errors MUST be wrapped in OllamaConnectionException
         var handler = new ThrowingHttpMessageHandler(new HttpRequestException("Connection failed"));
 
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var ollamaClient = new OllamaHttpClient(httpClient, "http://localhost:11434");
 
         var request = new OllamaRequest(

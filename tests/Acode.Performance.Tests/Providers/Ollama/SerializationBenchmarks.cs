@@ -159,7 +159,7 @@ public class SerializationBenchmarks
     public OllamaResponse? Benchmark_RoundTrip()
     {
         // Serialize request
-        var requestJson = JsonSerializer.Serialize(_testRequest, OllamaJsonContext.Default.OllamaRequest);
+        _ = JsonSerializer.Serialize(_testRequest, OllamaJsonContext.Default.OllamaRequest);
 
         // Deserialize response (simulating server response)
         return JsonSerializer.Deserialize(_testResponseJson, OllamaJsonContext.Default.OllamaResponse);
