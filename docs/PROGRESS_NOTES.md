@@ -1385,4 +1385,115 @@ Continuing with CLI command implementation (Gaps #14-20), then E2E tests, docume
 - Will stop when context <5k or task complete
 
 ---
-Last Updated: 2026-01-11 (Session 1)
+
+## Session: 2026-01-13 - Task 007a/007b/007c + 008a/008b Gap Analysis COMPLETE
+
+### Current Status: 🔄 IN PROGRESS - Window 1 - Feature Branch `feature/task-008-agentic-loop`
+
+### Completed This Session
+
+#### Task-007a/b/c Gap Analysis & Checklists ✅
+- **Task-007a**: Device Identification + Setup Wizard
+  - Gap analysis: 600+ lines identifying 25+ gaps
+  - Completion checklist: 1100+ lines with TDD ordering
+
+- **Task-007b**: Validator Errors & Model Retry Contract
+  - Gap analysis: 1100+ lines
+  - Key finding: ErrorSeverity enum values INVERTED (spec: Info=0, code: Error=0)
+  - Completion checklist: 2100+ lines
+  - 50+ tests required, only 3 partial files exist
+
+- **Task-007c**: Truncation + Artifact Attachment Rules
+  - Gap analysis: 1100+ lines
+  - Key finding: Interface mismatch (spec: sync Process(), impl: async ProcessAsync())
+  - Missing: GetArtifactTool completely missing
+  - Completion checklist: 1300+ lines
+  - 20+ tests required, only ~5 tests exist
+
+- **PR #46 Created**: All three gap analyses + checklists
+
+#### Task-008a Gap Analysis & Checklist ✅
+- **Status**: 85-90% complete with 50+ tests required
+- Gap analysis: 550+ lines
+- Completion checklist: 750+ lines
+- Key findings:
+  - Extra task-008b code (PromptPackLoader, PromptComposer, TemplateEngine) mixed in
+  - 4 test files missing (PackDiscoveryTests, HashVerificationTests, PackCreationE2ETests, PackLayoutBenchmarks)
+  - Built-in packs need verification
+
+#### Task-008b Gap Analysis & Checklist ✅ (THIS SESSION)
+- **Status**: 70-75% complete with 36+ tests/benchmarks required
+- Gap analysis: 800+ lines identifying 17+ critical gaps
+- Completion checklist: 2700+ lines with 25 detailed implementation items
+- **CRITICAL FINDING**: Interface signature mismatch (async vs sync) - BLOCKING
+  - Spec shows: `LoadPack()`, `LoadBuiltInPack()` (sync)
+  - Implementation has: `LoadPackAsync()`, `LoadBuiltInPackAsync()` (async)
+  - Must resolve interface decision before proceeding
+
+### Key Metrics
+
+| Task | Gap Analysis | Checklist | Tests | Status |
+|------|--------------|-----------|-------|--------|
+| 007a | ✅ 600L | ✅ 1100L | 25+ | Pending |
+| 007b | ✅ 1100L | ✅ 2100L | 50+ | Pending |
+| 007c | ✅ 1100L | ✅ 1300L | 20+ | Pending |
+| 008a | ✅ 550L | ✅ 750L | 50+ | Pending |
+| 008b | ✅ 800L | ✅ 2700L | 36+ | **Awaiting Interface Decision** |
+
+### Critical Decision Required (Task-008b)
+
+**Interface Signature Mismatch**: Spec expects synchronous methods, implementation uses async.
+
+**Options**:
+1. **Option A** (Recommended): Keep async, update spec - async better for I/O
+2. **Option B**: Create sync wrapper - risk of deadlock issues
+3. **Option C**: Switch to sync - poor performance, not idiomatic .NET
+
+**Status**: Awaiting user confirmation on which path to take.
+
+### Files Committed
+
+**Feature Branch**: feature/task-008-agentic-loop (all pushes successful)
+
+Session commits:
+1. docs(task-008a): add comprehensive gap analysis and completion checklist
+2. docs(task-008b): add comprehensive gap analysis and completion checklist (THIS COMMIT)
+
+### Next Steps
+
+1. **Immediate** (User approval needed):
+   - Confirm interface decision for task-008b (async vs sync)
+   - This unblocks all downstream work
+
+2. **Task-008b Implementation** (Once decision made):
+   - Phase 1: Verify interface implementations
+   - Phase 2: Complete unit test coverage (11 loader + 11 validator tests)
+   - Phase 3: Create integration tests (LoaderIntegrationTests, RegistryIntegrationTests)
+   - Phase 4: Create E2E tests with CLI commands
+   - Phase 5: Verify performance benchmarks
+
+3. **Follow-up Tasks**:
+   - Task-008c (Starter Packs) - after 008b complete
+   - Task-009 (Composition Engine) - after 008c complete
+
+### Session Summary
+
+**Achievements**:
+- ✅ Completed gap analysis for 5 subtasks (007a, 007b, 007c, 008a, 008b)
+- ✅ Created comprehensive completion checklists for all 5 subtasks
+- ✅ Identified critical blockers and interface mismatches
+- ✅ PR #46 created with 007a/b/c work
+- ✅ All documents pushed to feature/task-008-agentic-loop
+- ✅ Detailed remediation strategies documented
+
+**Gaps Identified**:
+- 25+ gaps in task-007a
+- 30+ gaps in task-007b
+- 25+ gaps in task-007c
+- 14+ gaps in task-008a
+- 25+ gaps in task-008b (CRITICAL - interface decision needed)
+
+**Total Assessment**: 119+ total gaps across 5 subtasks, comprehensive analysis and implementation guidance documented.
+
+---
+Last Updated: 2026-01-13 (Session - Task-008b Analysis)
