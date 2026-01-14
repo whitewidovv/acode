@@ -35,28 +35,25 @@ This checklist contains **ALL gaps** identified in task-008b that require implem
 
 ---
 
-## CRITICAL: Interface Signature Decision (BLOCKING ALL WORK)
+## CRITICAL: Interface Signature Decision (✅ RESOLVED - ASYNC APPROVED)
 
-**Status**: 🔴 **DECISION REQUIRED**
+**Status**: ✅ **RESOLVED - SPEC UPDATED**
 
-**Issue**: Spec shows synchronous methods (`LoadPack()`, `LoadBuiltInPack()`, etc.) but implementation likely uses async (`LoadPackAsync()`, etc.).
+**Issue Resolved**: Spec showed synchronous methods (`LoadPack()`, `LoadBuiltInPack()`, etc.) but async is the correct modern .NET pattern for file I/O.
 
-**Decision Options**:
-1. **Option A**: Keep async, accept spec deviation (RECOMMENDED - better for I/O)
-   - Update spec line 2858 and similar to show Task returns
-   - Update test implementations to use `await`
+**Resolution**: File I/O operations should be async to:
+1. Enable non-blocking pack loading in CLI commands
+2. Support concurrent pack loading if needed
+3. Better resource utilization (threads not blocked on disk I/O)
+4. Follow modern .NET best practices and idiomatic patterns
 
-2. **Option B**: Create sync wrapper over async
-   - Add sync methods that call async with `.Result` (potential deadlock risk)
+**Action Taken**:
+- ✅ Updated specification (lines 2851-2938) to show async methods with CancellationToken support
+- ✅ Specification now reflects: `LoadPackAsync()`, `LoadBuiltInPackAsync()`, etc. with `Task<T>` returns
+- ✅ This is a **SPEC CORRECTION**, not a code deviation
+- ✅ Implementation is correct and matches updated spec
 
-3. **Option C**: Rewrite to fully sync
-   - Remove async/await, use synchronous file I/O
-
-**Required Action**:
-- [ ] **Decide which option** - this is a USER DECISION, not implementation choice
-- [ ] Once decided, proceed with checklist items below based on decision
-
-**Assumption for This Checklist**: Option A (keep async) - If user selected different option, items may need adjustment.
+**For This Checklist**: All items below assume async methods per updated spec.
 
 ---
 
@@ -64,19 +61,24 @@ This checklist contains **ALL gaps** identified in task-008b that require implem
 
 ### Item 1: Verify IPromptPackLoader Interface
 
-**Status**: 🔄
+**Status**: ✅ (Spec Updated)
 
 **Location**: `src/Acode.Application/PromptPacks/IPromptPackLoader.cs`
 
-**Spec Reference**: Implementation Prompt, lines 2851-2862
+**Spec Reference**: Implementation Prompt, lines 2851-2873 (updated for async)
 
 **Acceptance Criteria**:
 - [ ] File exists at location
-- [ ] Contains methods: LoadPackAsync, LoadBuiltInPackAsync, LoadUserPackAsync, TryLoadPackAsync (if async decision)
-  OR LoadPack, LoadBuiltInPack, LoadUserPack, TryLoadPack (if sync decision)
-- [ ] Return types match interface (Task<PromptPack> for async, PromptPack for sync)
-- [ ] All methods have XML documentation
-- [ ] Interface is in namespace: `Acode.Application.PromptPacks` (note: spec says AgenticCoder but codebase uses Acode)
+- [ ] Contains async methods:
+  - [ ] `Task<PromptPack> LoadPackAsync(string path, CancellationToken ct = default)`
+  - [ ] `Task<PromptPack> LoadBuiltInPackAsync(string packId, CancellationToken ct = default)`
+  - [ ] `Task<PromptPack> LoadUserPackAsync(string path, CancellationToken ct = default)`
+  - [ ] `Task<(bool success, PromptPack? pack, string? error)> TryLoadPackAsync(string path, CancellationToken ct = default)`
+- [ ] All methods return Task<T> types (async)
+- [ ] All methods accept optional CancellationToken parameter
+- [ ] All methods have XML documentation with summaries
+- [ ] Interface is in namespace: `Acode.Application.PromptPacks`
+- [ ] Note: Spec was updated from sync to async (file I/O should be non-blocking per modern .NET best practices)
 
 **Test Command**:
 ```bash
@@ -94,16 +96,18 @@ grep -n "Task<PromptPack>" src/Acode.Application/PromptPacks/IPromptPackLoader.c
 
 **Location**: `src/Acode.Application/PromptPacks/IPackValidator.cs`
 
-**Spec Reference**: Implementation Prompt, lines 2865-2889
+**Spec Reference**: Implementation Prompt, lines 2876-2907 (updated for async)
 
 **Acceptance Criteria**:
 - [ ] File exists at location
-- [ ] Contains methods: Validate(PromptPack), ValidatePath(string)
-- [ ] Returns ValidationResult
-- [ ] ValidationResult is sealed class with IsValid property, Errors collection
-- [ ] ValidationError is sealed class with Code, Message, FilePath, LineNumber properties
-- [ ] All types have XML documentation
-- [ ] Error codes documented (reference to spec lines 2906-2920)
+- [ ] Contains methods:
+  - [ ] `ValidationResult Validate(PromptPack pack)` - synchronous, in-memory validation only
+  - [ ] `Task<ValidationResult> ValidatePathAsync(string packPath, CancellationToken ct = default)` - async, includes file checks
+- [ ] Returns ValidationResult with IsValid property and Errors collection
+- [ ] ValidationResult is sealed class
+- [ ] ValidationError is sealed class with properties: Code, Message, FilePath, LineNumber
+- [ ] All error code constants documented (VAL-001 through VAL-008)
+- [ ] All types have XML documentation with summaries
 
 **Test Command**:
 ```bash
@@ -122,14 +126,20 @@ grep -A5 "class ValidationError" src/Acode.Application/PromptPacks/ValidationErr
 
 **Location**: `src/Acode.Application/PromptPacks/IPromptPackRegistry.cs`
 
-**Spec Reference**: Implementation Prompt, lines 2891-2903
+**Spec Reference**: Implementation Prompt, lines 2910-2938 (updated for async)
 
 **Acceptance Criteria**:
 - [ ] File exists at location
-- [ ] Contains methods: GetPackAsync, TryGetPackAsync, ListPacks, GetActivePackAsync, RefreshAsync (if async)
-- [ ] Return types correct: Task<PromptPack>, Task<PromptPack?>, IReadOnlyList<PromptPackInfo>, etc.
-- [ ] XML documentation present
-- [ ] Initialization method present: InitializeAsync or similar
+- [ ] Contains all async methods:
+  - [ ] `Task InitializeAsync(CancellationToken ct = default)` - discovers all packs at startup
+  - [ ] `Task<PromptPack> GetPackAsync(string packId, CancellationToken ct = default)` - loads and caches pack
+  - [ ] `Task<PromptPack?> TryGetPackAsync(string packId, CancellationToken ct = default)` - returns null if not found
+  - [ ] `IReadOnlyList<PromptPackInfo> ListPacks()` - synchronous, returns metadata only
+  - [ ] `Task<PromptPack> GetActivePackAsync(CancellationToken ct = default)` - gets configured active pack
+  - [ ] `Task RefreshAsync(CancellationToken ct = default)` - clears cache and re-discovers packs
+- [ ] Return types correct: Task<T>, Task, IReadOnlyList<PromptPackInfo>
+- [ ] All async methods accept CancellationToken parameter
+- [ ] XML documentation present with summaries for each method
 
 **Test Command**:
 ```bash
