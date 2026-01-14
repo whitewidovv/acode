@@ -2753,6 +2753,38 @@ Pack may not work as expected.
 3. Verify: C# conventions applied
 4. Verify: Async patterns correct
 
+## Design Decisions & Architecture Notes
+
+### Data Structure Design: IReadOnlyList<LoadedComponent> vs Dictionary
+
+**Decision**: Use `IReadOnlyList<LoadedComponent>` instead of `Dictionary<string, string>`
+
+**Rationale**:
+1. **Order Preservation** - Composition order matters. Maintaining insertion order is critical for prompt effectiveness.
+2. **Helper Methods** - Enables efficient `GetComponent(path)`, `GetComponentsByType(type)`, `GetSystemPrompt()` queries.
+3. **Memory Efficiency** - More efficient than Dictionary for small collections (6-15 components per pack).
+4. **Composability** - Sequential iteration is the primary access pattern.
+
+### Property Naming: "Directory" vs "PackPath"
+
+**Decision**: Property is named `pack.Directory` (absolute path to extracted pack contents)
+
+**Rationale**: Clarity, spec consistency, semantic accuracy.
+
+### Manifest vs Direct Properties
+
+**Decision**: Flatten manifest into direct PromptPack properties (Id, Version, Name, Description, Source, Directory, ContentHash)
+
+**Rationale**: Simpler API, record immutability, type safety.
+
+### Registry Pattern
+
+**Decision**: `IPromptPackRegistry` is sync (GetPack, ListPacks); `IPromptPackLoader` is async (LoadPackAsync)
+
+**Rationale**: Registry queries in-memory cache (no I/O); Loader handles I/O-bound operations asynchronously.
+
+---
+
 ---
 
 ## Implementation Prompt
