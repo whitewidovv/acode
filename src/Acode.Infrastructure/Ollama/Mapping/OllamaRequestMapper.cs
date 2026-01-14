@@ -76,7 +76,7 @@ public static class OllamaRequestMapper
     /// </summary>
     private static OllamaTool MapTool(ToolDefinition tool)
     {
-        var function = new OllamaFunction(
+        var function = new OllamaToolDefinition(
             name: tool.Name,
             description: tool.Description,
             parameters: tool.Parameters,

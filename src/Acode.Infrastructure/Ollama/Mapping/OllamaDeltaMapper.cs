@@ -21,6 +21,23 @@ public static class OllamaDeltaMapper
         // FR-079: Extract content delta from chunk
         var contentDelta = chunk.Message?.Content;
 
+        // Gap #5: Extract tool call delta from chunk (if present)
+        ToolCallDelta? toolCallDelta = null;
+        if (chunk.Message?.ToolCalls != null && chunk.Message.ToolCalls.Length > 0)
+        {
+            // Map the first tool call to a domain ToolCallDelta
+            // In Ollama streaming, tool calls typically arrive complete in one chunk
+            var firstToolCall = chunk.Message.ToolCalls[0];
+            if (firstToolCall.Function != null)
+            {
+                toolCallDelta = new ToolCallDelta(
+                    Index: 0, // Tool call index within the response
+                    Id: firstToolCall.Id,
+                    Name: firstToolCall.Function.Name,
+                    ArgumentsDelta: firstToolCall.Function.Arguments);
+            }
+        }
+
         // FR-081: Detect final chunk (done: true)
         // FR-082 to FR-084: Map done_reason to FinishReason
         FinishReason? finishReason = null;
@@ -40,9 +57,17 @@ public static class OllamaDeltaMapper
         }
 
         // FR-086: Create ResponseDelta
-        // Note: For non-final chunks, we need contentDelta
-        // For final chunks, we need either contentDelta or finishReason
-        if (contentDelta is not null)
+        // Priority: tool calls > content > final marker
+        if (toolCallDelta is not null)
+        {
+            return new ResponseDelta(
+                index: index,
+                contentDelta: contentDelta, // Can have both content and tool calls
+                toolCallDelta: toolCallDelta,
+                finishReason: finishReason,
+                usage: usage);
+        }
+        else if (contentDelta is not null)
         {
             return new ResponseDelta(
                 index: index,
