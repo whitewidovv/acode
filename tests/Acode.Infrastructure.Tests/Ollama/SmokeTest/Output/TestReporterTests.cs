@@ -149,7 +149,7 @@ public sealed class TestReporterTests
         var result = output.ToString();
 
         // Assert - Should be valid JSON
-        var parsed = JsonDocument.Parse(result);
+        using var parsed = JsonDocument.Parse(result);
         parsed.Should().NotBeNull();
 
         var root = parsed.RootElement;
@@ -189,7 +189,7 @@ public sealed class TestReporterTests
         var result = output.ToString();
 
         // Assert
-        var parsed = JsonDocument.Parse(result);
+        using var parsed = JsonDocument.Parse(result);
         var resultsArray = parsed.RootElement.GetProperty("results");
         resultsArray.GetArrayLength().Should().Be(2);
 

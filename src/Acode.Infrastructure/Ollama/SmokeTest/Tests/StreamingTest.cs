@@ -22,8 +22,19 @@ public sealed class StreamingTest : ISmokeTest
     /// <param name="httpClient">HTTP client for making requests.</param>
     public StreamingTest(HttpClient? httpClient = null)
     {
-        this.httpClient = httpClient ?? new HttpClient();
-        this.httpClient.Timeout = Timeout.InfiniteTimeSpan; // We handle timeouts manually for streaming
+        if (httpClient is null)
+        {
+            // Create our own HttpClient with infinite timeout for streaming
+            // (we handle timeouts manually via CancellationTokenSource)
+            var client = new HttpClient();
+            client.Timeout = Timeout.InfiniteTimeSpan;
+            this.httpClient = client;
+        }
+        else
+        {
+            // Use injected client without modifying its settings
+            this.httpClient = httpClient;
+        }
     }
 
     /// <inheritdoc/>
@@ -92,7 +103,7 @@ public sealed class StreamingTest : ISmokeTest
                 // Parse chunk to check for done field
                 try
                 {
-                    var chunkJson = JsonDocument.Parse(line);
+                    using var chunkJson = JsonDocument.Parse(line);
                     if (chunkJson.RootElement.TryGetProperty("done", out var doneElement) && doneElement.GetBoolean())
                     {
                         receivedFinalChunk = true;

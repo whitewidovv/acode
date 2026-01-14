@@ -145,7 +145,16 @@ Exit Codes:
         {
             if (args[i].Equals(flag, StringComparison.OrdinalIgnoreCase))
             {
-                return args[i + 1];
+                var value = args[i + 1];
+
+                // Validate that the value is not itself a flag (starts with "--")
+                // This prevents misinterpretation when user omits a value, e.g., "--model --timeout 30"
+                if (value.StartsWith("--", StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
+                return value;
             }
         }
 
