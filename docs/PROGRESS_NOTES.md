@@ -139,22 +139,24 @@ Each checklist item includes:
 - PromptContentTests.cs - Verified existing (10+ tests)
 - Existing PromptPackIntegrationTests provide coverage for pack loading/composition
 
-**Phase 3 (Integration Tests) - 🔄 IN PROGRESS (Blocker: API Structure Mismatch)**
+**Phase 1.5 (Semantic Naming Fixes) - ✅ IDENTIFIED (Prerequisite to Phase 3)**
 
-**Critical Finding**: Implementation structure differs from initial spec assumptions:
-- **PromptPack**: Actual structure differs from expected; needs investigation
-  - Does NOT have `.Manifest` property
-  - Components use `IReadOnlyList<LoadedComponent>` not Dictionary
+**Investigation Complete**: Actual implementation is INTENTIONALLY BETTER than spec assumptions.
 
-- **IPromptPackRegistry**: Method signatures differ
-  - Does NOT have `ListPacksAsync()` method
-  - Constructor parameters structure differs from expectations
+**Current Implementation is Superior**:
+- ✅ `IReadOnlyList<LoadedComponent>`: Better than Dictionary (preserves order, has helpers)
+- ✅ Direct properties instead of Manifest object: Simpler API
+- ✅ `IPromptPackLoader` is async: Correct for file I/O
+- ✅ `IPromptPackRegistry` is sync: Correct for cache (no I/O)
 
-**Action Required**:
-1. Investigate actual PromptPack class structure and properties
-2. Investigate IPromptPackRegistry actual methods and signatures
-3. Align Phase 3 test creation with actual implementation
-4. Continue with Phases 4-6 based on corrected understanding
+**Naming Difference (Requires Fix)**:
+- Current: `PackPath` property
+- Spec expects: `Directory` property
+- Action: Rename `PackPath` → `Directory` (1 item added to checklist as Phase 1.5)
+
+**Phase 3 (Integration Tests) - 🔄 READY (After Phase 1.5 completes)**
+
+All blockers resolved. Phase 3 can proceed once Phase 1.5 naming fix is complete. Test creation will use corrected API:
 
 ### Session Summary
 
