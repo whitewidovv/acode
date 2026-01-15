@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Acode.Infrastructure.Common;
 using Acode.Infrastructure.Vllm.Models;
 
 namespace Acode.Infrastructure.Vllm.Client.Serialization;
@@ -8,11 +7,16 @@ namespace Acode.Infrastructure.Vllm.Client.Serialization;
 /// <summary>
 /// Serializer for vLLM requests and responses using System.Text.Json.
 /// </summary>
+/// <remarks>
+/// FR-016, AC-016: Uses source-generated serializers from VllmJsonSerializerContext
+/// for performance and AOT compatibility (no reflection).
+/// </remarks>
 public static class VllmRequestSerializer
 {
     private static readonly JsonSerializerOptions Options = new()
     {
-        PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
+        TypeInfoResolver = VllmJsonSerializerContext.Default,  // FR-016: Use source generator
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         WriteIndented = false
     };
