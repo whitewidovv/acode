@@ -840,6 +840,84 @@ Commands:
 
 ---
 
+#### Gap 15: ExportCommand [ ]
+
+**File:** `src/Acode.Cli/Commands/ExportCommand.cs`
+**ACs Covered:** AC-021-045, AC-103
+**Status:** [ ] PENDING
+**Effort:** 3 hours
+
+**What to Implement:**
+
+CLI command: `acode export <chat-id>` with options:
+- `--format json|markdown|text` (AC-026)
+- `--output /path/to/file` (AC-035)
+- `--all` (AC-029)
+- `--since 2025-01-01` or `--since 7d` (AC-030-031)
+- `--until 2025-12-31` (AC-030)
+- `--tag <tagname>` (AC-032)
+- `--redact` (AC-041)
+- `--compress` (AC-038)
+- `--encrypt` (AC-039)
+- `--preview` (AC-034)
+
+**Tests (4):**
+- [ ] Single chat export works (AC-028)
+- [ ] All chats export works (AC-029)
+- [ ] Filters applied correctly (AC-030-034)
+- [ ] Redaction integration works (AC-041-045)
+
+---
+
+#### Gap 16: PrivacyCommand [ ]
+
+**File:** `src/Acode.Cli/Commands/PrivacyCommand.cs`
+**ACs Covered:** AC-051-055, AC-104-105
+**Status:** [ ] PENDING
+**Effort:** 2 hours
+
+**What to Implement:**
+
+CLI commands:
+- `acode chat privacy <id> <level>` (AC-051, AC-104) - Set per-chat level
+- `acode chat privacy --all <level>` (AC-054) - Bulk update
+- `acode privacy status` (AC-105) - Show privacy status
+
+Must enforce transitions (AC-056-060):
+- LOCAL_ONLY → others blocked unless --force flag (AC-056)
+- REDACTED → FULL requires --confirm-expose-data (AC-057)
+- Any → LOCAL_ONLY always allowed (AC-058)
+
+**Tests (3):**
+- [ ] Per-chat level settable (AC-051)
+- [ ] Bulk update works (AC-054)
+- [ ] Transition rules enforced (AC-056-058)
+
+---
+
+#### Gap 17: RedactionCommand [ ]
+
+**File:** `src/Acode.Cli/Commands/RedactionCommand.cs`
+**ACs Covered:** AC-061-085, AC-106-107
+**Status:** [ ] PENDING
+**Effort:** 2 hours
+
+**What to Implement:**
+
+CLI commands:
+- `acode redaction preview <chat-id>` (AC-081, AC-106) - Show what would be redacted
+- `acode redaction patterns list` (AC-073, AC-107) - Show all patterns (built-in + custom)
+- `acode redaction patterns remove <name>` (AC-074) - Remove custom pattern
+- `acode redaction test --pattern <regex> --text <sample>` (AC-072) - Test pattern
+
+**Tests (4):**
+- [ ] Preview shows matches (AC-081-085)
+- [ ] Pattern list works (AC-073)
+- [ ] Pattern removal works (AC-074)
+- [ ] Pattern testing works (AC-072)
+
+---
+
 ## SECTION 4: VERIFICATION CHECKLIST
 
 **After all 4 phases complete, verify all 115 ACs:**
