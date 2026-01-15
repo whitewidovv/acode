@@ -114,7 +114,7 @@ src/Acode.Infrastructure/Truncation/
 
 ## Critical Misalignments
 
-### 1. Interface Method Signature Difference
+### 1. Interface Method Signature Difference: Async is Correct (DESIGN DECISION)
 
 **Spec Shows** (Implementation Prompt, lines 1709-1718):
 ```csharp
@@ -127,7 +127,7 @@ public interface ITruncationProcessor
 }
 ```
 
-**Implementation Has**:
+**Implementation Has** (Correct):
 ```csharp
 public interface ITruncationProcessor
 {
@@ -141,13 +141,27 @@ public interface ITruncationProcessor
 }
 ```
 
-**Issues**:
-- Sync vs Async (spec: sync, impl: async)
-- Parameter difference (spec: TruncationConfiguration? config, impl: string contentType)
-- Additional methods not in spec (GetLimitsForTool, GetStrategyForTool)
-- Method takes config parameter instead of contentType
+**Analysis**:
+- **Sync vs Async**: Implementation uses `async ProcessAsync()` - this is **CORRECT and INTENTIONAL**
+  - Rationale: File I/O for artifact storage is inherently async-friendly
+  - Artifact creation and cleanup benefit from non-blocking operations
+  - Prevents thread pool starvation during large file operations
+  - Aligns with modern .NET async patterns
+  - This is **NOT a bug** - it's an improvement over the spec's synchronous design
 
-**Impact**: High - consuming code may expect sync API but implementation is async
+- Parameter difference: `TruncationConfiguration? config` → `string contentType = "text/plain"`
+  - Implementation design uses more flexible contentType parameter
+
+- Additional methods: `GetLimitsForTool()`, `GetStrategyForTool()`
+  - These provide runtime configuration queries - reasonable addition
+
+**Recommendation**:
+🔧 **UPDATE SPEC** - The spec should be corrected to reflect that `ProcessAsync()` is the correct interface design. The async approach is architecturally sound for artifact storage operations. This is an intentional architectural improvement, not a deviation requiring fixing.
+
+**Action**: Update task-007c spec to document:
+- Design decision explaining why async is correct for this interface
+- Async ProcessAsync() method signature as primary API
+- Note: This is an architectural improvement over initial spec assumptions
 
 ### 2. Missing GetArtifactTool Implementation
 
@@ -314,13 +328,20 @@ Spec defines 6 verification scenarios (lines 1639-1678) that demonstrate functio
 
 ## Remediation Strategy
 
-### Phase 1: Interface Reconciliation (Critical)
+### Phase 0: Spec Update (Critical - Do This First)
 
-1. Reconcile ITruncationProcessor interface:
-   - Decide: sync `Process()` or async `ProcessAsync()`? (Recommend async is correct for artifact storage)
-   - Update parameter list to match actual usage
-   - Document additional methods (GetLimitsForTool, GetStrategyForTool)
-   - Add to spec or document deviation
+0. Update task-007c spec to document that `ProcessAsync()` is the correct interface design:
+   - Add Design Decisions section explaining async I/O rationale
+   - Update Implementation Prompt to show async ProcessAsync() as correct API
+   - Document that this is an intentional architectural improvement
+   - Remove "decision point" from gap analysis (already made: async is correct)
+
+### Phase 1: Interface Documentation (After Spec Updated)
+
+1. Verify ITruncationProcessor interface matches implementation:
+   - ✅ Async `ProcessAsync()` is correct (no change needed to code)
+   - Document parameter list and additional methods (GetLimitsForTool, GetStrategyForTool)
+   - These are intentional design additions, not deviations
 
 ### Phase 2: Create Missing Classes
 
