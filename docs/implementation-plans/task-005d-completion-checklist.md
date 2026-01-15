@@ -104,8 +104,8 @@
 
 ### Phase 3: Infrastructure Layer - Core Implementation
 
-#### Gap #5: OllamaServiceOrchestrator Main Class ⏳
-- **File to Create**: `src/Acode.Infrastructure/Providers/Ollama/Lifecycle/OllamaServiceOrchestrator.cs`
+#### Gap #9: OllamaServiceOrchestrator Main Class ✅ COMPLETE
+- **File Created**: `src/Acode.Infrastructure/Providers/Ollama/Lifecycle/OllamaServiceOrchestrator.cs` (300+ lines)
 - **Purpose**: Main orchestration logic, Spec line 949+, implements IOllamaServiceOrchestrator
 - **Responsibilities**:
   - Manage process lifecycle (start/stop/restart)
@@ -113,26 +113,37 @@
   - Track service state
   - Enforce restart policies
   - Manage model pulling
-- **Key Methods** (all from interface):
-  - `EnsureHealthyAsync()` - Ensures service ready, handles auto-start in Managed mode
-  - `GetStateAsync()` - Returns current service state
-  - `StartAsync()` - Starts Ollama process
-  - `StopAsync()` - Gracefully stops process
-  - `PullModelAsync()` - Pulls model from registry
-- **Dependencies to Inject**:
-  - `OllamaHttpClient` - For HTTP communication
-  - `OllamaHealthChecker` - For health checks
-  - `IProcessManager` - For process control (Windows/Unix)
-  - `ILogger<OllamaServiceOrchestrator>` - For logging
-- **Key Logic**:
-  - Detect if process running (check port 11434 or process listing)
-  - Handle mode-specific behavior (Managed vs Monitored vs External)
-  - Implement restart limiting (max 3 per 60 seconds)
-  - Cache state for 5 seconds (FR-044)
-  - Support Operating Modes constraints (LocalOnly, Burst, Airgapped)
-- **Implementation Pattern**: Use dependency injection, follow async patterns, proper CancellationToken handling
-- **Success Criteria**: All public methods implemented (not throwing NotImplementedException), compiles, integrates with dependency injection
-- **Evidence**: [TBD]
+- **Key Methods** (all from interface - ✅ all implemented):
+  - ✅ `EnsureHealthyAsync()` - Ensures service ready, handles auto-start in Managed mode
+  - ✅ `GetStateAsync()` - Returns current service state
+  - ✅ `StartAsync()` - Starts Ollama process
+  - ✅ `StopAsync()` - Gracefully stops process
+  - ✅ `PullModelAsync()` - Pulls model from registry
+  - ✅ `PullModelAsync()` (with callback) - Model pull with progress
+  - ✅ `PullModelStreamAsync()` - Async iterator for streaming
+- **Helper Methods**:
+  - ✅ `EnsureHealthy_ManagedModeAsync()` - Mode-specific handler
+  - ✅ `EnsureHealthy_MonitoredModeAsync()` - Mode-specific handler
+  - ✅ `EnsureHealthy_ExternalModeAsync()` - Mode-specific handler
+- **Design Details**:
+  - Sealed class with IAsyncDisposable
+  - Constructor validates OllamaLifecycleOptions
+  - Initializes all 4 helper components: ServiceStateTracker, HealthCheckWorker, RestartPolicyEnforcer, ModelPullManager
+  - Mode-aware branching via switch expression
+  - Proper async/await with ConfigureAwait(false)
+  - Full XML documentation on all methods
+- **Key Logic** (implemented):
+  - Mode-specific behavior (Managed vs Monitored vs External)
+  - Restart policy coordination
+  - Health check integration
+  - Model pull delegation
+- **Success Criteria**: ✅ All met
+  - ✅ All 7 public methods implemented (no NotImplementedException)
+  - ✅ Compiles with 0 warnings, 0 errors
+  - ✅ Integrates with all 4 helper components
+  - ✅ Proper cancellation token handling throughout
+  - ✅ Full XML documentation
+- **Evidence**: Commit f30a678 - 24 unit tests all passing
 
 #### Gap #6: ServiceStateTracker Helper Class ⏳
 - **File to Create**: `src/Acode.Infrastructure/Providers/Ollama/Lifecycle/ServiceStateTracker.cs`
@@ -417,15 +428,22 @@
 | 1 | OllamaLifecycleMode | ✅ COMPLETE | 10 tests | Commit 7c3806a | All passing |
 | 1 | IOllamaServiceOrchestrator | ✅ COMPLETE | Interface + 2 types | Commit a46f0cb | Builds 0 errors |
 | 2 | OllamaLifecycleOptions | ✅ COMPLETE | 18 tests | Commit c8f9008 | All passing |
-| 3 | ServiceStateTracker | ⏳ Next | [ ] | [ ] | |
-| 3 | RestartPolicyEnforcer | ⏳ Pending | [ ] | [ ] | |
-| 3 | ModelPullManager | ⏳ Pending | [ ] | [ ] | |
-| 3 | HealthCheckWorker | ⏳ Pending | [ ] | [ ] | |
-| 3 | OllamaServiceOrchestrator | ⏳ Pending | [ ] | [ ] | |
-| 4 | Unit Tests | ⏳ Pending | [ ] | [ ] | |
-| 4 | Integration Tests | ⏳ Pending | [ ] | [ ] | |
+| 3 | ServiceStateTracker | ✅ COMPLETE | 20 tests | Commit (Gap #5) | All passing |
+| 3 | RestartPolicyEnforcer | ✅ COMPLETE | 9 tests | Commit (Gap #7) | All passing |
+| 3 | ModelPullManager | ✅ COMPLETE | 8 tests | Commit (Gap #8) | All passing |
+| 3 | HealthCheckWorker | ✅ COMPLETE | 7 tests | Commit (Gap #6) | All passing |
+| 3 | OllamaServiceOrchestrator | ✅ COMPLETE | 24 tests | Commit f30a678 | All 24 passing |
+| 4 | Integration Tests | ⏳ Next | [ ] | [ ] | |
+| 4 | Audit & Final Verification | ⏳ Pending | [ ] | [ ] | |
+| 4 | PR Creation | ⏳ Pending | [ ] | [ ] | |
 
-**Summary**: Phases 1-2 complete (4 gaps). Phase 3 infrastructure components (5 gaps) ready for implementation. All work committed and pushed to remote.
+**Summary**:
+- ✅ **Phase 1-2 COMPLETE**: All domain and application layer components (4 gaps, 45 tests)
+- ✅ **Phase 3 COMPLETE**: All infrastructure implementation (5 gaps, 68 tests - total 113 tests written)
+- ⏳ **Phase 4 IN PROGRESS**: Integration tests, audit, and PR creation remaining
+- **Test Count**: 44 tests before Gap #9 + 24 new tests = 68 total new tests (113 including phases 1-2)
+- **Build Status**: 0 warnings, 0 errors
+- **Next**: Integration tests, full audit, PR creation
 
 ---
 
