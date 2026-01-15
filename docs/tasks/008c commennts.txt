@@ -1,0 +1,20 @@
+tests/Acode.Integration.Tests/PromptPacks/StarterPackLoadingTests.cs
+Comment on lines +68 to +69
+        pack!.Manifest.Id.Should().Be("acode-standard");
+        pack.Manifest.Source.Should().Be(PackSource.BuiltIn);
+Copilot AI
+1 minute ago
+The test accesses pack.Manifest.Id and pack.Manifest.Source, but based on gap analysis documentation (task-008c-gap-analysis.md), properties are flattened directly on PromptPack (e.g., pack.Id, pack.Source). This API mismatch may cause compilation errors. Verify the actual PromptPack API structure.
+
+Copilot uses AI. Check for mistakes.
+@whitewidovv	Reply...
+tests/Acode.Integration.Tests/PromptPacks/StarterPackLoadingTests.cs
+        pack.Manifest.Source.Should().Be(PackSource.BuiltIn);
+
+        // DotNet pack should include language and framework prompts
+        var componentPaths = pack.Components.Keys.ToList();
+Copilot AI
+1 minute ago
+The code treats Components as a dictionary with .Keys, but according to gap analysis (task-008c-gap-analysis.md), Components is an IReadOnlyList<LoadedComponent>, not a Dictionary. This will cause a compilation error. Use Components.Select(c => c.Path) or similar instead.
+
+Copilot uses AI. Check for mistakes.
