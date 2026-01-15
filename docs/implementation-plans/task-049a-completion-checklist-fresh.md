@@ -77,9 +77,9 @@ No dependencies on other tasks. All infrastructure is present.
 
 ## SECTION 2: GAPS TO IMPLEMENT
 
-### ⚠️ CRITICAL PRIORITY GAPS (PostgreSQL Repositories) - Gaps 1-8
+### ⚠️ CRITICAL PRIORITY GAPS (PostgreSQL Repositories) - Gaps 1-7
 
-These 8 gaps implement the PostgreSQL Provider (AC-077-082) and must be completed before other gaps to reach semantic completeness.
+These 7 gaps implement the PostgreSQL Provider (AC-077-082) including message repository methods. Must be completed before other gaps to reach semantic completeness.
 
 ---
 
@@ -279,11 +279,7 @@ services.AddSingleton<IMessageRepository>(sp =>
 
 ---
 
-### HIGH PRIORITY GAPS (Non-PostgreSQL) - Gaps 6-8
-
----
-
-### Gap 6: IMessageRepository.AppendAsync() Method [ ]
+### Gap 6: PostgreSQL MessageRepository - AppendAsync() Method [ ]
 
 **AC Covered:** AC-069 - "AppendAsync adds Message to Run"
 **Effort:** 1-2 hours
@@ -327,7 +323,7 @@ public async Task<MessageId> AppendAsync(Message message, CancellationToken ct)
 
 ---
 
-### Gap 7: IMessageRepository.BulkCreateAsync() Method [ ]
+### Gap 7: PostgreSQL MessageRepository - BulkCreateAsync() Method [ ]
 
 **AC Covered:** AC-070 - "BulkCreateAsync inserts multiple Messages efficiently"
 **Priority:** HIGH
@@ -395,7 +391,7 @@ public async Task BulkCreateAsync(IEnumerable<Message> messages, CancellationTok
 
 ---
 
-### Gap 8: Add Error Code Pattern to All Exceptions [ ]
+### Gap 8: Error Code Pattern (Non-PostgreSQL Cross-Cutting) [ ]
 
 **AC Covered:** AC-093 - "Error codes follow ACODE-CONV-DATA-xxx pattern"
 **Priority:** HIGH
@@ -815,9 +811,9 @@ public async Task Should_Be_Idempotent()
 
 ## SECTION 3: IMPLEMENTATION PHASES
 
-### 🟥 PHASE 0: PostgreSQL Repositories (5 gaps, 13-15 hours) - CRITICAL PRIORITY
+### 🟥 PHASE 0: PostgreSQL Repositories (8 gaps, 19-24 hours) - CRITICAL PRIORITY
 
-**Goals:** Implement PostgreSQL persistence layer (AC-077-082)
+**Goals:** Implement complete PostgreSQL persistence layer with error handling (AC-077-082, AC-093)
 
 **Gaps:**
 - [ ] Gap 1: PostgreSQL Connection Factory and Configuration
@@ -825,26 +821,33 @@ public async Task Should_Be_Idempotent()
 - [ ] Gap 3: PostgreSQL RunRepository Implementation
 - [ ] Gap 4: PostgreSQL MessageRepository Implementation
 - [ ] Gap 5: PostgreSQL Repository Registration (Dependency Injection)
+- [ ] Gap 6: PostgreSQL MessageRepository - AppendAsync() method implementation
+- [ ] Gap 7: PostgreSQL MessageRepository - BulkCreateAsync() method implementation
+- [ ] Gap 8: Error Code Pattern (needed for all PostgreSQL exceptions)
 
 **Order:**
 1. Create PostgresConnectionFactory with connection pooling (size=10), timeout=30s, statement caching, TLS
 2. Implement PostgresChatRepository with all CRUD + worktree filtering + soft delete
 3. Implement PostgresRunRepository with all CRUD + chat filtering
-4. Implement PostgresMessageRepository with all CRUD + run filtering + AppendAsync + BulkCreateAsync
+4. Implement PostgresMessageRepository with base CRUD + run filtering
 5. Register all repositories in DI container for both SQLite (default) and PostgreSQL (if enabled)
+6. Add AppendAsync() method to PostgresMessageRepository (alias for CreateAsync with semantics)
+7. Add BulkCreateAsync() method to PostgresMessageRepository (batch insert with performance optimization)
+8. Add error code pattern to all exception types (affects PostgreSQL repository exception handling)
 
 **Tests to Create:**
 - [ ] PostgresConnectionFactoryTests.cs (4 tests)
 - [ ] PostgresChatRepositoryTests.cs (7 tests)
 - [ ] PostgresRunRepositoryTests.cs (6 tests)
-- [ ] PostgresMessageRepositoryTests.cs (6 tests)
+- [ ] PostgresMessageRepositoryTests.cs (8 tests, includes Append and Bulk)
 - [ ] RepositoryRegistrationTests.cs (1 test)
+- [ ] ExceptionErrorCodeTests.cs (4 tests, for all exception types)
 
-**Total: 24 tests, ~13-15 hours effort**
+**Total: 30 tests, ~19-24 hours effort**
 
 **Command After Completion:**
 ```bash
-dotnet test --filter "Postgres"
+dotnet test --filter "Postgres|Exception"
 ```
 
 **Success Criteria:**
@@ -853,70 +856,45 @@ dotnet test --filter "Postgres"
 - [ ] Command timeout = 30 seconds
 - [ ] Statement caching enabled
 - [ ] TLS encryption required
-- [ ] All 24 tests passing
+- [ ] AppendAsync and BulkCreateAsync methods implemented
+- [ ] All exception types include error codes
+- [ ] All 30 tests passing
 
 ---
 
-### PHASE 1: Message Repository Methods (2 gaps, 3-5 hours)
+### PHASE 1: SQLite Message Repository Methods (2 gaps, 3-5 hours)
 
-**Goals:** Implement AppendAsync and BulkCreateAsync
+**Goals:** Add AppendAsync and BulkCreateAsync to SQLite implementation
 
 **Gaps:**
-- [ ] Gap 6: AppendAsync() method
-- [ ] Gap 7: BulkCreateAsync() method
+- [ ] Gap 9: SQLite AppendAsync() method
+- [ ] Gap 10: SQLite BulkCreateAsync() method
 
 **Order:**
-1. Add AppendAsync to IMessageRepository interface
+1. Add AppendAsync to IMessageRepository interface (if not already done in PHASE 0)
 2. Implement AppendAsync in SqliteMessageRepository
 3. Write tests for AppendAsync
-4. Add BulkCreateAsync to IMessageRepository interface
-5. Implement BulkCreateAsync in SqliteMessageRepository
-6. Write tests for BulkCreateAsync
+4. Implement BulkCreateAsync in SqliteMessageRepository
+5. Write tests for BulkCreateAsync
 
 **Tests to Create:**
-- [ ] MessageRepositoryAppendAsyncTests.cs (2 tests)
-- [ ] MessageRepositoryBulkCreateAsyncTests.cs (3 tests)
+- [ ] SqliteMessageRepositoryAppendAsyncTests.cs (2 tests)
+- [ ] SqliteMessageRepositoryBulkCreateAsyncTests.cs (3 tests)
 
 **Command After Completion:**
 ```bash
-dotnet test --filter "MessageRepository"
+dotnet test --filter "SqliteMessageRepository"
 ```
 
 ---
 
-### PHASE 2: Error Codes (1 gap, 1-2 hours)
-
-**Goal:** Add error code pattern to all exceptions
-
-**Gaps:**
-- [ ] Gap 8: Error code pattern (AC-093)
-
-**Order:**
-1. Create enum for error codes
-2. Add ErrorCode property to ConcurrencyException
-3. Add ErrorCode property to EntityNotFoundException
-4. Add ErrorCode property to ValidationException
-5. Add ErrorCode property to ConnectionException
-6. Update repository methods to include error codes in exceptions
-7. Write tests for error codes
-
-**Tests to Create:**
-- [ ] ExceptionErrorCodeTests.cs (4 tests)
-
-**Command After Completion:**
-```bash
-dotnet test --filter "Exception"
-```
-
----
-
-### PHASE 3: Migrations (2 gaps, 2-4 hours)
+### PHASE 2: Migrations (2 gaps, 2-4 hours)
 
 **Goals:** Auto-apply migrations and add verification tests
 
 **Gaps:**
-- [ ] Gap 9: Migration auto-apply
-- [ ] Gap 14: Migration idempotency
+- [ ] Gap 11: Migration auto-apply
+- [ ] Gap 12: Migration idempotency
 
 **Order:**
 1. Create ConversationMigrationRunner
@@ -935,14 +913,14 @@ dotnet test --filter "Migration"
 
 ---
 
-### PHASE 4: Verification & Optimization (3 gaps, 2-4 hours)
+### PHASE 3: Verification & Optimization (3 gaps, 2-4 hours)
 
 **Goals:** Verify connection pooling, prepared statements, add performance benchmarks
 
 **Gaps:**
-- [ ] Gap 12: Connection pooling verification (AC-075)
-- [ ] Gap 13: Prepared statements verification (AC-076)
-- [ ] Gap 11: Performance benchmarks (AC-094–098)
+- [ ] Gap 13: Connection pooling verification (AC-075)
+- [ ] Gap 14: Prepared statements verification (AC-076)
+- [ ] Gap 15: Performance benchmarks (AC-094–098)
 
 **Order:**
 1. Add connection pooling test to SqliteChatRepositoryTests
@@ -963,12 +941,12 @@ dotnet test --filter "Conversation" && dotnet run --project tests/Acode.Performa
 
 ---
 
-### PHASE 5: CLI Integration (1 gap, 2-3 hours)
+### PHASE 4: CLI Integration (1 gap, 2-3 hours)
 
 **Goal:** Add migration status CLI command
 
 **Gaps:**
-- [ ] Gap 10: Migration status CLI command (AC-088)
+- [ ] Gap 16: Migration status CLI command (AC-088)
 
 **Order:**
 1. Create DbMigrationsStatusCommand
@@ -989,15 +967,16 @@ acode db migrations status
 
 **After all gaps complete, verify:**
 
-- [ ] All 14 gaps implemented (Gaps 1-14)
-- [ ] PHASE 0 (PostgreSQL) complete - 5 gaps, 24 tests
-- [ ] PHASE 1-5 complete - 9 gaps, 30+ tests
+- [ ] All 16 gaps implemented (Gaps 1-16)
+- [ ] PHASE 0 (PostgreSQL) complete - 8 gaps, 30 tests
+- [ ] PHASE 1-4 complete - 8 gaps, 20+ tests
 - [ ] All 98 in-scope ACs verified implemented
-- [ ] All 55+ new tests passing
+- [ ] All 50+ new tests passing
 - [ ] Zero NotImplementedException
 - [ ] Zero build errors/warnings
 - [ ] Performance benchmarks passing (AC-094-098)
-- [ ] PostgreSQL repositories fully tested
+- [ ] PostgreSQL repositories fully tested with error codes
+- [ ] SQLite message methods working (Append, BulkCreate)
 - [ ] Code coverage > 90% on conversation layer
 - [ ] PR created and ready for review
 
@@ -1005,11 +984,11 @@ acode db migrations status
 
 **Implementation Order (CRITICAL):**
 
-1. **Start with PHASE 0** (PostgreSQL) - This is critical path. Complete all 5 gaps + 24 tests
-2. Then proceed to PHASE 1 (Message Repository Methods)
-3. Continue through PHASES 2-5 in order
+1. **Start with PHASE 0** (PostgreSQL) - This is critical path. Complete all 8 gaps + 30 tests
+2. Then proceed to PHASE 1 (SQLite Message Repository Methods)
+3. Continue through PHASES 2-4 in order
 
-**Next Action:** Begin PHASE 0 (Gaps 1-5) - implement PostgreSQL repositories in TDD order.
+**Next Action:** Begin PHASE 0 (Gaps 1-8) - implement PostgreSQL repositories with error handling in TDD order.
 
-**Estimated Total Effort:** 34-44 hours (15-20 hours for PHASE 0 + 19-24 hours for PHASES 1-5)
+**Estimated Total Effort:** 35-47 hours (19-24 hours for PHASE 0 + 16-23 hours for PHASES 1-4)
 
