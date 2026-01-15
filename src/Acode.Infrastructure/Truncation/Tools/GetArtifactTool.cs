@@ -72,20 +72,51 @@ public sealed class GetArtifactTool
     /// <summary>
     /// Validates artifact ID format to prevent security issues.
     /// </summary>
+    /// <remarks>
+    /// Validates against path traversal attacks including URL-encoded variants.
+    /// Enforces a conservative character set for artifact IDs.
+    /// </remarks>
     private static bool IsValidArtifactId(string artifactId)
     {
-        // Check for path traversal attempts
-        if (artifactId.Contains("..", StringComparison.Ordinal) ||
-            artifactId.Contains('/', StringComparison.Ordinal) ||
-            artifactId.Contains('\\', StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(artifactId))
         {
             return false;
         }
 
-        // Must start with "art_" prefix
-        if (!artifactId.StartsWith("art_", StringComparison.Ordinal))
+        // Decode any percent-encoded characters (e.g., %2e%2e for "..")
+        string decodedId;
+        try
+        {
+            decodedId = Uri.UnescapeDataString(artifactId);
+        }
+        catch (UriFormatException)
+        {
+            // Malformed percent-encoding
+            return false;
+        }
+
+        // Must start with "art_" prefix after decoding
+        if (!decodedId.StartsWith("art_", StringComparison.Ordinal))
         {
             return false;
+        }
+
+        // Check for path traversal attempts in the decoded value
+        if (decodedId.Contains("..", StringComparison.Ordinal) ||
+            decodedId.Contains('/', StringComparison.Ordinal) ||
+            decodedId.Contains('\\', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // Enforce a conservative character set for artifact IDs
+        for (int i = 0; i < decodedId.Length; i++)
+        {
+            char c = decodedId[i];
+            if (!char.IsLetterOrDigit(c) && c != '_' && c != '-')
+            {
+                return false;
+            }
         }
 
         return true;

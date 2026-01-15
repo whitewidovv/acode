@@ -350,7 +350,7 @@ public static class ServiceCollectionExtensions
         // Register configuration as singleton
         services.AddSingleton(config);
 
-        // Register artifact store (scoped to handle session-based artifact cleanup)
+        // Register artifact store as a singleton (shared across the app; disposed on application shutdown)
         services.AddSingleton<IArtifactStore>(sp =>
         {
             var cfg = sp.GetRequiredService<TruncationConfiguration>();

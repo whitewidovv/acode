@@ -65,7 +65,7 @@ public sealed class TruncationPerformanceTests : IDisposable
 
         // Assert
         result.WasTruncated.Should().BeTrue();
-        stopwatch.ElapsedMilliseconds.Should().BeLessThan(100, "truncation of 100KB should complete in under 100ms (spec: 10ms ideal, 100ms acceptable)");
+        stopwatch.ElapsedMilliseconds.Should().BeLessThan(10, "truncation of 100KB should complete in under 10ms as per spec");
     }
 
     [Fact]

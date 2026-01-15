@@ -157,6 +157,36 @@ public sealed class GetArtifactToolTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAsync_WithUrlEncodedPathTraversal_ReturnsError()
+    {
+        // Arrange - URL-encoded ".." (%2e%2e)
+        var maliciousId = "art_%2e%2e%2fetc%2fpasswd";
+
+        // Act
+        var result = await this.tool.GetAsync(maliciousId);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Invalid artifact ID");
+    }
+
+    [Fact]
+    public async Task GetAsync_WithInvalidCharacters_ReturnsError()
+    {
+        // Arrange - artifact ID with invalid characters (spaces, special chars)
+        var invalidId = "art_test id with spaces!@#";
+
+        // Act
+        var result = await this.tool.GetAsync(invalidId);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Invalid artifact ID");
+    }
+
+    [Fact]
     public async Task GetAsync_WithNullId_ReturnsError()
     {
         // Act
