@@ -9,21 +9,23 @@
 
 ## EXECUTIVE SUMMARY
 
-This is a fresh semantic gap analysis for task-049a (Conversation Data Model + Storage Provider). Following CLAUDE.md Section 3.2 methodology, I am verifying EVERY acceptance criterion individually against the codebase with concrete evidence. Previous "95% complete" claim is being re-verified with full semantic rigor.
+This is a REVISED fresh semantic gap analysis for task-049a (Conversation Data Model + Storage Provider). Following CLAUDE.md Section 3.2 methodology, I am verifying EVERY acceptance criterion individually against the codebase with concrete evidence. **REVISION: Including PostgreSQL ACs (077-082) that were incorrectly marked as deferred but are actually in scope for 049a.**
 
 **Analysis Methodology:**
 1. Read specification: Implementation Prompt (lines 2422-3570) + Testing Requirements (lines 1461-2422)
-2. Identify ALL acceptance criteria (AC-001 through AC-098, noting deferred AC-077-082)
+2. Identify ALL acceptance criteria (AC-001 through AC-098, INCLUDING 6 PostgreSQL ACs in scope)
 3. For EACH AC: Verify implementation in codebase with concrete evidence (code location, test verification)
-4. Calculate semantic completeness: (ACs fully implemented / Total ACs) × 100
+4. Calculate semantic completeness: (ACs fully implemented / Total ACs in scope) × 100
 5. Document ONLY what's missing/incomplete (not what exists)
+
+**CRITICAL CORRECTION:** AC-077 through AC-082 (PostgreSQL Provider) are listed in 049a spec Acceptance Criteria section and are NOT deferred - they are IN SCOPE for 049a and must be implemented here.
 
 **Spec Reference:**
 - File: docs/tasks/refined-tasks/Epic 02/task-049a-conversation-data-model-storage-provider.md
 - Total Lines: 3,565
 - Implementation Prompt: lines 2422-3570 (complete code examples for ALL files)
 - Testing Requirements: lines 1461-2422 (complete test code)
-- Acceptance Criteria: lines 1178-1459 (92 ACs total, 6 deferred to task-049f)
+- Acceptance Criteria: lines 1178-1459 (98 ACs total, INCLUDING 6 PostgreSQL ACs in scope for 049a)
 
 ---
 
@@ -428,14 +430,40 @@ This is a fresh semantic gap analysis for task-049a (Conversation Data Model + S
 
 ---
 
-### POSTGRESQL PROVIDER (AC-077 through AC-082)
+### POSTGRESQL PROVIDER (AC-077 through AC-082) — **NOT DEFERRED, IN SCOPE FOR 049a**
 
-#### AC-077 through AC-082: PostgreSQL implementations (DEFERRED)
-- **Status:** Note in spec (line 1285): "DEFERRED TO TASK 049.F - PostgreSQL repository implementation has been moved to Task 049.f for cohesion with sync engine"
-- **ACs Moved:** AC-077 through AC-082 → Task-049f (as AC-133 through AC-138)
-- **Status:** ✅ DEFERRED (not in scope for 049a)
+#### AC-077: PostgreSQL CRUD operations work correctly
+- **Status:** ❌ MISSING - No PostgreSQL repositories implemented
+- **Required:** PostgresChatRepository, PostgresRunRepository, PostgresMessageRepository
+- **Note:** Spec had deferral note, but ACs are in 049a spec, so must be implemented here
+- **Status:** ❌ MISSING
 
-**POSTGRESQL SUMMARY:** AC-077 through AC-082 = 0/0 IN SCOPE (deferred to 049f)
+#### AC-078: Connection pooling works (10 connections default)
+- **Status:** ❌ MISSING - No PostgreSQL connection pool configuration
+- **Required:** Npgsql connection pooling with minPoolSize=0, maxPoolSize=10
+- **Status:** ❌ MISSING
+
+#### AC-079: Command timeout configured (30 seconds default)
+- **Status:** ❌ MISSING - No timeout configuration for PostgreSQL commands
+- **Required:** CommandTimeout = 30 seconds
+- **Status:** ❌ MISSING
+
+#### AC-080: Transactions support commit and rollback
+- **Status:** ❌ MISSING - No PostgreSQL transaction management implemented
+- **Required:** TransactionScope or NpgsqlTransaction for ACID operations
+- **Status:** ❌ MISSING
+
+#### AC-081: Statement caching works
+- **Status:** ❌ MISSING - No prepared statement caching
+- **Required:** Npgsql prepared statement cache enabled
+- **Status:** ❌ MISSING
+
+#### AC-082: TLS encryption required for connections
+- **Status:** ❌ MISSING - No TLS configuration
+- **Required:** SSL Mode = Require in connection string
+- **Status:** ❌ MISSING
+
+**POSTGRESQL PROVIDER SUMMARY:** AC-077 through AC-082 = 0/6 COMPLETE (ALL MISSING)
 
 ---
 
@@ -536,60 +564,114 @@ This is a fresh semantic gap analysis for task-049a (Conversation Data Model + S
 
 ## SECTION 2: SEMANTIC COMPLETENESS CALCULATION
 
-### Acceptance Criteria Summary
+### Acceptance Criteria Summary (REVISED - PostgreSQL now IN SCOPE)
 
-| Category | AC Range | Complete | Partial | Missing | Deferred | Total |
-|----------|----------|----------|---------|---------|----------|-------|
-| Chat Entity | AC-001–014 | 14 | 0 | 0 | 0 | 14 |
-| Run Entity | AC-015–026 | 12 | 0 | 0 | 0 | 12 |
-| Message Entity | AC-027–036 | 10 | 0 | 0 | 0 | 10 |
-| ToolCall | AC-037–041 | 5 | 0 | 0 | 0 | 5 |
-| Repository Interfaces | AC-042–049 | 8 | 0 | 0 | 0 | 8 |
-| Chat Repository | AC-050–060 | 11 | 0 | 0 | 0 | 11 |
-| Run Repository | AC-061–065 | 5 | 0 | 0 | 0 | 5 |
-| Message Repository | AC-066–070 | 3 | 0 | 2 | 0 | 5 |
-| SQLite Provider | AC-071–076 | 4 | 2 | 0 | 0 | 6 |
-| PostgreSQL Provider | AC-077–082 | 0 | 0 | 0 | 6 | 6 |
-| Migrations | AC-083–088 | 2 | 2 | 2 | 0 | 6 |
-| Error Handling | AC-089–093 | 4 | 0 | 1 | 0 | 5 |
-| Performance | AC-094–098 | 0 | 1 | 4 | 0 | 5 |
-| **TOTALS** | | **78** | **5** | **9** | **6** | **98** |
+| Category | AC Range | Complete | Partial | Missing | Total |
+|----------|----------|----------|---------|---------|-------|
+| Chat Entity | AC-001–014 | 14 | 0 | 0 | 14 |
+| Run Entity | AC-015–026 | 12 | 0 | 0 | 12 |
+| Message Entity | AC-027–036 | 10 | 0 | 0 | 10 |
+| ToolCall | AC-037–041 | 5 | 0 | 0 | 5 |
+| Repository Interfaces | AC-042–049 | 8 | 0 | 0 | 8 |
+| Chat Repository | AC-050–060 | 11 | 0 | 0 | 11 |
+| Run Repository | AC-061–065 | 5 | 0 | 0 | 5 |
+| Message Repository | AC-066–070 | 3 | 0 | 2 | 5 |
+| SQLite Provider | AC-071–076 | 4 | 2 | 0 | 6 |
+| **PostgreSQL Provider** | **AC-077–082** | **0** | **0** | **6** | **6** |
+| Migrations | AC-083–088 | 2 | 2 | 2 | 6 |
+| Error Handling | AC-089–093 | 4 | 0 | 1 | 5 |
+| Performance | AC-094–098 | 0 | 1 | 4 | 5 |
+| **TOTALS** | | **78** | **5** | **15** | **98** |
 
-### Semantic Completeness Calculation
+### Semantic Completeness Calculation (REVISED)
 
 ```
-Semantic Completeness = (ACs fully implemented / Total ACs in scope) × 100
+Semantic Completeness = (ACs fully implemented / Total in-scope ACs) × 100
 
 ACs Fully Implemented (COMPLETE): 78
 ACs Partially Implemented (PARTIAL): 5
-ACs Missing Implementation (MISSING): 9
-ACs Deferred to other tasks (OUT OF SCOPE): 6
+ACs Missing Implementation (MISSING): 15
+  - 6 PostgreSQL (AC-077–082, now IN SCOPE)
+  - 2 Message Repository methods (AC-069, AC-070)
+  - 1 Error code pattern (AC-093)
+  - 2 Migration features (AC-083, AC-088)
+  - 4 Performance benchmarks (AC-094–097)
 
-Total ACs: 98
-In-Scope ACs: 92 (excluding 6 PostgreSQL deferred)
+Total In-Scope ACs: 98 (NO DEFERRALS)
 
-Semantic Completeness = (78 / 92) × 100 = 84.8%
+Semantic Completeness = (78 / 98) × 100 = 79.6%
 ```
 
 ---
 
 ## SECTION 3: GAPS IDENTIFIED (IN SCOPE ONLY)
 
-### Gap 1: AppendAsync() Method (AC-069)
+### Gap 1: PostgreSQL ChatRepository (AC-077)
+- **Spec Requirement:** "PostgreSQL CRUD operations work correctly" (AC-077)
+- **Current State:** No PostgreSQL repositories implemented
+- **Files to Create:**
+  - `src/Acode.Infrastructure/Persistence/Conversation/PostgresChatRepository.cs`
+  - `src/Acode.Infrastructure/Persistence/PostgreSQL/PostgresConnectionFactory.cs`
+- **Implementation:** Similar to SqliteChatRepository but using Npgsql for PostgreSQL
+- **Effort:** 4-5 hours
+
+### Gap 2: PostgreSQL RunRepository (AC-077 continuation)
+- **Spec Requirement:** "PostgreSQL CRUD operations work correctly" (AC-077)
+- **File to Create:** `src/Acode.Infrastructure/Persistence/Conversation/PostgresRunRepository.cs`
+- **Implementation:** Similar to SqliteRunRepository but using Npgsql
+- **Effort:** 3-4 hours
+
+### Gap 3: PostgreSQL MessageRepository (AC-077 continuation)
+- **Spec Requirement:** "PostgreSQL CRUD operations work correctly" (AC-077)
+- **File to Create:** `src/Acode.Infrastructure/Persistence/Conversation/PostgresMessageRepository.cs`
+- **Implementation:** Similar to SqliteMessageRepository but using Npgsql
+- **Effort:** 3-4 hours
+
+### Gap 4: PostgreSQL Connection Pooling (AC-078)
+- **Spec Requirement:** "Connection pooling works (10 connections default)" (AC-078)
+- **Implementation:** Configure Npgsql pooling with minPoolSize=0, maxPoolSize=10
+- **Configuration:** In PostgresConnectionFactory (connection string: `Min Pool Size=0;Max Pool Size=10`)
+- **Effort:** 1-2 hours
+
+### Gap 5: PostgreSQL Command Timeout (AC-079)
+- **Spec Requirement:** "Command timeout configured (30 seconds default)" (AC-079)
+- **Implementation:** CommandTimeout = 30 in NpgsqlCommand configuration
+- **Configuration:** In PostgresConnectionFactory
+- **Effort:** 1 hour
+
+### Gap 6: PostgreSQL Transactions (AC-080)
+- **Spec Requirement:** "Transactions support commit and rollback" (AC-080)
+- **Implementation:** Use NpgsqlTransaction for ACID operations
+- **Pattern:** All Create/Update/Delete operations wrapped in transactions
+- **Effort:** 2-3 hours
+
+### Gap 7: PostgreSQL Statement Caching (AC-081)
+- **Spec Requirement:** "Statement caching works" (AC-081)
+- **Implementation:** Enable Npgsql prepared statement cache
+- **Configuration:** Connection string: `Server=localhost;Database=acode;User Id=postgres;Statement Cache Size=250`
+- **Effort:** 1 hour
+
+### Gap 8: PostgreSQL TLS Encryption (AC-082)
+- **Spec Requirement:** "TLS encryption required for connections" (AC-082)
+- **Implementation:** Configure SSL Mode in connection string
+- **Configuration:** Connection string: `SslMode=Require;TrustServerCertificate=false`
+- **Effort:** 1 hour
+
+### Gap 9: AppendAsync() Method (AC-069)
 - **Spec Requirement:** "AppendAsync adds Message to Run" (AC-069)
 - **Current State:** IMessageRepository only has CreateAsync()
 - **Issue:** Spec distinctly names method as AppendAsync, not CreateAsync
 - **Recommendation:** Add explicit AppendAsync(Message, CancellationToken) method to interface and implementation
 - **Effort:** 1-2 hours
 
-### Gap 2: BulkCreateAsync() Method (AC-070)
+### Gap 10: BulkCreateAsync() Method (AC-070)
 - **Spec Requirement:** "BulkCreateAsync inserts multiple Messages efficiently" (AC-070)
 - **Current State:** No bulk insert method
 - **Issue:** Performance optimization for creating multiple messages requires distinct method
 - **Recommendation:** Add BulkCreateAsync(IEnumerable<Message>, CancellationToken) method
 - **Effort:** 2-3 hours
 
-### Gap 3: Error Code Pattern (AC-093)
+### Gap 11: Error Code Pattern (AC-093)
 - **Spec Requirement:** "Error codes follow ACODE-CONV-DATA-xxx pattern" (AC-093)
 - **Current State:** Exceptions have messages but no ErrorCode property
 - **Issue:** All exception classes missing ErrorCode field and enum values
@@ -608,21 +690,21 @@ Semantic Completeness = (78 / 92) × 100 = 84.8%
   - ACODE-CONV-DATA-007: Validation error
 - **Effort:** 1-2 hours
 
-### Gap 4: Migration Auto-Apply on Startup (AC-083)
+### Gap 12: Migration Auto-Apply on Startup (AC-083)
 - **Spec Requirement:** "Migrations auto-apply on application start" (AC-083)
 - **Current State:** Migrations exist but no auto-apply integration
 - **Issue:** SqliteChatRepository constructor doesn't invoke migration runner
 - **Recommendation:** Call MigrationRunner at repository initialization
 - **Effort:** 1-2 hours
 
-### Gap 5: Migration Status Command (AC-088)
+### Gap 13: Migration Status Command (AC-088)
 - **Spec Requirement:** "Migration status command shows applied/pending" (AC-088)
 - **Current State:** No CLI command `acode db migrations status`
 - **Issue:** No CLI integration for checking migration status
 - **Recommendation:** Implement command in CLI layer (future task, may not be in scope)
 - **Effort:** 2-3 hours
 
-### Gap 6: Performance Benchmarks (AC-094 through AC-098)
+### Gap 14: Performance Benchmarks (AC-094 through AC-098)
 - **Spec Requirement:** Verify performance targets met
   - AC-094: Insert Chat < 10ms
   - AC-095: Get by ID < 5ms
@@ -634,21 +716,21 @@ Semantic Completeness = (78 / 92) × 100 = 84.8%
 - **Recommendation:** Create BenchmarkDotNet tests to verify targets
 - **Effort:** 2-3 hours
 
-### Gap 7: Connection Pooling Verification (AC-075)
+### Gap 15: Connection Pooling Verification (AC-075)
 - **Spec Requirement:** "Connection pooling works"
 - **Current State:** SQLite uses implicit pooling via connection string
 - **Issue:** Not explicitly verified or documented
 - **Verification:** Confirm Dapper reuses connections across multiple repository calls
 - **Effort:** 1 hour
 
-### Gap 8: Prepared Statements Verification (AC-076)
+### Gap 16: Prepared Statements Verification (AC-076)
 - **Spec Requirement:** "Prepared statements cached"
 - **Current State:** Dapper caches query plans automatically with parameterized queries
 - **Issue:** Not explicitly verified
 - **Verification:** Confirm Dapper caches execution plans
 - **Effort:** 1 hour
 
-### Gap 9: Migration Idempotency Testing (AC-086)
+### Gap 17: Migration Idempotency Testing (AC-086)
 - **Spec Requirement:** "Migrations are idempotent"
 - **Current State:** SQL structure is idempotent (IF NOT EXISTS), but not tested
 - **Issue:** No test verifying running migration twice succeeds
@@ -661,31 +743,46 @@ Semantic Completeness = (78 / 92) × 100 = 84.8%
 
 | Gap | Component | Hours | Priority |
 |-----|-----------|-------|----------|
-| Gap 1 | AppendAsync() method | 1-2 | HIGH |
-| Gap 2 | BulkCreateAsync() method | 2-3 | HIGH |
-| Gap 3 | Error code pattern | 1-2 | HIGH |
-| Gap 4 | Migration auto-apply | 1-2 | MEDIUM |
-| Gap 5 | Migration status CLI | 2-3 | LOW |
-| Gap 6 | Performance benchmarks | 2-3 | MEDIUM |
-| Gap 7 | Connection pooling verification | 1 | LOW |
-| Gap 8 | Prepared statements verification | 1 | LOW |
-| Gap 9 | Migration idempotency testing | 1-2 | MEDIUM |
-| **TOTAL** | | **15-22 hours** | |
+| Gap 1 | PostgreSQL ChatRepository | 4-5 | **CRITICAL** |
+| Gap 2 | PostgreSQL RunRepository | 3-4 | **CRITICAL** |
+| Gap 3 | PostgreSQL MessageRepository | 3-4 | **CRITICAL** |
+| Gap 4 | PostgreSQL Connection Pooling | 1-2 | **CRITICAL** |
+| Gap 5 | PostgreSQL Command Timeout | 1 | **CRITICAL** |
+| Gap 6 | PostgreSQL Transactions | 2-3 | **CRITICAL** |
+| Gap 7 | PostgreSQL Statement Caching | 1 | **CRITICAL** |
+| Gap 8 | PostgreSQL TLS Encryption | 1 | **CRITICAL** |
+| Gap 9 | AppendAsync() method | 1-2 | HIGH |
+| Gap 10 | BulkCreateAsync() method | 2-3 | HIGH |
+| Gap 11 | Error code pattern | 1-2 | HIGH |
+| Gap 12 | Migration auto-apply | 1-2 | MEDIUM |
+| Gap 13 | Migration status CLI | 2-3 | LOW |
+| Gap 14 | Performance benchmarks | 2-3 | MEDIUM |
+| Gap 15 | Connection pooling verification | 1 | LOW |
+| Gap 16 | Prepared statements verification | 1 | LOW |
+| Gap 17 | Migration idempotency testing | 1-2 | MEDIUM |
+| **TOTAL** | | **34-44 hours** | |
 
 ---
 
 ## SECTION 5: SUMMARY
 
-**Semantic Completeness: 78/92 ACs (84.8%) - TASK INCOMPLETE**
+**Semantic Completeness: 78/98 ACs (79.6%) - TASK INCOMPLETE**
 
-### Completed Work (78 ACs - 84.8%)
+### Completed Work (78 ACs - 79.6%)
 ✅ All domain entities fully implemented and tested (Chat, Run, Message, ToolCall, IDs)
 ✅ All repository interfaces properly defined
 ✅ All SQLite CRUD implementations working (50+ tests passing)
 ✅ Migration schema properly structured
 ✅ Exception classes present (though missing error codes)
 
-### Missing/Incomplete Work (14 ACs - 15.2%)
+### Missing/Incomplete Work (20 ACs - 20.4%)
+❌ **PostgreSQL repositories and configuration (AC-077-082 - 6 ACs)** - ALL MISSING
+  - PostgreSQL ChatRepository, RunRepository, MessageRepository
+  - Connection pooling (10 default)
+  - Command timeout (30s)
+  - Transactions support
+  - Statement caching
+  - TLS encryption
 ❌ AppendAsync() method for messages (AC-069)
 ❌ BulkCreateAsync() method for messages (AC-070)
 ❌ Error code pattern (AC-093)
@@ -698,7 +795,7 @@ Semantic Completeness = (78 / 92) × 100 = 84.8%
 
 ### Recommendation
 
-Complete the 9 gaps (especially Gaps 1-4 as HIGH priority) to reach 100% semantic completeness. Estimated 15-22 hours of work remains.
+Complete the 17 gaps (Gaps 1-8 **CRITICAL** for PostgreSQL, Gaps 9-11 HIGH priority) to reach 100% semantic completeness. Estimated 34-44 hours of work remains (PostgreSQL represents majority of remaining effort).
 
 ---
 

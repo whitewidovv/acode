@@ -1,10 +1,11 @@
 # Task-049a Completion Checklist (FRESH): Conversation Data Model + Storage Provider
 
-**Status:** 🟡 84.8% COMPLETE - Ready for Gap Implementation
+**Status:** 🟡 79.6% COMPLETE - Ready for Gap Implementation (REVISED: PostgreSQL now IN SCOPE)
 
 **Date:** 2026-01-15
-**Created From:** task-049a-semantic-gap-analysis-fresh.md (completed 78/92 ACs)
+**Created From:** task-049a-semantic-gap-analysis-fresh.md (completed 78/98 ACs)
 **Reference Implementation:** task-049d-completion-checklist.md (gold standard)
+**CRITICAL UPDATE:** PostgreSQL ACs (AC-077-082) are IN SCOPE and must be implemented as part of 049a
 
 ---
 
@@ -16,9 +17,10 @@ This checklist is created FROM the gap analysis (task-049a-semantic-gap-analysis
 
 **Before using this checklist:**
 
-1. Read `task-049a-semantic-gap-analysis-fresh.md` completely (identifies all 14 missing/incomplete ACs)
-2. Understand that semantic completeness = 78/92 (84.8%) - 14 ACs not fully implemented
-3. All core entities are complete; only specific methods and optimizations remain
+1. Read `task-049a-semantic-gap-analysis-fresh.md` completely (identifies all 20 missing/incomplete ACs, including 6 PostgreSQL ACs)
+2. Understand that semantic completeness = 78/98 (79.6%) - 20 ACs not fully implemented
+3. PostgreSQL repositories are IN SCOPE and CRITICAL priority (Gaps 1-8)
+4. All core entities are complete; PostgreSQL implementations, specific methods, and optimizations remain
 
 ### BLOCKING DEPENDENCIES: NONE ✅
 
@@ -50,12 +52,12 @@ No dependencies on other tasks. All infrastructure is present.
 
 ## SECTION 1: SEMANTIC COMPLETENESS STATUS
 
-### Current State (VERIFIED IN FRESH GAP ANALYSIS)
+### Current State (VERIFIED IN FRESH GAP ANALYSIS - REVISED FOR POSTGRESQL IN SCOPE)
 
-**Total Acceptance Criteria:** 92 in scope (6 PostgreSQL deferred to 049f)
-**ACs Complete:** 78 (84.8%)
-**ACs Partial:** 5 (5.4%)
-**ACs Missing:** 9 (9.8%)
+**Total Acceptance Criteria:** 98 in scope (PostgreSQL AC-077-082 now IN SCOPE, NOT deferred)
+**ACs Complete:** 78 (79.6%)
+**ACs Partial:** 5 (5.1%)
+**ACs Missing:** 15 (15.3%)
 
 ### Completed Work (DO NOT REDO)
 
@@ -75,11 +77,218 @@ No dependencies on other tasks. All infrastructure is present.
 
 ## SECTION 2: GAPS TO IMPLEMENT
 
-### Gap 1: IMessageRepository.AppendAsync() Method [ ]
+### ⚠️ CRITICAL PRIORITY GAPS (PostgreSQL Repositories) - Gaps 1-8
+
+These 8 gaps implement the PostgreSQL Provider (AC-077-082) and must be completed before other gaps to reach semantic completeness.
+
+---
+
+### Gap 1: PostgreSQL Connection Factory and Configuration [ ]
+
+**ACs Covered:** AC-077, AC-078, AC-079, AC-080, AC-081, AC-082
+**Effort:** 4-5 hours
+**Spec Reference:** Implementation Prompt line ~2800-2900 (PostgreSQL connection details)
+**Status:** [ ]
+
+**What to Implement:**
+
+Create `src/Acode.Infrastructure/Persistence/PostgreSQL/PostgresConnectionFactory.cs`:
+
+```csharp
+namespace Acode.Infrastructure.Persistence.PostgreSQL;
+
+using Npgsql;
+
+public sealed class PostgresConnectionFactory
+{
+    private readonly string _connectionString;
+
+    public PostgresConnectionFactory(string host, string database, string userId, string password, int? port = null)
+    {
+        var portValue = port ?? 5432;
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = host,
+            Database = database,
+            Username = userId,
+            Password = password,
+            Port = portValue,
+            CommandTimeout = 30, // AC-079: 30 second timeout
+            MinPoolSize = 0, // AC-078: Connection pooling
+            MaxPoolSize = 10, // AC-078: 10 connections default
+            StatementCacheSize = 250, // AC-081: Statement caching
+            SslMode = SslMode.Require, // AC-082: TLS encryption required
+            TrustServerCertificate = false
+        };
+        _connectionString = builder.ConnectionString;
+    }
+
+    public NpgsqlConnection CreateConnection() => new(_connectionString);
+
+    public string ConnectionString => _connectionString;
+}
+```
+
+**Tests (4):**
+- [ ] Connection string built with correct parameters
+- [ ] CommandTimeout = 30 seconds
+- [ ] Pool size configured (min=0, max=10)
+- [ ] SSL Mode = Require
+
+**Success Criteria:**
+- [ ] PostgresConnectionFactory.cs created
+- [ ] Connection pooling configured (AC-078)
+- [ ] Command timeout set to 30s (AC-079)
+- [ ] Statement caching enabled (AC-081)
+- [ ] TLS encryption required (AC-082)
+- [ ] All 4 tests passing
+
+---
+
+### Gap 2: PostgreSQL ChatRepository Implementation [ ]
+
+**ACs Covered:** AC-077 (CRUD operations)
+**Effort:** 4-5 hours
+**Spec Reference:** Implementation Prompt line ~2800-2900
+**Status:** [ ]
+
+**What to Implement:**
+
+Create `src/Acode.Infrastructure/Persistence/Conversation/PostgresChatRepository.cs` with methods:
+
+```csharp
+public sealed class PostgresChatRepository : IChatRepository
+{
+    private readonly PostgresConnectionFactory _factory;
+
+    // Implement all IChatRepository methods:
+    // - CreateAsync(Chat chat, CancellationToken ct)
+    // - GetByIdAsync(ChatId id, CancellationToken ct)
+    // - UpdateAsync(Chat chat, CancellationToken ct)
+    // - SoftDeleteAsync(ChatId id, CancellationToken ct)
+    // - ListAsync(ChatFilter filter, CancellationToken ct)
+    // - GetByWorktreeAsync(WorktreeId id, int skip, int take, CancellationToken ct)
+    // - PurgeDeletedAsync(DateTimeOffset olderThan, CancellationToken ct)
+    // All operations wrapped in NpgsqlTransaction (AC-080)
+}
+```
+
+**Spec Requirements:**
+- [ ] AC-077: CRUD operations work correctly
+- [ ] AC-080: Transactions support commit and rollback (use NpgsqlTransaction)
+- [ ] AC-081: Statement caching (use Npgsql prepared statements)
+- [ ] All methods async with CancellationToken
+- [ ] Parameterized queries (no SQL injection)
+
+**Tests (7):**
+- [ ] CreateAsync creates chat and returns ChatId
+- [ ] GetByIdAsync returns null when not found
+- [ ] UpdateAsync with concurrency control
+- [ ] SoftDeleteAsync marks deleted_at
+- [ ] ListAsync with filters and pagination
+- [ ] GetByWorktreeAsync filters by worktree
+- [ ] All operations transactional
+
+**Success Criteria:**
+- [ ] PostgresChatRepository.cs created
+- [ ] All 7 IChatRepository methods implemented
+- [ ] Transactions used (AC-080)
+- [ ] Parameterized queries
+- [ ] 7 tests passing
+
+---
+
+### Gap 3: PostgreSQL RunRepository Implementation [ ]
+
+**ACs Covered:** AC-077 (CRUD operations)
+**Effort:** 3-4 hours
+**Status:** [ ]
+
+**What to Implement:**
+
+Create `src/Acode.Infrastructure/Persistence/Conversation/PostgresRunRepository.cs` with all IRunRepository methods, similar pattern to PostgresChatRepository but for Run entity.
+
+**Tests (6):**
+- [ ] CreateAsync creates run and returns RunId
+- [ ] GetByIdAsync returns null when not found
+- [ ] UpdateAsync with concurrency control
+- [ ] ListByChatAsync filters by chat
+- [ ] GetLatestByChatAsync returns most recent
+- [ ] DeleteAsync soft deletes
+
+**Success Criteria:**
+- [ ] PostgresRunRepository.cs created
+- [ ] All 6 IRunRepository methods implemented
+- [ ] 6 tests passing
+
+---
+
+### Gap 4: PostgreSQL MessageRepository Implementation [ ]
+
+**ACs Covered:** AC-077 (CRUD operations)
+**Effort:** 3-4 hours
+**Status:** [ ]
+
+**What to Implement:**
+
+Create `src/Acode.Infrastructure/Persistence/Conversation/PostgresMessageRepository.cs` with all IMessageRepository methods.
+
+**Tests (6):**
+- [ ] CreateAsync creates message and returns MessageId
+- [ ] GetByIdAsync returns null when not found
+- [ ] ListByRunAsync filters by run with ordering
+- [ ] DeleteByRunAsync soft deletes all messages in run
+- [ ] AppendAsync adds message (AC-069)
+- [ ] BulkCreateAsync inserts multiple (AC-070)
+
+**Success Criteria:**
+- [ ] PostgresMessageRepository.cs created
+- [ ] All IMessageRepository methods implemented
+- [ ] 6 tests passing
+
+---
+
+### Gap 5: PostgreSQL Repository Registration (Dependency Injection) [ ]
+
+**ACs Covered:** AC-077, AC-078, AC-079, AC-080, AC-081, AC-082
+**Effort:** 1 hour
+**Status:** [ ]
+
+**What to Implement:**
+
+Update dependency injection to register PostgreSQL repositories:
+
+```csharp
+// In Startup/ConfigureServices:
+services.AddSingleton(new PostgresConnectionFactory(host, database, userId, password));
+services.AddSingleton<IChatRepository>(sp =>
+    new PostgresChatRepository(sp.GetRequiredService<PostgresConnectionFactory>()));
+services.AddSingleton<IRunRepository>(sp =>
+    new PostgresRunRepository(sp.GetRequiredService<PostgresConnectionFactory>()));
+services.AddSingleton<IMessageRepository>(sp =>
+    new PostgresMessageRepository(sp.GetRequiredService<PostgresConnectionFactory>()));
+```
+
+**Tests (1):**
+- [ ] All PostgreSQL repositories successfully registered and can be resolved
+
+**Success Criteria:**
+- [ ] Dependency injection configured
+- [ ] All PostgreSQL repos resolvable
+- [ ] 1 test passing
+
+---
+
+### HIGH PRIORITY GAPS (Non-PostgreSQL) - Gaps 6-8
+
+---
+
+### Gap 6: IMessageRepository.AppendAsync() Method [ ]
 
 **AC Covered:** AC-069 - "AppendAsync adds Message to Run"
 **Effort:** 1-2 hours
 **Spec Reference:** Implementation Prompt line ~2945
+**Priority:** HIGH
 **Status:** [ ]
 
 **What to Implement:**
@@ -118,9 +327,10 @@ public async Task<MessageId> AppendAsync(Message message, CancellationToken ct)
 
 ---
 
-### Gap 2: IMessageRepository.BulkCreateAsync() Method [ ]
+### Gap 7: IMessageRepository.BulkCreateAsync() Method [ ]
 
 **AC Covered:** AC-070 - "BulkCreateAsync inserts multiple Messages efficiently"
+**Priority:** HIGH
 **Effort:** 2-3 hours
 **Spec Reference:** Implementation Prompt line ~2970
 **Status:** [ ]
@@ -185,9 +395,10 @@ public async Task BulkCreateAsync(IEnumerable<Message> messages, CancellationTok
 
 ---
 
-### Gap 3: Add Error Code Pattern to All Exceptions [ ]
+### Gap 8: Add Error Code Pattern to All Exceptions [ ]
 
 **AC Covered:** AC-093 - "Error codes follow ACODE-CONV-DATA-xxx pattern"
+**Priority:** HIGH
 **Effort:** 1-2 hours
 **Spec Reference:** Implementation Prompt line ~3529
 **Status:** [ ]
@@ -254,9 +465,10 @@ if (rowsAffected == 0)
 
 ---
 
-### Gap 4: Migration Auto-Apply on Repository Initialization [ ]
+### Gap 9: Migration Auto-Apply on Repository Initialization [ ]
 
 **AC Covered:** AC-083 - "Migrations auto-apply on application start"
+**Priority:** MEDIUM
 **Effort:** 1-2 hours
 **Spec Reference:** Implementation Prompt line ~3525
 **Status:** [ ]
