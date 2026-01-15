@@ -1,6 +1,8 @@
 namespace Acode.Infrastructure.Vllm.StructuredOutput;
 
 using System.Text.Json;
+using Acode.Application.Inference;
+using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.Vllm.StructuredOutput.Capability;
 using Acode.Infrastructure.Vllm.StructuredOutput.Configuration;
 using Acode.Infrastructure.Vllm.StructuredOutput.Fallback;
@@ -172,6 +174,122 @@ public sealed class StructuredOutputHandler
         }
 
         return this._fallbackHandler.Validate(output, schema);
+    }
+
+    /// <summary>
+    /// Apply structured output constraints to a vLLM request based on ChatRequest.
+    /// Handles both ResponseFormat and Tool schemas.
+    /// </summary>
+    /// <param name="chatRequest">The chat request with possible ResponseFormat or Tools.</param>
+    /// <param name="modelId">The model identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>An enrichment result indicating whether structured output should be applied.</returns>
+    public async Task<EnrichmentResult> ApplyToRequestAsync(
+        ChatRequest chatRequest,
+        string modelId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(chatRequest);
+
+        if (!this._config.IsEnabled(modelId))
+        {
+            return EnrichmentResult.CreateDisabled($"Structured output disabled for model {modelId}");
+        }
+
+        // Check ResponseFormat first (higher priority)
+        if (chatRequest.ResponseFormat is not null)
+        {
+            return await this.ApplyResponseFormatAsync(chatRequest.ResponseFormat, modelId, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Check Tools second - transform tool schemas
+        if (chatRequest.Tools?.Any() == true)
+        {
+            return this.ApplyToolSchemas(chatRequest.Tools, modelId);
+        }
+
+        // No structured output needed
+        return EnrichmentResult.CreateDisabled("No ResponseFormat or Tools configured");
+    }
+
+    private async Task<EnrichmentResult> ApplyResponseFormatAsync(
+        Application.Inference.ResponseFormat format,
+        string modelId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Detect model capabilities
+            var capabilities = await this.GetModelCapabilitiesAsync(modelId, cancellationToken).ConfigureAwait(false);
+
+            if (format.Type == "json_object")
+            {
+                if (capabilities == null || !capabilities.SupportsGuidedJson)
+                {
+                    return EnrichmentResult.CreateFailed(
+                        $"Model {modelId} does not support json_object mode",
+                        ValidationFailureReason.UnsupportedModel);
+                }
+
+                var vllmFormat = new VllmResponseFormat { Type = "json_object" };
+                return EnrichmentResult.CreateSuccess(vllmFormat, new object(), capabilities);
+            }
+
+            if (format.Type == "json_schema" && format.JsonSchema is not null)
+            {
+                if (capabilities == null || !capabilities.SupportsGuidedJson)
+                {
+                    return EnrichmentResult.CreateFailed(
+                        $"Model {modelId} does not support json_schema mode",
+                        ValidationFailureReason.UnsupportedModel);
+                }
+
+                // Use existing EnrichRequestAsync for schema transformation
+                return await this.EnrichRequestAsync(modelId, format.JsonSchema.Schema, cancellationToken).ConfigureAwait(false);
+            }
+
+            return EnrichmentResult.CreateFailed(
+                $"Unknown response format type: {format.Type}",
+                ValidationFailureReason.InvalidSchema);
+        }
+        catch (Exception ex)
+        {
+            return EnrichmentResult.CreateFailed(
+                $"Error applying response format: {ex.Message}",
+                ValidationFailureReason.EnrichmentError);
+        }
+    }
+
+    private EnrichmentResult ApplyToolSchemas(
+        ToolDefinition[] tools,
+        string modelId)
+    {
+        try
+        {
+            if (tools.Length == 0)
+            {
+                return EnrichmentResult.CreateDisabled("No tools provided");
+            }
+
+            // Collect all tool parameter schemas
+            var toolSchemas = new List<JsonElement>();
+            foreach (var tool in tools)
+            {
+                toolSchemas.Add(tool.Parameters);
+            }
+
+            // Get capabilities for tool schema validation
+            var capabilities = this._capabilityCache.TryGetCached(modelId, out var cached) && cached != null ? cached : new ModelCapabilities { ModelId = modelId };
+
+            // Return success with tool schemas for vLLM to apply
+            return EnrichmentResult.CreateSuccess(new VllmResponseFormat { Type = "json_object" }, toolSchemas.ToArray(), capabilities);
+        }
+        catch (Exception ex)
+        {
+            return EnrichmentResult.CreateFailed(
+                $"Error applying tool schemas: {ex.Message}",
+                ValidationFailureReason.EnrichmentError);
+        }
     }
 
     private async Task<ModelCapabilities?> GetModelCapabilitiesAsync(string modelId, CancellationToken cancellationToken)
