@@ -1021,7 +1021,7 @@ Expected: All streaming tests pass
 
 ### Gap 3.1: Create Retry Subdirectory and Interface
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Files to Create**:
 1. src/Acode.Infrastructure/Vllm/Client/Retry/IVllmRetryPolicy.cs
@@ -1276,7 +1276,7 @@ Expected: GREEN
 
 ### Gap 3.2: Add All VllmRetryPolicy Tests
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Tests to Add** (from spec lines 591-595):
 1. Should_Retry_Socket_Errors() - ✅ Done in Gap 3.1

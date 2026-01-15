@@ -1,4 +1,5 @@
 using Acode.Infrastructure.Vllm.Client;
+using Acode.Infrastructure.Vllm.Client.Retry;
 using Acode.Infrastructure.Vllm.Exceptions;
 using Acode.Infrastructure.Vllm.Models;
 using FluentAssertions;
@@ -348,5 +349,57 @@ public class VllmHttpClientTests
         await Assert.ThrowsAsync<VllmConnectionException>(async () =>
             await client.PostAsync<VllmResponse>("/v1/chat/completions", new { }, CancellationToken.None));
 #pragma warning restore CA2007
+    }
+
+    [Fact]
+    public void Constructor_Should_Accept_RetryPolicy()
+    {
+        // Arrange (FR-075, AC-075) - Constructor must accept optional IVllmRetryPolicy
+        var config = new VllmClientConfiguration
+        {
+            Endpoint = "http://localhost:8000"
+        };
+        var logger = Substitute.For<ILogger<VllmHttpClient>>();
+        var retryPolicy = Substitute.For<IVllmRetryPolicy>();
+
+        // Act
+        var client = new VllmHttpClient(config, logger, retryPolicy);
+
+        // Assert
+        client.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_Use_RetryPolicy_When_Provided()
+    {
+        // Arrange (FR-075, AC-075) - PostAsync should wrap operation in retry policy
+        var config = new VllmClientConfiguration
+        {
+            Endpoint = "http://localhost:8000"
+        };
+        var logger = Substitute.For<ILogger<VllmHttpClient>>();
+        var retryPolicy = Substitute.For<IVllmRetryPolicy>();
+
+        var mockResponse = new VllmResponse
+        {
+            Id = "test-id",
+            Model = "test-model",
+            Choices = new List<VllmChoice>
+            {
+                new() { Message = new VllmMessage { Role = "assistant", Content = "response" } }
+            }
+        };
+
+        retryPolicy.ExecuteAsync(Arg.Any<Func<CancellationToken, Task<VllmResponse>>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(mockResponse));
+
+        var client = new VllmHttpClient(config, logger, retryPolicy);
+
+        // Act
+        var result = await client.PostAsync<VllmResponse>("/v1/chat/completions", new { }, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        await retryPolicy.Received(1).ExecuteAsync(Arg.Any<Func<CancellationToken, Task<VllmResponse>>>(), Arg.Any<CancellationToken>());
     }
 }

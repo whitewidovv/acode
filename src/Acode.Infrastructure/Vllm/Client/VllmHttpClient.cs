@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using Acode.Infrastructure.Common;
+using Acode.Infrastructure.Vllm.Client.Retry;
 using Acode.Infrastructure.Vllm.Client.Streaming;
 using Acode.Infrastructure.Vllm.Exceptions;
 using Acode.Infrastructure.Vllm.Models;
@@ -17,6 +18,7 @@ public sealed class VllmHttpClient : IAsyncDisposable
     private readonly VllmClientConfiguration _config;
     private readonly HttpClient _httpClient;
     private readonly ILogger<VllmHttpClient> _logger;
+    private readonly IVllmRetryPolicy _retryPolicy;
     private bool _disposed;
 
     /// <summary>
@@ -24,10 +26,20 @@ public sealed class VllmHttpClient : IAsyncDisposable
     /// </summary>
     /// <param name="config">Client configuration.</param>
     /// <param name="logger">Logger for diagnostic output.</param>
-    public VllmHttpClient(VllmClientConfiguration config, ILogger<VllmHttpClient> logger)
+    /// <param name="retryPolicy">Optional retry policy for transient failures.</param>
+    public VllmHttpClient(VllmClientConfiguration config, ILogger<VllmHttpClient> logger, IVllmRetryPolicy? retryPolicy = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        // FR-075: Initialize retry policy (use provided or create default, no logger due to type mismatch)
+        _retryPolicy = retryPolicy ?? new VllmRetryPolicy(
+            maxRetries: 3,
+            initialDelayMs: 100,
+            maxDelayMs: 30000,
+            backoffMultiplier: 2.0,
+            logger: null);
+
         _config.Validate();
 
         var handler = new SocketsHttpHandler
@@ -80,70 +92,76 @@ public sealed class VllmHttpClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(request);
 
-        try
-        {
-            // FR-027: Generate correlation ID for request tracing
-            var correlationId = Guid.NewGuid().ToString();
-
-            var requestOptions = new System.Text.Json.JsonSerializerOptions
+        // FR-075: Wrap operation in retry policy for transient failures
+        return await _retryPolicy.ExecuteAsync(
+            async ct =>
             {
-                PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
-                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-            };
-            var json = System.Text.Json.JsonSerializer.Serialize(request, requestOptions);
-            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                try
+                {
+                    // FR-027: Generate correlation ID for request tracing
+                    var correlationId = Guid.NewGuid().ToString();
 
-            // FR-027: Create request message with correlation ID header
-            var requestMessage = new HttpRequestMessage(HttpMethod.Post, path)
-            {
-                Content = content
-            };
-            requestMessage.Headers.Add("X-Request-ID", correlationId);
+                    var requestOptions = new System.Text.Json.JsonSerializerOptions
+                    {
+                        PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
+                        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+                    };
+                    var json = System.Text.Json.JsonSerializer.Serialize(request, requestOptions);
+                    var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.SendAsync(
-                requestMessage,
-                cancellationToken).ConfigureAwait(false);
+                    // FR-027: Create request message with correlation ID header
+                    var requestMessage = new HttpRequestMessage(HttpMethod.Post, path)
+                    {
+                        Content = content
+                    };
+                    requestMessage.Headers.Add("X-Request-ID", correlationId);
 
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken)
-                    .ConfigureAwait(false);
-                ThrowForStatusCode(response.StatusCode, errorContent);
-            }
+                    var response = await _httpClient.SendAsync(
+                        requestMessage,
+                        ct).ConfigureAwait(false);
 
-            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken)
-                .ConfigureAwait(false);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        var errorContent = await response.Content.ReadAsStringAsync(ct)
+                            .ConfigureAwait(false);
+                        ThrowForStatusCode(response.StatusCode, errorContent);
+                    }
 
-            var responseOptions = new System.Text.Json.JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            };
+                    var responseJson = await response.Content.ReadAsStringAsync(ct)
+                        .ConfigureAwait(false);
 
-            return System.Text.Json.JsonSerializer.Deserialize<TResponse>(responseJson, responseOptions)
-                ?? throw new VllmParseException("Failed to deserialize response");
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new VllmConnectionException(
-                $"Failed to connect to vLLM at {_config.Endpoint}: {ex.Message}",
-                ex);
-        }
-        catch (TaskCanceledException ex) when (ex.CancellationToken == cancellationToken)
-        {
-            throw;
-        }
-        catch (TaskCanceledException ex) when (IsConnectionTimeout(ex))
-        {
-            throw new VllmConnectionException(
-                $"Failed to connect to vLLM at {_config.Endpoint}: connection timed out",
-                ex);
-        }
-        catch (TaskCanceledException ex)
-        {
-            throw new VllmTimeoutException(
-                $"Request to vLLM timed out after {_config.RequestTimeoutSeconds}s",
-                ex);
-        }
+                    var responseOptions = new System.Text.Json.JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    };
+
+                    return System.Text.Json.JsonSerializer.Deserialize<TResponse>(responseJson, responseOptions)
+                        ?? throw new VllmParseException("Failed to deserialize response");
+                }
+                catch (HttpRequestException ex)
+                {
+                    throw new VllmConnectionException(
+                        $"Failed to connect to vLLM at {_config.Endpoint}: {ex.Message}",
+                        ex);
+                }
+                catch (TaskCanceledException ex) when (ex.CancellationToken == ct)
+                {
+                    throw;
+                }
+                catch (TaskCanceledException ex) when (IsConnectionTimeout(ex))
+                {
+                    throw new VllmConnectionException(
+                        $"Failed to connect to vLLM at {_config.Endpoint}: connection timed out",
+                        ex);
+                }
+                catch (TaskCanceledException ex)
+                {
+                    throw new VllmTimeoutException(
+                        $"Request to vLLM timed out after {_config.RequestTimeoutSeconds}s",
+                        ex);
+                }
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
