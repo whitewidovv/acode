@@ -3,7 +3,7 @@ namespace Acode.Infrastructure.Vllm.Exceptions;
 /// <summary>
 /// Base exception for all vLLM provider errors.
 /// </summary>
-public class VllmException : Exception
+public class VllmException : Exception, IVllmException
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="VllmException"/> class.
