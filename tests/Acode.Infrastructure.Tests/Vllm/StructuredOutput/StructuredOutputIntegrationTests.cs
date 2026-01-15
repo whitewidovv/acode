@@ -4,6 +4,7 @@ using System.Text.Json;
 using Acode.Application.Inference;
 using Acode.Application.Tools;
 using Acode.Domain.Models.Inference;
+using Acode.Infrastructure.Vllm.Models;
 using Acode.Infrastructure.Vllm.StructuredOutput;
 using Acode.Infrastructure.Vllm.StructuredOutput.Capability;
 using Acode.Infrastructure.Vllm.StructuredOutput.Configuration;
@@ -51,6 +52,12 @@ public class StructuredOutputIntegrationTests
     public async Task ApplyToRequestAsync_WithResponseFormatJsonObject_ReturnsSuccess()
     {
         // Arrange
+        var vllmRequest = new VllmRequest
+        {
+            Model = "llama2",
+            Messages = new(),
+            Stream = false,
+        };
         var chatRequest = new ChatRequest(
             new[]
             {
@@ -60,13 +67,12 @@ public class StructuredOutputIntegrationTests
             responseFormat: new Acode.Application.Inference.ResponseFormat { Type = "json_object" });
 
         // Act
-        var result = await this._handler.ApplyToRequestAsync(chatRequest, "llama2");
+        var result = await this._handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2");
 
         // Assert
-        result.Success.Should().BeTrue();
-        result.ResponseFormat.Should().NotBeNull();
-        result.ResponseFormat!.Type.Should().Be("json_object");
-        result.FailureReason.Should().BeNull();
+        result.IsApplied.Should().BeTrue();
+        result.Mode.Should().Be(StructuredOutputMode.JsonObject);
+        vllmRequest.ResponseFormat.Should().NotBeNull();
     }
 
     [Fact]

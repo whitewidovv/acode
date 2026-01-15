@@ -1,7 +1,9 @@
 # Task 007e: Gap Remediation Checklist
 
-**Status**: IN PROGRESS
+**Status**: Phase 10A & 10B COMPLETE - Phase 10C IN PROGRESS
 **Total Gaps**: 23
+**Completed**: GAP-001 through GAP-021 (Core refactoring and VllmProvider integration)
+**Remaining**: Phase 10C (Test updates) and Phase 10D
 **Priority**: CRITICAL - Task cannot pass audit without these fixes
 
 ---
@@ -11,7 +13,7 @@
 ### Step 1: Implement ApplyResult Class
 
 **File**: `src/Acode.Infrastructure/Vllm/StructuredOutput/ApplyResult.cs`
-**Status**: 🔄 TODO
+**Status**: ✅ COMPLETED
 
 Create new class:
 ```csharp
@@ -39,7 +41,7 @@ public sealed class ApplyResult
 ### Step 2: Implement StructuredOutputMode Enum
 
 **File**: `src/Acode.Infrastructure/Vllm/StructuredOutput/StructuredOutputMode.cs`
-**Status**: 🔄 TODO
+**Status**: ✅ COMPLETED
 
 Create new enum:
 ```csharp
@@ -58,7 +60,7 @@ public enum StructuredOutputMode
 ### Step 3: Refactor ApplyToRequestAsync in StructuredOutputHandler
 
 **File**: `src/Acode.Infrastructure/Vllm/StructuredOutput/StructuredOutputHandler.cs`
-**Status**: 🔄 MAJOR REFACTORING REQUIRED
+**Status**: ✅ COMPLETED
 
 Changes needed:
 1. Add ILogger<StructuredOutputHandler> to constructor
@@ -81,7 +83,7 @@ Changes needed:
 ### Step 4: Implement Logging Statements
 
 **File**: `src/Acode.Infrastructure/Vllm/StructuredOutput/StructuredOutputHandler.cs`
-**Status**: 🔄 TODO (depends on Step 3)
+**Status**: ✅ COMPLETED (depends on Step 3)
 
 Add logging per spec (lines 3319, 3337, 3352, 3366, 3382, 3387, 3403, 3428, 3436):
 
@@ -107,7 +109,7 @@ _logger.LogDebug("Applied {Count} tool schemas for {Model}", transformedTools.Co
 ### Step 5: Update VllmProvider.ChatAsync
 
 **File**: `src/Acode.Infrastructure/Vllm/VllmProvider.cs`
-**Status**: 🔄 TODO
+**Status**: ✅ COMPLETED
 
 Current code (WRONG):
 ```csharp
@@ -143,7 +145,7 @@ if (this._structuredOutputHandler is not null)
 ### Step 6: Update VllmProvider.StreamChatAsync
 
 **File**: `src/Acode.Infrastructure/Vllm/VllmProvider.cs`
-**Status**: 🔄 TODO
+**Status**: ✅ COMPLETED
 
 Same changes as Step 5 but for StreamChatAsync method
 
@@ -156,6 +158,8 @@ Same changes as Step 5 but for StreamChatAsync method
 ## Phase 10C: Test Verification
 
 ### Step 7: Verify All Tests Still Pass
+
+**Status**: 🔄 IN PROGRESS - Test method calls being updated to new ApplyToRequestAsync signature
 
 **Commands to Run**:
 ```bash
@@ -172,8 +176,15 @@ dotnet test tests/Acode.Application.Tests/ --filter "Inference"
 dotnet test --verbosity quiet
 ```
 
-Expected: All 2350+ tests passing, 0 errors/warnings
+**What's Done**:
+- ✅ Infrastructure project compiles with 0 errors/warnings
+- ✅ Test file using directives updated (ILogger, IToolSchemaRegistry, NSubstitute, Acode.Infrastructure.Vllm.Models)
+- ✅ 5 StructuredOutputHandler constructor calls updated to pass new parameters
+- ✅ 1 ApplyToRequestAsync test call updated with new signature
 
+**Still TODO**:
+- ⏳ Update 11+ remaining ApplyToRequestAsync test calls to pass VllmRequest and modelId
+- ⏳ Update test assertions to use ApplyResult properties (IsApplied, IsDisabled, Mode)
 - [ ] GAP-022: Build succeeds with 0 errors/warnings
 - [ ] GAP-023: All tests pass
 
