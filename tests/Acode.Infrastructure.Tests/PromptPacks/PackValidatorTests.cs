@@ -303,6 +303,132 @@ components:
         result.Errors[0].Message.Should().Be("Error message");
     }
 
+    /// <summary>
+    /// Test that ValidatePath fails on invalid version format.
+    /// </summary>
+    [Fact]
+    public void ValidatePath_Should_Fail_On_Invalid_Version()
+    {
+        // Arrange
+        var packPath = Path.Combine(_tempDir, "bad-version");
+        Directory.CreateDirectory(packPath);
+
+        var manifest = @"
+format_version: '1.0'
+id: test-pack
+version: not-semver
+name: Test Pack
+description: A test prompt pack for invalid version validation
+created_at: 2025-01-01T00:00:00Z
+components:
+  - path: system.md
+    type: system
+";
+        File.WriteAllText(Path.Combine(packPath, "manifest.yml"), manifest);
+        File.WriteAllText(Path.Combine(packPath, "system.md"), "content");
+
+        // Act
+        var result = _validator.ValidatePath(packPath);
+
+        // Assert - Parse fails because version is invalid
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Code == "ACODE-VAL-003" || e.Message.Contains("version"));
+    }
+
+    /// <summary>
+    /// Test that strict validation detects undeclared template variables.
+    /// </summary>
+    [Fact]
+    public void Should_Detect_Undeclared_Template_Variables_With_Strict_Validation()
+    {
+        // Arrange - Component uses {{project_name}} but no variables declared
+        var components = new[]
+        {
+            new LoadedComponent("system.md", ComponentType.System, "Welcome to {{project_name}}! Use {{language}} for coding.", null),
+        };
+
+        var pack = new PromptPack(
+            "template-pack",
+            PackVersion.Parse("1.0.0"),
+            "Template Pack",
+            "Has template variables",
+            PackSource.User,
+            _tempDir,
+            null,
+            components);
+
+        // Act - Use strict validation
+        var errors = new List<ValidationError>();
+        _validator.ValidateTemplateVariablesStrict(pack, errors);
+
+        // Assert - Strict validation should report ACODE-VAL-005 for undeclared variables
+        errors.Should().Contain(e => e.Code == "ACODE-VAL-005");
+        errors.Should().HaveCount(2); // project_name and language
+    }
+
+    /// <summary>
+    /// Test that normal validation allows undeclared template variables (for runtime substitution).
+    /// </summary>
+    [Fact]
+    public void Should_Allow_Undeclared_Template_Variables_For_Runtime_Substitution()
+    {
+        // Arrange - Component uses {{project_name}} but no variables declared
+        var components = new[]
+        {
+            new LoadedComponent("system.md", ComponentType.System, "Welcome to {{project_name}}!", null),
+        };
+
+        var pack = new PromptPack(
+            "template-pack",
+            PackVersion.Parse("1.0.0"),
+            "Template Pack",
+            "Has template variables",
+            PackSource.User,
+            _tempDir,
+            null,
+            components);
+
+        // Act - Normal validation
+        var result = _validator.Validate(pack);
+
+        // Assert - Normal validation should NOT error on undeclared variables
+        // They can be provided at composition time
+        result.Errors.Should().NotContain(e => e.Code == "ACODE-VAL-005");
+    }
+
+    /// <summary>
+    /// Test that declared template variables do not cause errors.
+    /// </summary>
+    [Fact]
+    public void Should_Pass_When_Template_Variables_Are_Declared()
+    {
+        // Arrange - Component uses {{project_name}} which is declared in metadata
+        var components = new[]
+        {
+            new LoadedComponent(
+                "system.md",
+                ComponentType.System,
+                "Welcome to {{project_name}}!",
+                new Dictionary<string, string> { ["project_name"] = "MyProject" }),
+        };
+
+        var pack = new PromptPack(
+            "template-pack",
+            PackVersion.Parse("1.0.0"),
+            "Template Pack",
+            "Has declared template variables",
+            PackSource.User,
+            _tempDir,
+            null,
+            components);
+
+        // Act
+        var result = _validator.Validate(pack);
+
+        // Assert - Should pass since variable is declared
+        result.Errors.Should().NotContain(e => e.Code == "ACODE-VAL-005");
+    }
+
     private PromptPack CreateValidPack()
     {
         return CreateValidPackWithId("test-pack");
