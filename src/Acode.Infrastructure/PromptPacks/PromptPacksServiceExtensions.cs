@@ -34,8 +34,8 @@ public static class PromptPacksServiceExtensions
         services.AddSingleton<ManifestParser>();
         services.AddSingleton<ContentHasher>();
         services.AddSingleton<HashVerifier>();
-        services.AddSingleton<PackDiscovery>();
         services.AddSingleton<EmbeddedPackProvider>();
+        services.AddSingleton<PackDiscovery>();
 
         // Register loader, validator, and registry
         services.AddSingleton<PromptPackLoader>();

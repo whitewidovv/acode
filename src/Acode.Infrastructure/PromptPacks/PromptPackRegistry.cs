@@ -9,7 +9,7 @@ namespace Acode.Infrastructure.PromptPacks;
 /// <summary>
 /// Registry that indexes and provides access to prompt packs.
 /// </summary>
-public sealed class PromptPackRegistry : IPromptPackRegistry
+public sealed class PromptPackRegistry : IPromptPackRegistry, IDisposable
 {
     private readonly PackDiscovery _discovery;
     private readonly PromptPackLoader _loader;
@@ -19,7 +19,7 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
     private readonly ILogger<PromptPackRegistry> _logger;
 
     private readonly ConcurrentDictionary<string, PackManifest> _index = new();
-    private readonly object _refreshLock = new();
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PromptPackRegistry"/> class.
@@ -46,16 +46,12 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
         _logger = logger;
     }
 
-    /// <summary>
-    /// Initializes the registry by discovering available packs.
-    /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task representing the initialization.</returns>
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    /// <inheritdoc/>
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
         _logger.LogInformation("Initializing pack registry");
 
-        var packs = await _discovery.DiscoverAsync(cancellationToken).ConfigureAwait(false);
+        var packs = await _discovery.DiscoverAsync(ct).ConfigureAwait(false);
 
         foreach (var pack in packs)
         {
@@ -68,11 +64,11 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
     }
 
     /// <inheritdoc/>
-    public PromptPack GetPack(string packId)
+    public async Task<PromptPack> GetPackAsync(string packId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packId);
 
-        var pack = TryGetPack(packId);
+        var pack = await TryGetPackAsync(packId, ct).ConfigureAwait(false);
         if (pack is null)
         {
             throw new PackNotFoundException(packId);
@@ -82,7 +78,7 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
     }
 
     /// <inheritdoc/>
-    public PromptPack? TryGetPack(string packId)
+    public async Task<PromptPack?> TryGetPackAsync(string packId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packId);
 
@@ -102,7 +98,7 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
         // Load the pack
         try
         {
-            var pack = _loader.LoadPackAsync(manifest.PackPath).GetAwaiter().GetResult();
+            var pack = await _loader.LoadPackAsync(manifest.PackPath, ct).ConfigureAwait(false);
 
             // Validate
             var validationResult = _validator.Validate(pack);
@@ -150,10 +146,10 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
     }
 
     /// <inheritdoc/>
-    public PromptPack GetActivePack()
+    public async Task<PromptPack> GetActivePackAsync(CancellationToken ct = default)
     {
         var packId = GetActivePackId();
-        var pack = TryGetPack(packId);
+        var pack = await TryGetPackAsync(packId, ct).ConfigureAwait(false);
 
         if (pack is null)
         {
@@ -162,7 +158,7 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
                 packId,
                 PackConfiguration.DefaultPack);
 
-            pack = TryGetPack(PackConfiguration.DefaultPack);
+            pack = await TryGetPackAsync(PackConfiguration.DefaultPack, ct).ConfigureAwait(false);
         }
 
         if (pack is null)
@@ -181,9 +177,10 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
     }
 
     /// <inheritdoc/>
-    public void Refresh()
+    public async Task RefreshAsync(CancellationToken ct = default)
     {
-        lock (_refreshLock)
+        await _refreshLock.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
             _logger.LogInformation("Refreshing pack registry");
 
@@ -191,7 +188,17 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
             _index.Clear();
             _configuration.ClearCache();
 
-            InitializeAsync().GetAwaiter().GetResult();
+            await InitializeAsync(ct).ConfigureAwait(false);
         }
+        finally
+        {
+            _refreshLock.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _refreshLock.Dispose();
     }
 }

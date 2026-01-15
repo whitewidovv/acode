@@ -117,7 +117,7 @@ public class PromptsCommandTests
         var command = new PromptsCommand(_mockRegistry, _mockLoader, _mockValidator);
         var pack = CreateTestPack("acode-standard");
 
-        _mockRegistry.TryGetPack("acode-standard").Returns(pack);
+        _mockRegistry.TryGetPackAsync("acode-standard", Arg.Any<CancellationToken>()).Returns(pack);
 
         var output = new StringWriter();
         var context = CreateContext(new[] { "show", "acode-standard" }, output);
@@ -137,7 +137,7 @@ public class PromptsCommandTests
         var command = new PromptsCommand(_mockRegistry, _mockLoader, _mockValidator);
         var pack = CreateTestPack("acode-standard");
 
-        _mockRegistry.TryGetPack("acode-standard").Returns(pack);
+        _mockRegistry.TryGetPackAsync("acode-standard", Arg.Any<CancellationToken>()).Returns(pack);
 
         var output = new StringWriter();
         var context = CreateContext(new[] { "show", "acode-standard" }, output);
@@ -174,7 +174,7 @@ public class PromptsCommandTests
         // Arrange
         var command = new PromptsCommand(_mockRegistry, _mockLoader, _mockValidator);
 
-        _mockRegistry.TryGetPack("unknown-pack").Returns((PromptPack?)null);
+        _mockRegistry.TryGetPackAsync("unknown-pack", Arg.Any<CancellationToken>()).Returns((PromptPack?)null);
 
         var output = new StringWriter();
         var context = CreateContext(new[] { "show", "unknown-pack" }, output);
@@ -302,7 +302,7 @@ public class PromptsCommandTests
 
         // Assert
         exitCode.Should().Be(ExitCode.Success);
-        _mockRegistry.Received(1).Refresh();
+        await _mockRegistry.Received(1).RefreshAsync(Arg.Any<CancellationToken>()).ConfigureAwait(true);
         output.ToString().Should().Contain("reload");
     }
 

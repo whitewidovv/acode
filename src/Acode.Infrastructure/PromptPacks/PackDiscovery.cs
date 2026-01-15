@@ -12,6 +12,7 @@ public sealed class PackDiscovery
     private const string ManifestFileName = "manifest.yml";
 
     private readonly ManifestParser _parser;
+    private readonly EmbeddedPackProvider _embeddedProvider;
     private readonly PackDiscoveryOptions _options;
     private readonly ILogger<PackDiscovery> _logger;
 
@@ -19,14 +20,17 @@ public sealed class PackDiscovery
     /// Initializes a new instance of the <see cref="PackDiscovery"/> class.
     /// </summary>
     /// <param name="parser">The manifest parser.</param>
+    /// <param name="embeddedProvider">The embedded pack provider for built-in packs.</param>
     /// <param name="options">The discovery options.</param>
     /// <param name="logger">The logger.</param>
     public PackDiscovery(
         ManifestParser parser,
+        EmbeddedPackProvider embeddedProvider,
         IOptions<PackDiscoveryOptions> options,
         ILogger<PackDiscovery> logger)
     {
         _parser = parser ?? throw new ArgumentNullException(nameof(parser));
+        _embeddedProvider = embeddedProvider ?? throw new ArgumentNullException(nameof(embeddedProvider));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -40,8 +44,9 @@ public sealed class PackDiscovery
         CancellationToken cancellationToken = default)
     {
         var packs = new List<PackManifest>();
+        var discoveredIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Discover user packs
+        // Discover user packs first (they take precedence over built-in)
         var userPacksPath = _options.GetResolvedUserPacksPath();
         if (Directory.Exists(userPacksPath))
         {
@@ -49,7 +54,37 @@ public sealed class PackDiscovery
                 userPacksPath,
                 PackSource.User,
                 cancellationToken).ConfigureAwait(false);
-            packs.AddRange(userPacks);
+
+            foreach (var pack in userPacks)
+            {
+                packs.Add(pack);
+                discoveredIds.Add(pack.Id);
+            }
+        }
+
+        // Discover built-in packs (only add if not overridden by user)
+        var builtInPackIds = _embeddedProvider.GetAvailablePackIds();
+        foreach (var packId in builtInPackIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (discoveredIds.Contains(packId))
+            {
+                _logger.LogDebug("Built-in pack {PackId} overridden by user pack", packId);
+                continue;
+            }
+
+            try
+            {
+                var manifest = _embeddedProvider.LoadManifest(packId);
+                packs.Add(manifest);
+                discoveredIds.Add(packId);
+                _logger.LogDebug("Discovered built-in pack: {PackId}", packId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load built-in pack manifest for {PackId}", packId);
+            }
         }
 
         _logger.LogDebug("Discovered {PackCount} prompt packs", packs.Count);

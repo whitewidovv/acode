@@ -165,6 +165,42 @@ public sealed partial class PackValidator : IPackValidator
         return new ValidationResult(errors);
     }
 
+    /// <summary>
+    /// Validates template variables strictly, requiring all to be declared.
+    /// Used when strict validation is explicitly requested.
+    /// </summary>
+    /// <param name="pack">The pack to validate.</param>
+    /// <param name="errors">The list to add errors to.</param>
+    internal void ValidateTemplateVariablesStrict(PromptPack pack, List<ValidationError> errors)
+    {
+        var variablePattern = TemplateVariableRegex();
+
+        var validationErrors = pack.Components
+            .SelectMany(component => variablePattern.Matches(component.Content)
+                .Select(match => new
+                {
+                    Component = component,
+                    VarName = match.Groups[1].Value,
+                }))
+            .Where(x => x.Component.Metadata?.ContainsKey(x.VarName) != true)
+            .Select(x =>
+            {
+                _logger.LogWarning(
+                    "Undeclared template variable {VarName} in {Path}",
+                    x.VarName,
+                    x.Component.Path);
+
+                return new ValidationError
+                {
+                    Code = "ACODE-VAL-005",
+                    Message = $"Undeclared template variable '{{{{{x.VarName}}}}}' in {x.Component.Path}. Declare it in component metadata.",
+                    FilePath = x.Component.Path,
+                };
+            });
+
+        errors.AddRange(validationErrors);
+    }
+
     private static void ValidateComponent(LoadedComponent component, List<ValidationError> errors)
     {
         if (string.IsNullOrWhiteSpace(component.Path))
@@ -202,11 +238,24 @@ public sealed partial class PackValidator : IPackValidator
             {
                 var varName = match.Groups[1].Value;
 
-                // Log but don't error - we're lenient on undefined variables
-                _logger.LogDebug(
-                    "Found template variable {VarName} in {Path}",
-                    varName,
-                    component.Path);
+                // Check if variable is declared in component metadata
+                var isDeclared = component.Metadata?.ContainsKey(varName) == true;
+
+                if (!isDeclared)
+                {
+                    // Log as debug - undeclared variables are expected when values are provided at composition time
+                    _logger.LogDebug(
+                        "Template variable {VarName} in {Path} has no default value declared - will use composition context",
+                        varName,
+                        component.Path);
+                }
+                else
+                {
+                    _logger.LogDebug(
+                        "Found declared template variable {VarName} in {Path}",
+                        varName,
+                        component.Path);
+                }
             }
         }
     }

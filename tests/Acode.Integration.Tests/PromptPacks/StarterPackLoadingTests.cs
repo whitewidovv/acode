@@ -26,7 +26,8 @@ public class StarterPackLoadingTests : IAsyncLifetime
         _registry = _serviceProvider.GetRequiredService<IPromptPackRegistry>();
         _loader = _serviceProvider.GetRequiredService<IPromptPackLoader>();
 
-        await Task.CompletedTask;
+        // Initialize the registry to discover packs
+        await _registry.InitializeAsync().ConfigureAwait(false);
     }
 
     public async Task DisposeAsync()
