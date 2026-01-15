@@ -71,6 +71,12 @@ public sealed record AcodeConfig
     /// Optional - defaults applied if missing.
     /// </summary>
     public SearchSettings? Search { get; init; }
+
+    /// <summary>
+    /// Gets the prompt pack configuration.
+    /// Optional - defaults applied if missing.
+    /// </summary>
+    public PromptsConfig? Prompts { get; init; }
 }
 
 /// <summary>
@@ -446,4 +452,43 @@ public sealed record StorageSyncRetryPolicy
     /// Gets the backoff time in milliseconds.
     /// </summary>
     public int BackoffMs { get; init; } = 1000;
+}
+
+/// <summary>
+/// Prompt pack configuration.
+/// </summary>
+/// <remarks>
+/// Per Task 008b requirements for configuration-based pack selection.
+/// </remarks>
+public sealed record PromptsConfig
+{
+    /// <summary>
+    /// Gets the active prompt pack ID.
+    /// Defaults to "acode-standard".
+    /// </summary>
+    public string PackId { get; init; } = "acode-standard";
+
+    /// <summary>
+    /// Gets the discovery configuration.
+    /// Optional - defaults applied if missing.
+    /// </summary>
+    public PromptsDiscoveryConfig? Discovery { get; init; }
+}
+
+/// <summary>
+/// Prompt pack discovery configuration.
+/// </summary>
+public sealed record PromptsDiscoveryConfig
+{
+    /// <summary>
+    /// Gets the user packs path.
+    /// Defaults to ".acode/prompts".
+    /// </summary>
+    public string UserPath { get; init; } = ".acode/prompts";
+
+    /// <summary>
+    /// Gets a value indicating whether built-in packs are enabled.
+    /// Defaults to true.
+    /// </summary>
+    public bool EnableBuiltin { get; init; } = true;
 }
