@@ -1,188 +1,450 @@
-# Task 006d: vLLM Lifecycle Management - Fresh Gap Analysis
+# Task 006d: vLLM Lifecycle Management - Comprehensive Gap Analysis
 
 **Date**: January 15, 2026
-**Methodology**: CLAUDE.md Section 3.2 - Fresh Gap Analysis (treating as if none done before)
-**Specification**: `docs/tasks/refined-tasks/Epic 01/task-006d-vllm-lifecycle-management.md` (717 lines)
-**Related Task (Reference Pattern)**: Task 005d (Ollama Lifecycle Management) - completed with 24+ unit tests and full implementation
+**Methodology**: CLAUDE.md Section 3.2 + GAP_ANALYSIS_METHODOLOGY.md
+**Specification**: docs/tasks/refined-tasks/Epic 01/task-006d-vllm-lifecycle-management.md (717 lines)
+**Reference Pattern**: Task 005d (Ollama Lifecycle) - proven pattern to follow
 
 ---
 
-## Part 1: READ THE SPEC - Key Sections to Verify
+## EXECUTIVE SUMMARY
 
-### Specification Structure Review
-- **Description** (lines 14-95): Business value, technical approach, integration points, assumptions
-- **Functional Requirements** (lines 173-271): 50 FRs covering orchestrator, startup, health, model mgmt, GPU config, error handling, integration
-- **Non-Functional Requirements** (lines 273-313): 19 NFRs covering performance, reliability, observability, compatibility
-- **Acceptance Criteria** (lines 517-590): 44 ACs across auto-start, model mgmt, health monitoring, crash recovery, config, GPU, status, error handling, integration
-- **Testing Requirements** (lines 592-630):
-  - Unit tests: 10 required (FR validation, startup, health, model management, config, restart limits, airgapped)
-  - Integration tests: 7 required (end-to-end startup, model switching, crash recovery, GPU detection, auth, multi-GPU, status reporting)
-  - Performance tests: 4 required (startup latency, health check, model lazy load, GPU monitoring overhead)
-- **Implementation Prompt** (lines 632-714): File structure, configuration example, error codes, implementation checklist
+**Spec Requirements**:
+- **717 total lines** with 50+ FRs, 19 NFRs, 44 ACs, 21 tests, 15 implementation items
+- **File structure**: 20+ files across Domain/Application/Infrastructure/Tests layers
+- **Scope**: vLLM service orchestration with startup, health monitoring, model loading, GPU management, crash recovery
 
-### Key Technical Requirements
-1. **Service Orchestrator**: Parallel to OllamaServiceOrchestrator but vLLM-specific
-2. **Operating Modes**: Managed, Monitored, External (same as Ollama)
-3. **GPU Support**: NVIDIA/AMD GPU configuration, memory utilization monitoring
-4. **Model Loading**: Huggingface models with lazy loading support
-5. **Configuration**: From `providers.vllm.lifecycle` section in config.yml
-6. **Health Monitoring**: `/health` endpoint + `/v1/models` for model verification
-7. **Lifecycle Management**: Start/stop/restart with restart policy enforcement
-8. **Error Handling**: GPU not available, model not found, auth required, port conflict, etc.
+**Current Implementation State**:
+- ✅ Task 006c COMPLETE: vLLM Health Check endpoints, error handling (64 tests passing)
+- ❌ Task 006d MISSING: All lifecycle orchestration, state machine, GPU/model managers
+- **Completion**: 0% (no lifecycle files exist yet)
 
----
+**Gap Breakdown**:
+| Category | Required | Complete | Missing | Status |
+|----------|----------|----------|---------|--------|
+| Domain Layer | 4 files | 0 | 4 | ❌ MISSING |
+| Application Layer | 2 files | 0 | 2 | ❌ MISSING |
+| Infrastructure | 8 files | 0 | 8 | ❌ MISSING |
+| Tests | 7 files | 0 | 7 | ❌ MISSING |
+| **TOTAL** | **21 files** | **0** | **21** | **0% COMPLETE** |
 
-## Part 2: VERIFY CURRENT IMPLEMENTATION STATE
-
-### Existing vLLM Infrastructure (DO NOT RECREATE)
-- ✅ `src/Acode.Infrastructure/Vllm/` directory structure
-- ✅ `VllmProvider.cs` - vLLM HTTP provider implementation
-- ✅ `VllmHttpClient.cs` - HTTP client layer with retry/auth
-- ✅ `VllmHealthChecker.cs` - Basic health checking (Task 006c - COMPLETE)
-- ✅ `VllmHealthConfiguration.cs` - Health check config (Task 006c - COMPLETE, now includes BaseUrl + ModelsEndpoint)
-- ✅ `VllmMetricsClient.cs` - Prometheus metrics client (Task 006c - COMPLETE)
-- ✅ `VllmMetricsParser.cs` - Prometheus parser (Task 006c - COMPLETE)
-- ✅ Various exception types in `Vllm/Exceptions/`
-- ✅ Test structure: `tests/Acode.Infrastructure.Tests/Vllm/`
-
-**IMPORTANT**: We are NOT recreating these. We build lifecycle management ON TOP.
-
-### What MUST BE CREATED FOR TASK 006d (Domain/Application/Infrastructure Layers)
-
-#### Phase 1: Domain Layer (Enums & Interfaces) - MISSING
-- ❌ `src/Acode.Domain/Providers/Vllm/VllmServiceState.cs` - Service state enum (7 values: Running, Starting, Stopping, Stopped, Failed, Crashed, Unknown)
-- ❌ `src/Acode.Domain/Providers/Vllm/VllmLifecycleMode.cs` - Lifecycle mode enum (3 values: Managed, Monitored, External)
-- ❌ `src/Acode.Domain/Providers/Vllm/ModelLoadProgress.cs` - Model loading progress tracking
-
-#### Phase 2: Application Layer (Configuration) - MISSING
-- ❌ `src/Acode.Application/Providers/Vllm/IVllmServiceOrchestrator.cs` - Interface definition (7 methods minimum)
-- ❌ `src/Acode.Application/Providers/Vllm/VllmLifecycleOptions.cs` - Configuration options (10+ properties)
-
-#### Phase 3: Infrastructure Layer - Core Components - MISSING
-- ❌ `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmServiceOrchestrator.cs` - Main orchestrator (300+ lines)
-- ❌ `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmServiceStateTracker.cs` - State machine (150+ lines)
-- ❌ `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmHealthCheckWorker.cs` - Background health monitoring (150+ lines)
-- ❌ `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmRestartPolicyEnforcer.cs` - Restart rate limiting (100+ lines)
-- ❌ `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmModelLoader.cs` - Huggingface model loading (150+ lines)
-- ❌ `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmGpuMonitor.cs` - GPU monitoring (120+ lines)
-
-#### Phase 4: DI Registration - MISSING
-- ❌ `AddVllmLifecycleManagement()` extension method in ServiceCollectionExtensions.cs
-
-#### Phase 5: Tests - MISSING
-- ❌ `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/VllmServiceOrchestratorTests.cs` - 20+ unit tests
-- ❌ `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/VllmServiceStateTrackerTests.cs` - 15+ unit tests
-- ❌ `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/VllmHealthCheckWorkerTests.cs` - 10+ unit tests
-- ❌ `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/VllmRestartPolicyEnforcerTests.cs` - 12+ unit tests
-- ❌ `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/VllmGpuMonitorTests.cs` - 8+ unit tests
-- ❌ `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/VllmModelLoaderTests.cs` - 10+ unit tests
-- ❌ `tests/Acode.Integration.Tests/Providers/Vllm/Lifecycle/VllmLifecycleIntegrationTests.cs` - 7+ integration tests
+**Expected Implementation Scope**:
+- **Production Code**: 2000+ lines (enums, configs, orchestrator, helpers)
+- **Test Code**: 1500+ lines (100+ tests - unit, integration, performance)
+- **Test Count Expected**: 10 unit + 7 integration + 4 performance = 21+ tests minimum
 
 ---
 
-## Part 3: GAP SUMMARY
+## SPECIFICATION ANALYSIS
 
-### Total Implementation Gaps: 20 files / 1500+ lines of code
+### Functional Requirements Summary (50 FRs)
 
-#### By Layer:
-- **Domain Layer**: 3 files (enums + supporting types)
-- **Application Layer**: 2 files (interface + configuration)
-- **Infrastructure Layer**: 8 files (orchestrator + 6 helper components + DI)
-- **Test Layer**: 7 test files (100+ tests total)
+**FR-001 to FR-005**: Service Orchestrator Interface
+- Must mirror OllamaServiceOrchestrator interface
+- Accept model ID in constructor (Huggingface format)
+- Support 3 lifecycle modes: Managed/Monitored/External
 
-#### By Complexity:
-- **Simple** (enums, config): 5 files - 400 lines
-- **Medium** (helpers, GPU monitor): 5 files - 600 lines
-- **Complex** (main orchestrator): 1 file - 300+ lines
-- **Tests**: 7 files - 1000+ lines
+**FR-006 to FR-015**: vLLM-Specific Startup
+- Start via `python -m vllm.entrypoints.openai.api_server` or `vllm serve`
+- Pass `--model <model-id>` for Huggingface models
+- GPU configuration (tensor parallelism, memory utilization)
+- Error detection: GPU unavailable, model not found, port conflict
 
----
+**FR-016 to FR-020**: Health Monitoring
+- Use `/health` endpoint + `/v1/models` for model verification
+- 5-second timeout (same as Ollama)
+- Auto-restart on failed checks
 
-## Part 4: IMPLEMENTATION ORDER (For TDD)
+**FR-021 to FR-027**: Model Management
+- Ensure configured model available/loadable
+- Lazy loading (default vLLM behavior)
+- Configurable load timeout (default 300s)
+- Airgapped mode blocks HF registry fetching
+- Model ID validation (org/model-name format)
+- Model switching restarts service
 
-### Recommended Sequence (Tests First)
+**FR-028 to FR-031**: GPU Configuration
+- Memory utilization configurable (0.0-1.0, default 0.9)
+- Tensor parallelism for multi-GPU
+- Pipeline parallelism (if supported)
 
-**Phase 1: Domain Enums** (Foundation - no dependencies)
-1. VllmServiceState enum + tests
-2. VllmLifecycleMode enum + tests
+**FR-032 to FR-039**: Restart Policy & Configuration
+- Same crash detection as Ollama (PID-based)
+- Max 3 restarts per 60 seconds
+- 2-second minimum wait before retry
+- VllmLifecycleOptions with: Mode, StartTimeout, HealthCheckInterval, MaxRestarts, Port
+- Load from `providers.vllm.lifecycle` config section
+- Model ID via config, CLI, or env var override
 
-**Phase 2: Application Config** (Depends on Phase 1)
-3. IVllmServiceOrchestrator interface + tests
-4. VllmLifecycleOptions config + tests
+**FR-040 to FR-051**: Error Reporting & Integration
+- Detailed error messages for port, model, auth, GPU, timeout issues
+- Integration with ProviderRegistry
+- EnsureHealthyAsync() calls from registry
 
-**Phase 3: Helper Components** (Depends on Phase 2)
-5. VllmServiceStateTracker + tests
-6. VllmRestartPolicyEnforcer + tests
-7. VllmGpuMonitor + tests
-8. VllmModelLoader + tests
-9. VllmHealthCheckWorker + tests
+### Non-Functional Requirements (19 NFRs)
 
-**Phase 4: Main Orchestrator** (Depends on all above)
-10. VllmServiceOrchestrator + tests (integrates all helpers)
-
-**Phase 5: Integration & DI** (Depends on Phase 4)
-11. DI registration (AddVllmLifecycleManagement)
-12. Integration tests (end-to-end scenarios)
-13. Performance tests (startup latency, GPU overhead)
-
----
-
-## Part 5: KEY DIFFERENCES FROM OLLAMA (vLLM-Specific)
-
-1. **GPU Support**: Additional GPU monitoring and configuration
-2. **Model Format**: Huggingface model IDs instead of Ollama model names
-3. **Lazy Loading**: vLLM loads models on first request (default behavior)
-4. **Port**: Default 8000 instead of 11434
-5. **Multi-GPU**: Tensor parallelism configuration for multi-GPU setups
-6. **Authentication**: HF_TOKEN support for private/gated models
-7. **Airgapped Mode**: Special handling to prevent HF model registry access
-8. **Startup Command**: `python -m vllm.entrypoints.openai.api_server` or `vllm serve`
-
----
-
-## Part 6: SPECIFICATION COMPLIANCE CHECKLIST
-
-### Functional Requirements (50 FRs)
-- [ ] FR-001 to FR-009: Service Orchestrator interface (same as Ollama)
-- [ ] FR-010 to FR-015: vLLM-specific startup with GPU, model loading
-- [ ] FR-016 to FR-021: Health monitoring with /health and /v1/models endpoints
-- [ ] FR-022 to FR-027: Model management with Huggingface format validation
-- [ ] FR-028 to FR-031: GPU configuration (utilization, tensor parallelism)
-- [ ] FR-032 to FR-035: Crash detection and restart policy (same as Ollama)
-- [ ] FR-036 to FR-042: Configuration loading and validation
-- [ ] FR-043 to FR-048: Error reporting with helpful messages
-- [ ] FR-049 to FR-051: Integration with ProviderRegistry
+| Category | Target |
+|----------|--------|
+| EnsureHealthyAsync() when running | <50ms |
+| EnsureHealthyAsync() when restarting | 2-5 seconds |
+| Health check latency | <100ms |
+| Model lazy load | <30 seconds |
+| Startup overhead | 5-15 seconds |
+| Memory overhead | <20 MB |
+| Idle CPU usage | <1% |
+| GPU monitoring overhead | <5% CPU |
+| Restart success rate | >95% |
+| Health check accuracy | >95% |
+| Model load success | >95% |
+| vLLM version support | 0.4.0+ |
 
 ### Acceptance Criteria (44 ACs)
-- [ ] AC-001 to AC-005: Auto-start functionality
-- [ ] AC-006 to AC-013: Model management (lazy loading, validation, auth, airgapped)
-- [ ] AC-014 to AC-017: Health monitoring
-- [ ] AC-018 to AC-021: Crash recovery
-- [ ] AC-022 to AC-027: Configuration
-- [ ] AC-028 to AC-031: GPU configuration
-- [ ] AC-032 to AC-035: Status reporting
-- [ ] AC-036 to AC-040: Error handling
-- [ ] AC-041 to AC-044: Integration
 
-### Testing Requirements
-- [ ] 10 unit tests: Startup, health check, model management, config, restart, airgapped
-- [ ] 7 integration tests: End-to-end, model switching, crash recovery, GPU, auth, multi-GPU, status
-- [ ] 4 performance tests: Startup latency, health check, model lazy load, GPU overhead
+**AC-001 to AC-005**: Auto-Start (Managed Mode)
+**AC-006 to AC-013**: Model Management (lazy load, validation, auth, airgapped)
+**AC-014 to AC-017**: Health Monitoring (endpoints, model verification, restart triggers)
+**AC-018 to AC-021**: Crash Recovery (detection, restart, limits, history)
+**AC-022 to AC-027**: Configuration (loading, env override, validation)
+**AC-028 to AC-031**: GPU Configuration (memory, tensor parallelism, detection)
+**AC-032 to AC-035**: Status Reporting (state, model, GPU, health)
+**AC-036 to AC-040**: Error Handling (port, model, GPU, auth, timeout)
+**AC-041 to AC-044**: Integration (registry, failures, reconnect, retry)
+
+### Testing Requirements (21+ tests)
+
+**Unit Tests (10)**: UT-001 to UT-010
+- Startup with valid model, port detection, GPU detection, model not found
+- Health checks (/health and /v1/models endpoints)
+- Model ID validation, config loading, restart limits, airgapped mode
+
+**Integration Tests (7)**: IT-001 to IT-007
+- End-to-end startup → model load → request
+- Model switching with restart
+- Crash recovery and auto-restart
+- GPU detection
+- HF authentication
+- Multi-GPU tensor parallelism
+- Status reporting
+
+**Performance Tests (4)**: PT-001 to PT-004
+- Startup with 7B model (<15 seconds)
+- Health check latency (<100ms)
+- Model lazy load (<30 seconds)
+- GPU monitoring overhead (<5% CPU)
 
 ---
 
-## Next Steps
+## CURRENT IMPLEMENTATION STATE
 
-This gap analysis documents everything that must be built for task-006d. The recommended approach:
+### VERIFIED: Existing Infrastructure (Do NOT recreate)
 
-1. **Use task-005d as pattern reference** - Mirror Ollama's orchestrator design
-2. **Follow TDD methodology** - Write tests before implementation
-3. **Implement in phases** - Domain → Config → Helpers → Orchestrator → Tests
-4. **Focus on vLLM-specific differences** - GPU support, Huggingface models, airgapped constraints
-5. **Ensure spec compliance** - All 50 FRs and 44 ACs must be validated
+✅ **Task 006c COMPLETE** (64 tests passing):
+- `src/Acode.Infrastructure/Vllm/Health/VllmHealthChecker.cs` - Health check logic
+- `src/Acode.Infrastructure/Vllm/Health/VllmHealthConfiguration.cs` - Health config with BaseUrl, ModelsEndpoint
+- `src/Acode.Infrastructure/Vllm/Health/Metrics/VllmMetricsClient.cs` - Prometheus metrics
+- `src/Acode.Infrastructure/Vllm/Health/Metrics/VllmMetricsParser.cs` - Metrics parsing
+- `src/Acode.Infrastructure/Vllm/Health/VllmLoadStatus.cs` - Load status tracking
+- `src/Acode.Infrastructure/Vllm/VllmProvider.cs` - HTTP provider implementation
+- `src/Acode.Infrastructure/Vllm/Client/VllmHttpClient.cs` - HTTP client
+- Exception types in `src/Acode.Infrastructure/Vllm/Exceptions/`
 
-Total estimated scope: 20 files, 1500+ lines of code, 100+ tests
+✅ **Pattern Reference - Ollama Lifecycle** (Task 005d - working reference):
+- `src/Acode.Domain/Providers/Ollama/OllamaServiceState.cs` - Enum: Running/Starting/Stopping/Stopped/Failed/Crashed/Unknown
+- `src/Acode.Domain/Providers/Ollama/OllamaLifecycleMode.cs` - Enum: Managed/Monitored/External
+- `src/Acode.Domain/Providers/Ollama/ModelPullProgress.cs` - Progress tracking
+- `src/Acode.Domain/Providers/Ollama/ModelPullResult.cs` - Pull result
+- `src/Acode.Application/Providers/Ollama/OllamaLifecycleOptions.cs` - Configuration class
+- `src/Acode.Infrastructure/Providers/Ollama/Lifecycle/OllamaServiceOrchestrator.cs` - Main orchestrator
+- `src/Acode.Infrastructure/Providers/Ollama/Lifecycle/ServiceStateTracker.cs` - State machine
+- `src/Acode.Infrastructure/Providers/Ollama/Lifecycle/HealthCheckWorker.cs` - Background health checks
+- `src/Acode.Infrastructure/Providers/Ollama/Lifecycle/RestartPolicyEnforcer.cs` - Restart rate limiting
+- `src/Acode.Infrastructure/Providers/Ollama/Lifecycle/ModelPullManager.cs` - Model pull logic
+
+### MISSING: Task 006d Implementation (20 files)
+
+#### DOMAIN LAYER (4 files)
+
+**❌ Missing: `src/Acode.Domain/Providers/Vllm/VllmServiceState.cs`**
+- Type: Enum
+- Size: ~50 lines
+- Expected values: Running, Starting, Stopping, Stopped, Failed, Crashed, Unknown (7 values)
+- Mirrors: OllamaServiceState.cs (same pattern)
+- Tests: VllmServiceStateTests (5+ test methods)
+
+**❌ Missing: `src/Acode.Domain/Providers/Vllm/VllmLifecycleMode.cs`**
+- Type: Enum
+- Size: ~40 lines
+- Expected values: Managed, Monitored, External (3 values)
+- Mirrors: OllamaLifecycleMode.cs (same pattern)
+- Tests: VllmLifecycleModeTests (6+ test methods)
+
+**❌ Missing: `src/Acode.Domain/Providers/Vllm/ModelLoadProgress.cs`**
+- Type: Class (sealed record-like)
+- Size: ~80 lines
+- Properties: ModelId, ProgressPercent, BytesDownloaded, TotalBytes, Status, StartedAt, CompletedAt
+- Factory methods: FromDownloading(), FromComplete()
+- Tests: ModelLoadProgressTests (8+ test methods)
+
+**❌ Missing: `src/Acode.Domain/Providers/Vllm/GpuInfo.cs`**
+- Type: Class (sealed record-like)
+- Size: ~60 lines
+- Properties: DeviceId, Name, TotalMemory, AvailableMemory, UtilizationPercent, Temperature
+- Tests: GpuInfoTests (6+ test methods)
+
+#### APPLICATION LAYER (2 files)
+
+**❌ Missing: `src/Acode.Application/Providers/Vllm/IVllmServiceOrchestrator.cs`**
+- Type: Interface
+- Size: ~80 lines
+- Methods: EnsureHealthyAsync(model?), StartAsync(model), StopAsync(), GetStatusAsync(), RestartAsync()
+- Returns: IDisposable, Task<VllmStatus>, Task<IReadOnlyList<GpuInfo>>, etc.
+- Mirrors: IOllamaServiceOrchestrator pattern
+
+**❌ Missing: `src/Acode.Application/Providers/Vllm/VllmLifecycleOptions.cs`**
+- Type: Class (configuration)
+- Size: ~100 lines
+- Properties: Mode, StartTimeoutSeconds, HealthCheckIntervalSeconds, MaxRestartsPerMinute, ModelLoadTimeoutSeconds, Port, StopOnExit, GpuMemoryUtilization, TensorParallelSize
+- Methods: Validate() with exception on invalid config
+- Mirrors: OllamaLifecycleOptions.cs
+
+#### INFRASTRUCTURE LAYER (8 files)
+
+**❌ Missing: `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmServiceOrchestrator.cs`**
+- Type: Class (main orchestrator)
+- Size: 350-400 lines
+- Implements: IVllmServiceOrchestrator, IDisposable
+- Dependencies: IVllmProvider, IProcessRunner, ILogger, VllmHealthChecker, GpuMonitor, ModelLoader, StateTracker, RestartPolicyEnforcer
+- Key methods:
+  - StartAsync(): Start vLLM process with model
+  - StopAsync(): Graceful shutdown
+  - EnsureHealthyAsync(): Check health, restart if failed
+  - GetStatusAsync(): Current service state
+  - RestartAsync(): Forceful restart
+- Mirrors: OllamaServiceOrchestrator.cs pattern
+
+**❌ Missing: `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmServiceStateTracker.cs`**
+- Type: Class (state machine)
+- Size: 150-180 lines
+- Properties: CurrentState (VllmServiceState), ProcessId, UpSinceUtc, LastHealthCheckUtc, LastHealthCheckStatus
+- Methods: Transition(newState), MarkHealthy(), MarkUnhealthy(), GetDiagnostics()
+- Thread-safe: Yes (lock-based)
+- Mirrors: ServiceStateTracker.cs (Ollama pattern)
+
+**❌ Missing: `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmHealthCheckWorker.cs`**
+- Type: Class (background worker)
+- Size: 150-180 lines
+- Implements: IDisposable, BackgroundService (or Timer-based)
+- Responsibility: Periodic health checks, failure counting, auto-restart trigger
+- Methods: StartAsync(), StopAsync(), ExecuteAsync() (worker loop)
+- Mirrors: HealthCheckWorker.cs (Ollama pattern)
+
+**❌ Missing: `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmRestartPolicyEnforcer.cs`**
+- Type: Class (rate limiter)
+- Size: 120-150 lines
+- Responsibility: Track restart history, enforce max 3 restarts per 60 seconds
+- Methods: CanRestart(), RecordRestart(), Reset(), GetHistory()
+- Mirrors: RestartPolicyEnforcer.cs (Ollama pattern)
+
+**❌ Missing: `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmGpuMonitor.cs`**
+- Type: Class (GPU-specific health)
+- Size: 200-250 lines
+- Responsibility: Detect GPU availability, monitor utilization, report errors
+- Methods: GetAvailableGpuAsync(), GetUtilizationAsync(), GetTemperatureAsync(), DetectGpuError()
+- GPU detection: nvidia-smi or rocm-smi commands
+- vLLM-specific: Reports as GpuInfo[] with device IDs, memory, utilization
+
+**❌ Missing: `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmModelLoader.cs`**
+- Type: Class (Huggingface model management)
+- Size: 200-250 lines
+- Responsibility: Validate model IDs, check HF token, detect airgapped mode, handle loading errors
+- Methods: ValidateModelIdAsync(modelId), CanLoadModelAsync(modelId), GetModelInfoAsync(modelId), LoadModelAsync(modelId)
+- Format validation: Ensure org/model-name format
+- Airgapped handling: Check local cache only, reject HF registry fetches
+- Error handling: 401 (auth), 404 (not found), timeout, etc.
+
+**❌ Missing: `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmProcessRunner.cs`** (or reuse existing)
+- Type: Class or interface
+- Responsibility: Start/stop vLLM process, handle stdout/stderr
+- Methods: StartProcessAsync(command, args), TerminateAsync(processId), GetProcessStatusAsync(processId)
+- Command format: `python -m vllm.entrypoints.openai.api_server --model <model> --port <port>`
+
+#### TEST LAYER (7 files)
+
+**❌ Missing: `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/VllmServiceStateTests.cs`**
+- Test count: 5+ tests
+- Coverage: Enum values exist, accessible, correct numeric values, ToString(), Parse()
+
+**❌ Missing: `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/VllmLifecycleModeTests.cs`**
+- Test count: 6+ tests
+- Coverage: All 3 modes, default, accessible, ToString(), Parse(), documentation
+
+**❌ Missing: `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/ModelLoadProgressTests.cs`**
+- Test count: 8+ tests
+- Coverage: Factory methods, progress calculation, immutability, completion state
+
+**❌ Missing: `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/GpuInfoTests.cs`**
+- Test count: 6+ tests
+- Coverage: Construction, property access, immutability, error states
+
+**❌ Missing: `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/VllmServiceOrchestratorTests.cs`**
+- Test count: 20+ tests
+- Coverage: StartAsync (valid model, port conflict, GPU error), StopAsync, EnsureHealthyAsync, GetStatusAsync, RestartAsync, failure handling, mode behavior (Managed/Monitored/External)
+
+**❌ Missing: `tests/Acode.Infrastructure.Tests/Providers/Vllm/Lifecycle/VllmGpuMonitorTests.cs`**
+- Test count: 10+ tests
+- Coverage: GPU detection, nvidia-smi/rocm-smi parsing, error reporting, availability states
+
+**❌ Missing: `tests/Acode.Integration.Tests/Providers/Vllm/Lifecycle/VllmLifecycleIntegrationTests.cs`**
+- Test count: 7+ integration tests
+- Coverage: E2E startup, model switching, crash recovery, GPU detection, HF auth, multi-GPU, status reporting
 
 ---
 
-**Status**: Ready for detailed implementation planning in completion checklist
+## IMPLEMENTATION STRATEGY
+
+### Phase 1: Domain Layer (Foundation - No Dependencies)
+
+**Estimated Effort**: 1-2 hours
+**Output**: 4 enum/class files, 25+ unit tests
+
+1. Create VllmServiceState enum + tests (5 tests)
+2. Create VllmLifecycleMode enum + tests (6 tests)
+3. Create ModelLoadProgress class + tests (8 tests)
+4. Create GpuInfo class + tests (6 tests)
+
+**Acceptance**: All files compile, no NotImplementedException, 25+ tests passing, 0 warnings
+
+### Phase 2: Application Layer (Configuration - Depends on Phase 1)
+
+**Estimated Effort**: 1-1.5 hours
+**Output**: 2 files, 12+ unit tests
+
+1. Create IVllmServiceOrchestrator interface (no tests needed for interface)
+2. Create VllmLifecycleOptions class + tests (12+ tests for config validation, property access, defaults)
+
+**Acceptance**: Files compile, VllmLifecycleOptions validates properly, 12+ tests passing
+
+### Phase 3: Helper Components (Infrastructure - Depends on Phase 2)
+
+**Estimated Effort**: 3-4 hours
+**Output**: 3 helper files, 25+ unit tests
+
+1. Create VllmServiceStateTracker + tests (8 tests for state transitions, thread safety)
+2. Create VllmRestartPolicyEnforcer + tests (8 tests for rate limiting, history)
+3. Create VllmGpuMonitor + tests (10+ tests for GPU detection, parsing)
+
+**Acceptance**: 25+ tests passing, no stubs
+
+### Phase 4: Complex Components (Infrastructure - Depends on Phase 3)
+
+**Estimated Effort**: 2-3 hours
+**Output**: 2 files, 15+ unit tests
+
+1. Create VllmModelLoader + tests (10+ tests for validation, error handling, airgapped)
+2. Create VllmHealthCheckWorker + tests (5+ tests for background monitoring)
+
+**Acceptance**: 15+ tests passing
+
+### Phase 5: Main Orchestrator (Infrastructure - Depends on All Above)
+
+**Estimated Effort**: 2-3 hours
+**Output**: 1 file, 20+ unit tests
+
+1. Create VllmServiceOrchestrator + tests (20+ tests for startup, stop, ensure healthy, restart, modes)
+
+**Acceptance**: 20+ tests passing, implements IVllmServiceOrchestrator fully
+
+### Phase 6: Integration Tests (Depends on Phase 5)
+
+**Estimated Effort**: 1.5-2 hours
+**Output**: 1 file, 7+ integration tests
+
+1. Create VllmLifecycleIntegrationTests (7+ E2E scenarios)
+
+**Acceptance**: 7+ integration tests passing
+
+### Phase 7: DI Wiring & Final Integration
+
+**Estimated Effort**: 0.5-1 hour
+**Output**: Updates to ServiceCollectionExtensions, ProviderRegistry
+
+1. Update ServiceCollectionExtensions.cs to register VllmServiceOrchestrator and dependencies
+2. Update ProviderRegistry to call EnsureHealthyAsync() for vLLM
+3. Update CLI commands if needed
+4. Verify build: 0 errors, 0 warnings
+
+**Acceptance**: Build clean, all 80+ tests passing, no regressions
+
+---
+
+## VERIFICATION CHECKLIST (Final Audit)
+
+**File Count Verification**:
+- [ ] Domain: 4 files (VllmServiceState, VllmLifecycleMode, ModelLoadProgress, GpuInfo)
+- [ ] Application: 2 files (IVllmServiceOrchestrator, VllmLifecycleOptions)
+- [ ] Infrastructure: 8 files (Orchestrator + 6 helpers + ProcessRunner/wiring)
+- [ ] Tests: 7 files with 80+ test methods
+- [ ] **Total: 21 files created**
+
+**NotImplementedException Scan**:
+- [ ] `grep -r "NotImplementedException" src/Acode.*/Providers/Vllm/Lifecycle/` → **NO MATCHES**
+- [ ] `grep -r "NotImplementedException" tests/Acode.*.Tests/Providers/Vllm/Lifecycle/` → **NO MATCHES**
+
+**Test Execution Verification**:
+- [ ] `dotnet test --filter "VllmServiceState"` → 5/5 passing
+- [ ] `dotnet test --filter "VllmLifecycleMode"` → 6/6 passing
+- [ ] `dotnet test --filter "ModelLoadProgress"` → 8/8 passing
+- [ ] `dotnet test --filter "GpuInfo"` → 6/6 passing
+- [ ] `dotnet test --filter "VllmLifecycleOptions"` → 12+ passing
+- [ ] `dotnet test --filter "VllmServiceStateTracker"` → 8+ passing
+- [ ] `dotnet test --filter "VllmRestartPolicyEnforcer"` → 8+ passing
+- [ ] `dotnet test --filter "VllmGpuMonitor"` → 10+ passing
+- [ ] `dotnet test --filter "VllmModelLoader"` → 10+ passing
+- [ ] `dotnet test --filter "VllmHealthCheckWorker"` → 5+ passing
+- [ ] `dotnet test --filter "VllmServiceOrchestrator"` → 20+ passing
+- [ ] `dotnet test --filter "VllmLifecycleIntegration"` → 7+ passing
+- [ ] **Total: 80+ tests passing (100%)**
+
+**Build Verification**:
+- [ ] `dotnet build` → 0 errors, 0 warnings
+- [ ] `dotnet build --configuration Release` → 0 errors, 0 warnings
+
+**Spec Compliance Verification**:
+- [ ] All 50 FRs implemented (grep verification per file)
+- [ ] All 44 ACs semantically complete (test coverage verification)
+- [ ] All 21 unit/integration/perf tests from Testing Requirements exist
+
+**No Regression Verification**:
+- [ ] Task 006c tests still passing (64 tests)
+- [ ] Ollama lifecycle tests still passing (no changes to Ollama)
+- [ ] Build still clean
+
+---
+
+## SUCCESS CRITERIA
+
+Task 006d is COMPLETE when:
+1. ✅ All 21 files created with real implementations (no stubs)
+2. ✅ NO NotImplementedException found anywhere
+3. ✅ 80+ tests passing (unit + integration + performance)
+4. ✅ Build: 0 errors, 0 warnings (Debug and Release)
+5. ✅ All 50 FRs mapped to implementation
+6. ✅ All 44 ACs verified with tests
+7. ✅ ProviderRegistry integration complete
+8. ✅ Config schema updated
+9. ✅ All commits pushed to feature branch
+
+**If ANY criterion fails, task is INCOMPLETE.**
+
+---
+
+## REFERENCES
+
+- **Specification**: docs/tasks/refined-tasks/Epic 01/task-006d-vllm-lifecycle-management.md
+- **Reference Pattern**: docs/implementation-plans/task-005d-completion-checklist.md (Ollama - 461 lines)
+- **Methodology**: docs/GAP_ANALYSIS_METHODOLOGY.md (1325 lines)
+- **CLAUDE.md Section 3.2**: Gap Analysis and Completion Checklist
+
+---
+
+**Status**: READY FOR DETAILED COMPLETION CHECKLIST + IMPLEMENTATION
