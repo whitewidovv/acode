@@ -1596,10 +1596,10 @@ namespace AgenticCoder.Infrastructure.Tests.Resources
         [InlineData("acode-standard")]
         [InlineData("acode-dotnet")]
         [InlineData("acode-react")]
-        public void Should_Include_Minimal_Diff_Instructions(string packId)
+        public async Task Should_Include_Minimal_Diff_Instructions(string packId)
         {
             // Arrange
-            var pack = _provider.LoadPack(packId);
+            var pack = await _provider.LoadPackAsync(packId);
             var systemPromptPath = Path.Combine(pack.Directory, "system.md");
             var coderPromptPath = Path.Combine(pack.Directory, "roles", "coder.md");
 
@@ -1608,12 +1608,12 @@ namespace AgenticCoder.Infrastructure.Tests.Resources
             var coderContent = File.ReadAllText(coderPromptPath);
 
             // Assert
-            systemContent.Should().Contain("strict minimal diff", 
+            systemContent.Should().Contain("strict minimal diff",
                 "system prompt must define strict minimal diff principle");
             systemContent.Should().Contain("smallest possible changes",
                 "system prompt must emphasize minimal changes");
-                
-            coderContent.Should().Contain("minimal", 
+
+            coderContent.Should().Contain("minimal",
                 "coder prompt must reinforce minimal changes");
             coderContent.Should().MatchRegex("(?i)(only modify|preserve existing|do not fix)",
                 "coder prompt must have explicit minimal diff constraints");
@@ -1623,10 +1623,10 @@ namespace AgenticCoder.Infrastructure.Tests.Resources
         [InlineData("acode-standard")]
         [InlineData("acode-dotnet")]
         [InlineData("acode-react")]
-        public void Should_Have_Valid_Template_Variables(string packId)
+        public async Task Should_Have_Valid_Template_Variables(string packId)
         {
             // Arrange
-            var pack = _provider.LoadPack(packId);
+            var pack = await _provider.LoadPackAsync(packId);
             var systemPromptPath = Path.Combine(pack.Directory, "system.md");
             var systemContent = File.ReadAllText(systemPromptPath);
 
@@ -1656,10 +1656,10 @@ namespace AgenticCoder.Infrastructure.Tests.Resources
         [InlineData("acode-react", "languages/typescript.md", 2000)]
         [InlineData("acode-dotnet", "frameworks/aspnetcore.md", 2000)]
         [InlineData("acode-react", "frameworks/react.md", 2000)]
-        public void Should_Be_Under_Token_Limits(string packId, string componentPath, int maxTokens)
+        public async Task Should_Be_Under_Token_Limits(string packId, string componentPath, int maxTokens)
         {
             // Arrange
-            var pack = _provider.LoadPack(packId);
+            var pack = await _provider.LoadPackAsync(packId);
             var fullPath = Path.Combine(pack.Directory, componentPath);
             var content = File.ReadAllText(fullPath);
 
@@ -1674,10 +1674,10 @@ namespace AgenticCoder.Infrastructure.Tests.Resources
         [Theory]
         [InlineData("acode-dotnet", "languages/csharp.md")]
         [InlineData("acode-react", "languages/typescript.md")]
-        public void Should_Include_Language_Conventions(string packId, string componentPath)
+        public async Task Should_Include_Language_Conventions(string packId, string componentPath)
         {
             // Arrange
-            var pack = _provider.LoadPack(packId);
+            var pack = await _provider.LoadPackAsync(packId);
             var fullPath = Path.Combine(pack.Directory, componentPath);
             var content = File.ReadAllText(fullPath);
 
@@ -1692,10 +1692,10 @@ namespace AgenticCoder.Infrastructure.Tests.Resources
         [Theory]
         [InlineData("acode-dotnet", "frameworks/aspnetcore.md")]
         [InlineData("acode-react", "frameworks/react.md")]
-        public void Should_Include_Framework_Patterns(string packId, string componentPath)
+        public async Task Should_Include_Framework_Patterns(string packId, string componentPath)
         {
             // Arrange
-            var pack = _provider.LoadPack(packId);
+            var pack = await _provider.LoadPackAsync(packId);
             var fullPath = Path.Combine(pack.Directory, componentPath);
             var content = File.ReadAllText(fullPath);
 
@@ -1707,10 +1707,10 @@ namespace AgenticCoder.Infrastructure.Tests.Resources
         }
 
         [Fact]
-        public void DotNet_Pack_Should_Cover_Async_Patterns()
+        public async Task DotNet_Pack_Should_Cover_Async_Patterns()
         {
             // Arrange
-            var pack = _provider.LoadPack("acode-dotnet");
+            var pack = await _provider.LoadPackAsync("acode-dotnet");
             var csharpPath = Path.Combine(pack.Directory, "languages", "csharp.md");
             var content = File.ReadAllText(csharpPath);
 
@@ -1722,10 +1722,10 @@ namespace AgenticCoder.Infrastructure.Tests.Resources
         }
 
         [Fact]
-        public void React_Pack_Should_Cover_Hooks()
+        public async Task React_Pack_Should_Cover_Hooks()
         {
             // Arrange
-            var pack = _provider.LoadPack("acode-react");
+            var pack = await _provider.LoadPackAsync("acode-react");
             var reactPath = Path.Combine(pack.Directory, "frameworks", "react.md");
             var content = File.ReadAllText(reactPath);
 
@@ -2752,6 +2752,38 @@ Pack may not work as expected.
 2. Request code change
 3. Verify: C# conventions applied
 4. Verify: Async patterns correct
+
+## Design Decisions & Architecture Notes
+
+### Data Structure Design: IReadOnlyList<LoadedComponent> vs Dictionary
+
+**Decision**: Use `IReadOnlyList<LoadedComponent>` instead of `Dictionary<string, string>`
+
+**Rationale**:
+1. **Order Preservation** - Composition order matters. Maintaining insertion order is critical for prompt effectiveness.
+2. **Helper Methods** - Enables efficient `GetComponent(path)`, `GetComponentsByType(type)`, `GetSystemPrompt()` queries.
+3. **Memory Efficiency** - More efficient than Dictionary for small collections (6-15 components per pack).
+4. **Composability** - Sequential iteration is the primary access pattern.
+
+### Property Naming: "Directory" vs "PackPath"
+
+**Decision**: Property is named `pack.Directory` (absolute path to extracted pack contents)
+
+**Rationale**: Clarity, spec consistency, semantic accuracy.
+
+### Manifest vs Direct Properties
+
+**Decision**: Flatten manifest into direct PromptPack properties (Id, Version, Name, Description, Source, Directory, ContentHash)
+
+**Rationale**: Simpler API, record immutability, type safety.
+
+### Registry Pattern
+
+**Decision**: `IPromptPackRegistry` is sync (GetPack, ListPacks); `IPromptPackLoader` is async (LoadPackAsync)
+
+**Rationale**: Registry queries in-memory cache (no I/O); Loader handles I/O-bound operations asynchronously.
+
+---
 
 ---
 

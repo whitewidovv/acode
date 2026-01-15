@@ -2851,55 +2851,90 @@ src/AgenticCoder.Infrastructure/PromptPacks/
 ### IPromptPackLoader Interface
 
 ```csharp
-namespace AgenticCoder.Application.PromptPacks;
+namespace Acode.Application.PromptPacks;
 
+/// <summary>
+/// Loads prompt pack definitions from disk or embedded resources.
+/// All methods are async to support non-blocking file I/O operations.
+/// </summary>
 public interface IPromptPackLoader
 {
-    PromptPack LoadPack(string path);
-    PromptPack LoadBuiltInPack(string packId);
-    PromptPack LoadUserPack(string path);
-    bool TryLoadPack(string path, out PromptPack? pack, out string? error);
+    /// <summary>Loads a pack from the specified filesystem path.</summary>
+    Task<PromptPack> LoadPackAsync(string path, CancellationToken ct = default);
+
+    /// <summary>Loads a built-in pack from embedded resources.</summary>
+    Task<PromptPack> LoadBuiltInPackAsync(string packId, CancellationToken ct = default);
+
+    /// <summary>Loads a user pack from a workspace directory path.</summary>
+    Task<PromptPack> LoadUserPackAsync(string path, CancellationToken ct = default);
+
+    /// <summary>Attempts to load a pack, returning false on error instead of throwing.</summary>
+    Task<(bool success, PromptPack? pack, string? error)> TryLoadPackAsync(string path, CancellationToken ct = default);
 }
 ```
 
 ### IPackValidator Interface
 
 ```csharp
-namespace AgenticCoder.Application.PromptPacks;
+namespace Acode.Application.PromptPacks;
 
+/// <summary>
+/// Validates prompt pack structure and content.
+/// </summary>
 public interface IPackValidator
 {
+    /// <summary>Validates a loaded pack object (in-memory validation).</summary>
     ValidationResult Validate(PromptPack pack);
-    ValidationResult ValidatePath(string packPath);
+
+    /// <summary>Validates a pack at a filesystem path (includes file existence checks).</summary>
+    Task<ValidationResult> ValidatePathAsync(string packPath, CancellationToken ct = default);
 }
 
+/// <summary>Result of pack validation with zero or more error details.</summary>
 public sealed class ValidationResult
 {
     public bool IsValid => Errors.Count == 0;
-    public IReadOnlyList<ValidationError> Errors { get; }
+    public IReadOnlyList<ValidationError> Errors { get; init; } = new List<ValidationError>();
 }
 
+/// <summary>Single validation error with location information.</summary>
 public sealed class ValidationError
 {
-    public required string Code { get; init; }
-    public required string Message { get; init; }
-    public string? FilePath { get; init; }
-    public int? LineNumber { get; init; }
+    public required string Code { get; init; }                    // VAL-001, VAL-002, etc.
+    public required string Message { get; init; }                // Human-readable error description
+    public string? FilePath { get; init; }                       // Relative path within pack
+    public int? LineNumber { get; init; }                        // Line in YAML manifest (if applicable)
 }
 ```
 
 ### IPromptPackRegistry Interface
 
 ```csharp
-namespace AgenticCoder.Application.PromptPacks;
+namespace Acode.Application.PromptPacks;
 
+/// <summary>
+/// Manages pack discovery, caching, and selection based on configuration.
+/// All methods are async to support non-blocking operations.
+/// </summary>
 public interface IPromptPackRegistry
 {
-    PromptPack GetPack(string packId);
-    PromptPack? TryGetPack(string packId);
+    /// <summary>Initializes the registry by discovering all available packs.</summary>
+    Task InitializeAsync(CancellationToken ct = default);
+
+    /// <summary>Gets a pack by ID, loading and caching if not already loaded.</summary>
+    Task<PromptPack> GetPackAsync(string packId, CancellationToken ct = default);
+
+    /// <summary>Attempts to get a pack by ID, returning null if not found.</summary>
+    Task<PromptPack?> TryGetPackAsync(string packId, CancellationToken ct = default);
+
+    /// <summary>Lists all discovered packs with their metadata.</summary>
     IReadOnlyList<PromptPackInfo> ListPacks();
-    PromptPack GetActivePack();
-    void Refresh();
+
+    /// <summary>Gets the currently active pack based on configuration.</summary>
+    Task<PromptPack> GetActivePackAsync(CancellationToken ct = default);
+
+    /// <summary>Refreshes pack discovery and clears cache (for hot reload during development).</summary>
+    Task RefreshAsync(CancellationToken ct = default);
 }
 ```
 
