@@ -1252,7 +1252,7 @@ Create: src/Acode.Infrastructure/Privacy/ExportRedactionPipeline.cs
 
 ## Gap 13: Export CLI Commands [  ]
 
-**ACs Covered:** AC-103, AC-106 (partial coverage for export commands)
+**ACs Covered:** AC-103 (1 AC)
 
 **Description:**
 CLI command handler for export operations: export chats with all options (format, filters, output, redaction).
@@ -1280,7 +1280,6 @@ src/Acode.CLI/Commands/ExportChatCommand.cs
 **ACs Covered:**
 
 - AC-103: ✅ `acode export` - export chat data
-- AC-106: ✅ `acode redaction preview` - preview redaction (partial - full in Gap 17)
 
 ---
 
@@ -1455,7 +1454,7 @@ src/Acode.Infrastructure/Privacy/RedactionPreviewService.cs
 
 ## Gap 18: Redaction CLI Commands [  ]
 
-**ACs Covered:** AC-106, AC-107 (partial coverage)
+**ACs Covered:** AC-106, AC-107 (2 ACs)
 
 **Description:**
 CLI command handlers for redaction operations: preview redaction, manage patterns.
