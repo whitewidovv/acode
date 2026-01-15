@@ -18,20 +18,20 @@
    - File: `docs/implementation-plans/task-011a-completion-checklist.md` (1,600+ lines)
 
 2. **Task-011b: Persistence Model (SQLite/Postgres)**
-   - Status: ✅ Gap analysis complete
+   - Status: ⚠️ INCOMPLETE - Both gap analysis and checklist need redo
    - Completeness: 0% (59 ACs, Phase 1 ready 8 hrs, Phases 2-7 blocked)
    - Blockers: Task-050 + Task-011a for Phases 2-7
-   - File: `docs/implementation-plans/task-011b-gap-analysis.md` (300+ lines)
-   - File: `docs/implementation-plans/task-011b-completion-checklist.md` (400+ lines)
-   - Key Finding: Phase 1 (8 hrs) unblocked, can start immediately ✅
+   - File: `docs/implementation-plans/task-011b-gap-analysis.md` - NEEDS REDO (too brief, no AC verification)
+   - File: `docs/implementation-plans/task-011b-completion-checklist.md` - NEEDS REDO (too brief)
+   - Key Finding: Phase 1 (8 hrs) unblocked, can start immediately ✅ (but needs proper docs)
 
 3. **Task-011c: Resume Behavior + Invariants**
-   - Status: ✅ Gap analysis complete
+   - Status: ⚠️ INCOMPLETE - Checklist done, gap analysis needs redo
    - Completeness: 0% (62 ACs, 68 hours needed)
    - Blockers: Task-011a + Task-050 + Task-049f - ALL WORK BLOCKED ❌
-   - File: `docs/implementation-plans/task-011c-gap-analysis.md` (125 lines)
-   - File: `docs/implementation-plans/task-011c-completion-checklist.md` (128 lines)
-   - Key Finding: Full deferral recommended until dependencies complete
+   - File: `docs/implementation-plans/task-011c-resume-behavior-completion-checklist.md` (1,537 lines) ✅
+   - File: `docs/implementation-plans/task-011c-gap-analysis.md` - NEEDS REDO (too brief, no AC verification)
+   - Work Needed: Create proper gap analysis with semantic completeness verification of all 62 ACs
 
 4. **Task-011 Suite Summary**
    - File: `docs/implementation-plans/task-011-suite-summary.md`
@@ -115,12 +115,34 @@ Recommendation: Prioritize Task-050 in Epic planning to unblock downstream work.
 - `docs/implementation-plans/task-049-suite-analysis-summary.md` (comprehensive suite overview)
 - All gap analyses referenced with link to source documents
 
-**Next Steps:**
-1. Create detailed gap analysis + completion checklists for 049e and 049f
-2. Complete 049b CLI edge cases (12 hours)
-3. Complete 049d Priority 7 features (3 hours)
-4. Implement 049e + 049f (80 hours combined)
-5. Full audit of all 6 tasks before PR creation
+**URGENT - Gap Analysis Corrections Needed:**
+
+🔴 **PRIORITY 1: Fix task-011c gap analysis** (Next session)
+- Current: Too brief (125 lines), no AC verification
+- Need: Comprehensive gap analysis with:
+  - Verify EVERY one of 62 ACs semantically
+  - Calculate: (ACs present / 62) × 100 = semantic completeness %
+  - Document ONLY gaps (what's missing)
+  - Reference spec line numbers for each gap
+  - Map gaps to 13 implementation phases
+  - Target: 1,500+ line document matching quality of task-049d-completion-checklist.md
+- Note: Completion checklist (1,537 lines) is done and good ✅
+
+🔴 **PRIORITY 2: Fix task-011b gap analysis** (Next session after 011c)
+- Current: Too brief (300 lines), no AC verification
+- Need: Same comprehensive approach as 011c
+  - Verify all 59 ACs semantically
+  - Calculate semantic completeness for full task AND for Phase 1 separately
+  - Document gaps for Phase 1 (8 hrs, unblocked) vs Phases 2-7 (91 hrs, blocked)
+  - Target: 1,200+ line document
+- Note: Current checklist too brief as well
+
+**Other Next Steps:**
+3. Create detailed gap analysis + completion checklists for 049e and 049f
+4. Complete 049b CLI edge cases (12 hours)
+5. Complete 049d Priority 7 features (3 hours)
+6. Implement 049e + 049f (80 hours combined)
+7. Full audit of all 6 tasks before PR creation
 
 ---
 
