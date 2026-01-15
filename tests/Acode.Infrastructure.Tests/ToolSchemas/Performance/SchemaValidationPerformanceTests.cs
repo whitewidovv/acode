@@ -1,6 +1,7 @@
 namespace Acode.Infrastructure.Tests.ToolSchemas.Performance;
 
 using System.Diagnostics;
+using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.ToolSchemas.Providers;
 using FluentAssertions;
 
@@ -42,18 +43,15 @@ public sealed class SchemaValidationPerformanceTests
 
         var tools = this.provider.GetToolDefinitions().ToList();
 
-        foreach (var tool in tools)
-        {
-            // Access each schema's properties
-            var properties = tool.Parameters.GetProperty("properties");
-            foreach (var prop in properties.EnumerateObject())
-            {
-                _ = prop.Value.GetProperty("type").GetString();
-            }
-        }
+        // Access each schema's properties and count total property types accessed
+        var totalPropertiesAccessed = tools
+            .Select(tool => tool.Parameters.GetProperty("properties"))
+            .SelectMany(props => props.EnumerateObject())
+            .Count(prop => prop.Value.TryGetProperty("type", out _));
 
         stopwatch.Stop();
 
+        totalPropertiesAccessed.Should().BeGreaterThan(0);
         stopwatch.ElapsedMilliseconds.Should().BeLessThan(
             20,
             $"Accessing all 17 schemas should complete in <20ms (actual: {stopwatch.ElapsedMilliseconds}ms)");
@@ -95,9 +93,14 @@ public sealed class SchemaValidationPerformanceTests
     }
 
     [Fact]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Reliability",
+        "CA2001:AvoidCallingProblematicMethods",
+        Justification = "GC.Collect() is intentional for memory measurement in performance tests")]
     public void Memory_Usage_Should_Be_Reasonable()
     {
-        // Force GC before measurement
+        // Force GC before measurement to get accurate baseline
+        // This is intentional for memory measurement tests
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
@@ -105,12 +108,15 @@ public sealed class SchemaValidationPerformanceTests
         var memoryBefore = GC.GetTotalMemory(true);
 
         // Create multiple providers and materialize all schemas
+        // Store both providers and tools to prevent GC optimization
         var providers = new List<CoreToolsProvider>();
+        var allTools = new List<IReadOnlyList<ToolDefinition>>();
         for (int i = 0; i < 10; i++)
         {
             var p = new CoreToolsProvider();
             var tools = p.GetToolDefinitions().ToList();
             providers.Add(p);
+            allTools.Add(tools);
         }
 
         var memoryAfter = GC.GetTotalMemory(true);
@@ -122,7 +128,8 @@ public sealed class SchemaValidationPerformanceTests
             10.0,
             $"10 providers should use <10MB (actual: {memoryUsedMB:F2}MB)");
 
-        // Keep reference to prevent optimization
+        // Keep references to prevent optimization
         providers.Count.Should().Be(10);
+        allTools.Count.Should().Be(10);
     }
 }
