@@ -147,7 +147,7 @@ Examples:
         }
 
         var packId = context.Args[1];
-        var pack = _registry.TryGetPack(packId);
+        var pack = await _registry.TryGetPackAsync(packId, context.CancellationToken).ConfigureAwait(false);
 
         if (pack is null)
         {
@@ -256,7 +256,7 @@ Examples:
     {
         try
         {
-            _registry.Refresh();
+            await _registry.RefreshAsync(context.CancellationToken).ConfigureAwait(false);
             await context.Output.WriteLineAsync("Prompt pack registry reload complete.").ConfigureAwait(false);
 
             var packs = _registry.ListPacks();

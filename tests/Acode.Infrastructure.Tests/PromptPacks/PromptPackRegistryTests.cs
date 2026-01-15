@@ -40,7 +40,7 @@ public class PromptPackRegistryTests : IDisposable
             UserPacksPath = Path.Combine(_tempDir, ".acode", "prompts"),
         };
 
-        _discovery = new PackDiscovery(parser, Options.Create(discoveryOptions), NullLogger<PackDiscovery>.Instance);
+        _discovery = new PackDiscovery(parser, embeddedProvider, Options.Create(discoveryOptions), NullLogger<PackDiscovery>.Instance);
         _loader = new PromptPackLoader(parser, hasher, embeddedProvider, NullLogger<PromptPackLoader>.Instance);
         _validator = new PackValidator(parser, NullLogger<PackValidator>.Instance);
         _cache = new PackCache();
@@ -69,11 +69,11 @@ public class PromptPackRegistryTests : IDisposable
     }
 
     /// <summary>
-    /// Test that ListPacks returns empty when no packs.
+    /// Test that ListPacks returns built-in packs when no user packs exist.
     /// </summary>
     /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public async Task ListPacks_Should_Return_Empty_When_No_Packs()
+    public async Task ListPacks_Should_Return_BuiltIn_Packs_When_No_User_Packs()
     {
         // Arrange
         await _registry.InitializeAsync();
@@ -81,16 +81,17 @@ public class PromptPackRegistryTests : IDisposable
         // Act
         var packs = _registry.ListPacks();
 
-        // Assert
-        packs.Should().BeEmpty();
+        // Assert - should have built-in packs at minimum
+        packs.Should().NotBeEmpty();
+        packs.Should().Contain(p => p.Id == "acode-standard");
     }
 
     /// <summary>
-    /// Test that ListPacks returns discovered packs.
+    /// Test that ListPacks returns user packs along with built-in packs.
     /// </summary>
     /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public async Task ListPacks_Should_Return_Discovered_Packs()
+    public async Task ListPacks_Should_Include_User_Packs()
     {
         // Arrange
         CreateUserPack("my-pack");
@@ -99,24 +100,24 @@ public class PromptPackRegistryTests : IDisposable
         // Act
         var packs = _registry.ListPacks();
 
-        // Assert
-        packs.Should().HaveCount(1);
-        packs[0].Id.Should().Be("my-pack");
+        // Assert - should have both user pack and built-in packs
+        packs.Should().Contain(p => p.Id == "my-pack");
+        packs.Should().Contain(p => p.Id == "acode-standard");
     }
 
     /// <summary>
-    /// Test that GetPack returns the pack.
+    /// Test that GetPackAsync returns the pack.
     /// </summary>
     /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public async Task GetPack_Should_Return_Pack()
+    public async Task GetPackAsync_Should_Return_Pack()
     {
         // Arrange
         CreateUserPack("test-pack");
         await _registry.InitializeAsync();
 
         // Act
-        var pack = _registry.GetPack("test-pack");
+        var pack = await _registry.GetPackAsync("test-pack");
 
         // Assert
         pack.Should().NotBeNull();
@@ -124,53 +125,53 @@ public class PromptPackRegistryTests : IDisposable
     }
 
     /// <summary>
-    /// Test that GetPack throws for unknown pack.
+    /// Test that GetPackAsync throws for unknown pack.
     /// </summary>
     /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public async Task GetPack_Should_Throw_For_Unknown_Pack()
+    public async Task GetPackAsync_Should_Throw_For_Unknown_Pack()
     {
         // Arrange
         await _registry.InitializeAsync();
 
         // Act
-        var act = () => _registry.GetPack("nonexistent");
+        var act = async () => await _registry.GetPackAsync("nonexistent");
 
         // Assert
-        act.Should().Throw<PackNotFoundException>();
+        await act.Should().ThrowAsync<PackNotFoundException>();
     }
 
     /// <summary>
-    /// Test that TryGetPack returns null for unknown pack.
+    /// Test that TryGetPackAsync returns null for unknown pack.
     /// </summary>
     /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public async Task TryGetPack_Should_Return_Null_For_Unknown_Pack()
+    public async Task TryGetPackAsync_Should_Return_Null_For_Unknown_Pack()
     {
         // Arrange
         await _registry.InitializeAsync();
 
         // Act
-        var pack = _registry.TryGetPack("nonexistent");
+        var pack = await _registry.TryGetPackAsync("nonexistent");
 
         // Assert
         pack.Should().BeNull();
     }
 
     /// <summary>
-    /// Test that TryGetPack uses cache.
+    /// Test that TryGetPackAsync uses cache.
     /// </summary>
     /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public async Task TryGetPack_Should_Use_Cache()
+    public async Task TryGetPackAsync_Should_Use_Cache()
     {
         // Arrange
         CreateUserPack("cached-pack");
         await _registry.InitializeAsync();
 
         // Act - Load twice
-        var first = _registry.TryGetPack("cached-pack");
-        var second = _registry.TryGetPack("cached-pack");
+        var first = await _registry.TryGetPackAsync("cached-pack");
+        var second = await _registry.TryGetPackAsync("cached-pack");
 
         // Assert
         first.Should().NotBeNull();
@@ -209,25 +210,27 @@ public class PromptPackRegistryTests : IDisposable
     }
 
     /// <summary>
-    /// Test that Refresh clears cache and re-discovers.
+    /// Test that RefreshAsync clears cache and re-discovers.
     /// </summary>
     /// <returns>A task representing the asynchronous test.</returns>
     [Fact]
-    public async Task Refresh_Should_Clear_Cache_And_Rediscover()
+    public async Task RefreshAsync_Should_Clear_Cache_And_Rediscover()
     {
         // Arrange
         CreateUserPack("initial-pack");
         await _registry.InitializeAsync();
-        _registry.ListPacks().Should().HaveCount(1);
+        var initialCount = _registry.ListPacks().Count;
+        _registry.ListPacks().Should().Contain(p => p.Id == "initial-pack");
 
         // Add another pack
         CreateUserPack("second-pack");
 
         // Act
-        _registry.Refresh();
+        await _registry.RefreshAsync();
 
-        // Assert
-        _registry.ListPacks().Should().HaveCount(2);
+        // Assert - should have one more pack than before
+        _registry.ListPacks().Should().HaveCount(initialCount + 1);
+        _registry.ListPacks().Should().Contain(p => p.Id == "second-pack");
     }
 
     /// <summary>
@@ -246,9 +249,14 @@ public class PromptPackRegistryTests : IDisposable
         // Act
         var packs = _registry.ListPacks();
 
-        // Assert
-        packs.Should().HaveCount(1);
-        packs[0].IsActive.Should().BeTrue();
+        // Assert - the active pack should be marked
+        var activePack = packs.FirstOrDefault(p => p.Id == "active-test");
+        activePack.Should().NotBeNull();
+        activePack!.IsActive.Should().BeTrue();
+
+        // Other packs should not be marked as active
+        var otherPacks = packs.Where(p => p.Id != "active-test");
+        otherPacks.Should().OnlyContain(p => !p.IsActive);
     }
 
     /// <summary>
@@ -266,12 +274,13 @@ public class PromptPackRegistryTests : IDisposable
 
         // Act
         var packs = _registry.ListPacks();
+        var packIds = packs.Select(p => p.Id).ToList();
 
-        // Assert
-        packs.Should().HaveCount(3);
-        packs[0].Id.Should().Be("apple-pack");
-        packs[1].Id.Should().Be("mango-pack");
-        packs[2].Id.Should().Be("zebra-pack");
+        // Assert - should be sorted alphabetically
+        packIds.Should().BeInAscendingOrder();
+        packIds.Should().Contain("apple-pack");
+        packIds.Should().Contain("mango-pack");
+        packIds.Should().Contain("zebra-pack");
     }
 
     private void CreateUserPack(string packId)
