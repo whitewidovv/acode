@@ -159,4 +159,20 @@ public sealed class SchemaValidationIntegrationTests
 
         names.Should().OnlyHaveUniqueItems("All tool names must be unique");
     }
+
+    [Fact]
+    public void All_Tool_Descriptions_Should_Be_Between_50_And_200_Characters()
+    {
+        var tools = this.provider.GetToolDefinitions().ToList();
+
+        foreach (var tool in tools)
+        {
+            tool.Description.Length.Should().BeGreaterThanOrEqualTo(
+                50,
+                $"Tool '{tool.Name}' description should be at least 50 chars (actual: {tool.Description.Length})");
+            tool.Description.Length.Should().BeLessThanOrEqualTo(
+                200,
+                $"Tool '{tool.Name}' description should be at most 200 chars (actual: {tool.Description.Length})");
+        }
+    }
 }

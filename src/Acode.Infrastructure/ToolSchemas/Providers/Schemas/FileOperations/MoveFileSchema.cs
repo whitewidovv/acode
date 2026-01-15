@@ -32,7 +32,7 @@ internal static class MoveFileSchema
 
         return new ToolDefinition(
             "move_file",
-            "Move or rename a file or directory.",
+            "Move or rename a file or directory. Supports cross-directory moves and overwrite options.",
             schema);
     }
 }
