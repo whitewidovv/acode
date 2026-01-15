@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using Acode.Infrastructure.Common;
+using Acode.Infrastructure.Vllm.Client.Streaming;
 using Acode.Infrastructure.Vllm.Exceptions;
 using Acode.Infrastructure.Vllm.Models;
 using Acode.Infrastructure.Vllm.Serialization;
@@ -259,7 +260,6 @@ public sealed class VllmHttpClient : IAsyncDisposable
 
         HttpResponseMessage? response = null;
         Stream? stream = null;
-        StreamReader? reader = null;
 
         try
         {
@@ -295,36 +295,24 @@ public sealed class VllmHttpClient : IAsyncDisposable
             }
 
             stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            reader = new StreamReader(stream, System.Text.Encoding.UTF8);
 
-            string? line;
-            while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
+            // FR-051, FR-052: Use VllmSseReader to parse SSE events
+            var sseReader = new VllmSseReader();
+
+            await foreach (var eventData in sseReader.ReadEventsAsync(stream, cancellationToken).ConfigureAwait(false))
             {
-                if (cancellationToken.IsCancellationRequested)
+                // FR-052: Handle [DONE] marker to end stream
+                if (eventData == "[DONE]")
                 {
                     break;
                 }
 
-                // FR-051: Parse SSE format (lines starting with "data: ")
-                if (line.StartsWith("data: ", StringComparison.Ordinal))
-                {
-                    var data = line.Substring(6);
-
-                    // FR-052: Handle [DONE] marker to end stream
-                    if (data == "[DONE]")
-                    {
-                        break;
-                    }
-
-                    var chunk = VllmRequestSerializer.DeserializeStreamChunk(data);
-                    yield return chunk;
-                }
+                var chunk = VllmRequestSerializer.DeserializeStreamChunk(eventData);
+                yield return chunk;
             }
         }
         finally
         {
-            reader?.Dispose();
-            stream?.Dispose();
             response?.Dispose();
         }
     }
@@ -361,7 +349,6 @@ public sealed class VllmHttpClient : IAsyncDisposable
 
         HttpResponseMessage? response = null;
         Stream? stream = null;
-        StreamReader? reader = null;
 
         try
         {
@@ -398,35 +385,24 @@ public sealed class VllmHttpClient : IAsyncDisposable
 
             stream = await response.Content.ReadAsStreamAsync(cancellationToken)
                 .ConfigureAwait(false);
-            reader = new StreamReader(stream);
 
-            while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+            // FR-051, FR-052: Use VllmSseReader to parse SSE events
+            var sseReader = new VllmSseReader();
+
+            await foreach (var eventData in sseReader.ReadEventsAsync(stream, cancellationToken).ConfigureAwait(false))
             {
-                var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-
-                if (string.IsNullOrWhiteSpace(line))
+                // FR-052: Handle [DONE] marker to end stream
+                if (eventData == "[DONE]")
                 {
-                    continue;
+                    break;
                 }
 
-                if (line.StartsWith("data: ", StringComparison.Ordinal))
-                {
-                    var data = line["data: ".Length..];
-
-                    if (data == "[DONE]")
-                    {
-                        break;
-                    }
-
-                    var chunk = VllmRequestSerializer.DeserializeStreamChunk(data);
-                    yield return chunk;
-                }
+                var chunk = VllmRequestSerializer.DeserializeStreamChunk(eventData);
+                yield return chunk;
             }
         }
         finally
         {
-            reader?.Dispose();
-            stream?.Dispose();
             response?.Dispose();
         }
     }
