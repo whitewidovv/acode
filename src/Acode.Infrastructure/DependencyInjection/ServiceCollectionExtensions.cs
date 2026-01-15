@@ -263,7 +263,11 @@ public static class ServiceCollectionExtensions
 
         // Register metrics subsystem
         services.AddSingleton<VllmMetricsParser>();
-        services.AddSingleton<VllmMetricsClient>();
+        services.AddSingleton<VllmMetricsClient>(sp =>
+        {
+            var cfg = sp.GetRequiredService<VllmHealthConfiguration>();
+            return new VllmMetricsClient(cfg.BaseUrl, cfg.LoadMonitoring.MetricsEndpoint);
+        });
 
         // Register error handling subsystem
         services.AddSingleton<VllmErrorParser>();

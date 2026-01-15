@@ -6,9 +6,19 @@ namespace Acode.Infrastructure.Vllm.Health;
 public sealed class VllmHealthConfiguration
 {
     /// <summary>
+    /// Gets or sets the base URL for the vLLM server.
+    /// </summary>
+    public string BaseUrl { get; set; } = "http://localhost:8000";
+
+    /// <summary>
     /// Gets or sets the health check endpoint.
     /// </summary>
     public string HealthEndpoint { get; set; } = "/health";
+
+    /// <summary>
+    /// Gets or sets the models endpoint to check loaded models.
+    /// </summary>
+    public string ModelsEndpoint { get; set; } = "/v1/models";
 
     /// <summary>
     /// Gets or sets the health check timeout in seconds.

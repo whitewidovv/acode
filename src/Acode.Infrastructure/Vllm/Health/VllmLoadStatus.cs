@@ -21,7 +21,8 @@ public sealed class VllmLoadStatus
     public double GpuUtilizationPercent { get; init; }
 
     /// <summary>
-    /// Gets the overall load score (0-100).
+    /// Gets the overall load score (0-100, where 100 is fully loaded).
+    /// Calculated as a weighted average of queue depth and GPU utilization.
     /// </summary>
     public int LoadScore { get; init; }
 

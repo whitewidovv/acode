@@ -122,11 +122,9 @@ internal class MockHttpMessageHandler : HttpMessageHandler
             throw new HttpRequestException("Connection failed");
         }
 
-        var response = new HttpResponseMessage(_statusCode.Value)
+        return Task.FromResult(new HttpResponseMessage(_statusCode.Value)
         {
             Content = new StringContent(_content)
-        };
-
-        return Task.FromResult(response);
+        });
     }
 }

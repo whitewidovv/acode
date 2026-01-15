@@ -21,18 +21,12 @@ public sealed class VllmMetricsParser
             return new VllmMetrics();
         }
 
-        var lines = prometheusText.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var lines = prometheusText.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .Where(trimmed => !trimmed.StartsWith('#') && !string.IsNullOrWhiteSpace(trimmed));
 
-        foreach (var line in lines)
+        foreach (var trimmed in lines)
         {
-            var trimmed = line.Trim();
-
-            // Skip comments and empty lines
-            if (trimmed.StartsWith('#') || string.IsNullOrWhiteSpace(trimmed))
-            {
-                continue;
-            }
-
             if (trimmed.StartsWith("vllm_num_requests_running", StringComparison.OrdinalIgnoreCase))
             {
                 runningRequests = ExtractValue<int>(trimmed);

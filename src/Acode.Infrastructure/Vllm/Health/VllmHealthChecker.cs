@@ -9,7 +9,7 @@ namespace Acode.Infrastructure.Vllm.Health;
 /// <summary>
 /// Health checker for vLLM servers.
 /// </summary>
-public sealed class VllmHealthChecker
+public sealed class VllmHealthChecker : IDisposable
 {
     private readonly VllmHealthConfiguration _config;
     private readonly HttpClient _httpClient;
@@ -17,7 +17,9 @@ public sealed class VllmHealthChecker
     private readonly Uri _endpoint;
     private readonly VllmMetricsClient? _metricsClient;
     private readonly VllmMetricsParser _metricsParser;
+    private readonly object _statusLock = new();
     private HealthStatus? _previousStatus;
+    private bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VllmHealthChecker"/> class.
@@ -36,7 +38,7 @@ public sealed class VllmHealthChecker
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _config.Validate();
 
-        _endpoint = new Uri("http://localhost:8000");
+        _endpoint = new Uri(_config.BaseUrl);
         _httpClient = new HttpClient
         {
             BaseAddress = _endpoint,
@@ -45,6 +47,20 @@ public sealed class VllmHealthChecker
 
         _metricsClient = metricsClient;
         _metricsParser = metricsParser ?? new VllmMetricsParser();
+    }
+
+    /// <summary>
+    /// Disposes the health checker resources.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _httpClient?.Dispose();
+        _disposed = true;
     }
 
     /// <summary>
@@ -144,7 +160,8 @@ public sealed class VllmHealthChecker
     {
         try
         {
-            var response = await _httpClient.GetAsync(_config.LoadMonitoring.MetricsEndpoint, cancellationToken).ConfigureAwait(false);
+            // Use the models endpoint (/v1/models) to check which models are loaded
+            var response = await _httpClient.GetAsync(_config.ModelsEndpoint, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 return Array.Empty<string>();
@@ -152,16 +169,18 @@ public sealed class VllmHealthChecker
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
-            // Parse JSON: { "data": [{ "id": "model-name" }] }
-            var doc = JsonDocument.Parse(json);
-            var models = doc.RootElement
-                .GetProperty("data")
-                .EnumerateArray()
-                .Select(m => m.GetProperty("id").GetString() ?? string.Empty)
-                .Where(id => !string.IsNullOrEmpty(id))
-                .ToArray();
+            // Parse JSON: { "object": "list", "data": [{ "id": "model-name", ... }], ... }
+            using (var doc = JsonDocument.Parse(json))
+            {
+                var models = doc.RootElement
+                    .GetProperty("data")
+                    .EnumerateArray()
+                    .Select(m => m.GetProperty("id").GetString() ?? string.Empty)
+                    .Where(id => !string.IsNullOrEmpty(id))
+                    .ToArray();
 
-            return models;
+                return models;
+            }
         }
         catch (Exception ex)
         {
@@ -234,14 +253,17 @@ public sealed class VllmHealthChecker
 
     private void CheckStatusTransition(HealthStatus newStatus)
     {
-        if (_previousStatus.HasValue && _previousStatus != newStatus)
+        lock (_statusLock)
         {
-            _logger.LogWarning(
-                "Health status changed: {PreviousStatus} → {CurrentStatus}",
-                _previousStatus.Value,
-                newStatus);
-        }
+            if (_previousStatus.HasValue && _previousStatus != newStatus)
+            {
+                _logger.LogWarning(
+                    "Health status changed: {PreviousStatus} → {CurrentStatus}",
+                    _previousStatus.Value,
+                    newStatus);
+            }
 
-        _previousStatus = newStatus;
+            _previousStatus = newStatus;
+        }
     }
 }
