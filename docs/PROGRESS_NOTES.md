@@ -1,42 +1,69 @@
 # Progress Notes
 
+## Session 2026-01-15 (CONTINUATION 2) - Task-049a PostgreSQL Correction + Updated Gap Analysis ✅
+
+**Status:** ✅ Task-049a gap analysis REVISED - PostgreSQL now IN SCOPE
+**Branch:** feature/task-049-prompt-pack-loader
+**Commit:** c9e0fff
+
+### ✅ TASK-049a REVISED: PostgreSQL IN SCOPE (AC-077-082)
+
+**Correction Applied:**
+User explicitly corrected that PostgreSQL ACs (AC-077-082) are IN SCOPE for 049a, not deferred to 049f. Updated:
+1. Semantic gap analysis to include PostgreSQL as MISSING
+2. Added 8 new gaps for PostgreSQL implementation (Gaps 1-8)
+3. Recalculated completeness: **78/98 ACs = 79.6%** (revised from 84.8%)
+4. Updated completion checklist with detailed PostgreSQL implementation roadmap
+5. Verified 049a has NO blocking dependencies from 049f
+
+**PostgreSQL Gaps Added (CRITICAL Priority):**
+- Gap 1: PostgreSQL Connection Factory (pooling, timeout, statement caching, TLS)
+- Gap 2: PostgreSQL ChatRepository
+- Gap 3: PostgreSQL RunRepository
+- Gap 4: PostgreSQL MessageRepository
+- Gap 5: PostgreSQL Repository DI registration
+- Gap 6: AppendAsync() method (HIGH)
+- Gap 7: BulkCreateAsync() method (HIGH)
+- Gap 8: Error code pattern (HIGH)
+- Gap 9-11: Migration features (MEDIUM-LOW)
+- Gap 12-17: Performance and verification (LOW-MEDIUM)
+
+**Updated Metrics:**
+- Total ACs in scope: 98 (was 92)
+- Missing ACs: 15 (was 9)
+- Estimated remaining effort: **34-44 hours** (was 15-22 hours)
+- PostgreSQL represents ~18-20 hours of critical-priority work
+
+**Files Updated:**
+- `docs/implementation-plans/task-049a-semantic-gap-analysis-fresh.md` (updated with PostgreSQL gaps)
+- `docs/implementation-plans/task-049a-completion-checklist-fresh.md` (added PostgreSQL implementation details)
+
+**Dependency Check:**
+- ✅ 049a has NO dependencies from 049f (SyncStatus attributes already implemented in domain models)
+- ✅ Ready to begin implementation without waiting for 049f
+
+---
+
 ## Session 2026-01-15 (CONTINUATION) - Task-049 Fresh Gap Analysis COMPLETE ✅
 
-**Status:** ✅ Fresh semantic gap analysis completed for task-049a
+**Status:** ✅ Fresh semantic gap analysis completed for task-049a (INITIAL)
 **Branch:** feature/task-049-prompt-pack-loader
-**Time Remaining:** ~85k tokens
 
-### ✅ TASK-049a FRESH GAP ANALYSIS: COMPLETE
+### ✅ TASK-049a FRESH GAP ANALYSIS: COMPLETE (INITIAL - Now REVISED)
 
 **Methodology:** CLAUDE.md Section 3.2 - Semantic completeness verification with AC-by-AC verification
 
-**Analysis Completed:**
+**Initial Analysis (Before PostgreSQL Correction):**
 1. Read full implementation prompt + testing requirements
 2. Verified all 92 in-scope ACs individually with concrete evidence
 3. Identified 9 specific gaps (AppendAsync, BulkCreateAsync, error codes, migrations, performance)
-4. Calculated semantic completeness: 78/92 = **84.8%** (not 100% as previously claimed)
-5. Created comprehensive gap analysis (706 lines)
-6. Created implementation roadmap from gaps (750+ lines)
+4. Calculated semantic completeness: 78/92 = **84.8%** (later revised to 79.6% with PostgreSQL)
 
-**Key Finding:** Previous "100% complete" claim was based on file existence, not semantic completeness. Fresh analysis reveals:
-- ✅ 78 ACs fully implemented (Chat/Run/Message entities, SQLite repos, domain model)
-- ❌ 9 ACs missing (AppendAsync, BulkCreateAsync, error codes, migration auto-apply, CLI, benchmarks)
-- ⚠️ 5 ACs partial (connection pooling verification, prepared statements, idempotency testing)
+**Key Finding:** Previous "100% complete" claim was based on file existence, not semantic completeness.
 
-**Files Created:**
-- `docs/implementation-plans/task-049a-semantic-gap-analysis-fresh.md` (706 lines)
-- `docs/implementation-plans/task-049a-completion-checklist-fresh.md` (750+ lines)
-
-**Next Steps:**
-1. Create fresh gap analyses for 049b, 049c, 049d (user's request)
-2. Begin implementation of task-049a gaps (15-22 hours)
-3. Implement 049e and 049f gaps
-4. Full audit of task-049 suite before PR creation
-
-**Current Session Progress:**
-- ✅ 049a fresh gap analysis complete
-- ✅ 049a completion checklist complete
-- ⏳ Ready to start 049b analysis OR begin implementing 049a gaps (user decision)
+**Status Update:**
+- ⚠️ Initial analysis incomplete - PostgreSQL ACs were incorrectly marked deferred
+- ✅ Correction applied - PostgreSQL now IN SCOPE with full implementation roadmap
 
 ---
 
