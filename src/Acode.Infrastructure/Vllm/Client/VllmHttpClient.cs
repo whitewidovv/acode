@@ -4,6 +4,7 @@ using Acode.Infrastructure.Common;
 using Acode.Infrastructure.Vllm.Exceptions;
 using Acode.Infrastructure.Vllm.Models;
 using Acode.Infrastructure.Vllm.Serialization;
+using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.Vllm.Client;
 
@@ -14,15 +15,18 @@ public sealed class VllmHttpClient : IAsyncDisposable
 {
     private readonly VllmClientConfiguration _config;
     private readonly HttpClient _httpClient;
+    private readonly ILogger<VllmHttpClient> _logger;
     private bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VllmHttpClient"/> class.
     /// </summary>
     /// <param name="config">Client configuration.</param>
-    public VllmHttpClient(VllmClientConfiguration config)
+    /// <param name="logger">Logger for diagnostic output.</param>
+    public VllmHttpClient(VllmClientConfiguration config, ILogger<VllmHttpClient> logger)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _config.Validate();
 
         var handler = new SocketsHttpHandler
@@ -71,6 +75,9 @@ public sealed class VllmHttpClient : IAsyncDisposable
 
         try
         {
+            // FR-027: Generate correlation ID for request tracing
+            var correlationId = Guid.NewGuid().ToString();
+
             var requestOptions = new System.Text.Json.JsonSerializerOptions
             {
                 PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
@@ -79,9 +86,15 @@ public sealed class VllmHttpClient : IAsyncDisposable
             var json = System.Text.Json.JsonSerializer.Serialize(request, requestOptions);
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync(
-                path,
-                content,
+            // FR-027: Create request message with correlation ID header
+            var requestMessage = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = content
+            };
+            requestMessage.Headers.Add("X-Request-ID", correlationId);
+
+            var response = await _httpClient.SendAsync(
+                requestMessage,
                 cancellationToken).ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
@@ -142,12 +155,22 @@ public sealed class VllmHttpClient : IAsyncDisposable
     {
         try
         {
+            // FR-027: Generate correlation ID for request tracing
+            var correlationId = Guid.NewGuid().ToString();
+
             var json = VllmRequestSerializer.Serialize(request);
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync(
-                "/v1/chat/completions",
-                content,
+            var requestMessage = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions")
+            {
+                Content = content
+            };
+
+            // FR-027: Add correlation ID header for request tracing
+            requestMessage.Headers.Add("X-Request-ID", correlationId);
+
+            var response = await _httpClient.SendAsync(
+                requestMessage,
                 cancellationToken).ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
@@ -209,6 +232,9 @@ public sealed class VllmHttpClient : IAsyncDisposable
             vllmRequest.Stream = true;
         }
 
+        // FR-027: Generate correlation ID for request tracing
+        var correlationId = Guid.NewGuid().ToString();
+
         var requestOptions = new System.Text.Json.JsonSerializerOptions
         {
             PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
@@ -221,6 +247,9 @@ public sealed class VllmHttpClient : IAsyncDisposable
         {
             Content = content
         };
+
+        // FR-027: Add correlation ID header for request tracing
+        requestMessage.Headers.Add("X-Request-ID", correlationId);
 
         HttpResponseMessage? response = null;
         Stream? stream = null;
@@ -310,6 +339,9 @@ public sealed class VllmHttpClient : IAsyncDisposable
 
         request.Stream = true;
 
+        // FR-027: Generate correlation ID for request tracing
+        var correlationId = Guid.NewGuid().ToString();
+
         var json = VllmRequestSerializer.Serialize(request);
         var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
@@ -317,6 +349,9 @@ public sealed class VllmHttpClient : IAsyncDisposable
         {
             Content = content
         };
+
+        // FR-027: Add correlation ID header for request tracing
+        requestMessage.Headers.Add("X-Request-ID", correlationId);
 
         HttpResponseMessage? response = null;
         Stream? stream = null;

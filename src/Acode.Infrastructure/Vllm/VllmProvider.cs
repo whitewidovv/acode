@@ -5,6 +5,7 @@ using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.Vllm.Client;
 using Acode.Infrastructure.Vllm.Health;
 using Acode.Infrastructure.Vllm.Models;
+using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.Vllm;
 
@@ -19,18 +20,22 @@ public sealed class VllmProvider : IModelProvider, IAsyncDisposable
     private readonly VllmClientConfiguration _config;
     private readonly VllmHttpClient _client;
     private readonly VllmHealthChecker _healthChecker;
+    private readonly ILogger<VllmProvider> _logger;
     private bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VllmProvider"/> class.
     /// </summary>
     /// <param name="config">Client configuration.</param>
-    public VllmProvider(VllmClientConfiguration config)
+    /// <param name="logger">Logger for diagnostic output.</param>
+    public VllmProvider(VllmClientConfiguration config, ILogger<VllmProvider> logger)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _config.Validate();
 
-        _client = new VllmHttpClient(_config);
+        var clientLogger = Microsoft.Extensions.Logging.Abstractions.NullLogger<VllmHttpClient>.Instance;
+        _client = new VllmHttpClient(_config, clientLogger);
         _healthChecker = new VllmHealthChecker(_config);
         _disposed = false;
     }
