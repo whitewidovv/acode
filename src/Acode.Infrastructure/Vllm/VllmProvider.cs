@@ -5,6 +5,7 @@ using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.Vllm.Client;
 using Acode.Infrastructure.Vllm.Health;
 using Acode.Infrastructure.Vllm.Models;
+using Acode.Infrastructure.Vllm.StructuredOutput;
 
 namespace Acode.Infrastructure.Vllm;
 
@@ -19,6 +20,7 @@ public sealed class VllmProvider : IModelProvider, IDisposable
     private readonly VllmClientConfiguration _config;
     private readonly VllmHttpClient _client;
     private readonly VllmHealthChecker _healthChecker;
+    private readonly StructuredOutputHandler? _structuredOutputHandler;
     private bool _disposed;
 
     /// <summary>
@@ -26,12 +28,23 @@ public sealed class VllmProvider : IModelProvider, IDisposable
     /// </summary>
     /// <param name="config">Client configuration.</param>
     public VllmProvider(VllmClientConfiguration config)
+        : this(config, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VllmProvider"/> class.
+    /// </summary>
+    /// <param name="config">Client configuration.</param>
+    /// <param name="structuredOutputHandler">Optional structured output handler for enforcement.</param>
+    public VllmProvider(VllmClientConfiguration config, StructuredOutputHandler? structuredOutputHandler)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _config.Validate();
 
         _client = new VllmHttpClient(_config);
         _healthChecker = new VllmHealthChecker(_config);
+        _structuredOutputHandler = structuredOutputHandler;
         _disposed = false;
     }
 

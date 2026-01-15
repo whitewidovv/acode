@@ -8,6 +8,12 @@ using Acode.Infrastructure.PromptPacks;
 using Acode.Infrastructure.Tools;
 using Acode.Infrastructure.Vllm;
 using Acode.Infrastructure.Vllm.Client;
+using Acode.Infrastructure.Vllm.StructuredOutput;
+using Acode.Infrastructure.Vllm.StructuredOutput.Capability;
+using Acode.Infrastructure.Vllm.StructuredOutput.Configuration;
+using Acode.Infrastructure.Vllm.StructuredOutput.Fallback;
+using Acode.Infrastructure.Vllm.StructuredOutput.ResponseFormat;
+using Acode.Infrastructure.Vllm.StructuredOutput.Schema;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Acode.Infrastructure.DependencyInjection;
@@ -104,8 +110,15 @@ public static class ServiceCollectionExtensions
         // Register configuration as singleton
         services.AddSingleton(config);
 
-        // Register VllmProvider as IModelProvider
-        services.AddSingleton<IModelProvider, VllmProvider>();
+        // Register Structured Output components for vLLM
+        services.AddStructuredOutputComponents();
+
+        // Register VllmProvider as IModelProvider with optional StructuredOutputHandler
+        services.AddSingleton<IModelProvider>(sp =>
+        {
+            var structuredOutputHandler = sp.GetService<StructuredOutputHandler>();
+            return new VllmProvider(config, structuredOutputHandler);
+        });
 
         return services;
     }
@@ -152,6 +165,43 @@ public static class ServiceCollectionExtensions
         // Register formatter and tracker
         services.AddSingleton<IValidationErrorFormatter, ValidationErrorFormatter>();
         services.AddSingleton<IRetryTracker, RetryTracker>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers Structured Output enforcement components for vLLM with the DI container.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <remarks>
+    /// FR-054 through FR-058: Structured Output Enforcement.
+    /// Registers all components needed for JSON schema and guided decoding enforcement.
+    /// </remarks>
+    private static IServiceCollection AddStructuredOutputComponents(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        // Register configuration
+        services.AddSingleton<StructuredOutputConfiguration>();
+
+        // Register schema components
+        services.AddSingleton<SchemaValidator>();
+
+        // Register capability components
+        services.AddSingleton<CapabilityDetector>();
+        services.AddSingleton<CapabilityCache>();
+
+        // Register response format components
+        services.AddSingleton<ResponseFormatBuilder>();
+        services.AddSingleton<GuidedDecodingBuilder>();
+
+        // Register fallback components
+        services.AddSingleton<OutputValidator>();
+        services.AddSingleton<FallbackHandler>();
+
+        // Register main orchestrator
+        services.AddSingleton<StructuredOutputHandler>();
 
         return services;
     }
