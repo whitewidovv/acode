@@ -1,6 +1,6 @@
 # Task 007e (formerly 006b) - Structured Outputs Enforcement Progress
 
-**Current Status**: Phase 2 COMPLETE | Overall ~35% Complete
+**Current Status**: Phase 3 COMPLETE | Overall ~45% Complete
 
 ## Completed Phases
 
@@ -25,14 +25,25 @@
 - 9 comprehensive validation tests (all passing)
 - AC-019 through AC-028 partially verified
 
+### Phase 3 ✅ COMPLETE
+- Implemented ResponseFormat subsystem:
+  - ResponseFormatType enum (JsonObject, JsonSchema)
+  - ResponseFormatBuilder with Build() method
+  - VllmResponseFormat data class
+  - GuidedDecodingBuilder with BuildGuidedJson, BuildGuidedChoice, BuildGuidedRegex
+  - GuidedJsonParameter, GuidedChoiceParameter, GuidedRegexParameter data classes
+  - SelectGuidedParameter auto-detection method
+- 17 comprehensive tests (5 ResponseFormatBuilder + 12 GuidedDecodingBuilder)
+- AC-008 through AC-034 coverage
+
 ## Test Summary So Far
-- Phase 0-2: 24 tests created
-- All 24 tests passing (100% pass rate)
+- Phase 0-3: 41 tests created (excluding SchemaTransformer)
+- All 54/54 tests passing in StructuredOutput namespace (100% pass rate)
 - 0 build errors, 0 warnings
 
 ## Remaining Phases
 
-### Phase 3 (PENDING)
+### Phase 4 (IN PROGRESS)
 - Implement ResponseFormat subsystem
   - ResponseFormatBuilder.cs
   - GuidedDecodingBuilder.cs
@@ -94,21 +105,22 @@
 ## Critical Notes
 - Configuration layer fully complete (all methods exist)
 - Schema transformation/validation foundation complete
-- Still need to implement: ResponseFormat, Capability, Fallback, Orchestrator
+- ResponseFormat subsystem complete ✅
+- Still need to implement: Capability, Fallback, Orchestrator
 - Main orchestrator (Phase 6) is CRITICAL - ties everything together
 - All phases use strict TDD: RED → GREEN → REFACTOR
 - Each phase commits after completion
 
 ## Next Steps
-1. Continue with Phase 3 - ResponseFormat subsystem
-2. Phase 4 - Capability detection (depends on vLLM API)
-3. Phase 5 - Fallback handling with JSON schema validation
-4. Phase 6 - StructuredOutputHandler (critical orchestrator)
-5. Phase 7 - Exception hierarchy
-6. Phase 8 - VllmProvider integration
-7. Phase 9 - Integration tests
-8. Phase 10 - Final audit and PR
+1. Continue with Phase 4 - Capability subsystem (model capability detection)
+2. Phase 5 - Fallback handling with JSON schema validation
+3. Phase 6 - StructuredOutputHandler (critical orchestrator)
+4. Phase 7 - Exception hierarchy
+5. Phase 8 - VllmProvider integration
+6. Phase 9 - Integration tests
+7. Phase 10 - Final audit and PR
 
 **Commit History**:
 - 16f939e: Phase 1 - IsEnabled and GetFallbackConfig methods (15 tests)
 - 0040786: Phase 2 - SchemaValidator implementation (9 tests)
+- 34d9c79: Phase 3 - ResponseFormat subsystem (ResponseFormatBuilder, GuidedDecodingBuilder, 17 tests)
