@@ -831,7 +831,7 @@ public async Task<IReadOnlyList<GpuInfo>> GetAvailableGpusAsync(CancellationToke
 
 ## PHASE 6: INTEGRATION TESTS
 
-### P6.1: VllmLifecycleIntegrationTests [  ]
+### P6.1: VllmLifecycleIntegrationTests [✅]
 
 **File to Create**: `tests/Acode.Integration.Tests/Providers/Vllm/Lifecycle/VllmLifecycleIntegrationTests.cs`
 
@@ -1017,9 +1017,9 @@ grep -r "NotImplementedException" tests/Acode.*.Tests/Providers/Vllm/Lifecycle/
 | 4.1 | VllmModelLoader | [✅] | 33 | [next] |
 | 4.2 | VllmHealthCheckWorker | [✅] | 24 | [next] |
 | 5.1 | VllmServiceOrchestrator | [✅] | 21 | [next] |
-| 6.1 | Integration Tests | [ ] | 7 | [TBD] |
+| 6.1 | Integration Tests | [✅] | 7 | [next] |
 | 7.x | DI & Final | [ ] | 0 | [TBD] |
-| **TOTAL** | **14 items** | **[86%]** | **155/80+** | **12/14** |
+| **TOTAL** | **14 items** | **[93%]** | **162/80+** | **13/14** |
 
 ---
 
