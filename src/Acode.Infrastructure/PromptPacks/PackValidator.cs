@@ -175,30 +175,30 @@ public sealed partial class PackValidator : IPackValidator
     {
         var variablePattern = TemplateVariableRegex();
 
-        foreach (var component in pack.Components)
-        {
-            var matches = variablePattern.Matches(component.Content);
-            foreach (Match match in matches)
-            {
-                var varName = match.Groups[1].Value;
-                var isDeclared = component.Metadata?.ContainsKey(varName) == true;
-
-                if (!isDeclared)
+        var validationErrors = pack.Components
+            .SelectMany(component => variablePattern.Matches(component.Content)
+                .Select(match => new
                 {
-                    _logger.LogWarning(
-                        "Undeclared template variable {VarName} in {Path}",
-                        varName,
-                        component.Path);
+                    Component = component,
+                    VarName = match.Groups[1].Value,
+                }))
+            .Where(x => x.Component.Metadata?.ContainsKey(x.VarName) != true)
+            .Select(x =>
+            {
+                _logger.LogWarning(
+                    "Undeclared template variable {VarName} in {Path}",
+                    x.VarName,
+                    x.Component.Path);
 
-                    errors.Add(new ValidationError
-                    {
-                        Code = "ACODE-VAL-005",
-                        Message = $"Undeclared template variable '{{{{{varName}}}}}' in {component.Path}. Declare it in component metadata.",
-                        FilePath = component.Path,
-                    });
-                }
-            }
-        }
+                return new ValidationError
+                {
+                    Code = "ACODE-VAL-005",
+                    Message = $"Undeclared template variable '{{{{{x.VarName}}}}}' in {x.Component.Path}. Declare it in component metadata.",
+                    FilePath = x.Component.Path,
+                };
+            });
+
+        errors.AddRange(validationErrors);
     }
 
     private static void ValidateComponent(LoadedComponent component, List<ValidationError> errors)

@@ -15,8 +15,8 @@ public sealed class PackConfiguration
     private readonly IConfigLoader? _configLoader;
     private readonly ILogger<PackConfiguration> _logger;
     private readonly string? _repositoryRoot;
-    private string? _cachedPackId;
-    private bool _configLoaded;
+    private volatile string? _cachedPackId;
+    private volatile bool _configLoaded;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PackConfiguration"/> class.
@@ -140,25 +140,27 @@ public sealed class PackConfiguration
             return null;
         }
 
-        _configLoaded = true;
-
         try
         {
             var config = await _configLoader!.LoadAsync(_repositoryRoot!, cancellationToken).ConfigureAwait(false);
+            _configLoaded = true;
             return config.Prompts?.PackId;
         }
         catch (FileNotFoundException ex)
         {
+            _configLoaded = false;
             _logger.LogDebug(ex, "Config file not found, using default pack");
             return null;
         }
         catch (InvalidOperationException ex)
         {
+            _configLoaded = false;
             _logger.LogWarning(ex, "Config file validation failed, using default pack");
             return null;
         }
         catch (Exception ex)
         {
+            _configLoaded = false;
             _logger.LogWarning(ex, "Failed to read config file, using default pack");
             return null;
         }

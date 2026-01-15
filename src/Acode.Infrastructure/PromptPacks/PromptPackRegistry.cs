@@ -9,7 +9,7 @@ namespace Acode.Infrastructure.PromptPacks;
 /// <summary>
 /// Registry that indexes and provides access to prompt packs.
 /// </summary>
-public sealed class PromptPackRegistry : IPromptPackRegistry
+public sealed class PromptPackRegistry : IPromptPackRegistry, IDisposable
 {
     private readonly PackDiscovery _discovery;
     private readonly PromptPackLoader _loader;
@@ -194,5 +194,11 @@ public sealed class PromptPackRegistry : IPromptPackRegistry
         {
             _refreshLock.Release();
         }
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        _refreshLock.Dispose();
     }
 }
