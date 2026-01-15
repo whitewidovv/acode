@@ -1,18 +1,30 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Acode.Infrastructure.Common;
 using Acode.Infrastructure.Vllm.Models;
 
-namespace Acode.Infrastructure.Vllm.Serialization;
+namespace Acode.Infrastructure.Vllm.Client.Serialization;
 
 /// <summary>
 /// Serializer for vLLM requests and responses using System.Text.Json.
 /// </summary>
+/// <remarks>
+/// FR-016, AC-016: Uses source-generated serializers from VllmJsonSerializerContext
+/// for performance and AOT compatibility (no reflection).
+/// </remarks>
 public static class VllmRequestSerializer
 {
     private static readonly JsonSerializerOptions Options = new()
     {
-        PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
+        TypeInfoResolver = VllmJsonSerializerContext.Default,  // FR-016: Use source generator
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = false
+    };
+
+    // FR-016: Generic serialization options (uses reflection for unknown types)
+    private static readonly JsonSerializerOptions GenericOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         WriteIndented = false
     };
@@ -25,6 +37,22 @@ public static class VllmRequestSerializer
     public static string Serialize(VllmRequest request)
     {
         return JsonSerializer.Serialize(request, Options);
+    }
+
+    /// <summary>
+    /// Serializes any object to JSON using vLLM serialization conventions.
+    /// </summary>
+    /// <typeparam name="T">The type of object to serialize.</typeparam>
+    /// <param name="request">The object to serialize.</param>
+    /// <returns>JSON string.</returns>
+    /// <remarks>
+    /// FR-016, AC-016: Uses reflection-based serialization for generic types.
+    /// Applies snake_case naming policy to match vLLM API expectations.
+    /// </remarks>
+    public static string SerializeGeneric<T>(T request)
+        where T : class
+    {
+        return JsonSerializer.Serialize(request, GenericOptions);
     }
 
     /// <summary>

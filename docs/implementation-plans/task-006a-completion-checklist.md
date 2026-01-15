@@ -1021,7 +1021,7 @@ Expected: All streaming tests pass
 
 ### Gap 3.1: Create Retry Subdirectory and Interface
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Files to Create**:
 1. src/Acode.Infrastructure/Vllm/Client/Retry/IVllmRetryPolicy.cs
@@ -1276,7 +1276,7 @@ Expected: GREEN
 
 ### Gap 3.2: Add All VllmRetryPolicy Tests
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Tests to Add** (from spec lines 591-595):
 1. Should_Retry_Socket_Errors() - ✅ Done in Gap 3.1
@@ -1439,7 +1439,7 @@ Expected: GREEN
 
 ### Gap 3.3: Integrate VllmRetryPolicy into VllmHttpClient
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Problem**:
 - Current: VllmHttpClient has no retry logic
@@ -1601,7 +1601,7 @@ Expected: GREEN
 
 ### Gap 4.1: Create Serialization Subdirectory and Move VllmRequestSerializer
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Current State**:
 - VllmRequestSerializer.cs at: src/Acode.Infrastructure/Vllm/Serialization/VllmRequestSerializer.cs
@@ -1665,7 +1665,7 @@ dotnet test --filter "VllmRequestSerializerTests"
 
 ### Gap 4.2: Create VllmJsonSerializerContext with Source Generators (FR-016, AC-016)
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Problem**:
 - Spec line 696, FR-016, AC-016: MUST use System.Text.Json source generators
@@ -1774,7 +1774,7 @@ Expected: All tests pass
 
 ### Gap 4.3: Create VllmResponseParser (FR-032 through FR-040, AC-032 through AC-040)
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Problem**:
 - Spec line 698: VllmResponseParser.cs should exist

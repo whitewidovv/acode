@@ -9,6 +9,7 @@ using Acode.Infrastructure.Tools;
 using Acode.Infrastructure.Vllm;
 using Acode.Infrastructure.Vllm.Client;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.DependencyInjection;
 
@@ -101,11 +102,18 @@ public static class ServiceCollectionExtensions
         var config = configuration ?? new VllmClientConfiguration();
         config.Validate();
 
+        // Ensure logging is registered (required by VllmProvider)
+        services.AddLogging();
+
         // Register configuration as singleton
         services.AddSingleton(config);
 
         // Register VllmProvider as IModelProvider
-        services.AddSingleton<IModelProvider, VllmProvider>();
+        services.AddSingleton<IModelProvider>(sp =>
+        {
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            return new VllmProvider(config, loggerFactory);
+        });
 
         return services;
     }
