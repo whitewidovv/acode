@@ -1,0 +1,19 @@
+ great thats merged. fetch latest and were going to continue
+  implementation and gap
+    analysis.  moving on to 005c within 005 suite. another agent is
+  simultaneously implementing 
+  
+  005a&b
+
+  so if there is anything here dependent upon
+  them, you have explicit permission to defer it to the end of this implementation task, but only the pieces that require stuff from those in  progress. the
+  rest still goes through normal deferal requirements. i'll have you merge
+  in the preceeding tasks when done and gap free, but i feel there's work that can be
+  done on this one in the mean time.  here's the typical implementation
+    prompt to help guide you on beginning: you're window 3 on account of operating out of worktrees/3 diretory. we're going through the task list that should be implemented and figuring out what was missed. we're going to start at task 005c now and confirm
+  implementation according to spec.  it's necessary because we've
+  identified many gaps in other files that the implementing agent claimed
+  were fully implemented and passed an audit.  so we're continuing on to 005, and you are now on 005c,  working methodically through. implement it as per CLAUDE.md (read CLAUDE.md thoroughly and follow it precisely)
+  instructions. pull latest from main, create a feature branch from it, and begin. remember that 
+  presence alone does not equal implemented, only semantic completion
+  does, and your checklist should contain all gaps (things that should have been implemented but are confirmed to either NOT be implemented, be implemented wrong, or incompletely according to specs and possibly evolved requirements) in implementation order, specifically for task assigned to you. 

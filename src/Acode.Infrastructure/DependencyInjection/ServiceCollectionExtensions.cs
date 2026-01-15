@@ -15,6 +15,7 @@ using Acode.Infrastructure.Vllm.StructuredOutput.Fallback;
 using Acode.Infrastructure.Vllm.StructuredOutput.ResponseFormat;
 using Acode.Infrastructure.Vllm.StructuredOutput.Schema;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.DependencyInjection;
 
@@ -120,8 +121,9 @@ public static class ServiceCollectionExtensions
         // Register VllmProvider as IModelProvider with optional StructuredOutputHandler
         services.AddSingleton<IModelProvider>(sp =>
         {
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             var structuredOutputHandler = sp.GetService<StructuredOutputHandler>();
-            return new VllmProvider(config, structuredOutputHandler);
+            return new VllmProvider(config, loggerFactory, structuredOutputHandler);
         });
 
         return services;
