@@ -515,4 +515,76 @@ public class PackManifestTests
             .Where(e => e.ErrorCode == "ACODE-PKL-002")
             .WithMessage("*description*");
     }
+
+    /// <summary>
+    /// AC-022: Pack name validation should use trimmed length.
+    /// Names with whitespace padding should be validated based on meaningful content.
+    /// </summary>
+    /// <param name="paddedName">The whitespace-padded name to test.</param>
+    /// <param name="trimmedLength">The expected trimmed length.</param>
+    [Theory]
+    [InlineData("  ab  ", 2)] // 6 chars total, 2 meaningful
+    [InlineData("   x   ", 1)] // 7 chars total, 1 meaningful
+    [InlineData("\t ab \t", 2)] // tabs and spaces, 2 meaningful
+    public void Should_Reject_Name_With_Whitespace_Padding_When_Trimmed_Too_Short(
+        string paddedName,
+        int trimmedLength)
+    {
+        // Arrange - whitespace-padded name that appears long enough but has short content
+        var yaml = $"""
+            format_version: "1.0"
+            id: test-pack
+            version: "1.0.0"
+            name: "{paddedName}"
+            description: A test prompt pack for validation testing
+            content_hash: a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
+            created_at: 2024-01-15T10:00:00Z
+            components: []
+            """;
+        var parser = new ManifestParser();
+
+        // Act - attempt to parse
+        var act = () => parser.Parse(yaml);
+
+        // Assert - should reject because trimmed content is < 3 characters
+        act.Should().Throw<ManifestParseException>()
+            .Where(e => e.ErrorCode == "ACODE-PKL-008")
+            .WithMessage($"*{trimmedLength}*");
+    }
+
+    /// <summary>
+    /// AC-024: Pack description validation should use trimmed length.
+    /// Descriptions with whitespace padding should be validated based on meaningful content.
+    /// </summary>
+    /// <param name="paddedDesc">The whitespace-padded description to test.</param>
+    /// <param name="trimmedLength">The expected trimmed length.</param>
+    [Theory]
+    [InlineData("  short   ", 5)] // 10 chars total, 5 meaningful
+    [InlineData("   tiny   ", 4)] // 10 chars total, 4 meaningful
+    [InlineData("\t hello \t", 5)] // tabs and spaces, 5 meaningful
+    public void Should_Reject_Description_With_Whitespace_Padding_When_Trimmed_Too_Short(
+        string paddedDesc,
+        int trimmedLength)
+    {
+        // Arrange - whitespace-padded description that appears long enough but has short content
+        var yaml = $"""
+            format_version: "1.0"
+            id: test-pack
+            version: "1.0.0"
+            name: Test Pack
+            description: "{paddedDesc}"
+            content_hash: a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
+            created_at: 2024-01-15T10:00:00Z
+            components: []
+            """;
+        var parser = new ManifestParser();
+
+        // Act - attempt to parse
+        var act = () => parser.Parse(yaml);
+
+        // Assert - should reject because trimmed content is < 10 characters
+        act.Should().Throw<ManifestParseException>()
+            .Where(e => e.ErrorCode == "ACODE-PKL-009")
+            .WithMessage($"*{trimmedLength}*");
+    }
 }

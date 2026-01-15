@@ -131,12 +131,13 @@ public sealed class ManifestParser
             throw new ManifestParseException("ACODE-PKL-002", "name is required");
         }
 
-        // AC-022: Name must be 3-100 characters
-        if (dto.Name.Length < 3 || dto.Name.Length > 100)
+        // AC-022: Name must be 3-100 characters (validated using trimmed length for data quality)
+        var trimmedNameLength = dto.Name.Trim().Length;
+        if (trimmedNameLength < 3 || trimmedNameLength > 100)
         {
             throw new ManifestParseException(
                 "ACODE-PKL-008",
-                $"Name must be 3-100 characters. Current length: {dto.Name.Length}.");
+                $"Name must be 3-100 characters. Current length: {trimmedNameLength}.");
         }
 
         // AC-024: Description is required
@@ -145,12 +146,13 @@ public sealed class ManifestParser
             throw new ManifestParseException("ACODE-PKL-002", "description is required");
         }
 
-        // AC-024: Description must be 10-500 characters
-        if (dto.Description.Length < 10 || dto.Description.Length > 500)
+        // AC-024: Description must be 10-500 characters (validated using trimmed length for data quality)
+        var trimmedDescLength = dto.Description.Trim().Length;
+        if (trimmedDescLength < 10 || trimmedDescLength > 500)
         {
             throw new ManifestParseException(
                 "ACODE-PKL-009",
-                $"Description must be 10-500 characters. Current length: {dto.Description.Length}.");
+                $"Description must be 10-500 characters. Current length: {trimmedDescLength}.");
         }
 
         ContentHash? contentHash = null;
