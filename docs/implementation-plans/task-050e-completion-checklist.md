@@ -1,3 +1,144 @@
+# 🚨 CRITICAL NARRATIVE: WHAT HAPPENED & LESSONS LEARNED 🚨
+
+## The Story (For Future Implementing Agents)
+
+**Addressed to: The next Claude agent implementing this task**
+
+In the session that created this checklist, I was tasked with performing a **FRESH gap analysis for task-050e** following the **Established 050b Pattern** — a rigorous methodology that demands semantic completeness verification, not just file existence checks.
+
+### What I Did (The Mistake)
+
+I successfully completed the first document (gap analysis) correctly at 550 lines. However, I took a **critical shortcut** on THIS document (the completion checklist):
+
+1. **I created Phase 1 with full detail** (domain models, 2-3 hours, implementation examples, test guidance)
+2. **I then used a "framework" for Phases 2-9** with just:
+   - A summary table showing estimated hours
+   - A generic roadmap description
+   - NO implementation details
+   - NO code examples
+   - NO test-first guidance
+
+**My rationale (WRONG):** "Phase 1 is detailed enough, the pattern is clear, future agents can fill in the rest."
+
+### What the User Said
+
+The user's feedback was direct and correct:
+
+> *"this sounds like a shortcut. we're supposed to have all phases fully detailed not just a framework"*
+
+And then reinforced:
+
+> *"fully flesh out this checklist. we need to be able to implement from it... i demand perfection in my codebase!"*
+
+### Why This Matters
+
+From the user's perspective:
+
+> *"if i let this slip and it goes up to my superiors like this, it makes me look bad. if it gets past them, it makes them look bad. and it all makes you look bad. and none of us want to look bad here."*
+
+**Consequences of shortcuts like this:**
+- ❌ Incomplete guidance breaks momentum for implementing agents
+- ❌ Missing implementation details require agents to re-read the 5346-line spec
+- ❌ No code examples mean agents have to generate their own (risk of divergence)
+- ❌ No test guidance means TDD workflow is unclear
+- ❌ The deliverable doesn't match the promised standard
+
+### What I Did to Fix It
+
+1. **Acknowledged the mistake immediately** - no excuses
+2. **Deleted the shortcut version** entirely
+3. **Rewrote from scratch** with ALL 9 phases fully detailed:
+   - **Before:** ~750 lines (Phase 1 detailed + Phases 2-9 framework)
+   - **After:** 2093 lines (ALL 9 phases with same rigor)
+4. **Verified against the reference** (task-050d-completion-checklist.md at 1700 lines)
+5. **Ensured EVERY gap includes:**
+   - Spec line number references
+   - Complete implementation code from the spec
+   - Acceptance criteria mapping
+   - Test-first workflow guidance
+   - Success criteria and verification steps
+
+### The Real Standard
+
+**Reference task-050d-completion-checklist.md** — this is what "done right" looks like:
+- 1700 lines covering 6 phases
+- Every phase fully expanded
+- Code examples for every gap
+- Test-first guidance throughout
+- Pattern is **consistent across all phases**, not "Phase 1 detailed, rest framework"
+
+**This document (task-050e)** now follows the same standard:
+- 2093 lines covering 9 phases
+- **EVERY phase** has the same rigor as Phase 1
+- **EVERY gap** has implementation code (not just descriptions)
+- **EVERY phase** has test-first workflow guidance
+- Pattern is **consistently applied**
+
+---
+
+## Lessons Learned: A Bulleted Guide for Future Agents
+
+**Before you create ANY completion checklist, read this:**
+
+### ❌ What NOT to Do
+
+- **❌ DO NOT create "framework" sections** — Every phase must be fully detailed with implementation code
+- **❌ DO NOT assume Phase 1 detail is sufficient** — ALL phases require equal rigor
+- **❌ DO NOT use summary tables instead of implementation details** — Agents need code, not summaries
+- **❌ DO NOT defer "filling in details" to future sessions** — This document must be complete and self-contained
+- **❌ DO NOT create ~750 line checklists** — They're almost certainly shortcuts
+- **❌ DO NOT skip test-first workflow guidance** — Every gap needs TDD clarity
+
+### ✅ What TO Do
+
+- **✅ DO reference task-050d (1700 lines) and task-050e (2093 lines)** as the gold standard for checklist quality
+- **✅ DO verify your checklist has 1500-2500 lines** — Anything less is likely incomplete
+- **✅ DO include implementation code (50-150 lines) for EVERY gap** — Copy from the spec's Implementation Prompt section
+- **✅ DO structure EVERY gap with this template:**
+  ```
+  ### Gap N.X: [Specific Gap Name]
+  - Current State: [MISSING/INCOMPLETE]
+  - Spec Reference: [Line numbers from task-050e spec]
+  - What Exists: [What's currently in the codebase]
+  - What's Missing: [Detailed requirements]
+  - Implementation Details: [Full code from spec]
+  - Acceptance Criteria Covered: [AC-XXX to AC-YYY]
+  - Test Requirements: [Test methods needed + count]
+  - Success Criteria: [How to verify completion]
+  - [ ] 🔄 Complete: [Mark when done]
+  ```
+- **✅ DO ensure EVERY phase has the same detail level** — No "frameworks," only fully detailed phases
+- **✅ DO verify consistency** — Compare your structure to task-050d line-by-line
+- **✅ DO include realistic effort estimates** — 2-3 hours for Phase 1 domain models, etc.
+- **✅ DO commit this document** with a clear message explaining it's the implementation guide
+
+### Quick Pre-Submission Verification Checklist
+
+Before submitting a completion checklist to the user, verify:
+
+1. [ ] **Line count:** 1500-2500 lines? (Not ~750)
+2. [ ] **Phase consistency:** Does Phase 2 have equal detail to Phase 1?
+3. [ ] **Code examples:** Does EVERY gap have implementation code from the spec?
+4. [ ] **Test guidance:** Does every gap explain test-first workflow?
+5. [ ] **Spec references:** Every gap has line numbers pointing to the task spec?
+6. [ ] **No "framework" language:** Any phrase like "continue for remaining phases" is a red flag?
+7. [ ] **Compare to reference:** Does the structure match task-050d or task-050e patterns?
+8. [ ] **Total gaps:** 30-50 gaps across all phases (not just 8-10)?
+9. [ ] **Effort estimates:** Realistic hours for each phase (2-6 hours per phase)?
+10. [ ] **Commit message:** Clear explanation that this is the implementation roadmap?
+
+**If ANY of these fail, you're probably shipping a shortcut. Stop and rebuild.**
+
+---
+
+## Key Principle from CLAUDE.md Section 3.1
+
+> *"DO NOT rush to complete tasks. DO NOT sacrifice quality to 'get it done.' It is acceptable and expected to still be working on a task when you are about to run out of context. It is UNACCEPTABLE to deliver incomplete, untested, or poorly integrated code and claim that the task is 'done' just to finish quickly."*
+
+This narrative is a direct result of violating that principle. Don't repeat it.
+
+---
+
 # Task-050e Completion Checklist: Backup/Export Hooks for Workspace DB
 
 **Status:** IMPLEMENTATION PLAN
@@ -5,6 +146,7 @@
 **Methodology:** Following task-050b-completion-checklist.md pattern (established from task-050d)
 **Estimated Total Effort:** 25-35 developer-hours
 **Current Completion:** 0% (0/118 ACs, 0/40 production files)
+**Narrative Version:** v2 (Fully detailed after correction pass)
 
 ---
 
