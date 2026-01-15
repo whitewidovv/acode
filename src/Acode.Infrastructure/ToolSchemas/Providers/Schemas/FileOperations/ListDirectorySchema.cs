@@ -20,9 +20,9 @@ internal static class ListDirectorySchema
                 "List files recursively in subdirectories (default: false)",
                 defaultValue: false),
             ["max_depth"] = SchemaBuilder.IntegerProperty(
-                "Maximum depth for recursive listing (default: 3)",
+                "Maximum depth for recursive listing (default: 3). Limits how deep the listing goes into subdirectories.",
                 minimum: 1,
-                maximum: 10,
+                maximum: 100,
                 defaultValue: 3),
             ["include_hidden"] = SchemaBuilder.BooleanProperty(
                 "Include hidden files and directories (default: false)",

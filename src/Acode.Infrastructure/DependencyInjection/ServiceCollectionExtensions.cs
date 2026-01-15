@@ -6,6 +6,7 @@ using Acode.Infrastructure.Configuration;
 using Acode.Infrastructure.Ollama;
 using Acode.Infrastructure.PromptPacks;
 using Acode.Infrastructure.Tools;
+using Acode.Infrastructure.ToolSchemas.Providers;
 using Acode.Infrastructure.Vllm;
 using Acode.Infrastructure.Vllm.Client;
 using Acode.Infrastructure.Vllm.Health;
@@ -146,6 +147,25 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddSingleton<IToolSchemaRegistry, ToolSchemaRegistry>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the Core Tools schema provider with the DI container.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <remarks>
+    /// FR-007a: Core Tools Schema Provider registration.
+    /// Registers CoreToolsProvider as singleton implementing IToolSchemaProvider.
+    /// Core tools have Order=0 and are loaded first.
+    /// </remarks>
+    public static IServiceCollection AddCoreToolsProvider(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddSingleton<IToolSchemaProvider, CoreToolsProvider>();
 
         return services;
     }

@@ -25,8 +25,8 @@ internal static class WriteFileSchema
                 enumValues: new[] { "utf-8", "ascii", "utf-16" },
                 defaultValue: "utf-8"),
             ["create_directories"] = SchemaBuilder.BooleanProperty(
-                "Create parent directories if they don't exist (default: true)",
-                defaultValue: true),
+                "Create parent directories if they don't exist (default: false). Set to true when writing to new folder structures.",
+                defaultValue: false),
             ["overwrite"] = SchemaBuilder.BooleanProperty(
                 "Overwrite the file if it exists (default: true)",
                 defaultValue: true)
