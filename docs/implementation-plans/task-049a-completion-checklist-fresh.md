@@ -552,7 +552,7 @@ public SqliteChatRepository(string databasePath)
 
 ---
 
-### Gap 5: Migration Status CLI Command [ ]
+### Gap 10: Migration Status CLI Command [ ]
 
 **AC Covered:** AC-088 - "Migration status command shows applied/pending"
 **Effort:** 2-3 hours
@@ -599,7 +599,7 @@ public sealed class DbMigrationsStatusCommand : Command
 
 ---
 
-### Gap 6: Performance Benchmarks (AC-094 through AC-098) [ ]
+### Gap 11: Performance Benchmarks (AC-094 through AC-098) [ ]
 
 **ACs Covered:** AC-094, AC-095, AC-096, AC-097, AC-098
 **Effort:** 2-3 hours
@@ -681,7 +681,7 @@ public class ConversationBenchmarks
 
 ---
 
-### Gap 7: Connection Pooling Verification (AC-075) [ ]
+### Gap 12: Connection Pooling Verification (AC-075) [ ]
 
 **AC Covered:** AC-075 - "Connection pooling works"
 **Effort:** 1 hour
@@ -723,7 +723,7 @@ public async Task Should_Reuse_Connections()
 
 ---
 
-### Gap 8: Prepared Statements Verification (AC-076) [ ]
+### Gap 13: Prepared Statements Verification (AC-076) [ ]
 
 **AC Covered:** AC-076 - "Prepared statements cached"
 **Effort:** 1 hour
@@ -763,7 +763,7 @@ public async Task Should_Use_Parameterized_Queries()
 
 ---
 
-### Gap 9: Migration Idempotency Testing (AC-086) [ ]
+### Gap 14: Migration Idempotency Testing (AC-086) [ ]
 
 **AC Covered:** AC-086 - "Migrations are idempotent"
 **Effort:** 1-2 hours
@@ -815,13 +815,55 @@ public async Task Should_Be_Idempotent()
 
 ## SECTION 3: IMPLEMENTATION PHASES
 
+### 🟥 PHASE 0: PostgreSQL Repositories (5 gaps, 13-15 hours) - CRITICAL PRIORITY
+
+**Goals:** Implement PostgreSQL persistence layer (AC-077-082)
+
+**Gaps:**
+- [ ] Gap 1: PostgreSQL Connection Factory and Configuration
+- [ ] Gap 2: PostgreSQL ChatRepository Implementation
+- [ ] Gap 3: PostgreSQL RunRepository Implementation
+- [ ] Gap 4: PostgreSQL MessageRepository Implementation
+- [ ] Gap 5: PostgreSQL Repository Registration (Dependency Injection)
+
+**Order:**
+1. Create PostgresConnectionFactory with connection pooling (size=10), timeout=30s, statement caching, TLS
+2. Implement PostgresChatRepository with all CRUD + worktree filtering + soft delete
+3. Implement PostgresRunRepository with all CRUD + chat filtering
+4. Implement PostgresMessageRepository with all CRUD + run filtering + AppendAsync + BulkCreateAsync
+5. Register all repositories in DI container for both SQLite (default) and PostgreSQL (if enabled)
+
+**Tests to Create:**
+- [ ] PostgresConnectionFactoryTests.cs (4 tests)
+- [ ] PostgresChatRepositoryTests.cs (7 tests)
+- [ ] PostgresRunRepositoryTests.cs (6 tests)
+- [ ] PostgresMessageRepositoryTests.cs (6 tests)
+- [ ] RepositoryRegistrationTests.cs (1 test)
+
+**Total: 24 tests, ~13-15 hours effort**
+
+**Command After Completion:**
+```bash
+dotnet test --filter "Postgres"
+```
+
+**Success Criteria:**
+- [ ] All PostgreSQL repositories fully implemented
+- [ ] Connection pooling configured (min=0, max=10)
+- [ ] Command timeout = 30 seconds
+- [ ] Statement caching enabled
+- [ ] TLS encryption required
+- [ ] All 24 tests passing
+
+---
+
 ### PHASE 1: Message Repository Methods (2 gaps, 3-5 hours)
 
 **Goals:** Implement AppendAsync and BulkCreateAsync
 
 **Gaps:**
-- [ ] Gap 1: AppendAsync() method
-- [ ] Gap 2: BulkCreateAsync() method
+- [ ] Gap 6: AppendAsync() method
+- [ ] Gap 7: BulkCreateAsync() method
 
 **Order:**
 1. Add AppendAsync to IMessageRepository interface
@@ -847,7 +889,7 @@ dotnet test --filter "MessageRepository"
 **Goal:** Add error code pattern to all exceptions
 
 **Gaps:**
-- [ ] Gap 3: Error code pattern (AC-093)
+- [ ] Gap 8: Error code pattern (AC-093)
 
 **Order:**
 1. Create enum for error codes
@@ -873,8 +915,8 @@ dotnet test --filter "Exception"
 **Goals:** Auto-apply migrations and add verification tests
 
 **Gaps:**
-- [ ] Gap 4: Migration auto-apply
-- [ ] Gap 9: Migration idempotency
+- [ ] Gap 9: Migration auto-apply
+- [ ] Gap 14: Migration idempotency
 
 **Order:**
 1. Create ConversationMigrationRunner
@@ -898,9 +940,9 @@ dotnet test --filter "Migration"
 **Goals:** Verify connection pooling, prepared statements, add performance benchmarks
 
 **Gaps:**
-- [ ] Gap 5: Connection pooling verification (AC-075)
-- [ ] Gap 7: Prepared statements verification (AC-076)
-- [ ] Gap 6: Performance benchmarks (AC-094–098)
+- [ ] Gap 12: Connection pooling verification (AC-075)
+- [ ] Gap 13: Prepared statements verification (AC-076)
+- [ ] Gap 11: Performance benchmarks (AC-094–098)
 
 **Order:**
 1. Add connection pooling test to SqliteChatRepositoryTests
@@ -926,7 +968,7 @@ dotnet test --filter "Conversation" && dotnet run --project tests/Acode.Performa
 **Goal:** Add migration status CLI command
 
 **Gaps:**
-- [ ] Gap 5: Migration status CLI command (AC-088)
+- [ ] Gap 10: Migration status CLI command (AC-088)
 
 **Order:**
 1. Create DbMigrationsStatusCommand
@@ -947,16 +989,27 @@ acode db migrations status
 
 **After all gaps complete, verify:**
 
-- [ ] All 9 gaps implemented
-- [ ] All 92 in-scope ACs verified implemented
-- [ ] All 80+ new tests passing
+- [ ] All 14 gaps implemented (Gaps 1-14)
+- [ ] PHASE 0 (PostgreSQL) complete - 5 gaps, 24 tests
+- [ ] PHASE 1-5 complete - 9 gaps, 30+ tests
+- [ ] All 98 in-scope ACs verified implemented
+- [ ] All 55+ new tests passing
 - [ ] Zero NotImplementedException
 - [ ] Zero build errors/warnings
 - [ ] Performance benchmarks passing (AC-094-098)
+- [ ] PostgreSQL repositories fully tested
 - [ ] Code coverage > 90% on conversation layer
 - [ ] PR created and ready for review
 
 ---
 
-**Next Action:** Begin Phase 1 (Gaps 1-2) - implement AppendAsync and BulkCreateAsync in TDD order.
+**Implementation Order (CRITICAL):**
+
+1. **Start with PHASE 0** (PostgreSQL) - This is critical path. Complete all 5 gaps + 24 tests
+2. Then proceed to PHASE 1 (Message Repository Methods)
+3. Continue through PHASES 2-5 in order
+
+**Next Action:** Begin PHASE 0 (Gaps 1-5) - implement PostgreSQL repositories in TDD order.
+
+**Estimated Total Effort:** 34-44 hours (15-20 hours for PHASE 0 + 19-24 hours for PHASES 1-5)
 
