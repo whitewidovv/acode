@@ -187,6 +187,114 @@ public sealed class VllmHttpClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Streams a generic request to vLLM using Server-Sent Events (SSE).
+    /// </summary>
+    /// <param name="path">The endpoint path (e.g., "/v1/chat/completions").</param>
+    /// <param name="request">The request payload (can be any object).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Async enumerable of stream chunks.</returns>
+    /// <exception cref="VllmConnectionException">Connection failed.</exception>
+    /// <exception cref="VllmTimeoutException">Request timed out.</exception>
+    public async IAsyncEnumerable<VllmStreamChunk> PostStreamingAsync(
+        string path,
+        object request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(request);
+
+        // FR-043: If request is VllmRequest, automatically set Stream flag
+        if (request is VllmRequest vllmRequest)
+        {
+            vllmRequest.Stream = true;
+        }
+
+        var requestOptions = new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(request, requestOptions);
+        var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+        var requestMessage = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = content
+        };
+
+        HttpResponseMessage? response = null;
+        Stream? stream = null;
+        StreamReader? reader = null;
+
+        try
+        {
+            response = await _httpClient.SendAsync(
+                requestMessage,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new VllmConnectionException(
+                $"Failed to connect to vLLM at {_config.Endpoint}: {ex.Message}",
+                ex);
+        }
+        catch (TaskCanceledException ex) when (ex.CancellationToken == cancellationToken)
+        {
+            throw;
+        }
+        catch (TaskCanceledException ex)
+        {
+            throw new VllmTimeoutException(
+                $"Streaming request to vLLM timed out after {_config.StreamingReadTimeoutSeconds}s",
+                ex);
+        }
+
+        try
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                ThrowForStatusCode(response.StatusCode, errorContent);
+            }
+
+            stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+
+            string? line;
+            while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                // FR-051: Parse SSE format (lines starting with "data: ")
+                if (line.StartsWith("data: ", StringComparison.Ordinal))
+                {
+                    var data = line.Substring(6);
+
+                    // FR-052: Handle [DONE] marker to end stream
+                    if (data == "[DONE]")
+                    {
+                        break;
+                    }
+
+                    var chunk = VllmRequestSerializer.DeserializeStreamChunk(data);
+                    yield return chunk;
+                }
+            }
+        }
+        finally
+        {
+            reader?.Dispose();
+            stream?.Dispose();
+            response?.Dispose();
+        }
+    }
+
+    /// <summary>
     /// Streams a request to vLLM using Server-Sent Events (SSE).
     /// </summary>
     /// <param name="request">The request payload.</param>

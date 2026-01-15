@@ -236,4 +236,66 @@ public class VllmHttpClientTests
             await client.PostAsync<VllmResponse>("/custom/path", new { }, CancellationToken.None));
 #pragma warning restore CA2007
     }
+
+    [Fact]
+    public async Task PostStreamingAsync_Should_Accept_Path_Parameter()
+    {
+        // Arrange (FR-008, AC-007) - Test PostStreamingAsync with custom path
+        var config = new VllmClientConfiguration
+        {
+            Endpoint = "http://localhost:9999",
+            ConnectTimeoutSeconds = 1
+        };
+        var client = new VllmHttpClient(config);
+        var request = new { model = "test", messages = new[] { new { role = "user", content = "hi" } } };
+
+        // Act & Assert - Should support streaming with custom path
+#pragma warning disable CA2007
+        var stream = client.PostStreamingAsync("/v1/chat/completions", request, CancellationToken.None);
+
+        // Should throw connection error when trying to stream
+        await Assert.ThrowsAsync<VllmConnectionException>(async () =>
+        {
+            await foreach (var chunk in stream)
+            {
+                // Would process chunks here
+            }
+        });
+#pragma warning restore CA2007
+    }
+
+    [Fact]
+    public async Task PostStreamingAsync_Should_Auto_Set_Stream_Flag()
+    {
+        // Arrange (FR-008) - Verify stream flag is automatically set for VllmRequest
+        var config = new VllmClientConfiguration
+        {
+            Endpoint = "http://localhost:9999",
+            ConnectTimeoutSeconds = 1
+        };
+        var client = new VllmHttpClient(config);
+        var request = new VllmRequest
+        {
+            Model = "test",
+            Messages = new System.Collections.Generic.List<VllmMessage>
+            {
+                new VllmMessage { Role = "user", Content = "hi" }
+            },
+            Stream = false
+        }; // Explicitly false
+
+        // Act & Assert - Should fail on connection, but Stream should be set to true
+        var stream = client.PostStreamingAsync("/v1/chat/completions", request, CancellationToken.None);
+
+        await Assert.ThrowsAsync<VllmConnectionException>(async () =>
+        {
+            await foreach (var chunk in stream)
+            {
+                // Would process chunks here
+            }
+        });
+
+        // After enumeration attempt, Stream should be true
+        request.Stream.Should().BeTrue();
+    }
 }
