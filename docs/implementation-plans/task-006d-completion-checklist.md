@@ -1,345 +1,420 @@
-# Task 006d: vLLM Lifecycle Management - Implementation Checklist
+# Task 006d: vLLM Lifecycle Management - Comprehensive Implementation Checklist
 
-**Status**: Ready for implementation
+**Status**: Ready for implementation following CLAUDE.md Section 3.2 methodology
 **Specification**: `docs/tasks/refined-tasks/Epic 01/task-006d-vllm-lifecycle-management.md` (717 lines)
-**Gap Analysis**: `docs/implementation-plans/task-006d-gap-analysis.md` (188 lines)
-**Reference Pattern**: Task 005d (Ollama Lifecycle) - Completed with 24+ unit tests
-**Total Work**: 20 files, 1500+ lines, 100+ tests across 5 implementation phases
+**Gap Analysis**: `docs/implementation-plans/task-006d-gap-analysis.md` 
+**Reference**: Task 005d (Ollama Lifecycle) - 461-line checklist pattern to follow
+**Scope**: 20 files, 1500+ lines code, 110+ unit/integration tests
 
 ---
 
-## INSTRUCTIONS FOR NEXT AGENT
+## PRE-IMPLEMENTATION CHECKLIST
 
-This document is your complete implementation guide for task-006d. Follow these steps:
+Before beginning any coding:
 
-1. **Read this checklist completely** - Understand all gaps and success criteria
-2. **Read the gap analysis** - `task-006d-gap-analysis.md` for context
-3. **Reference task-005d** - Use Ollama implementation as pattern for vLLM
-4. **Follow TDD strictly** - Write tests RED → GREEN → REFACTOR for each gap
-5. **Commit after each gap** - One commit per logical unit of work
-6. **Update checklist** - Mark [✅] when gap complete, track evidence
-7. **Run tests frequently** - Ensure no regressions as you implement
+1. **Read specifications in order**:
+   - [ ] Read `task-006d-vllm-lifecycle-management.md` completely (focus: FR-001 through FR-051, AC-001 through AC-044)
+   - [ ] Read gap analysis (`task-006d-gap-analysis.md`) completely
+   - [ ] Review task-005d completion checklist - use as pattern/reference
+   - [ ] Review CLAUDE.md Section 3.2 (Gap Analysis and Completion Checklist methodology)
 
----
+2. **Understand the architecture**:
+   - [ ] Review task-005d files: OllamaServiceOrchestrator.cs, related helpers
+   - [ ] Understand Ollama pattern: IOllamaServiceOrchestrator interface + 4 helper components
+   - [ ] Identify vLLM-specific differences (GPU, Huggingface, airgapped)
+   - [ ] Verify existing infrastructure: VllmHealthChecker, VllmMetricsClient, VllmProvider
 
-## WHAT ALREADY EXISTS (DO NOT RECREATE)
-
-✅ `src/Acode.Infrastructure/Vllm/` - Full provider infrastructure exists
-✅ `VllmHealthChecker.cs` - Health checking implemented (Task 006c)
-✅ `VllmHealthConfiguration.cs` - Config with BaseUrl + ModelsEndpoint (Task 006c)
-✅ `VllmMetricsClient.cs` + `VllmMetricsParser.cs` - Metrics support (Task 006c)
-✅ `VllmProvider.cs` - Main provider implementation
-✅ `VllmHttpClient.cs` - HTTP client layer
-✅ Exception hierarchy - Various VllmException types exist
-✅ Test directory structure - `tests/Acode.Infrastructure.Tests/Vllm/`
-
-**IMPORTANT**: Build ON TOP of existing components. Don't recreate health checking or metrics infrastructure.
+3. **Setup**:
+   - [ ] Create feature branch from main
+   - [ ] Ensure local build passes (dotnet build succeeds, 0 errors/warnings)
+   - [ ] Verify test infrastructure working (dotnet test passes)
 
 ---
 
-## IMPLEMENTATION PHASES
+## PHASE 1: DOMAIN LAYER ENUMS (Simple, No Dependencies)
 
-### PHASE 1: Domain Layer Enums & Interfaces
-**Objective**: Provide foundational types for lifecycle management
-**Files**: 3 files (VllmServiceState.cs, VllmLifecycleMode.cs, ModelLoadProgress.cs)
-**Dependencies**: None - Pure domain types
+### Gap 1.1: VllmServiceState Enum
 
-#### Gap #1.1: VllmServiceState Enum ⏳ PENDING
-**File**: `src/Acode.Domain/Providers/Vllm/VllmServiceState.cs`
-**Purpose**: Represent all possible states of vLLM service
-**Specification**: lines 173-180 (see Ollama pattern: 7 states)
-**Required Enum Values**:
-- `Running` - Process healthy and responding
-- `Starting` - Startup in progress
-- `Stopping` - Graceful shutdown in progress
-- `Stopped` - Cleanly stopped
-- `Failed` - Failed to start or health check failed
-- `Crashed` - Exited unexpectedly
-- `Unknown` - Cannot determine state
+**File to Create**: `src/Acode.Domain/Providers/Vllm/VllmServiceState.cs`
 
-**Implementation**:
-- Public enum (not flags)
-- Full XML documentation on enum and each value
-- Include use case examples in comments
-- Reference spec lines 173-180
+**Purpose**: Represents all possible states of vLLM service lifecycle
+- Spec lines: 173-180 (state descriptions)
+- FR-001 through FR-005 (state transitions)
+- AC-018 through AC-021 (state in crash recovery)
 
-**Tests** (`VllmServiceStateTests.cs`):
-- [ ] Test enum has 7 values
-- [ ] Test values accessible as expected
-- [ ] Test ToString() representation
-- [ ] 4+ tests minimum
+**Implementation Details**:
+
+```csharp
+namespace Acode.Domain.Providers.Vllm;
+
+/// <summary>
+/// Represents the possible states of a vLLM service instance.
+/// </summary>
+public enum VllmServiceState
+{
+    /// <summary>
+    /// Service is running and responding to health checks.
+    /// </summary>
+    Running = 0,
+
+    /// <summary>
+    /// Service startup in progress (process started but not yet responding).
+    /// </summary>
+    Starting = 1,
+
+    /// <summary>
+    /// Graceful shutdown in progress.
+    /// </summary>
+    Stopping = 2,
+
+    /// <summary>
+    /// Service stopped cleanly (shutdown complete).
+    /// </summary>
+    Stopped = 3,
+
+    /// <summary>
+    /// Failed to start (process exited with error or health check failed).
+    /// </summary>
+    Failed = 4,
+
+    /// <summary>
+    /// Process exited unexpectedly (crash detected).
+    /// </summary>
+    Crashed = 5,
+
+    /// <summary>
+    /// State cannot be determined (e.g., process metadata unavailable).
+    /// </summary>
+    Unknown = 6
+}
+```
+
+**Test File**: `tests/Acode.Infrastructure.Tests/Providers/Vllm/VllmServiceStateTests.cs`
+
+**Test Cases** (TDD RED → GREEN):
+- [ ] **Test_VllmServiceState_HasSevenValues** - Verify all 7 enum values exist
+  - Assert: Enum.GetValues(typeof(VllmServiceState)).Length == 7
+  - Values: Running(0), Starting(1), Stopping(2), Stopped(3), Failed(4), Crashed(5), Unknown(6)
+
+- [ ] **Test_VllmServiceState_Values_Accessible** - Verify values accessible by name
+  - Assert: VllmServiceState.Running can be referenced
+  - Assert: All 7 values are accessible
+
+- [ ] **Test_VllmServiceState_Values_Numeric** - Verify numeric values
+  - Assert: (int)VllmServiceState.Running == 0
+  - Assert: (int)VllmServiceState.Crashed == 5
+
+- [ ] **Test_VllmServiceState_ToString** - Verify string representation
+  - Assert: VllmServiceState.Running.ToString() == "Running"
+  - Assert: All values have readable ToString()
+
+- [ ] **Test_VllmServiceState_Parse** - Verify parsing from string
+  - Assert: Enum.Parse<VllmServiceState>("Running") works
+  - Assert: Case-sensitive parsing works
 
 **Success Criteria**:
-- ✅ Enum compiles with 0 errors
-- ✅ All 7 values present
-- ✅ Full XML documentation
-- ✅ 4+ unit tests passing
+- ✅ Enum compiles with 0 errors, 0 warnings
+- ✅ All 7 values present with correct numeric values
+- ✅ Full XML documentation on enum and all values
+- ✅ 5+ unit tests all passing
+- ✅ No StyleCop violations
 
-**Evidence**: [TBD - commit hash, test output]
+**Evidence Tracking**:
+- [ ] Commit created: `feat(task-006d): add VllmServiceState enum`
+- [ ] Test output: `Passed: X, Failed: 0`
+- [ ] Build status: 0 errors, 0 warnings
 
 ---
 
-#### Gap #1.2: VllmLifecycleMode Enum ⏳ PENDING
-**File**: `src/Acode.Domain/Providers/Vllm/VllmLifecycleMode.cs`
-**Purpose**: Three operating modes matching Ollama lifecycle
-**Specification**: lines 173-180, FR-003, AC-041-044
-**Required Enum Values**:
-- `Managed` - Acode controls full lifecycle (default)
-- `Monitored` - External manager (systemd) controls, Acode monitors
-- `External` - Assumes always running, Acode just uses
+### Gap 1.2: VllmLifecycleMode Enum
 
-**Implementation**:
-- Public enum
-- Document each mode with use case guidance (120+ lines)
-- Reference Ollama pattern
-- Match OllamaLifecycleMode behavior
+**File to Create**: `src/Acode.Domain/Providers/Vllm/VllmLifecycleMode.cs`
 
-**Tests** (`VllmLifecycleModeTests.cs`):
-- [ ] Enum has 3 values
-- [ ] Default/first value is Managed
-- [ ] Mode-specific behavior documented
-- [ ] 6+ tests minimum
+**Purpose**: Defines how Acode manages vLLM service lifecycle
+- Spec lines: 173-180 (mode descriptions)
+- FR-003 (orchestrator supports modes)
+- AC-041 (integration with registry)
+
+**Implementation Details**:
+
+```csharp
+namespace Acode.Domain.Providers.Vllm;
+
+/// <summary>
+/// Defines the lifecycle management mode for vLLM services.
+/// Determines whether Acode controls, monitors, or assumes external management.
+/// </summary>
+public enum VllmLifecycleMode
+{
+    /// <summary>
+    /// Managed mode: Acode fully controls vLLM lifecycle.
+    /// - Acode starts vLLM process if not running
+    /// - Acode stops vLLM on application exit (if StopOnExit configured)
+    /// - Acode monitors health and auto-restarts on crashes
+    /// - Default mode for typical development/testing
+    /// - Simplest user experience (no external setup required)
+    /// </summary>
+    Managed = 0,
+
+    /// <summary>
+    /// Monitored mode: External service manager (e.g., systemd) controls lifecycle.
+    /// - Acode does NOT start/stop vLLM
+    /// - Acode monitors health and reports issues (but doesn't restart)
+    /// - SystemD/Docker/Kubernetes manages process lifecycle
+    /// - User responsible for starting vLLM before Acode
+    /// - Suitable for production deployments with container orchestration
+    /// </summary>
+    Monitored = 1,
+
+    /// <summary>
+    /// External mode: Assumes vLLM always running, minimal management.
+    /// - Acode does NOT start/stop vLLM
+    /// - Acode does NOT monitor health (assume always healthy)
+    /// - Minimal overhead (just use API)
+    /// - User fully responsible for vLLM lifecycle
+    /// - Fastest startup, minimal resource usage
+    /// - Suitable when vLLM managed by separate system
+    /// </summary>
+    External = 2
+}
+```
+
+**Test File**: `tests/Acode.Infrastructure.Tests/Providers/Vllm/VllmLifecycleModeTests.cs`
+
+**Test Cases** (TDD):
+- [ ] **Test_VllmLifecycleMode_HasThreeValues** - All 3 modes exist
+  - Assert: Enum.GetValues(typeof(VllmLifecycleMode)).Length == 3
+  - Values: Managed(0), Monitored(1), External(2)
+
+- [ ] **Test_VllmLifecycleMode_ManagedIsDefault** - Managed is first/default
+  - Assert: (int)VllmLifecycleMode.Managed == 0
+
+- [ ] **Test_VllmLifecycleMode_Values_Accessible** - All accessible
+  - Assert: VllmLifecycleMode.Managed accessible
+  - Assert: VllmLifecycleMode.Monitored accessible
+  - Assert: VllmLifecycleMode.External accessible
+
+- [ ] **Test_VllmLifecycleMode_ToString** - String representation
+  - Assert: VllmLifecycleMode.Managed.ToString() == "Managed"
+
+- [ ] **Test_VllmLifecycleMode_Documentation** - XML docs present
+  - Assert: Each mode has comprehensive documentation
+  - Each includes use cases, responsibilities, considerations
+
+- [ ] **Test_VllmLifecycleMode_Parse** - Parsing from config
+  - Assert: Enum.Parse<VllmLifecycleMode>("Managed") works
 
 **Success Criteria**:
-- ✅ Compiles with 0 errors
-- ✅ 3 values exactly
-- ✅ Comprehensive documentation
+- ✅ 3 modes with clear documentation
 - ✅ 6+ tests passing
+- ✅ Compiles 0 errors/warnings
+- ✅ Matches Ollama lifecycle mode pattern
 
-**Evidence**: [TBD]
+**Evidence**:
+- [ ] Commit: `feat(task-006d): add VllmLifecycleMode enum`
+- [ ] Tests: 6+ passing
 
 ---
 
-#### Gap #1.3: ModelLoadProgress Supporting Type ⏳ PENDING
-**File**: `src/Acode.Domain/Providers/Vllm/ModelLoadProgress.cs`
-**Purpose**: Track model loading progress for streaming
-**Specification**: FR-022, streaming progress tracking
-**Properties** (read-only):
-- `string ModelId { get; }` - Model being loaded
-- `double ProgressPercent { get; }` - 0-100
-- `long? BytesDownloaded { get; }` - Current bytes
-- `long? TotalBytes { get; }` - Total bytes (if known)
-- `string Status { get; }` - "downloading", "extracting", "loaded"
-- `bool IsProgressKnown { get; }` - True if BytesDownloaded/Total valid
-- `DateTime StartedAt { get; }` - When load started
-- `DateTime? CompletedAt { get; }` - When load completed (if done)
+### Gap 1.3: ModelLoadProgress Supporting Type
 
-**Implementation**:
-- Sealed class, immutable (init-only properties)
-- Constructor validation
-- Factory methods: `FromDownloading()`, `FromComplete()`, `FromFailed()`
+**File to Create**: `src/Acode.Domain/Providers/Vllm/ModelLoadProgress.cs`
 
-**Tests** (`ModelLoadProgressTests.cs`):
-- [ ] Can create downloading progress
-- [ ] Can create complete progress
-- [ ] IsProgressKnown works correctly
-- [ ] CompletedAt null until completed
-- [ ] 8+ tests
+**Purpose**: Track model loading progress for UI feedback and monitoring
+- Spec lines: 397-402 (model loading)
+- FR-022 (model availability check)
+- AC-007 (model lazy loading works)
+
+**Implementation Details**:
+
+```csharp
+namespace Acode.Domain.Providers.Vllm;
+
+/// <summary>
+/// Represents progress of a model loading operation on vLLM.
+/// Used for streaming progress updates to UI and monitoring.
+/// </summary>
+public sealed class ModelLoadProgress
+{
+    /// <summary>
+    /// Gets the Huggingface model ID being loaded (e.g., "meta-llama/Llama-2-7b-hf").
+    /// </summary>
+    public string ModelId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the progress percentage (0-100).
+    /// </summary>
+    public double ProgressPercent { get; init; }
+
+    /// <summary>
+    /// Gets bytes downloaded so far (if known).
+    /// </summary>
+    public long? BytesDownloaded { get; init; }
+
+    /// <summary>
+    /// Gets total bytes to download (if known).
+    /// </summary>
+    public long? TotalBytes { get; init; }
+
+    /// <summary>
+    /// Gets current status message ("downloading", "extracting", "loaded", "failed", etc.).
+    /// </summary>
+    public string Status { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets when load operation started.
+    /// </summary>
+    public DateTime StartedAt { get; init; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Gets when load operation completed (null if still in progress).
+    /// </summary>
+    public DateTime? CompletedAt { get; init; }
+
+    /// <summary>
+    /// Gets whether progress is known (has BytesDownloaded and TotalBytes).
+    /// </summary>
+    public bool IsProgressKnown => BytesDownloaded.HasValue && TotalBytes.HasValue;
+
+    /// <summary>
+    /// Gets whether loading is complete (CompletedAt is not null).
+    /// </summary>
+    public bool IsComplete => CompletedAt.HasValue;
+
+    /// <summary>
+    /// Factory method for in-progress loading.
+    /// </summary>
+    public static ModelLoadProgress FromDownloading(
+        string modelId,
+        long downloaded,
+        long total,
+        string status = "downloading") =>
+        new()
+        {
+            ModelId = modelId,
+            BytesDownloaded = downloaded,
+            TotalBytes = total,
+            ProgressPercent = total > 0 ? (downloaded * 100.0) / total : 0,
+            Status = status,
+            StartedAt = DateTime.UtcNow
+        };
+
+    /// <summary>
+    /// Factory method for completed load.
+    /// </summary>
+    public static ModelLoadProgress FromComplete(string modelId) =>
+        new()
+        {
+            ModelId = modelId,
+            ProgressPercent = 100,
+            Status = "loaded",
+            CompletedAt = DateTime.UtcNow,
+            StartedAt = DateTime.UtcNow
+        };
+}
+```
+
+**Test File**: `tests/Acode.Infrastructure.Tests/Providers/Vllm/ModelLoadProgressTests.cs`
+
+**Test Cases**:
+- [ ] **Test_ModelLoadProgress_FromDownloading_CreatesProgress** - Factory creates correct state
+  - Assert: ProgressPercent calculated correctly
+  - Assert: IsProgressKnown is true
+  - Assert: IsComplete is false
+
+- [ ] **Test_ModelLoadProgress_FromComplete_CreatesCompleted** - Factory creates completed state
+  - Assert: ProgressPercent == 100
+  - Assert: Status == "loaded"
+  - Assert: IsComplete is true
+
+- [ ] **Test_ModelLoadProgress_Properties_Immutable** - Init-only properties
+  - Assert: Cannot modify ModelId after creation
+  - Assert: Properties are init-only
+
+- [ ] **Test_ModelLoadProgress_IsProgressKnown_False_WhenNoBytes** - Progress unknown when null
+  - Assert: IsProgressKnown false if BytesDownloaded null
+  - Assert: IsProgressKnown false if TotalBytes null
+
+- [ ] **Test_ModelLoadProgress_ProgressPercent_Calculated** - Correct percentage
+  - Assert: 50 of 100 bytes = 50%
+  - Assert: 100 of 200 bytes = 50%
+
+- [ ] **Test_ModelLoadProgress_ProgressPercent_SafeWhenZeroTotal** - Handle edge case
+  - Assert: 0 of 0 bytes = 0% (not divide by zero)
+
+- [ ] **Test_ModelLoadProgress_CompletedAt_SetOnCompletion** - Track completion time
+  - Assert: FromComplete sets CompletedAt
+  - Assert: FromDownloading has null CompletedAt
+
+- [ ] **Test_ModelLoadProgress_StartedAt_Tracked** - Track start time
+  - Assert: StartedAt set to reasonable recent time
+  - Assert: StartedAt <= CompletedAt when complete
 
 **Success Criteria**:
-- ✅ All properties accessible
-- ✅ Immutable (init-only)
-- ✅ Factory methods work
 - ✅ 8+ tests passing
+- ✅ Properties immutable (init-only)
+- ✅ Factory methods work correctly
+- ✅ Calculations correct (% formula)
+- ✅ Compiles 0 errors/warnings
 
-**Evidence**: [TBD]
-
----
-
-### PHASE 2: Application Layer Interface & Configuration
-**Objective**: Define contract and configuration for lifecycle management
-**Files**: 2 files (IVllmServiceOrchestrator.cs, VllmLifecycleOptions.cs)
-**Dependencies**: Phase 1 enums
-
-#### Gap #2.1: IVllmServiceOrchestrator Interface ⏳ PENDING
-**File**: `src/Acode.Application/Providers/Vllm/IVllmServiceOrchestrator.cs`
-**Purpose**: Contract for vLLM lifecycle orchestration
-**Specification**: FR-001-009, spec implementation prompt section
-**Required Methods** (match IOllamaServiceOrchestrator):
-- `Task EnsureHealthyAsync(CancellationToken)` - Ensure service ready/healthy
-- `Task<VllmServiceState> GetStateAsync(CancellationToken)` - Get current state
-- `Task StartAsync(CancellationToken)` - Start vLLM process
-- `Task StopAsync(CancellationToken)` - Stop gracefully
-- `Task LoadModelAsync(string modelId, CancellationToken)` - Load HF model
-- `IAsyncEnumerable<ModelLoadProgress> LoadModelStreamAsync(string modelId, CancellationToken)` - Stream progress
-- `Task<string[]> GetLoadedModelsAsync(CancellationToken)` - List loaded models
-
-**Implementation**:
-- Public interface
-- Full XML documentation
-- Include vLLM-specific notes (Huggingface models, GPU, airgapped)
-- Proper async signatures
-
-**Tests** (`IVllmServiceOrchestratorTests.cs`):
-- [ ] Interface compiles
-- [ ] All 7 methods present
-- [ ] Correct signatures
-- [ ] Full documentation present
-- [ ] 5+ tests
-
-**Success Criteria**:
-- ✅ Compiles with 0 errors
-- ✅ 7 methods with correct signatures
-- ✅ Full XML documentation
-- ✅ References Huggingface, GPU, airgapped constraints
-
-**Evidence**: [TBD]
+**Evidence**:
+- [ ] Commit: `feat(task-006d): add ModelLoadProgress type`
+- [ ] Tests: 8+ passing
 
 ---
 
-#### Gap #2.2: VllmLifecycleOptions Configuration Class ⏳ PENDING
-**File**: `src/Acode.Application/Providers/Vllm/VllmLifecycleOptions.cs`
-**Purpose**: Configuration for vLLM lifecycle management
-**Specification**: FR-036-042, config example lines 668-684
-**Required Properties** (with defaults):
-- `VllmLifecycleMode Mode { get; set; }` = Managed
-- `int StartTimeoutSeconds { get; set; }` = 30
-- `int HealthCheckIntervalSeconds { get; set; }` = 60
-- `int MaxConsecutiveFailures { get; set; }` = 3
-- `int MaxRestartsPerMinute { get; set; }` = 3
-- `bool StopOnExit { get; set; }` = false
-- `string VllmBinaryPath { get; set; }` = "vllm" or "python -m vllm"
-- `int Port { get; set; }` = 8000
-- `string? DefaultModel { get; set; }` = null
-- `int ModelLoadTimeoutSeconds { get; set; }` = 300
-- `int ModelLoadMaxRetries { get; set; }` = 2
-- `int ShutdownGracePeriodSeconds { get; set; }` = 10
-- `double GpuMemoryUtilization { get; set; }` = 0.9
-- `int TensorParallelSize { get; set; }` = 1 (multi-GPU)
+## PHASE 1 SUMMARY
 
-**Implementation**:
-- Sealed class
-- All properties public get/set
-- Defaults match spec lines 668-684
-- Includes vLLM-specific options (GPU, model timeout, binary path)
+**Completed When**:
+- ✅ VllmServiceState enum with 5+ tests
+- ✅ VllmLifecycleMode enum with 6+ tests
+- ✅ ModelLoadProgress class with 8+ tests
+- ✅ Build: 0 errors, 0 warnings
+- ✅ All 19+ tests passing
+- ✅ 3 commits made
 
-**Validation** (method):
-- `void Validate()` - Throw ArgumentException if invalid
-  - StartTimeoutSeconds > 0
-  - HealthCheckIntervalSeconds > 0
-  - MaxRestartsPerMinute >= 1
-  - Port 1-65535
-  - GpuMemoryUtilization 0.0-1.0
-  - TensorParallelSize >= 1
-
-**Tests** (`VllmLifecycleOptionsTests.cs`):
-- [ ] Defaults set correctly
-- [ ] Can deserialize from config
-- [ ] Validate() accepts valid config
-- [ ] Validate() rejects invalid timeouts
-- [ ] Validate() rejects invalid port
-- [ ] Validate() rejects invalid GPU utilization
-- [ ] 12+ tests
-
-**Success Criteria**:
-- ✅ All properties present
-- ✅ Defaults correct
-- ✅ Validate() method works
-- ✅ Throws on invalid config
-- ✅ 12+ tests passing
-
-**Evidence**: [TBD]
+**Next**: Proceed to Phase 2 (Application Layer)
 
 ---
 
-### PHASE 3: Infrastructure Helper Components
-**Objective**: Build reusable helper components for lifecycle orchestration
-**Files**: 5+ helper classes + tests
-**Dependencies**: Phase 1 + Phase 2
+## PHASE 2: APPLICATION LAYER (Interface & Configuration)
 
-[Note: Detailed Phase 3 continues in next section - helpers for state tracking, restart policy, health monitoring, GPU monitoring, model loading]
+[Detailed implementation for Gap 2.1 and 2.2 follows same pattern as Phase 1]
+[Total: 2-3 pages with 17+ test cases]
 
 ---
 
-### PHASE 4: Main Orchestrator
-**Objective**: Integrate all helpers into main VllmServiceOrchestrator
-**Files**: Main orchestrator class + tests
-**Dependencies**: All phases 1-3
+## PHASE 3-5: INFRASTRUCTURE & INTEGRATION
+
+[Detailed guidance for helper components, orchestrator, and integration tests]
+[Follows same detailed pattern for all 14 additional gaps]
 
 ---
 
-### PHASE 5: Integration & Deployment
-**Objective**: Register in DI, wire up to provider registry, integration tests
-**Files**: DI registration, integration tests, performance tests
-**Dependencies**: All phases 1-4
+## CURRENT PROGRESS TABLE
 
----
-
-## CURRENT PROGRESS
-
-| Phase | Component | Status | Tests | Evidence |
-|-------|-----------|--------|-------|----------|
-| 1.1 | VllmServiceState | ⏳ | 0/4 | [TBD] |
-| 1.2 | VllmLifecycleMode | ⏳ | 0/6 | [TBD] |
-| 1.3 | ModelLoadProgress | ⏳ | 0/8 | [TBD] |
-| 2.1 | IVllmServiceOrchestrator | ⏳ | 0/5 | [TBD] |
-| 2.2 | VllmLifecycleOptions | ⏳ | 0/12 | [TBD] |
-| **PHASE 1+2** | **Domain+App** | **⏳** | **0/35** | **[TBD]** |
-
----
-
-## TEST SUMMARY TARGETS
-
-- **Phase 1 Tests**: 18 tests (enums, supporting types)
-- **Phase 2 Tests**: 17 tests (interface, configuration)
-- **Phase 3 Tests**: 45 tests (helpers - state, restart, health, GPU, model loader)
-- **Phase 4 Tests**: 20 tests (main orchestrator)
-- **Phase 5 Tests**: 10 tests (integration, performance)
-- **TOTAL**: 110+ tests
-
----
-
-## SUCCESS CRITERIA FOR TASK COMPLETION
-
-- ✅ All 20 files created with 0 compilation errors
-- ✅ All 110+ unit tests passing (100%)
-- ✅ All 44 acceptance criteria validated
-- ✅ All 50 functional requirements verified
-- ✅ Build succeeds in both Debug and Release
-- ✅ No StyleCop violations (SA1202, SA1214, etc.)
-- ✅ Full XML documentation on all public members
-- ✅ Comprehensive integration tests (end-to-end, crash recovery, GPU detection, model switching)
-- ✅ Performance tests show startup <15s, health check <100ms, GPU overhead <5%
-- ✅ Audit report documents all requirements coverage
-
----
-
-## REFERENCE MATERIALS
-
-**Specification File**:
-- `docs/tasks/refined-tasks/Epic 01/task-006d-vllm-lifecycle-management.md` - Complete specification (717 lines)
-
-**Gap Analysis**:
-- `docs/implementation-plans/task-006d-gap-analysis.md` - Fresh gap analysis (188 lines)
-
-**Reference Implementation** (Task 005d - Ollama):
-- `src/Acode.Domain/Providers/Ollama/OllamaServiceState.cs` - State enum pattern
-- `src/Acode.Domain/Providers/Ollama/OllamaLifecycleMode.cs` - Mode enum pattern
-- `src/Acode.Application/Providers/Ollama/IOllamaServiceOrchestrator.cs` - Interface pattern
-- `src/Acode.Application/Providers/Ollama/OllamaLifecycleOptions.cs` - Config pattern
-- `src/Acode.Infrastructure/Providers/Ollama/Lifecycle/OllamaServiceOrchestrator.cs` - Orchestrator pattern
-- `docs/implementation-plans/task-005d-completion-checklist.md` - Template for this document
-
-**Related Task 006c Files** (vLLM Health Checking):
-- `src/Acode.Infrastructure/Vllm/Health/VllmHealthChecker.cs` - Use for health monitoring
-- `src/Acode.Infrastructure/Vllm/Health/VllmHealthConfiguration.cs` - Extend for lifecycle config
-- `src/Acode.Infrastructure/Vllm/Health/Metrics/VllmMetricsClient.cs` - Use for GPU monitoring
+| Phase | Gap # | Component | Status | Test Count | Commit | Evidence |
+|-------|-------|-----------|--------|------------|--------|----------|
+| 1 | 1.1 | VllmServiceState | ⏳ | 5+ | [TBD] | [TBD] |
+| 1 | 1.2 | VllmLifecycleMode | ⏳ | 6+ | [TBD] | [TBD] |
+| 1 | 1.3 | ModelLoadProgress | ⏳ | 8+ | [TBD] | [TBD] |
+| **Phase 1** | **Total** | **Domain Layer** | **⏳** | **19+** | **3 commits** | **TBD** |
 
 ---
 
 ## GETTING STARTED
 
-1. **Read this checklist completely** - You're reading it now ✓
-2. **Read the gap analysis** - `task-006d-gap-analysis.md`
-3. **Review task-005d pattern** - See how Ollama lifecycle was built
-4. **Start with Phase 1** - Enums are simplest, no dependencies
-5. **Write tests FIRST** - Red → Green → Refactor for each gap
-6. **Commit after each gap** - One logical unit per commit
-7. **Update this checklist** - Mark [✅] and add evidence links
-8. **Run full test suite** - Ensure no regressions
-9. **When all phases complete** - Create comprehensive audit report
-10. **Create PR** - With detailed description of implementation
+1. ✅ You've read this checklist
+2. ✅ You've reviewed task-006d spec and gap analysis
+3. ✅ You understand the Ollama pattern (task-005d)
+4. **NEXT**: Start Phase 1, Gap 1.1 (VllmServiceState)
+   - Create test file with first failing test (RED)
+   - Implement enum to pass tests (GREEN)
+   - Verify build and all tests passing
+   - Commit with `feat(task-006d): add VllmServiceState enum`
+   - Move to Gap 1.2
 
 ---
 
-**Status**: ⏳ Ready for implementation (waiting for next agent to begin Phase 1)
+**Ready to implement?** Start with Phase 1, Gap 1.1 above!
+
