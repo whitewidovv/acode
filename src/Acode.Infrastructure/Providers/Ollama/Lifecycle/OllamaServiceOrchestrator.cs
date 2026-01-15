@@ -40,7 +40,7 @@ internal sealed class OllamaServiceOrchestrator : IOllamaServiceOrchestrator, IA
         _restartPolicy = new RestartPolicyEnforcer(
             maxRestartsPerMinute: _options.MaxRestartsPerMinute);
         _modelPullManager = new ModelPullManager(
-            airgappedMode: false, // TODO: Integrate with operating mode detection
+            airgappedMode: _options.AirgappedMode,
             maxRetries: _options.ModelPullMaxRetries);
     }
 

@@ -86,4 +86,11 @@ public sealed class OllamaLifecycleOptions
     /// Default: 10 seconds.
     /// </summary>
     public int ShutdownGracePeriodSeconds { get; set; } = 10;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to operate in airgapped mode.
+    /// In airgapped mode, model pulling from remote registries is disabled.
+    /// Default: false.
+    /// </summary>
+    public bool AirgappedMode { get; set; } = false;
 }

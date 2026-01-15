@@ -13,6 +13,7 @@ internal sealed class HealthCheckWorker : IAsyncDisposable
     private readonly bool _isExternalMode;
     private CancellationTokenSource? _cts;
     private Task? _workerTask;
+    private bool _isRunning;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="HealthCheckWorker"/> class.
@@ -48,6 +49,13 @@ internal sealed class HealthCheckWorker : IAsyncDisposable
             return;
         }
 
+        if (_isRunning)
+        {
+            // Prevent multiple concurrent health check loops
+            return;
+        }
+
+        _isRunning = true;
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _workerTask = RunHealthCheckLoopAsync(_cts.Token);
         await Task.CompletedTask.ConfigureAwait(false);

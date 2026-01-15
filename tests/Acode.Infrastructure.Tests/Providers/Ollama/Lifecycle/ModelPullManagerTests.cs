@@ -125,7 +125,7 @@ public class ModelPullManagerTests
     {
         // Arrange
         var manager = new ModelPullManager();
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         // Act & Assert - should throw OperationCanceledException

@@ -237,13 +237,16 @@ public class OllamaLifecycleIntegrationTests
             var stateTask = orchestrator.GetStateAsync(CancellationToken.None);
             var pullTask = orchestrator.PullModelAsync("llama2:latest", CancellationToken.None);
 
-            await Task.WhenAll(
-                ensureTask.ContinueWith(t => (object?)t.Result),
-                stateTask.ContinueWith(t => (object?)t.Result),
-                pullTask.ContinueWith(t => (object?)t.Result));
+            await Task.WhenAll(ensureTask, stateTask, pullTask);
 
-            // Assert - All should complete without error
-            Assert.True(true);
+            // Assert - All operations completed successfully
+            var ensureState = await ensureTask;
+            var currentState = await stateTask;
+            var pullResult = await pullTask;
+
+            Assert.NotEqual(default(OllamaServiceState), ensureState);
+            Assert.NotEqual(default(OllamaServiceState), currentState);
+            Assert.NotNull(pullResult);
         }
         finally
         {
@@ -257,7 +260,7 @@ public class OllamaLifecycleIntegrationTests
     {
         // Arrange
         var orchestrator = new OllamaServiceOrchestrator(_managedModeOptions);
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         try
@@ -282,6 +285,7 @@ public class OllamaLifecycleIntegrationTests
         try
         {
             // Act - Multiple startup/shutdown cycles
+            var cycleCount = 0;
             for (int i = 0; i < 3; i++)
             {
                 var startState = await orchestrator.StartAsync(CancellationToken.None);
@@ -295,10 +299,12 @@ public class OllamaLifecycleIntegrationTests
                     stopState == OllamaServiceState.Stopped ||
                     stopState == OllamaServiceState.Running,
                     "Stop state should be valid");
+
+                cycleCount++;
             }
 
-            // Assert - Should complete without errors
-            Assert.True(true);
+            // Assert - All 3 cycles completed successfully
+            Assert.Equal(3, cycleCount);
         }
         finally
         {

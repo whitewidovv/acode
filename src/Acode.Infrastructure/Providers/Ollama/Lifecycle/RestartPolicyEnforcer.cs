@@ -11,6 +11,7 @@ namespace Acode.Infrastructure.Providers.Ollama.Lifecycle;
 internal sealed class RestartPolicyEnforcer
 {
     private readonly int _maxRestartsPerMinute;
+    private readonly object _lockObject = new();
     private readonly List<DateTime> _restartTimestamps = new();
     private int _restartAttempt;
 
@@ -34,12 +35,15 @@ internal sealed class RestartPolicyEnforcer
     /// <returns>True if restart is allowed, false if rate limit exceeded.</returns>
     public bool CanRestart()
     {
-        // Remove timestamps older than 60 seconds
-        var cutoffTime = DateTime.UtcNow.AddSeconds(-60);
-        _restartTimestamps.RemoveAll(ts => ts < cutoffTime);
+        lock (_lockObject)
+        {
+            // Remove timestamps older than 60 seconds
+            var cutoffTime = DateTime.UtcNow.AddSeconds(-60);
+            _restartTimestamps.RemoveAll(ts => ts < cutoffTime);
 
-        // Check if we've hit the limit
-        return _restartTimestamps.Count < _maxRestartsPerMinute;
+            // Check if we've hit the limit
+            return _restartTimestamps.Count < _maxRestartsPerMinute;
+        }
     }
 
     /// <summary>
@@ -47,8 +51,11 @@ internal sealed class RestartPolicyEnforcer
     /// </summary>
     public void RecordRestart()
     {
-        _restartTimestamps.Add(DateTime.UtcNow);
-        _restartAttempt++;
+        lock (_lockObject)
+        {
+            _restartTimestamps.Add(DateTime.UtcNow);
+            _restartAttempt++;
+        }
     }
 
     /// <summary>
@@ -57,15 +64,18 @@ internal sealed class RestartPolicyEnforcer
     /// <returns>Recommended backoff duration before next restart attempt.</returns>
     public TimeSpan GetNextBackoffDuration()
     {
-        // Exponential backoff: 2^n seconds where n is restart attempt (0-based)
-        // Attempt 0 → 1s, Attempt 1 → 2s, Attempt 2 → 4s, Attempt 3 → 8s
-        var seconds = Math.Pow(2, _restartAttempt);
+        lock (_lockObject)
+        {
+            // Exponential backoff: 2^n seconds where n is restart attempt (0-based)
+            // Attempt 0 → 1s, Attempt 1 → 2s, Attempt 2 → 4s, Attempt 3 → 8s
+            var seconds = Math.Pow(2, _restartAttempt);
 
-        // Cap at 60 seconds maximum
-        var maxSeconds = 60.0;
-        seconds = Math.Min(seconds, maxSeconds);
+            // Cap at 60 seconds maximum
+            var maxSeconds = 60.0;
+            seconds = Math.Min(seconds, maxSeconds);
 
-        return TimeSpan.FromSeconds(seconds);
+            return TimeSpan.FromSeconds(seconds);
+        }
     }
 
     /// <summary>
@@ -73,7 +83,10 @@ internal sealed class RestartPolicyEnforcer
     /// </summary>
     public void Reset()
     {
-        _restartTimestamps.Clear();
-        _restartAttempt = 0;
+        lock (_lockObject)
+        {
+            _restartTimestamps.Clear();
+            _restartAttempt = 0;
+        }
     }
 }

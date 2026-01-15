@@ -28,7 +28,7 @@ public class HealthCheckWorkerTests
             isExternalMode: false);
 
         // Act & Assert - Just verify it can start without error
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromMilliseconds(100));
 
         try

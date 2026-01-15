@@ -233,7 +233,7 @@ public class OllamaServiceOrchestratorTests
     {
         // Arrange
         var orchestrator = new OllamaServiceOrchestrator(_managedOptions);
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         // Act & Assert
@@ -246,7 +246,7 @@ public class OllamaServiceOrchestratorTests
     {
         // Arrange
         var orchestrator = new OllamaServiceOrchestrator(_managedOptions);
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         // Act & Assert

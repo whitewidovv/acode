@@ -11,10 +11,12 @@ namespace Acode.Infrastructure.Providers.Ollama.Lifecycle;
 /// </remarks>
 internal sealed class ServiceStateTracker
 {
+    private readonly object _lockObject = new();
     private OllamaServiceState _currentState = OllamaServiceState.Unknown;
     private OllamaServiceState _previousState = OllamaServiceState.Unknown;
     private int _consecutiveHealthCheckFailures;
     private int _restartCount;
+    private DateTime _lastStateChangeTime = DateTime.UtcNow;
 
     /// <summary>
     /// Event fired when service state changes.
@@ -24,27 +26,72 @@ internal sealed class ServiceStateTracker
     /// <summary>
     /// Gets the current service state.
     /// </summary>
-    public OllamaServiceState CurrentState => _currentState;
+    public OllamaServiceState CurrentState
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _currentState;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the previous service state.
     /// </summary>
-    public OllamaServiceState PreviousState => _previousState;
+    public OllamaServiceState PreviousState
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _previousState;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the number of consecutive health check failures.
     /// </summary>
-    public int ConsecutiveHealthCheckFailures => _consecutiveHealthCheckFailures;
+    public int ConsecutiveHealthCheckFailures
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _consecutiveHealthCheckFailures;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the number of times the service has been restarted.
     /// </summary>
-    public int RestartCount => _restartCount;
+    public int RestartCount
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _restartCount;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the time of the last state change.
     /// </summary>
-    public DateTime LastStateChangeTime { get; private set; } = DateTime.UtcNow;
+    public DateTime LastStateChangeTime
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _lastStateChangeTime;
+            }
+        }
+    }
 
     /// <summary>
     /// Updates the current service state and fires state change event.
@@ -52,14 +99,25 @@ internal sealed class ServiceStateTracker
     /// <param name="newState">The new state.</param>
     public void UpdateState(OllamaServiceState newState)
     {
-        if (_currentState != newState)
+        Action<OllamaServiceState, OllamaServiceState>? handler;
+
+        lock (_lockObject)
         {
-            var oldState = _currentState;
-            _previousState = oldState;
-            _currentState = newState;
-            LastStateChangeTime = DateTime.UtcNow;
-            StateChanged?.Invoke(oldState, newState);
+            if (_currentState != newState)
+            {
+                var oldState = _currentState;
+                _previousState = oldState;
+                _currentState = newState;
+                _lastStateChangeTime = DateTime.UtcNow;
+                handler = StateChanged;
+            }
+            else
+            {
+                handler = null;
+            }
         }
+
+        handler?.Invoke(_previousState, _currentState);
     }
 
     /// <summary>
@@ -67,7 +125,10 @@ internal sealed class ServiceStateTracker
     /// </summary>
     public void IncrementFailureCount()
     {
-        _consecutiveHealthCheckFailures++;
+        lock (_lockObject)
+        {
+            _consecutiveHealthCheckFailures++;
+        }
     }
 
     /// <summary>
@@ -75,7 +136,10 @@ internal sealed class ServiceStateTracker
     /// </summary>
     public void ResetFailureCount()
     {
-        _consecutiveHealthCheckFailures = 0;
+        lock (_lockObject)
+        {
+            _consecutiveHealthCheckFailures = 0;
+        }
     }
 
     /// <summary>
@@ -83,7 +147,10 @@ internal sealed class ServiceStateTracker
     /// </summary>
     public void RecordRestart()
     {
-        _restartCount++;
+        lock (_lockObject)
+        {
+            _restartCount++;
+        }
     }
 
     /// <summary>
@@ -91,6 +158,9 @@ internal sealed class ServiceStateTracker
     /// </summary>
     public void ResetRestartCount()
     {
-        _restartCount = 0;
+        lock (_lockObject)
+        {
+            _restartCount = 0;
+        }
     }
 }
