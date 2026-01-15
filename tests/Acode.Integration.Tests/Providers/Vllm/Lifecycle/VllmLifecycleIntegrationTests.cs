@@ -10,28 +10,8 @@ namespace Acode.Integration.Tests.Providers.Vllm.Lifecycle;
 /// <summary>
 /// Integration tests for vLLM lifecycle management end-to-end scenarios.
 /// </summary>
-public class VllmLifecycleIntegrationTests : IDisposable
+public class VllmLifecycleIntegrationTests
 {
-    private readonly VllmServiceOrchestrator _orchestrator;
-
-    public VllmLifecycleIntegrationTests()
-    {
-        var options = new VllmLifecycleOptions
-        {
-            Mode = VllmLifecycleMode.Managed,
-            HealthCheckIntervalSeconds = 60,
-            StartTimeoutSeconds = 30,
-            Port = 8000
-        };
-        _orchestrator = new VllmServiceOrchestrator(options);
-    }
-
-    public void Dispose()
-    {
-        _orchestrator.Dispose();
-        GC.SuppressFinalize(this);
-    }
-
     /// <summary>
     /// IT-001: End-to-end startup flow (not running -> startup -> ready/failed).
     /// </summary>
@@ -39,13 +19,14 @@ public class VllmLifecycleIntegrationTests : IDisposable
     public async Task IT001_EndToEndStartup_TransitionsStates()
     {
         // Arrange
-        var initialStatus = await _orchestrator.GetStatusAsync();
+        using var orchestrator = CreateOrchestrator();
+        var initialStatus = await orchestrator.GetStatusAsync();
         initialStatus.State.Should().Be(VllmServiceState.Unknown, "Should start in Unknown state");
 
         // Act - Try to start (will fail in test environment, but tests the flow)
         try
         {
-            await _orchestrator.StartAsync("microsoft/phi-2");
+            await orchestrator.StartAsync("microsoft/phi-2");
         }
         catch
         {
@@ -53,7 +34,7 @@ public class VllmLifecycleIntegrationTests : IDisposable
         }
 
         // Assert
-        var finalStatus = await _orchestrator.GetStatusAsync();
+        var finalStatus = await orchestrator.GetStatusAsync();
         finalStatus.State.Should().BeOneOf(
             VllmServiceState.Starting,
             VllmServiceState.Failed,
@@ -68,22 +49,23 @@ public class VllmLifecycleIntegrationTests : IDisposable
     public async Task IT002_ModelSwitching_RestartsWithNewModel()
     {
         // Arrange - Start with first model
+        using var orchestrator = CreateOrchestrator();
         try
         {
-            await _orchestrator.StartAsync("microsoft/phi-2");
+            await orchestrator.StartAsync("microsoft/phi-2");
         }
         catch
         {
             // Expected
         }
 
-        var statusAfterFirst = await _orchestrator.GetStatusAsync();
+        var statusAfterFirst = await orchestrator.GetStatusAsync();
         statusAfterFirst.CurrentModel.Should().Be("microsoft/phi-2");
 
         // Act - Restart with different model
         try
         {
-            await _orchestrator.RestartAsync("google/gemma-2b");
+            await orchestrator.RestartAsync("google/gemma-2b");
         }
         catch
         {
@@ -91,7 +73,7 @@ public class VllmLifecycleIntegrationTests : IDisposable
         }
 
         // Assert
-        var finalStatus = await _orchestrator.GetStatusAsync();
+        var finalStatus = await orchestrator.GetStatusAsync();
         finalStatus.CurrentModel.Should().Be("google/gemma-2b", "Should switch to new model");
     }
 
@@ -102,11 +84,12 @@ public class VllmLifecycleIntegrationTests : IDisposable
     public async Task IT003_RestartRateLimiting_EnforcesPolicy()
     {
         // Arrange - Do 3 restarts (max allowed)
+        using var orchestrator = CreateOrchestrator();
         for (int i = 0; i < 3; i++)
         {
             try
             {
-                await _orchestrator.RestartAsync("microsoft/phi-2");
+                await orchestrator.RestartAsync("microsoft/phi-2");
             }
             catch (InvalidOperationException)
             {
@@ -120,7 +103,7 @@ public class VllmLifecycleIntegrationTests : IDisposable
         }
 
         // Act - 4th restart should hit rate limit
-        Func<Task> act = async () => await _orchestrator.RestartAsync("microsoft/phi-2");
+        Func<Task> act = async () => await orchestrator.RestartAsync("microsoft/phi-2");
 
         // Assert - Should throw rate limit exception
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -133,8 +116,11 @@ public class VllmLifecycleIntegrationTests : IDisposable
     [Fact]
     public async Task IT004_GpuDetection_ReturnsValidList()
     {
+        // Arrange
+        using var orchestrator = CreateOrchestrator();
+
         // Act
-        var gpus = await _orchestrator.GetAvailableGpusAsync();
+        var gpus = await orchestrator.GetAvailableGpusAsync();
 
         // Assert
         gpus.Should().NotBeNull("Should return a list");
@@ -155,13 +141,14 @@ public class VllmLifecycleIntegrationTests : IDisposable
     public async Task IT005_EnsureHealthy_StartsIfNotRunning()
     {
         // Arrange
-        var initialStatus = await _orchestrator.GetStatusAsync();
+        using var orchestrator = CreateOrchestrator();
+        var initialStatus = await orchestrator.GetStatusAsync();
         initialStatus.State.Should().Be(VllmServiceState.Unknown);
 
         // Act
         try
         {
-            await _orchestrator.EnsureHealthyAsync("microsoft/phi-2");
+            await orchestrator.EnsureHealthyAsync("microsoft/phi-2");
         }
         catch
         {
@@ -169,7 +156,7 @@ public class VllmLifecycleIntegrationTests : IDisposable
         }
 
         // Assert - Should have attempted to start
-        var finalStatus = await _orchestrator.GetStatusAsync();
+        var finalStatus = await orchestrator.GetStatusAsync();
         finalStatus.State.Should().NotBe(
             VllmServiceState.Unknown,
             "Should have transitioned from Unknown");
@@ -182,9 +169,10 @@ public class VllmLifecycleIntegrationTests : IDisposable
     public async Task IT006_StatusReporting_IncludesAllInfo()
     {
         // Arrange - Start a service first
+        using var orchestrator = CreateOrchestrator();
         try
         {
-            await _orchestrator.StartAsync("microsoft/phi-2");
+            await orchestrator.StartAsync("microsoft/phi-2");
         }
         catch
         {
@@ -192,7 +180,7 @@ public class VllmLifecycleIntegrationTests : IDisposable
         }
 
         // Act
-        var status = await _orchestrator.GetStatusAsync();
+        var status = await orchestrator.GetStatusAsync();
 
         // Assert - All fields populated
         status.Should().NotBeNull();
@@ -211,11 +199,26 @@ public class VllmLifecycleIntegrationTests : IDisposable
     [Fact]
     public async Task IT007_InvalidModelFormat_RejectedWithGuidance()
     {
+        // Arrange
+        using var orchestrator = CreateOrchestrator();
+
         // Act
-        Func<Task> act = async () => await _orchestrator.StartAsync("invalid-model-format");
+        Func<Task> act = async () => await orchestrator.StartAsync("invalid-model-format");
 
         // Assert
         await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("*org/model-name*");
+    }
+
+    private VllmServiceOrchestrator CreateOrchestrator()
+    {
+        var options = new VllmLifecycleOptions
+        {
+            Mode = VllmLifecycleMode.Managed,
+            HealthCheckIntervalSeconds = 60,
+            StartTimeoutSeconds = 30,
+            Port = 8000
+        };
+        return new VllmServiceOrchestrator(options);
     }
 }

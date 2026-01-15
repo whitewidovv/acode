@@ -252,7 +252,19 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IVllmServiceOrchestrator>(sp =>
         {
             var opts = sp.GetRequiredService<VllmLifecycleOptions>();
-            return new VllmServiceOrchestrator(opts);
+            var stateTracker = sp.GetRequiredService<VllmServiceStateTracker>();
+            var restartPolicy = sp.GetRequiredService<VllmRestartPolicyEnforcer>();
+            var gpuMonitor = sp.GetRequiredService<VllmGpuMonitor>();
+            var modelLoader = sp.GetRequiredService<VllmModelLoader>();
+            var healthCheckWorker = sp.GetRequiredService<VllmHealthCheckWorker>();
+
+            return new VllmServiceOrchestrator(
+                opts,
+                stateTracker,
+                restartPolicy,
+                gpuMonitor,
+                modelLoader,
+                healthCheckWorker);
         });
 
         return services;
