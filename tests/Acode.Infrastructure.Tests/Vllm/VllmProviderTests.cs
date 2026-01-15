@@ -119,16 +119,16 @@ public class VllmProviderTests
     }
 
     [Fact]
-    public void Dispose_Should_CleanupResources()
+    public async Task DisposeAsync_Should_CleanupResources()
     {
         // Arrange
         var config = new VllmClientConfiguration();
         var provider = new VllmProvider(config);
 
         // Act
-        provider.Dispose();
+        await provider.DisposeAsync();
 
         // Assert - no exception, safe to dispose twice
-        provider.Dispose();
+        await provider.DisposeAsync();
     }
 }
