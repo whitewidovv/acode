@@ -34,7 +34,10 @@ public sealed class VllmHttpClient : IAsyncDisposable
             MaxConnectionsPerServer = _config.MaxConnections,
             PooledConnectionIdleTimeout = TimeSpan.FromSeconds(_config.IdleTimeoutSeconds),
             PooledConnectionLifetime = TimeSpan.FromSeconds(_config.ConnectionLifetimeSeconds),
-            ConnectTimeout = TimeSpan.FromSeconds(_config.ConnectTimeoutSeconds)
+            ConnectTimeout = TimeSpan.FromSeconds(_config.ConnectTimeoutSeconds),
+
+            // FR-014: TCP keep-alive is enabled by default in SocketsHttpHandler
+            UseProxy = false
         };
 
         _httpClient = new HttpClient(handler)
@@ -51,6 +54,9 @@ public sealed class VllmHttpClient : IAsyncDisposable
 
         _httpClient.DefaultRequestHeaders.Accept.Add(
             new MediaTypeWithQualityHeaderValue("application/json"));
+
+        // FR-015: Explicitly disable Expect: 100-continue header for HTTP/1.1
+        _httpClient.DefaultRequestHeaders.ExpectContinue = false;
     }
 
     /// <summary>
