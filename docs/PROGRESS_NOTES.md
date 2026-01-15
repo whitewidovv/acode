@@ -1387,166 +1387,130 @@ Continuing with CLI command implementation (Gaps #14-20), then E2E tests, docume
 ---
 Last Updated: 2026-01-11 (Session 1)
 
----
-
-## Session 2026-01-13 - Task 005b STARTED
-
-### Task Status: 🔄 **IN PROGRESS**
-
-**Task**: 005b - Tool Call Parsing + Retry-on-Invalid-JSON (within Epic 01)
-**Branch**: feature/task-005b-tool-output-capture
-
-### Progress Summary
-
-**Phase 1: Core Integration (COMPLETE ✅)**
-- **Gap #1**: Integrated ToolCallParser into OllamaResponseMapper ✅
-- **Gap #2**: Verified ChatMessage tool call support ✅
-- **Gap #7**: OllamaResponseMapper integration tests (8 tests, all passing) ✅
-
-**Phase 2: Retry Logic (COMPLETE ✅)**
-- **Gap #6**: ToolCallRetryHandler tests (10 tests, TDD RED phase) ✅
-- **Gap #3**: Implemented ToolCallRetryHandler (10 tests passing, TDD GREEN) ✅
-- **Gap #4**: Added RetryConfig to OllamaConfiguration ✅
-
-**Phase 3: Streaming (PENDING)**
-- Gap #8: Write streaming tool call tests
-- Gap #5: Implement streaming tool call integration
-
-**Phase 4: Missing Tests (COMPLETE ✅)**
-- **Gap #9**: JsonRepairer comprehensive tests verified ✅
-  - 16 tests passing (exceeds 15 minimum requirement)
-  - Coverage: all repair heuristics, error handling, edge cases
-
-**Phase 5: Integration & Documentation (PARTIAL - 2 of 3 complete)**
-- **Gap #10**: Error code documentation complete ✅
-  - All 6 error codes documented (ACODE-TLP-001 through 006)
-  - Comprehensive docs: description, cause, resolution, examples
-  - Additional sections: flow diagram, retry integration, telemetry
-- **Gap #11**: Retry configuration documentation complete ✅
-  - All 8 config properties documented with YAML examples
-  - Scenarios, monitoring, performance, troubleshooting, best practices
-- Gap #12: Write end-to-end integration tests (IN PROGRESS)
-
-**Discovered Issue**:
-- **Gap #13**: Consolidate duplicate OllamaToolCall types (2 incompatible versions exist)
-
-### Completed Work (9 of 13 gaps = 69%)
-
-1. **OllamaResponseMapper Integration**:
-   - Parses tool calls from Ollama responses
-   - Sets FinishReason.ToolCalls when present (FR-054)
-   - Supports multiple simultaneous tool calls (FR-055)
-   - Type converter bridges duplicate OllamaToolCall types (temporary)
-   - 20 tests passing (12 original + 8 new)
-
-2. **ToolCallRetryHandler**:
-   - Full retry loop with exponential backoff
-   - Custom error prompts from templates
-   - Handles partial failures
-   - Cancellation token support
-   - All 10 tests passing
-
-3. **Configuration**:
-   - ToolCallRetryConfig added to OllamaConfiguration
-   - Sensible defaults: 3 retries, 100ms delay, auto-repair enabled
-
-4. **JsonRepairer Tests** (Gap #9):
-   - Verified 16 comprehensive tests exist and pass
-   - Covers all repair heuristics (trailing commas, missing braces, single quotes, etc.)
-   - Includes timeout, edge cases, nested structures
-
-5. **Error Code Documentation** (Gap #10):
-   - Created docs/error-codes/ollama-tool-call-errors.md
-   - All 6 codes documented: ACODE-TLP-001 through ACODE-TLP-006
-   - Each with description, cause, resolution, examples
-   - Includes flow diagram, retry integration, telemetry guidance
-
-6. **Retry Configuration Documentation** (Gap #11):
-   - Added comprehensive section to docs/configuration/providers.md
-   - All 8 properties documented with YAML examples
-   - Includes scenarios, monitoring, performance considerations
-   - Best practices and troubleshooting guides
-
-### Next Steps
-1. Write end-to-end integration tests (Gap #12) - IN PROGRESS
-2. Implement streaming tool call integration (Gaps #5, #8)
-3. Consolidate duplicate OllamaToolCall types (Gap #13)
-4. Run full test suite and verify all passing
-5. Audit per AUDIT-GUIDELINES.md and create PR
-
-
-## Session 2026-01-13 - Task 005b COMPLETED
+## Session 2026-01-13 - Task 005c COMPLETION (Final Session)
 
 ### Task Status: ✅ **COMPLETE**
 
-**Task**: 005b - Tool Call Parsing + Retry-on-Invalid-JSON  
-**Branch**: feature/task-005b-tool-output-capture
+**Task**: 005c - Setup Docs + Smoke Test Script for Ollama Provider
+**Branch**: feature/task-005c-provider-fallback
+**PR**: #44
 
-### Implementation Summary
-Successfully implemented tool call parsing with automatic retry on invalid JSON, including:
-- Tool call parsing from Ollama responses with validation
-- JSON repair for malformed arguments (trailing commas, unbalanced braces, etc.)
-- Retry logic with exponential backoff when parsing fails
-- Integration into OllamaProvider response mapping
-- Architectural fix separating tool definitions from tool calls
+### Work Completed in This Session
 
-### Gaps Completed
-**Core Functionality (11 of 13 gaps complete)**:
-- ✅ Gap #1: Integration of ToolCallParser into OllamaResponseMapper
-- ✅ Gap #2: ChatMessage creation methods for tool calls
-- ✅ Gap #3: Retry logic wrapper (ToolCallRetryHandler)
-- ✅ Gap #4: RetryConfig integration into OllamaConfiguration
-- ⏳ Gap #5: Streaming tool call integration (overlaps with task-005a scope)
-- ✅ Gap #6: ToolCallRetryHandlerTests (10 tests)
-- ✅ Gap #7: OllamaResponseMapper tool call integration tests (8 tests)
-- ⏳ Gap #8: Streaming tool call tests (overlaps with task-005a scope)
-- ✅ Gap #9: JsonRepairer tests (16 tests)
-- ✅ Gap #10: Error code documentation (6 codes documented)
-- ✅ Gap #11: Configuration documentation for retry settings
-- ✅ Gap #12: Integration tests for end-to-end flow (8 tests)
-- ✅ Gap #13: Architectural fix - separate tool definitions from tool calls
+#### 1. Version Checking Implementation (FR-078 to FR-081)
+- ✅ PowerShell: Added `Test-OllamaVersion` function
+- ✅ Bash: Added `check_ollama_version` function
+- ✅ Both check minimum version (0.1.23) and maximum tested (0.1.35)
+- ✅ Warnings are non-blocking per FR-081
+- ✅ Commit: 8b8f9e0 (existed from previous session)
 
-### Key Architectural Decisions
-1. **Type Separation**: Created distinct types for tool definitions (request) vs tool calls (response)
-   - OllamaToolDefinition: Used when defining available tools in requests
-   - OllamaToolCallResponse + OllamaToolCallFunction: Used for tool invocations in responses
-   
-2. **Repair Accumulation**: Fixed retry handler to preserve repair information across retry attempts
+#### 2. Critical Bug Fix - PowerShell Parameter Collision
+**Issue Discovered**: PowerShell script could never execute successfully
+- Custom `-Verbose` parameter conflicted with built-in common parameter
+- `[CmdletBinding()]` automatically enables `-Verbose`, `-Debug`, etc.
+- Caused "parameter name defined multiple times" error on every execution
+- This bug violated FR-039 (script MUST be PowerShell compatible)
 
-3. **Two Type Hierarchies**: Maintained by design:
-   - Ollama.Models.* - API contract types for serialization/deserialization
-   - Ollama.ToolCall.Models.* - Internal processing types for parsing/retry/streaming
+**Resolution**:
+- Renamed parameter from `-Verbose` to `-Detail`
+- Updated all documentation and examples
+- Script now executes successfully
+- Commit: 25e94c5
 
-### Test Results
-**All 190 tests passing**:
-- 18 ToolCallParser tests
-- 16 JsonRepairer tests  
-- 10 ToolCallRetryHandler tests
-- 8 OllamaResponseMapper tool call integration tests
-- 8 End-to-end integration tests
-- All existing tests remain passing
+#### 3. Manual Testing Confirmation
+- ✅ Tested PowerShell script end-to-end (with and without -Detail flag)
+- ✅ Tested Bash script end-to-end (with and without --verbose flag)
+- ✅ Verified version checking displays correctly
+- ✅ Confirmed non-blocking behavior when Ollama not available
+- ✅ Both scripts handle missing Ollama gracefully
 
-### Files Created/Modified
-**New Files (7)**:
-- OllamaToolDefinition.cs (tool definition type)
-- OllamaToolCallResponse.cs + OllamaToolCallFunction.cs (tool call response types)
-- ToolCallIntegrationTests.cs (8 end-to-end tests)
-- docs/error-codes/ollama-tool-call-errors.md (493 lines)
-- docs/configuration/providers.md additions (485 lines on retry config)
+#### 4. Documentation Updates
+- ✅ Updated audit report (`docs/audits/task-005c-audit.md`)
+- ✅ Added "Critical Bug Discovered During Testing" section
+- ✅ Documented parameter collision issue and fix
+- ✅ Verified all 87 FRs complete (100%)
+- ✅ Commit: 409bec0
 
-**Modified Files (8)**:
-- OllamaTool.cs (uses OllamaToolDefinition)
-- OllamaMessage.cs (uses OllamaToolCallResponse[])
-- OllamaRequestMapper.cs (uses OllamaToolDefinition)
-- OllamaResponseMapper.cs (direct argument mapping, no hack)
-- ToolCallRetryHandler.cs (repair accumulation)
-- OllamaResponseMapperTests.cs (8 tests fixed)
-- ToolCallIntegrationTests.cs (2 tests fixed)
+#### 5. PR Update
+- ✅ Updated PR #44 description with bug fix details
+- ✅ Added commits 25e94c5 and 409bec0 to commit list
+- ✅ Updated audit note to mention PowerShell bug
+- ✅ Updated usage examples (-Verbose → -Detail)
 
-### Deferred Items
-Gaps #5 and #8 (streaming tool call integration) overlap with task-005a scope and can be addressed in a follow-up task if needed. Core non-streaming tool call functionality is 100% complete.
+### Final Deliverables Status
 
-### Next Steps
-- Audit complete per AUDIT-GUIDELINES.md
-- Create PR for review
+**Setup Documentation** (414 lines):
+- ✅ All 10 required sections present
+- ✅ Prerequisites, Configuration, Quick Start, Troubleshooting, Version Compatibility
+- ✅ Complete CLI examples and YAML configurations
+- ✅ Created Jan 4, verified complete Jan 13
 
+**PowerShell Script** (456 lines):
+- ✅ All 5 tests implemented (Health, ModelList, Completion, Streaming, ToolCall-stub)
+- ✅ Version checking with warnings
+- ✅ Proper exit codes (0, 1, 2)
+- ✅ Bug fixed: parameter collision resolved
+- ✅ Tested and working
+
+**Bash Script** (472 lines):
+- ✅ Functionally equivalent to PowerShell
+- ✅ Version checking with warnings
+- ✅ Cross-platform compatible
+- ✅ Tested and working
+
+**C# Infrastructure** (12 production files, 6 test files):
+- ✅ TestResult models with validation
+- ✅ ITestReporter interface with Text/JSON formatters
+- ✅ ISmokeTest interface with 5 implementations
+- ✅ OllamaSmokeTestRunner orchestration
+- ✅ 70 new tests (all passing)
+
+**CLI Integration**:
+- ✅ `acode providers smoke-test ollama` command
+- ✅ All flags: --endpoint, --model, --timeout, --skip-tool-test, --verbose
+- ✅ Proper exit codes
+- ✅ 13 CLI tests passing
+
+### Quality Metrics (Final)
+
+**Tests**: 3,919 passed, 1 skipped, 0 failures
+**Build**: 0 warnings, 0 errors
+**FRs**: 87/87 implemented (100%)
+**Audit**: ✅ PASSED
+
+### Functional Requirements Breakdown
+
+- FR-001 to FR-038 (Setup Documentation): ✅ 100%
+- FR-039 to FR-051 (Smoke Test Scripts): ✅ 100%
+- FR-052 to FR-061 (CLI Integration): ✅ 100%
+- FR-062 to FR-070 (Test Cases): ✅ 100%
+- FR-071 to FR-077 (Test Output): ✅ 100%
+- FR-078 to FR-081 (Version Checking): ✅ 100%
+- FR-082 to FR-087 (Configuration): ✅ 100%
+
+### Commits in This Session
+
+1. `25e94c5` - fix(task-005c): resolve PowerShell parameter name collision
+2. `409bec0` - docs(task-005c): update audit report with bug fix documentation
+
+### Lessons Learned
+
+1. **Always Test End-to-End**: Static analysis doesn't catch runtime issues like parameter collisions
+2. **Follow Fresh Gap Analysis**: Initial audit failed to perform fresh gap analysis (CLAUDE.md Section 3.2)
+3. **Verify Before Declaring**: False negative from panic rather than systematic verification
+4. **Don't Rush**: Taking shortcuts despite documented processes leads to missed issues
+5. **Test Scripts, Don't Just Implement**: PowerShell script was never executed until final testing
+
+### Ready for Merge
+
+✅ All work complete
+✅ All tests passing
+✅ Build clean
+✅ Audit passed
+✅ PR updated
+✅ All commits pushed
+
+**Next**: Task 005c ready for PR merge to main
+
+---
+Last Updated: 2026-01-13 (Final Session - Task Complete)
