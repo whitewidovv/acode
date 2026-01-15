@@ -65,4 +65,57 @@ public class VllmExceptionTests
         // Assert
         exception.Timestamp.Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
     }
+
+    [Fact]
+    public void Should_Implement_IVllmException()
+    {
+        // Arrange & Act
+        var exception = new VllmException("ACODE-VLM-001", "Test error");
+
+        // Assert
+        exception.Should().BeAssignableTo<IVllmException>();
+    }
+
+    [Fact]
+    public void IVllmException_Should_Provide_ErrorCode()
+    {
+        // Arrange
+        IVllmException exception = new VllmException("ACODE-VLM-001", "Test");
+
+        // Act & Assert
+        exception.ErrorCode.Should().Be("ACODE-VLM-001");
+    }
+
+    [Fact]
+    public void IVllmException_Should_Provide_RequestId()
+    {
+        // Arrange
+        IVllmException exception = new VllmException("ACODE-VLM-001", "Test")
+        {
+            RequestId = "req-123"
+        };
+
+        // Act & Assert
+        exception.RequestId.Should().Be("req-123");
+    }
+
+    [Fact]
+    public void IVllmException_Should_Provide_Timestamp()
+    {
+        // Arrange & Act
+        IVllmException exception = new VllmException("ACODE-VLM-001", "Test");
+
+        // Assert
+        exception.Timestamp.Should().BeBefore(DateTime.UtcNow.AddSeconds(1));
+    }
+
+    [Fact]
+    public void IVllmException_Should_Provide_IsTransient()
+    {
+        // Arrange & Act
+        IVllmException exception = new VllmException("ACODE-VLM-001", "Test");
+
+        // Assert
+        exception.IsTransient.Should().BeFalse();
+    }
 }

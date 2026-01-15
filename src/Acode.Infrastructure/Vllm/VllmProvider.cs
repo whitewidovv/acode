@@ -40,7 +40,11 @@ public sealed class VllmProvider : IModelProvider, IAsyncDisposable
         _logger = loggerFactory.CreateLogger<VllmProvider>();
         var clientLogger = loggerFactory.CreateLogger<VllmHttpClient>();
         _client = new VllmHttpClient(_config, clientLogger);
-        _healthChecker = new VllmHealthChecker(_config);
+
+        // Create health checker with config derived from client config
+        var healthConfig = new VllmHealthConfiguration { BaseUrl = _config.Endpoint };
+        var healthLogger = loggerFactory.CreateLogger<VllmHealthChecker>();
+        _healthChecker = new VllmHealthChecker(healthConfig, healthLogger);
         _structuredOutputHandler = structuredOutputHandler;
         _disposed = false;
     }

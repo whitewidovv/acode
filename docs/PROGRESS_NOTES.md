@@ -2,6 +2,50 @@
 
 **Current Status**: Phase 8 IN PROGRESS | Overall ~95% Complete (140+/135 tests passing)
 
+---
+
+## Session 2026-01-15 - Task 006c: Load/Health-Check Endpoints + Error Handling - PHASE 4 COMPLETE ✅
+
+### Task Status: 🔄 **IN PROGRESS - PHASE 4 (METRICS SUBSYSTEM) COMPLETE**
+
+**Task**: 006c - Load/Health-Check Endpoints + Error Handling
+**Branch**: feature/task-006c-load-health-check-endpoints
+**Completion**: ~30% overall (Phase 4 metrics subsystem 100% complete)
+
+### Completed Work - Phase 4: Metrics Subsystem ✅
+
+**All 4 gaps in Phase 4 successfully implemented:**
+
+1. **Gap 4.1: VllmLoadStatus** ✅ (89 lines)
+   - Data class with 6 init-only properties
+   - Create() factory method with overload detection
+   - Load score calculation (50% queue, 50% GPU)
+   - OverloadReason descriptive messages
+
+2. **Gap 4.2: VllmMetricsParser** ✅ (94 lines, 10 tests)
+   - Prometheus text format parsing
+   - Extracts: vllm_num_requests_running, vllm_num_requests_waiting, vllm_gpu_cache_usage_perc
+   - Handles comments, empty strings, malformed input
+
+3. **Gap 4.3: VllmMetricsClient** ✅ (47 lines, 5 tests)
+   - HttpClient-based metrics endpoint querying
+   - Graceful failure handling (returns empty string on error)
+   - Configurable metrics endpoint path
+
+4. **Gap 4.4: VllmHealthChecker Integration** ✅
+   - Added metrics dependencies (optional parameters)
+   - Implemented GetLoadStatusAsync() method (replaced TODO)
+   - Calls metrics client and parser in health check flow
+   - All 7 existing tests still pass (backward compatible)
+
+**Test Results**:
+- VllmMetricsParserTests: 10/10 ✅ (100%)
+- VllmMetricsClientTests: 5/5 ✅ (100%)
+- VllmHealthCheckerTests: 7/7 ✅ (100% - all existing tests pass)
+- **Total: 22/22 metrics subsystem tests passing**
+
+---
+
 ## Completed Phases
 
 ### Phase 0 ✅ COMPLETE

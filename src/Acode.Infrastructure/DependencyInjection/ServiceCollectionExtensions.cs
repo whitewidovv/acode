@@ -8,6 +8,9 @@ using Acode.Infrastructure.PromptPacks;
 using Acode.Infrastructure.Tools;
 using Acode.Infrastructure.Vllm;
 using Acode.Infrastructure.Vllm.Client;
+using Acode.Infrastructure.Vllm.Health;
+using Acode.Infrastructure.Vllm.Health.Errors;
+using Acode.Infrastructure.Vllm.Health.Metrics;
 using Acode.Infrastructure.Vllm.StructuredOutput;
 using Acode.Infrastructure.Vllm.StructuredOutput.Capability;
 using Acode.Infrastructure.Vllm.StructuredOutput.Configuration;
@@ -171,6 +174,46 @@ public static class ServiceCollectionExtensions
         // Register formatter and tracker
         services.AddSingleton<IValidationErrorFormatter, ValidationErrorFormatter>();
         services.AddSingleton<IRetryTracker, RetryTracker>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers vLLM health checking components with the DI container.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Optional health check configuration. Uses defaults if null.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <remarks>
+    /// Task 006c: Load/Health-Check Endpoints + Error Handling
+    /// Registers all health checking and error handling components.
+    /// </remarks>
+    public static IServiceCollection AddVllmHealthChecking(
+        this IServiceCollection services,
+        VllmHealthConfiguration? configuration = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        // Register health check configuration
+        var healthConfig = configuration ?? new VllmHealthConfiguration();
+        healthConfig.Validate();
+        services.AddSingleton(healthConfig);
+
+        // Register metrics subsystem
+        services.AddSingleton<VllmMetricsParser>();
+        services.AddSingleton<VllmMetricsClient>(sp =>
+        {
+            var cfg = sp.GetRequiredService<VllmHealthConfiguration>();
+            return new VllmMetricsClient(cfg.BaseUrl, cfg.LoadMonitoring.MetricsEndpoint);
+        });
+
+        // Register error handling subsystem
+        services.AddSingleton<VllmErrorParser>();
+        services.AddSingleton<VllmErrorClassifier>();
+        services.AddSingleton<VllmExceptionMapper>();
+
+        // Register health checker
+        services.AddSingleton<VllmHealthChecker>();
 
         return services;
     }
