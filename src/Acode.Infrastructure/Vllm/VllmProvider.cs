@@ -74,13 +74,14 @@ public sealed class VllmProvider : IModelProvider, IDisposable
         // Apply structured output enrichment if handler available
         if (this._structuredOutputHandler is not null)
         {
-            var enrichmentResult = await this._structuredOutputHandler.ApplyToRequestAsync(
+            var applyResult = await this._structuredOutputHandler.ApplyToRequestAsync(
+                vllmRequest,
                 request,
                 vllmRequest.Model,
                 cancellationToken).ConfigureAwait(false);
 
-            // TODO: Apply enrichmentResult to vllmRequest
-            // This includes: response_format, guided_json, guided_choice, guided_regex parameters
+            // ApplyResult indicates whether structured output was applied.
+            // The vllmRequest object has been directly modified if ApplyResult.IsApplied is true.
         }
 
         var vllmResponse = await _client.SendRequestAsync(vllmRequest, cancellationToken).ConfigureAwait(false);
@@ -103,13 +104,14 @@ public sealed class VllmProvider : IModelProvider, IDisposable
         // Apply structured output enrichment if handler available
         if (this._structuredOutputHandler is not null)
         {
-            var enrichmentResult = await this._structuredOutputHandler.ApplyToRequestAsync(
+            var applyResult = await this._structuredOutputHandler.ApplyToRequestAsync(
+                vllmRequest,
                 request,
                 vllmRequest.Model,
                 cancellationToken).ConfigureAwait(false);
 
-            // TODO: Apply enrichmentResult to vllmRequest
-            // This includes: response_format, guided_json, guided_choice, guided_regex parameters
+            // ApplyResult indicates whether structured output was applied.
+            // The vllmRequest object has been directly modified if ApplyResult.IsApplied is true.
         }
 
         var index = 0;

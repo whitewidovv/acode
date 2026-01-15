@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 
 namespace Acode.Infrastructure.Vllm.Models;
@@ -44,11 +45,12 @@ public sealed class VllmRequest
     public bool Stream { get; set; }
 
     /// <summary>
-    /// Gets the tool definitions for function calling.
+    /// Gets or sets the tool definitions for function calling.
     /// </summary>
     [JsonPropertyName("tools")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public List<object>? Tools { get; init; }
+    [SuppressMessage("Usage", "CA2227:Collection properties should be read-only", Justification = "Property must be settable to allow structured output enforcement to modify tool schemas")]
+    public List<object>? Tools { get; set; }
 
     /// <summary>
     /// Gets or sets the tool choice strategy.

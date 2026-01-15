@@ -2,12 +2,15 @@ namespace Acode.Infrastructure.Vllm.StructuredOutput;
 
 using System.Text.Json;
 using Acode.Application.Inference;
+using Acode.Application.Tools;
 using Acode.Domain.Models.Inference;
+using Acode.Infrastructure.Vllm.Models;
 using Acode.Infrastructure.Vllm.StructuredOutput.Capability;
 using Acode.Infrastructure.Vllm.StructuredOutput.Configuration;
 using Acode.Infrastructure.Vllm.StructuredOutput.Fallback;
 using Acode.Infrastructure.Vllm.StructuredOutput.ResponseFormat;
 using Acode.Infrastructure.Vllm.StructuredOutput.Schema;
+using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// Enumeration of validation failure reasons.
@@ -51,6 +54,8 @@ public sealed class StructuredOutputHandler
     private readonly ResponseFormatBuilder _responseFormatBuilder;
     private readonly GuidedDecodingBuilder _guidedDecodingBuilder;
     private readonly FallbackHandler _fallbackHandler;
+    private readonly ILogger<StructuredOutputHandler> _logger;
+    private readonly IToolSchemaRegistry _schemaRegistry;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="StructuredOutputHandler"/> class.
@@ -62,6 +67,8 @@ public sealed class StructuredOutputHandler
     /// <param name="responseFormatBuilder">The response format builder.</param>
     /// <param name="guidedDecodingBuilder">The guided decoding builder.</param>
     /// <param name="fallbackHandler">The fallback handler.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="schemaRegistry">The tool schema registry.</param>
     public StructuredOutputHandler(
         StructuredOutputConfiguration config,
         SchemaValidator schemaValidator,
@@ -69,7 +76,9 @@ public sealed class StructuredOutputHandler
         CapabilityCache capabilityCache,
         ResponseFormatBuilder responseFormatBuilder,
         GuidedDecodingBuilder guidedDecodingBuilder,
-        FallbackHandler fallbackHandler)
+        FallbackHandler fallbackHandler,
+        ILogger<StructuredOutputHandler> logger,
+        IToolSchemaRegistry schemaRegistry)
     {
         this._config = config ?? throw new ArgumentNullException(nameof(config));
         this._schemaValidator = schemaValidator ?? throw new ArgumentNullException(nameof(schemaValidator));
@@ -78,6 +87,8 @@ public sealed class StructuredOutputHandler
         this._responseFormatBuilder = responseFormatBuilder ?? throw new ArgumentNullException(nameof(responseFormatBuilder));
         this._guidedDecodingBuilder = guidedDecodingBuilder ?? throw new ArgumentNullException(nameof(guidedDecodingBuilder));
         this._fallbackHandler = fallbackHandler ?? throw new ArgumentNullException(nameof(fallbackHandler));
+        this._logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this._schemaRegistry = schemaRegistry ?? throw new ArgumentNullException(nameof(schemaRegistry));
     }
 
     /// <summary>
@@ -179,40 +190,47 @@ public sealed class StructuredOutputHandler
     /// <summary>
     /// Apply structured output constraints to a vLLM request based on ChatRequest.
     /// Handles both ResponseFormat and Tool schemas.
+    /// Directly modifies the VllmRequest object.
     /// </summary>
+    /// <param name="request">The vLLM request to modify.</param>
     /// <param name="chatRequest">The chat request with possible ResponseFormat or Tools.</param>
     /// <param name="modelId">The model identifier.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>An enrichment result indicating whether structured output should be applied.</returns>
-    public async Task<EnrichmentResult> ApplyToRequestAsync(
+    /// <returns>An apply result indicating whether structured output was applied.</returns>
+    public async Task<ApplyResult> ApplyToRequestAsync(
+        VllmRequest request,
         ChatRequest chatRequest,
         string modelId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(chatRequest);
 
         if (!this._config.IsEnabled(modelId))
         {
-            return EnrichmentResult.CreateDisabled($"Structured output disabled for model {modelId}");
+            this._logger.LogDebug("Structured output disabled for {Model}", modelId);
+            return ApplyResult.Disabled();
         }
 
         // Check ResponseFormat first (higher priority)
         if (chatRequest.ResponseFormat is not null)
         {
-            return await this.ApplyResponseFormatAsync(chatRequest.ResponseFormat, modelId, cancellationToken).ConfigureAwait(false);
+            return await this.ApplyResponseFormatAsync(request, chatRequest.ResponseFormat, modelId, cancellationToken).ConfigureAwait(false);
         }
 
         // Check Tools second - transform tool schemas
         if (chatRequest.Tools?.Any() == true)
         {
-            return this.ApplyToolSchemas(chatRequest.Tools, modelId);
+            return await this.ApplyToolSchemasAsync(request, chatRequest.Tools, modelId, cancellationToken).ConfigureAwait(false);
         }
 
         // No structured output needed
-        return EnrichmentResult.CreateDisabled("No ResponseFormat or Tools configured");
+        this._logger.LogDebug("No structured output needed for request");
+        return ApplyResult.NotApplicable();
     }
 
-    private async Task<EnrichmentResult> ApplyResponseFormatAsync(
+    private async Task<ApplyResult> ApplyResponseFormatAsync(
+        VllmRequest request,
         Application.Inference.ResponseFormat format,
         string modelId,
         CancellationToken cancellationToken)
@@ -226,69 +244,124 @@ public sealed class StructuredOutputHandler
             {
                 if (capabilities == null || !capabilities.SupportsGuidedJson)
                 {
-                    return EnrichmentResult.CreateFailed(
-                        $"Model {modelId} does not support json_object mode",
-                        ValidationFailureReason.UnsupportedModel);
+                    this._logger.LogWarning("json_object not supported by {Model}, fallback activated", modelId);
+                    return ApplyResult.Fallback(FallbackReason.Unrecoverable, $"Model {modelId} does not support json_object mode");
                 }
 
-                var vllmFormat = new VllmResponseFormat { Type = "json_object" };
-                return EnrichmentResult.CreateSuccess(vllmFormat, new object(), capabilities);
+                request.ResponseFormat = new { type = "json_object" };
+                this._logger.LogDebug("Applied json_object format for {Model}", modelId);
+                return ApplyResult.Applied(StructuredOutputMode.JsonObject);
             }
 
             if (format.Type == "json_schema" && format.JsonSchema is not null)
             {
                 if (capabilities == null || !capabilities.SupportsGuidedJson)
                 {
-                    return EnrichmentResult.CreateFailed(
-                        $"Model {modelId} does not support json_schema mode",
-                        ValidationFailureReason.UnsupportedModel);
+                    this._logger.LogWarning("json_schema not supported by {Model}, fallback activated", modelId);
+                    return ApplyResult.Fallback(FallbackReason.Unrecoverable, $"Model {modelId} does not support json_schema mode");
                 }
 
-                // Use existing EnrichRequestAsync for schema transformation
-                return await this.EnrichRequestAsync(modelId, format.JsonSchema.Schema, cancellationToken).ConfigureAwait(false);
+                // Validate schema first
+                var schema = format.JsonSchema.Schema;
+                var validationResult = this._schemaValidator.Validate(schema);
+
+                if (!validationResult.IsValid)
+                {
+                    this._logger.LogWarning("Schema rejected for {Model}, fallback activated", modelId);
+                    return ApplyResult.Fallback(FallbackReason.Unrecoverable, string.Join("; ", validationResult.Errors));
+                }
+
+                // Apply the json_schema format
+                request.ResponseFormat = new
+                {
+                    type = "json_schema",
+                    json_schema = new
+                    {
+                        name = format.JsonSchema.Name,
+                        schema = schema
+                    }
+                };
+                this._logger.LogDebug("Applied json_schema format for {Model}", modelId);
+                return ApplyResult.Applied(StructuredOutputMode.JsonSchema);
             }
 
-            return EnrichmentResult.CreateFailed(
-                $"Unknown response format type: {format.Type}",
-                ValidationFailureReason.InvalidSchema);
+            return ApplyResult.NotApplicable();
         }
         catch (Exception ex)
         {
-            return EnrichmentResult.CreateFailed(
-                $"Error applying response format: {ex.Message}",
-                ValidationFailureReason.EnrichmentError);
+            this._logger.LogWarning(ex, "Error applying response format for {Model}", modelId);
+            return ApplyResult.Fallback(FallbackReason.Unrecoverable, $"Error applying response format: {ex.Message}");
         }
     }
 
-    private EnrichmentResult ApplyToolSchemas(
+    private async Task<ApplyResult> ApplyToolSchemasAsync(
+        VllmRequest request,
         ToolDefinition[] tools,
-        string modelId)
+        string modelId,
+        CancellationToken cancellationToken)
     {
         try
         {
             if (tools.Length == 0)
             {
-                return EnrichmentResult.CreateDisabled("No tools provided");
-            }
-
-            // Collect all tool parameter schemas
-            var toolSchemas = new List<JsonElement>();
-            foreach (var tool in tools)
-            {
-                toolSchemas.Add(tool.Parameters);
+                return ApplyResult.NotApplicable();
             }
 
             // Get capabilities for tool schema validation
-            var capabilities = this._capabilityCache.TryGetCached(modelId, out var cached) && cached != null ? cached : new ModelCapabilities { ModelId = modelId };
+            var capabilities = await this.GetModelCapabilitiesAsync(modelId, cancellationToken).ConfigureAwait(false);
 
-            // Return success with tool schemas for vLLM to apply
-            return EnrichmentResult.CreateSuccess(new VllmResponseFormat { Type = "json_object" }, toolSchemas.ToArray(), capabilities);
+            if (capabilities == null || !capabilities.SupportsGuidedJson)
+            {
+                this._logger.LogWarning("guided_json not supported by {Model}, tool schemas not enforced", modelId);
+                return ApplyResult.Fallback(FallbackReason.Unrecoverable, $"Model {modelId} does not support guided_json for tools");
+            }
+
+            // Transform and validate tool schemas
+            var transformedTools = new List<object>();
+            foreach (var tool in tools)
+            {
+                try
+                {
+                    // Validate the tool parameter schema
+                    var validationResult = this._schemaValidator.Validate(tool.Parameters);
+                    if (!validationResult.IsValid)
+                    {
+                        this._logger.LogWarning("Tool {ToolName} schema rejected", tool.Name);
+                        continue;  // Skip invalid tool schema
+                    }
+
+                    // Transform tool schema for vLLM
+                    transformedTools.Add(new
+                    {
+                        type = "function",
+                        function = new
+                        {
+                            name = tool.Name,
+                            description = tool.Description,
+                            parameters = tool.Parameters
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    this._logger.LogWarning(ex, "Tool {ToolName} schema rejected", tool.Name);
+                }
+            }
+
+            // Apply tool schemas to request if any valid tools exist
+            if (transformedTools.Count > 0)
+            {
+                request.Tools = transformedTools;
+                this._logger.LogDebug("Applied {Count} tool schemas for {Model}", transformedTools.Count, modelId);
+                return ApplyResult.Applied(StructuredOutputMode.ToolSchemas);
+            }
+
+            return ApplyResult.NotApplicable();
         }
         catch (Exception ex)
         {
-            return EnrichmentResult.CreateFailed(
-                $"Error applying tool schemas: {ex.Message}",
-                ValidationFailureReason.EnrichmentError);
+            this._logger.LogWarning(ex, "Error applying tool schemas for {Model}", modelId);
+            return ApplyResult.Fallback(FallbackReason.Unrecoverable, $"Error applying tool schemas: {ex.Message}");
         }
     }
 

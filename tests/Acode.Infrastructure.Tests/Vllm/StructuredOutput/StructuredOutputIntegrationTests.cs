@@ -2,6 +2,7 @@ namespace Acode.Infrastructure.Tests.Vllm.StructuredOutput;
 
 using System.Text.Json;
 using Acode.Application.Inference;
+using Acode.Application.Tools;
 using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.Vllm.StructuredOutput;
 using Acode.Infrastructure.Vllm.StructuredOutput.Capability;
@@ -10,6 +11,8 @@ using Acode.Infrastructure.Vllm.StructuredOutput.Fallback;
 using Acode.Infrastructure.Vllm.StructuredOutput.ResponseFormat;
 using Acode.Infrastructure.Vllm.StructuredOutput.Schema;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
 using Xunit;
 
 /// <summary>
@@ -39,7 +42,9 @@ public class StructuredOutputIntegrationTests
             capabilityCache,
             responseFormatBuilder,
             guidedDecodingBuilder,
-            fallbackHandler);
+            fallbackHandler,
+            Substitute.For<ILogger<StructuredOutputHandler>>(),
+            Substitute.For<IToolSchemaRegistry>());
     }
 
     [Fact]
@@ -145,7 +150,9 @@ public class StructuredOutputIntegrationTests
             new CapabilityCache(),
             new ResponseFormatBuilder(),
             new GuidedDecodingBuilder(),
-            new FallbackHandler(new OutputValidator()));
+            new FallbackHandler(new OutputValidator()),
+            Substitute.For<ILogger<StructuredOutputHandler>>(),
+            Substitute.For<IToolSchemaRegistry>());
 
         var chatRequest = new ChatRequest(
             new[]

@@ -1,6 +1,7 @@
 namespace Acode.Infrastructure.Tests.Vllm.StructuredOutput;
 
 using System.Text.Json;
+using Acode.Application.Tools;
 using Acode.Infrastructure.Vllm.StructuredOutput;
 using Acode.Infrastructure.Vllm.StructuredOutput.Capability;
 using Acode.Infrastructure.Vllm.StructuredOutput.Configuration;
@@ -8,6 +9,8 @@ using Acode.Infrastructure.Vllm.StructuredOutput.Fallback;
 using Acode.Infrastructure.Vllm.StructuredOutput.ResponseFormat;
 using Acode.Infrastructure.Vllm.StructuredOutput.Schema;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
 using Xunit;
 
 /// <summary>
@@ -227,7 +230,9 @@ public class StructuredOutputHandlerTests
             this._capabilityCache,
             this._responseFormatBuilder,
             this._guidedDecodingBuilder,
-            this._fallbackHandler);
+            this._fallbackHandler,
+            Substitute.For<ILogger<StructuredOutputHandler>>(),
+            Substitute.For<IToolSchemaRegistry>());
 
         // Assert
         action.Should().Throw<ArgumentNullException>();
@@ -244,7 +249,9 @@ public class StructuredOutputHandlerTests
             this._capabilityCache,
             this._responseFormatBuilder,
             this._guidedDecodingBuilder,
-            this._fallbackHandler);
+            this._fallbackHandler,
+            Substitute.For<ILogger<StructuredOutputHandler>>(),
+            Substitute.For<IToolSchemaRegistry>());
 
         // Assert
         action.Should().Throw<ArgumentNullException>();
@@ -333,6 +340,8 @@ public class StructuredOutputHandlerTests
             this._capabilityCache,
             this._responseFormatBuilder,
             this._guidedDecodingBuilder,
-            this._fallbackHandler);
+            this._fallbackHandler,
+            Substitute.For<ILogger<StructuredOutputHandler>>(),
+            Substitute.For<IToolSchemaRegistry>());
     }
 }
