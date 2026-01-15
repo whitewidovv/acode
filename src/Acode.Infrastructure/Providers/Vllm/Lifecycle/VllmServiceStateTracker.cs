@@ -35,6 +35,11 @@ public sealed class VllmServiceStateTracker
     public bool LastHealthCheckHealthy { get; private set; }
 
     /// <summary>
+    /// Gets the error message (if any).
+    /// </summary>
+    public string? ErrorMessage { get; private set; }
+
+    /// <summary>
     /// Transitions to a new service state.
     /// </summary>
     /// <param name="newState">The new state to transition to.</param>
@@ -85,6 +90,18 @@ public sealed class VllmServiceStateTracker
         lock (_lockObject)
         {
             ProcessId = processId;
+        }
+    }
+
+    /// <summary>
+    /// Sets the error message.
+    /// </summary>
+    /// <param name="errorMessage">The error message.</param>
+    public void SetErrorMessage(string? errorMessage)
+    {
+        lock (_lockObject)
+        {
+            ErrorMessage = errorMessage;
         }
     }
 }

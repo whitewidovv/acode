@@ -768,7 +768,7 @@ protected override async Task ExecuteAsync(CancellationToken stoppingToken);
 
 ## PHASE 5: MAIN ORCHESTRATOR
 
-### P5.1: VllmServiceOrchestrator [  ]
+### P5.1: VllmServiceOrchestrator [✅]
 
 **File to Create**: `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmServiceOrchestrator.cs`
 
@@ -1016,10 +1016,10 @@ grep -r "NotImplementedException" tests/Acode.*.Tests/Providers/Vllm/Lifecycle/
 | 3.3 | VllmGpuMonitor | [✅] | 11 | 9bf97f0 |
 | 4.1 | VllmModelLoader | [✅] | 33 | [next] |
 | 4.2 | VllmHealthCheckWorker | [✅] | 24 | [next] |
-| 5.1 | VllmServiceOrchestrator | [ ] | 20 | [TBD] |
+| 5.1 | VllmServiceOrchestrator | [✅] | 21 | [next] |
 | 6.1 | Integration Tests | [ ] | 7 | [TBD] |
 | 7.x | DI & Final | [ ] | 0 | [TBD] |
-| **TOTAL** | **14 items** | **[78%]** | **134/80+** | **11/14** |
+| **TOTAL** | **14 items** | **[86%]** | **155/80+** | **12/14** |
 
 ---
 
