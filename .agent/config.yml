@@ -44,6 +44,20 @@ paths:
   output: [bin/, obj/]
   docs: [docs/]
 
+# Tool validation retry configuration
+tools:
+  validation:
+    retry:
+      max_attempts: 3
+      max_message_length: 2000
+      max_errors_shown: 10
+      max_value_preview: 100
+      include_hints: true
+      include_actual_values: true
+      track_history: true
+      redact_secrets: true
+      relativize_paths: true
+
 # Ignore patterns
 ignore:
   patterns:
