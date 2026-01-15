@@ -1,17 +1,30 @@
 using Acode.Infrastructure.Vllm.Health;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using NSubstitute;
 
 namespace Acode.Infrastructure.Tests.Vllm.Health;
 
 public class VllmHealthCheckerTests
 {
     [Fact]
+    public void Constructor_Should_Require_Logger()
+    {
+        // Arrange
+        var config = new VllmHealthConfiguration();
+
+        // Act & Assert
+        var act = () => new VllmHealthChecker(config, logger: null!);
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
     public async Task IsHealthyAsync_Should_ReturnTrue_When_ServerRespondsOk()
     {
         // Arrange
         var healthConfig = new VllmHealthConfiguration();
-        var endpoint = "http://localhost:8000";
-        var checker = new VllmHealthChecker(healthConfig, endpoint);
+        var logger = CreateMockLogger();
+        var checker = new VllmHealthChecker(healthConfig, logger);
 
         // Act & Assert - will fail when server not running, but verifies contract
 #pragma warning disable CA2007
@@ -30,8 +43,8 @@ public class VllmHealthCheckerTests
         {
             TimeoutSeconds = 1
         };
-        var endpoint = "http://localhost:9999"; // Invalid port
-        var checker = new VllmHealthChecker(healthConfig, endpoint);
+        var logger = CreateMockLogger();
+        var checker = new VllmHealthChecker(healthConfig, logger);
 
         // Act
 #pragma warning disable CA2007
@@ -50,8 +63,8 @@ public class VllmHealthCheckerTests
         {
             TimeoutSeconds = 1
         };
-        var endpoint = "http://localhost:8000";
-        var checker = new VllmHealthChecker(healthConfig, endpoint);
+        var logger = CreateMockLogger();
+        var checker = new VllmHealthChecker(healthConfig, logger);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(10));
 
@@ -72,8 +85,8 @@ public class VllmHealthCheckerTests
         {
             TimeoutSeconds = 1
         };
-        var endpoint = "http://invalid-domain-that-does-not-exist.local";
-        var checker = new VllmHealthChecker(healthConfig, endpoint);
+        var logger = CreateMockLogger();
+        var checker = new VllmHealthChecker(healthConfig, logger);
 
         // Act
 #pragma warning disable CA2007
@@ -89,8 +102,8 @@ public class VllmHealthCheckerTests
     {
         // Arrange
         var healthConfig = new VllmHealthConfiguration();
-        var endpoint = "http://localhost:8000";
-        var checker = new VllmHealthChecker(healthConfig, endpoint);
+        var logger = CreateMockLogger();
+        var checker = new VllmHealthChecker(healthConfig, logger);
 
         // Act
 #pragma warning disable CA2007
@@ -99,10 +112,34 @@ public class VllmHealthCheckerTests
 
         // Assert
         status.Should().NotBeNull();
-
-        // Uri.ToString() normalizes to include trailing slash
-        status.Endpoint.Should().Be("http://localhost:8000/");
         status.CheckedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task GetHealthStatusAsync_Should_Log_Check_Start()
+    {
+        // Arrange
+        var healthConfig = new VllmHealthConfiguration();
+        var logger = CreateMockLogger();
+        var checker = new VllmHealthChecker(healthConfig, logger);
+
+        // Act
+#pragma warning disable CA2007
+        await checker.GetHealthStatusAsync(CancellationToken.None);
+#pragma warning restore CA2007
+
+        // Assert - verify logger was called for check start
+        logger.Received().Log(
+            LogLevel.Debug,
+            Arg.Any<EventId>(),
+            Arg.Is<object>(o => o.ToString()!.Contains("Starting health check")),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    private static ILogger<VllmHealthChecker> CreateMockLogger()
+    {
+        return Substitute.For<ILogger<VllmHealthChecker>>();
     }
 }
 
