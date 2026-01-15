@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
+using Acode.Infrastructure.Vllm.Health.Metrics;
 using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.Vllm.Health;
@@ -14,6 +15,8 @@ public sealed class VllmHealthChecker
     private readonly HttpClient _httpClient;
     private readonly ILogger<VllmHealthChecker> _logger;
     private readonly Uri _endpoint;
+    private readonly VllmMetricsClient? _metricsClient;
+    private readonly VllmMetricsParser _metricsParser;
     private HealthStatus? _previousStatus;
 
     /// <summary>
@@ -21,7 +24,13 @@ public sealed class VllmHealthChecker
     /// </summary>
     /// <param name="healthConfig">Health check configuration.</param>
     /// <param name="logger">Logger for diagnostic information.</param>
-    public VllmHealthChecker(VllmHealthConfiguration healthConfig, ILogger<VllmHealthChecker> logger)
+    /// <param name="metricsClient">Optional client for querying metrics.</param>
+    /// <param name="metricsParser">Optional parser for Prometheus metrics.</param>
+    public VllmHealthChecker(
+        VllmHealthConfiguration healthConfig,
+        ILogger<VllmHealthChecker> logger,
+        VllmMetricsClient? metricsClient = null,
+        VllmMetricsParser? metricsParser = null)
     {
         _config = healthConfig ?? throw new ArgumentNullException(nameof(healthConfig));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -33,6 +42,9 @@ public sealed class VllmHealthChecker
             BaseAddress = _endpoint,
             Timeout = TimeSpan.FromSeconds(_config.TimeoutSeconds)
         };
+
+        _metricsClient = metricsClient;
+        _metricsParser = metricsParser ?? new VllmMetricsParser();
     }
 
     /// <summary>
@@ -158,10 +170,37 @@ public sealed class VllmHealthChecker
         }
     }
 
-    private Task<VllmLoadStatus?> GetLoadStatusAsync(CancellationToken cancellationToken)
+    private async Task<VllmLoadStatus?> GetLoadStatusAsync(CancellationToken cancellationToken)
     {
-        // TODO: Implement in Phase 4 (Metrics subsystem)
-        return Task.FromResult<VllmLoadStatus?>(null);
+        if (_metricsClient == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var prometheusText = await _metricsClient.GetMetricsAsync(cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(prometheusText))
+            {
+                return null;
+            }
+
+            var metrics = _metricsParser.Parse(prometheusText);
+
+            var loadStatus = VllmLoadStatus.Create(
+                metrics.RunningRequests,
+                metrics.WaitingRequests,
+                metrics.GpuUtilizationPercent,
+                _config.LoadMonitoring.QueueThreshold,
+                _config.LoadMonitoring.GpuThresholdPercent);
+
+            return loadStatus;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get load status");
+            return null;
+        }
     }
 
     private HealthStatus DetermineStatus(HttpStatusCode statusCode, TimeSpan responseTime)

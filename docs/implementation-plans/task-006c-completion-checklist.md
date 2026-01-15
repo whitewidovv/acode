@@ -1622,7 +1622,7 @@ Run test: Expected GREEN
 
 ### Gap 4.3: Create VllmMetricsClient
 
-**Status**: [ ]
+**Status**: [✅]
 
 **File to Create**: src/Acode.Infrastructure/Vllm/Health/Metrics/VllmMetricsClient.cs
 
@@ -1710,10 +1710,15 @@ Run test: Expected GREEN (will return empty string if no server)
 - Should_Not_Throw_Exceptions
 
 **Success Criteria**:
-- [ ] VllmMetricsClient.cs created
-- [ ] GetMetricsAsync() method
-- [ ] ~4 tests passing
-- [ ] AC-015 verified
+- [✅] VllmMetricsClient.cs created
+- [✅] GetMetricsAsync() method implemented
+- [✅] 5 tests passing (exceeds 4 minimum):
+  - Should_Query_Metrics_Endpoint
+  - Should_Return_Empty_On_Connection_Failure
+  - Should_Return_Empty_On_Non_200
+  - Should_Not_Throw_Exceptions
+  - Should_Use_Custom_Metrics_Endpoint
+- [✅] AC-015 verified
 
 ---
 
