@@ -69,6 +69,9 @@ public sealed class VllmHealthResult
     /// <summary>
     /// Creates an Unknown health result.
     /// </summary>
+    /// <param name="endpoint">The vLLM server endpoint.</param>
+    /// <param name="reason">The reason for the unknown status.</param>
+    /// <returns>A new VllmHealthResult with Unknown status and zero response time.</returns>
     public static VllmHealthResult Unknown(string endpoint, string reason)
     {
         return new VllmHealthResult(
@@ -81,6 +84,10 @@ public sealed class VllmHealthResult
     /// <summary>
     /// Creates an Unhealthy health result.
     /// </summary>
+    /// <param name="endpoint">The vLLM server endpoint.</param>
+    /// <param name="responseTime">The response time of the failed check.</param>
+    /// <param name="message">The error message describing why the server is unhealthy.</param>
+    /// <returns>A new VllmHealthResult with Unhealthy status and the provided response time and error message.</returns>
     public static VllmHealthResult Unhealthy(string endpoint, TimeSpan responseTime, string message)
     {
         return new VllmHealthResult(

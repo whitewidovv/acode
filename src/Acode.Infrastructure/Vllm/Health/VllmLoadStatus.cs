@@ -38,6 +38,12 @@ public sealed class VllmLoadStatus
     /// <summary>
     /// Creates a load status with overload detection.
     /// </summary>
+    /// <param name="runningRequests">Number of currently running requests.</param>
+    /// <param name="waitingRequests">Number of requests waiting in queue.</param>
+    /// <param name="gpuUtilizationPercent">GPU utilization percentage.</param>
+    /// <param name="queueThreshold">Queue threshold for overload detection.</param>
+    /// <param name="gpuThreshold">GPU threshold percentage for overload detection.</param>
+    /// <returns>A new VllmLoadStatus with overload detection applied.</returns>
     public static VllmLoadStatus Create(
         int runningRequests,
         int waitingRequests,

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Acode.Infrastructure.Vllm.Client;
 
 namespace Acode.Infrastructure.Vllm.Health;
 
@@ -8,22 +7,26 @@ namespace Acode.Infrastructure.Vllm.Health;
 /// </summary>
 public sealed class VllmHealthChecker
 {
-    private readonly VllmClientConfiguration _config;
+    private readonly VllmHealthConfiguration _config;
     private readonly HttpClient _httpClient;
+    private readonly Uri _endpoint;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VllmHealthChecker"/> class.
     /// </summary>
-    /// <param name="config">Client configuration.</param>
-    public VllmHealthChecker(VllmClientConfiguration config)
+    /// <param name="healthConfig">Health check configuration.</param>
+    /// <param name="endpoint">The vLLM server endpoint.</param>
+    public VllmHealthChecker(VllmHealthConfiguration healthConfig, string endpoint)
     {
-        _config = config ?? throw new ArgumentNullException(nameof(config));
+        _config = healthConfig ?? throw new ArgumentNullException(nameof(healthConfig));
+        ArgumentException.ThrowIfNullOrEmpty(endpoint, nameof(endpoint));
         _config.Validate();
 
+        _endpoint = new Uri(endpoint);
         _httpClient = new HttpClient
         {
-            BaseAddress = new Uri(_config.Endpoint),
-            Timeout = TimeSpan.FromSeconds(_config.HealthCheckTimeoutSeconds)
+            BaseAddress = _endpoint,
+            Timeout = TimeSpan.FromSeconds(_config.TimeoutSeconds)
         };
     }
 
@@ -36,8 +39,8 @@ public sealed class VllmHealthChecker
     {
         try
         {
-            var response = await _httpClient.GetAsync("/health", cancellationToken).ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
+            var result = await GetHealthStatusAsync(cancellationToken).ConfigureAwait(false);
+            return result.Status == HealthStatus.Healthy;
         }
         catch
         {
@@ -49,29 +52,93 @@ public sealed class VllmHealthChecker
     /// Gets detailed health status of the vLLM server.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Health status with timing and error information.</returns>
-    public async Task<VllmHealthStatus> GetHealthStatusAsync(CancellationToken cancellationToken)
+    /// <returns>Health result with timing and detailed status information.</returns>
+    public async Task<VllmHealthResult> GetHealthStatusAsync(CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var response = await _httpClient.GetAsync("/health", cancellationToken).ConfigureAwait(false);
+            // Try /health endpoint first
+            var response = await _httpClient.GetAsync(_config.HealthEndpoint, cancellationToken).ConfigureAwait(false);
             stopwatch.Stop();
 
-            return new VllmHealthStatus(
-                isHealthy: response.IsSuccessStatusCode,
-                endpoint: _config.Endpoint,
-                responseTimeMs: stopwatch.ElapsedMilliseconds,
-                errorMessage: response.IsSuccessStatusCode ? null : $"HTTP {(int)response.StatusCode}");
+            if (response.IsSuccessStatusCode)
+            {
+                var status = DetermineStatus(stopwatch.Elapsed);
+                return new VllmHealthResult(
+                    status: status,
+                    endpoint: _endpoint.ToString(),
+                    responseTime: stopwatch.Elapsed,
+                    errorMessage: null,
+                    models: null,
+                    load: null);
+            }
+
+            // Fall back to /v1/models if /health fails
+            return await TryModelsEndpointAsync(stopwatch, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            stopwatch.Stop();
+            return VllmHealthResult.Unknown(_endpoint.ToString(), "Health check cancelled");
+        }
+        catch (HttpRequestException ex)
+        {
+            stopwatch.Stop();
+            return VllmHealthResult.Unhealthy(_endpoint.ToString(), stopwatch.Elapsed, $"Connection failed: {ex.Message}");
+        }
+        catch (TaskCanceledException ex)
+        {
+            stopwatch.Stop();
+            return VllmHealthResult.Unknown(_endpoint.ToString(), $"Request timeout: {ex.Message}");
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            return new VllmHealthStatus(
-                isHealthy: false,
-                endpoint: _config.Endpoint,
-                responseTimeMs: stopwatch.ElapsedMilliseconds,
-                errorMessage: ex.Message);
+            return VllmHealthResult.Unknown(_endpoint.ToString(), $"Unexpected error: {ex.Message}");
         }
+    }
+
+    private async Task<VllmHealthResult> TryModelsEndpointAsync(Stopwatch stopwatch, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync("/v1/models", cancellationToken).ConfigureAwait(false);
+            stopwatch.Stop();
+
+            if (response.IsSuccessStatusCode)
+            {
+                var status = DetermineStatus(stopwatch.Elapsed);
+                return new VllmHealthResult(
+                    status: status,
+                    endpoint: _endpoint.ToString(),
+                    responseTime: stopwatch.Elapsed,
+                    errorMessage: null,
+                    models: null,
+                    load: null);
+            }
+
+            return VllmHealthResult.Unhealthy(_endpoint.ToString(), stopwatch.Elapsed, $"HTTP {(int)response.StatusCode}");
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            return VllmHealthResult.Unhealthy(_endpoint.ToString(), stopwatch.Elapsed, ex.Message);
+        }
+    }
+
+    private HealthStatus DetermineStatus(TimeSpan responseTime)
+    {
+        if (responseTime.TotalMilliseconds < _config.HealthyThresholdMs)
+        {
+            return HealthStatus.Healthy;
+        }
+
+        if (responseTime.TotalMilliseconds > _config.DegradedThresholdMs)
+        {
+            return HealthStatus.Degraded;
+        }
+
+        return HealthStatus.Healthy;
     }
 }

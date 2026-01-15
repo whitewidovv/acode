@@ -1,4 +1,3 @@
-using Acode.Infrastructure.Vllm.Client;
 using Acode.Infrastructure.Vllm.Health;
 using FluentAssertions;
 
@@ -10,11 +9,9 @@ public class VllmHealthCheckerTests
     public async Task IsHealthyAsync_Should_ReturnTrue_When_ServerRespondsOk()
     {
         // Arrange
-        var config = new VllmClientConfiguration
-        {
-            Endpoint = "http://localhost:8000"
-        };
-        var checker = new VllmHealthChecker(config);
+        var healthConfig = new VllmHealthConfiguration();
+        var endpoint = "http://localhost:8000";
+        var checker = new VllmHealthChecker(healthConfig, endpoint);
 
         // Act & Assert - will fail when server not running, but verifies contract
 #pragma warning disable CA2007
@@ -29,12 +26,12 @@ public class VllmHealthCheckerTests
     public async Task IsHealthyAsync_Should_ReturnFalse_When_ServerUnreachable()
     {
         // Arrange
-        var config = new VllmClientConfiguration
+        var healthConfig = new VllmHealthConfiguration
         {
-            Endpoint = "http://localhost:9999", // Invalid port
-            HealthCheckTimeoutSeconds = 1
+            TimeoutSeconds = 1
         };
-        var checker = new VllmHealthChecker(config);
+        var endpoint = "http://localhost:9999"; // Invalid port
+        var checker = new VllmHealthChecker(healthConfig, endpoint);
 
         // Act
 #pragma warning disable CA2007
@@ -49,12 +46,12 @@ public class VllmHealthCheckerTests
     public async Task IsHealthyAsync_Should_ReturnFalse_When_Timeout()
     {
         // Arrange
-        var config = new VllmClientConfiguration
+        var healthConfig = new VllmHealthConfiguration
         {
-            Endpoint = "http://localhost:8000",
-            HealthCheckTimeoutSeconds = 1
+            TimeoutSeconds = 1
         };
-        var checker = new VllmHealthChecker(config);
+        var endpoint = "http://localhost:8000";
+        var checker = new VllmHealthChecker(healthConfig, endpoint);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(10));
 
@@ -71,12 +68,12 @@ public class VllmHealthCheckerTests
     public async Task IsHealthyAsync_Should_NeverThrowException()
     {
         // Arrange
-        var config = new VllmClientConfiguration
+        var healthConfig = new VllmHealthConfiguration
         {
-            Endpoint = "http://invalid-domain-that-does-not-exist.local",
-            HealthCheckTimeoutSeconds = 1
+            TimeoutSeconds = 1
         };
-        var checker = new VllmHealthChecker(config);
+        var endpoint = "http://invalid-domain-that-does-not-exist.local";
+        var checker = new VllmHealthChecker(healthConfig, endpoint);
 
         // Act
 #pragma warning disable CA2007
@@ -91,11 +88,9 @@ public class VllmHealthCheckerTests
     public async Task GetHealthStatusAsync_Should_ReturnHealthyStatus_When_ServerOk()
     {
         // Arrange
-        var config = new VllmClientConfiguration
-        {
-            Endpoint = "http://localhost:8000"
-        };
-        var checker = new VllmHealthChecker(config);
+        var healthConfig = new VllmHealthConfiguration();
+        var endpoint = "http://localhost:8000";
+        var checker = new VllmHealthChecker(healthConfig, endpoint);
 
         // Act
 #pragma warning disable CA2007
@@ -104,7 +99,9 @@ public class VllmHealthCheckerTests
 
         // Assert
         status.Should().NotBeNull();
-        status.Endpoint.Should().Be("http://localhost:8000");
+
+        // Uri.ToString() normalizes to include trailing slash
+        status.Endpoint.Should().Be("http://localhost:8000/");
         status.CheckedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
     }
 }
