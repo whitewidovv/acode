@@ -287,7 +287,7 @@ format_version: '1.0'
 id: {packId}
 version: 1.0.0
 name: {packId} Name
-description: Test pack
+description: A test prompt pack for registry testing purposes
 created_at: 2025-01-01T00:00:00Z
 components:
   - path: system.md

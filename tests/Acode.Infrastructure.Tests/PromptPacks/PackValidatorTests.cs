@@ -221,10 +221,10 @@ public class PackValidatorTests : IDisposable
 
         var manifest = @"
 format_version: '1.0'
-id: test
+id: test-pack
 version: 1.0.0
-name: Test
-description: Test
+name: Test Pack
+description: A test prompt pack for missing component validation
 created_at: 2025-01-01T00:00:00Z
 components:
   - path: missing.md
@@ -255,8 +255,8 @@ components:
 format_version: '1.0'
 id: AB
 version: 1.0.0
-name: Test
-description: Test
+name: Test Pack
+description: A test prompt pack for invalid ID validation
 created_at: 2025-01-01T00:00:00Z
 components:
   - path: system.md

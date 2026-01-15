@@ -232,7 +232,7 @@ public class PromptPackIntegrationTests : IDisposable
 id: {packId}
 version: 1.0.0
 name: {packId} Pack
-description: Test pack
+description: A test prompt pack for integration testing purposes
 created_at: 2024-01-15T10:00:00Z
 components:
   - path: system.md
@@ -253,6 +253,7 @@ components:
 id: {packId}
 version: {version}
 name: {name}
+description: A test prompt pack for integration testing purposes
 created_at: 2024-01-15T10:00:00Z
 components:
   - path: system.md
@@ -273,6 +274,7 @@ components:
 id: {packId}
 version: 1.0.0
 name: Template Test Pack
+description: A test prompt pack with template variables for testing
 created_at: 2024-01-15T10:00:00Z
 components:
   - path: system.md

@@ -131,6 +131,28 @@ public sealed class ManifestParser
             throw new ManifestParseException("ACODE-PKL-002", "name is required");
         }
 
+        // AC-022: Name must be 3-100 characters
+        if (dto.Name.Length < 3 || dto.Name.Length > 100)
+        {
+            throw new ManifestParseException(
+                "ACODE-PKL-008",
+                $"Name must be 3-100 characters. Current length: {dto.Name.Length}.");
+        }
+
+        // AC-024: Description is required
+        if (string.IsNullOrWhiteSpace(dto.Description))
+        {
+            throw new ManifestParseException("ACODE-PKL-002", "description is required");
+        }
+
+        // AC-024: Description must be 10-500 characters
+        if (dto.Description.Length < 10 || dto.Description.Length > 500)
+        {
+            throw new ManifestParseException(
+                "ACODE-PKL-009",
+                $"Description must be 10-500 characters. Current length: {dto.Description.Length}.");
+        }
+
         ContentHash? contentHash = null;
         if (!string.IsNullOrWhiteSpace(dto.ContentHash))
         {
