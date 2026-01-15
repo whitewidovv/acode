@@ -5,6 +5,7 @@ using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.Vllm.Client;
 using Acode.Infrastructure.Vllm.Health;
 using Acode.Infrastructure.Vllm.Models;
+using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.Vllm;
 
@@ -14,23 +15,28 @@ namespace Acode.Infrastructure.Vllm;
 /// <remarks>
 /// FR-006-001 to FR-006-033: VllmProvider implementation.
 /// </remarks>
-public sealed class VllmProvider : IModelProvider, IDisposable
+public sealed class VllmProvider : IModelProvider, IAsyncDisposable
 {
     private readonly VllmClientConfiguration _config;
     private readonly VllmHttpClient _client;
     private readonly VllmHealthChecker _healthChecker;
+    private readonly ILogger<VllmProvider> _logger;
     private bool _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="VllmProvider"/> class.
     /// </summary>
     /// <param name="config">Client configuration.</param>
-    public VllmProvider(VllmClientConfiguration config)
+    /// <param name="loggerFactory">Logger factory for creating loggers.</param>
+    public VllmProvider(VllmClientConfiguration config, ILoggerFactory loggerFactory)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
+        ArgumentNullException.ThrowIfNull(loggerFactory);
         _config.Validate();
 
-        _client = new VllmHttpClient(_config);
+        _logger = loggerFactory.CreateLogger<VllmProvider>();
+        var clientLogger = loggerFactory.CreateLogger<VllmHttpClient>();
+        _client = new VllmHttpClient(_config, clientLogger);
         _healthChecker = new VllmHealthChecker(_config);
         _disposed = false;
     }
@@ -132,14 +138,14 @@ public sealed class VllmProvider : IModelProvider, IDisposable
     }
 
     /// <inheritdoc/>
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         if (_disposed)
         {
             return;
         }
 
-        _client.Dispose();
+        await _client.DisposeAsync().ConfigureAwait(false);
         _disposed = true;
     }
 
