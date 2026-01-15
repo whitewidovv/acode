@@ -9,30 +9,96 @@ public sealed class VllmServiceStateTracker
 {
     private readonly object _lockObject = new();
 
+    private VllmServiceState _currentState = VllmServiceState.Unknown;
+    private int? _processId;
+    private DateTime? _upSinceUtc;
+    private DateTime? _lastHealthCheckUtc;
+    private bool _lastHealthCheckHealthy;
+    private string? _errorMessage;
+
     /// <summary>
     /// Gets the current service state.
     /// </summary>
-    public VllmServiceState CurrentState { get; private set; } = VllmServiceState.Unknown;
+    public VllmServiceState CurrentState
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _currentState;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the process ID (if running).
     /// </summary>
-    public int? ProcessId { get; private set; }
+    public int? ProcessId
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _processId;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets when the service started running (UTC).
     /// </summary>
-    public DateTime? UpSinceUtc { get; private set; }
+    public DateTime? UpSinceUtc
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _upSinceUtc;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets when the last health check occurred (UTC).
     /// </summary>
-    public DateTime? LastHealthCheckUtc { get; private set; }
+    public DateTime? LastHealthCheckUtc
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _lastHealthCheckUtc;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets a value indicating whether the last health check succeeded.
     /// </summary>
-    public bool LastHealthCheckHealthy { get; private set; }
+    public bool LastHealthCheckHealthy
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _lastHealthCheckHealthy;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the error message (if any).
+    /// </summary>
+    public string? ErrorMessage
+    {
+        get
+        {
+            lock (_lockObject)
+            {
+                return _errorMessage;
+            }
+        }
+    }
 
     /// <summary>
     /// Transitions to a new service state.
@@ -43,12 +109,12 @@ public sealed class VllmServiceStateTracker
         lock (_lockObject)
         {
             // When transitioning to Running, set UpSinceUtc
-            if (newState == VllmServiceState.Running && CurrentState != VllmServiceState.Running)
+            if (newState == VllmServiceState.Running && _currentState != VllmServiceState.Running)
             {
-                UpSinceUtc = DateTime.UtcNow;
+                _upSinceUtc = DateTime.UtcNow;
             }
 
-            CurrentState = newState;
+            _currentState = newState;
         }
     }
 
@@ -59,8 +125,8 @@ public sealed class VllmServiceStateTracker
     {
         lock (_lockObject)
         {
-            LastHealthCheckUtc = DateTime.UtcNow;
-            LastHealthCheckHealthy = true;
+            _lastHealthCheckUtc = DateTime.UtcNow;
+            _lastHealthCheckHealthy = true;
         }
     }
 
@@ -71,8 +137,8 @@ public sealed class VllmServiceStateTracker
     {
         lock (_lockObject)
         {
-            LastHealthCheckUtc = DateTime.UtcNow;
-            LastHealthCheckHealthy = false;
+            _lastHealthCheckUtc = DateTime.UtcNow;
+            _lastHealthCheckHealthy = false;
         }
     }
 
@@ -84,7 +150,19 @@ public sealed class VllmServiceStateTracker
     {
         lock (_lockObject)
         {
-            ProcessId = processId;
+            _processId = processId;
+        }
+    }
+
+    /// <summary>
+    /// Sets the error message.
+    /// </summary>
+    /// <param name="errorMessage">The error message.</param>
+    public void SetErrorMessage(string? errorMessage)
+    {
+        lock (_lockObject)
+        {
+            _errorMessage = errorMessage;
         }
     }
 }
