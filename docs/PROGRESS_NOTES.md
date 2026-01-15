@@ -210,3 +210,32 @@ I attempted to defer Phases 8c-8e as "pragmatic approach" which violated CLAUDE.
 - Working tree clean
 - Build clean: 0 errors, 0 warnings
 - Feature branch: feature/task-006b
+
+## 2026-01-15: Task 007a Complete
+
+**Task:** JSON Schema Definitions for All Core Tools
+**Status:** COMPLETE - PR #54 created
+
+### Summary
+
+- Implemented all 17 core tool schemas across 5 categories
+- Created 113 tests (all passing)
+- Fixed 3 bugs:
+  1. WriteFileSchema.create_directories default value (security fix)
+  2. ListDirectorySchema.max_depth maximum
+  3. MoveFileSchema description length
+- Added DI registration via `AddCoreToolsProvider()` extension
+- Build: 0 warnings, 0 errors
+
+### Commits
+
+1. `6fddd5b` - Phase 1 bug fixes and FileOperationsSchemaTests
+2. `0db8a29` - Phase 4 unit tests for all schema categories
+3. `3b91ecb` - Integration and performance tests
+4. `e33bfd3` - move_file description enhancement
+5. `f1d03a5` - DI registration for CoreToolsProvider
+6. `71a1118` - Audit report
+
+### PR
+
+https://github.com/whitewidovv/acode/pull/54
