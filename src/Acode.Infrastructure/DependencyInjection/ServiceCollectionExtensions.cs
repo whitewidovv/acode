@@ -3,12 +3,14 @@ using Acode.Application.Inference;
 using Acode.Application.Providers.Vllm;
 using Acode.Application.Tools;
 using Acode.Application.Tools.Retry;
+using Acode.Application.ToolSchemas.Retry;
 using Acode.Infrastructure.Configuration;
 using Acode.Infrastructure.Ollama;
 using Acode.Infrastructure.PromptPacks;
 using Acode.Infrastructure.Providers.Vllm.Lifecycle;
 using Acode.Infrastructure.Tools;
 using Acode.Infrastructure.ToolSchemas.Providers;
+using Acode.Infrastructure.ToolSchemas.Retry;
 using Acode.Infrastructure.Vllm;
 using Acode.Infrastructure.Vllm.Client;
 using Acode.Infrastructure.Vllm.Health;
@@ -184,18 +186,18 @@ public static class ServiceCollectionExtensions
     /// </remarks>
     public static IServiceCollection AddToolValidationRetry(
         this IServiceCollection services,
-        RetryConfiguration? configuration = null)
+        Application.Tools.Retry.RetryConfiguration? configuration = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        var config = configuration ?? RetryConfiguration.Default;
+        var config = configuration ?? Application.Tools.Retry.RetryConfiguration.Default;
 
         // Register configuration
         services.AddSingleton(config);
 
         // Register formatter and tracker
         services.AddSingleton<IValidationErrorFormatter, ValidationErrorFormatter>();
-        services.AddSingleton<IRetryTracker, RetryTracker>();
+        services.AddSingleton<Application.Tools.Retry.IRetryTracker, Infrastructure.Tools.RetryTracker>();
 
         return services;
     }
@@ -286,6 +288,40 @@ public static class ServiceCollectionExtensions
                 modelLoader,
                 healthCheckWorker);
         });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the retry contract components with the DI container.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Optional retry configuration. Uses defaults if null.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <remarks>
+    /// Task 007b: Validator Errors and Model Retry Contract.
+    /// Registers ErrorFormatter, RetryTracker, and EscalationFormatter as singletons.
+    /// Implements IErrorFormatter, IRetryTracker, and IEscalationFormatter interfaces.
+    /// </remarks>
+    public static IServiceCollection AddRetryContract(
+        this IServiceCollection services,
+        Application.ToolSchemas.Retry.RetryConfiguration? configuration = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var config = configuration ?? new Application.ToolSchemas.Retry.RetryConfiguration();
+
+        // Register configuration as singleton with explicit type to avoid DI conflicts
+        services.AddSingleton<Application.ToolSchemas.Retry.RetryConfiguration>(config);
+
+        // Register retry contract services
+        services.AddSingleton<IErrorFormatter, ErrorFormatter>();
+        services.AddSingleton<Application.ToolSchemas.Retry.IRetryTracker>(sp =>
+        {
+            var cfg = sp.GetRequiredService<Application.ToolSchemas.Retry.RetryConfiguration>();
+            return new Infrastructure.ToolSchemas.Retry.RetryTracker(cfg.MaxAttempts);
+        });
+        services.AddSingleton<IEscalationFormatter, EscalationFormatter>();
 
         return services;
     }
