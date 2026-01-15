@@ -119,4 +119,65 @@ public class ModelPullManagerTests
 
         Assert.Contains("model", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task ModelPullManager_RespectsCancellationToken()
+    {
+        // Arrange
+        var manager = new ModelPullManager();
+        var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // Act & Assert - should throw OperationCanceledException
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            manager.PullAsync("llama2:latest", cts.Token));
+    }
+
+    [Theory]
+    [InlineData("llama2")]
+    [InlineData("neural-chat:7b")]
+    [InlineData("mistral:latest")]
+    public async Task ModelPullManager_AcceptsVariousValidModelNames(string modelName)
+    {
+        // Arrange
+        var manager = new ModelPullManager();
+
+        // Act
+        var result = await manager.PullAsync(modelName, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.IsType<ModelPullResult>(result);
+    }
+
+    [Fact]
+    public async Task ModelPullManager_RejectsWhitespaceOnlyModelName()
+    {
+        // Arrange
+        var manager = new ModelPullManager();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            manager.PullAsync("   ", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ModelPullManager_HandleMultiplePullsSequentially()
+    {
+        // Arrange
+        var manager = new ModelPullManager();
+
+        // Act - Pull same model multiple times
+        var result1 = await manager.PullAsync("llama2:latest", CancellationToken.None);
+        var result2 = await manager.PullAsync("llama2:latest", CancellationToken.None);
+        var result3 = await manager.PullAsync("neural-chat:latest", CancellationToken.None);
+
+        // Assert - All should return valid results
+        Assert.NotNull(result1);
+        Assert.NotNull(result2);
+        Assert.NotNull(result3);
+        Assert.IsType<ModelPullResult>(result1);
+        Assert.IsType<ModelPullResult>(result2);
+        Assert.IsType<ModelPullResult>(result3);
+    }
 }

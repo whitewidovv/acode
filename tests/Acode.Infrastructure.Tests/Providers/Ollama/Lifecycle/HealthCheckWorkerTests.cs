@@ -79,4 +79,36 @@ public class HealthCheckWorkerTests
         // Assert
         Assert.NotNull(worker);
     }
+
+    [Fact]
+    public void HealthCheckWorker_RejectsNegativeInterval()
+    {
+        // Arrange & Act & Assert
+        Assert.Throws<ArgumentException>(() =>
+            new HealthCheckWorker(
+                healthCheckIntervalMs: -1,
+                isExternalMode: false));
+    }
+
+    [Fact]
+    public void HealthCheckWorker_RejectsZeroInterval()
+    {
+        // Arrange & Act & Assert
+        Assert.Throws<ArgumentException>(() =>
+            new HealthCheckWorker(
+                healthCheckIntervalMs: 0,
+                isExternalMode: false));
+    }
+
+    [Fact]
+    public async Task HealthCheckWorker_CanDisposeAsyncSafely()
+    {
+        // Arrange
+        var worker = new HealthCheckWorker(
+            healthCheckIntervalMs: 1000,
+            isExternalMode: false);
+
+        // Act & Assert - should not throw
+        await worker.DisposeAsync();
+    }
 }
