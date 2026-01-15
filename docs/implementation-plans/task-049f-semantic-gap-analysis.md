@@ -1,323 +1,201 @@
-# Task-049f Semantic Gap Analysis: SQLite/PostgreSQL Sync Engine
+# Task-049f Semantic Gap Analysis: SQLite↔PostgreSQL Sync Engine
 
-**Status:** 🟡 15% COMPLETE - SEMANTIC COMPLETENESS: ~22/146 ACs (15%)
-
+**Status:** ✅ GAP ANALYSIS COMPLETE - 15.7% COMPLETE (23/146 ACs, Major Work Remaining)
 **Date:** 2026-01-15
-**Analyzed By:** Claude Code
-**Methodology:** Semantic completeness verification per CLAUDE.md Section 3.2
+**Analyzed By:** Claude Code (Gap Analysis Methodology)
+**Methodology:** CLAUDE.md Section 3.2 + GAP_ANALYSIS_METHODOLOGY.md
+**Spec Reference:** docs/tasks/refined-tasks/Epic 02/task-049f-sqlite-postgres-sync-engine.md (3135 lines)
 
 ---
 
 ## EXECUTIVE SUMMARY
 
-Task-049f (Sync Engine) is **15% semantically complete** with foundational infrastructure in place:
+**Semantic Completeness: 15.7% (23/146 ACs) - MAJOR WORK REQUIRED ACROSS ALL FEATURE DOMAINS**
 
-- **Total ACs:** 146
-- **ACs Present/Complete:** ~22 (foundational only)
-- **ACs Missing:** ~124
-- **Semantic Completeness:** (22 / 146) × 100 = **15%**
-- **Implementation Gaps:** Sync coordination, PostgreSQL repos, conflict resolution
-- **Remaining Effort:** 50 hours
+**The Critical Issue:** Some foundational Sync infrastructure exists (OutboxEntry, SyncStatus, basic SyncEngine) BUT vast majority of spec unimplemented:
+- ✅ Domain entities: 2/4 complete (OutboxEntry, SyncStatus)
+- ❌ Inbox/Conflict entities: 0/2 (missing InboxEntry, ConflictPolicy)
+- ✅ Core interfaces: 2/4 complete (ISyncEngine, IOutboxRepository)
+- ❌ Processor/Resolver interfaces: 0/3 (missing IOutboxProcessor, IInboxProcessor, IConflictResolver)
+- ⚠️ SyncEngine: Partially complete (stub implementation with TODO markers on lines 187, 203)
+- ✅ Outbox infrastructure: 3/3 (OutboxBatcher, RetryPolicy, SqliteOutboxRepository)
+- ❌ CLI layer: 0/10+ commands (acode sync *)
+- ❌ PostgreSQL repositories: 0/3 (PostgresChatRepository, PostgresRunRepository, PostgresMessageRepository)
+- ❌ Inbox/Conflict processing: 0/2 (InboxProcessor, ConflictResolver)
+- ❌ Health monitoring: 0/3 (circuits, metrics, alerts)
 
-**What Exists (Foundational):**
-- Sync infrastructure (outbox pattern, batching, retry logic) - 10 hours invested
-- IOutboxRepository interface
-- Sync status tracking
-- Batching and retry policy
-
-**What's Missing (Core Implementation):**
-- PostgreSQL repository implementations (Chat, Run, Message) - 12 hours
-- Sync engine batch processing and coordination - 10 hours
-- Conflict resolution (last-write-wins strategy) - 8 hours
-- Health check integration - 5 hours
-- Performance optimization and testing - 15 hours
-
-**Blocking Dependencies:** NONE - can proceed independently
+**Result:** Partial foundation exists, but 84% of spec work remains across processing, conflict resolution, PostgreSQL sync, and CLI.
 
 ---
 
-## SECTION 1: ACCEPTANCE CRITERIA BY DOMAIN
+## SECTION 1: SPECIFICATION SUMMARY
 
-### SYNC CORE (AC-001-040) - 0/40 COMPLETE (0%)
+### Acceptance Criteria (146 total ACs)
+- AC-001-016: Outbox Entry Creation (16 ACs)
+- AC-017-030: Outbox Processing (14 ACs)
+- AC-031-045: Retry Mechanism (15 ACs)
+- AC-046-053: Idempotency Enforcement (8 ACs)
+- AC-054-065: Inbox Processing (12 ACs)
+- AC-066-078: Conflict Detection/Resolution (13 ACs)
+- AC-079-100: CLI Commands (22 ACs)
+- AC-101-111: Health and Monitoring (11 ACs)
+- AC-112-118: Data Integrity (7 ACs)
+- AC-119-124: Performance (6 ACs)
+- AC-125-132: Configuration (8 ACs)
+- AC-133-146: PostgreSQL Repository Provider (14 ACs)
 
-**Connection Management (AC-001-012):**
-- ❌ AC-001: SQLite connection initialized on startup
-- ❌ AC-002: PostgreSQL connection pool created if enabled
-- ❌ AC-003: Connection pool size = 10 (configurable)
-- ❌ AC-004: Connections validated before use
-- ❌ AC-005: Stale connections detected and refreshed
-- ❌ AC-006: Connection failures trigger retry (exponential backoff)
-- ❌ AC-007: No connection blocks operations (fallback to SQLite)
-- ❌ AC-008: Connection status queryable (health check)
-- ❌ AC-009: PostgreSQL disabled by config respected
-- ❌ AC-010: Connection strings not logged (redaction)
-- ❌ AC-011: SSL certificates verified (if required)
-- ❌ AC-012: Connection timeout = 30 seconds
+### Expected Production Files (31 total)
+- Domain: 4 (OutboxEntry ✅, SyncStatus ✅, InboxEntry ❌, ConflictPolicy ❌)
+- Application: 5 (ISyncEngine ✅, IOutboxRepository ✅, IOutboxProcessor ❌, IInboxProcessor ❌, IConflictResolver ❌)
+- Infrastructure: 7 (OutboxBatcher ✅, RetryPolicy ✅, SqliteOutboxRepository ✅, OutboxProcessor ❌, InboxProcessor ❌, ConflictResolver ❌, SyncEngine ⚠️ incomplete)
+- PostgreSQL Repos: 3 (PostgresChatRepository ❌, PostgresRunRepository ❌, PostgresMessageRepository ❌)
+- CLI Commands: 10+ (all missing)
 
-**Sync Status Tracking (AC-013-025):**
-- ❌ AC-013: Sync status enum: Pending, Syncing, Synced, Conflict, Failed
-- ❌ AC-014: Status persisted with timestamp
-- ❌ AC-015: Last sync time queryable
-- ❌ AC-016: Sync duration tracked
-- ❌ AC-017: Pending record count tracked
-- ❌ AC-018: Failed record count tracked
-- ❌ AC-019: Conflict count tracked
-- ❌ AC-020: Status queryable: `acode db sync status`
-- ❌ AC-021: Status includes human-readable summary
-- ❌ AC-022: Status includes next scheduled sync time
-- ❌ AC-023: Sync pause/resume supported
-- ❌ AC-024: Sync can be manually triggered: `acode db sync now`
-- ❌ AC-025: Sync logs include all status transitions
-
-**Outbox Processing (AC-026-040):**
-- ❌ AC-026: Outbox records ordered oldest-first
-- ❌ AC-027: Batch processing (default: 100 records/batch)
-- ❌ AC-028: Batches processed sequentially
-- ❌ AC-029: Failed records marked for retry
-- ❌ AC-030: Retry delay = exponential backoff (5s → 3600s max)
-- ❌ AC-031: Max 10 retry attempts
-- ❌ AC-032: Records > 10 attempts marked failed (permanent)
-- ❌ AC-033: Processing continues on batch failure
-- ❌ AC-034: Idempotency keys prevent duplicates
-- ❌ AC-035: Duplicate inserts marked as processed
-- ❌ AC-036: Processing resumable after crash
-- ❌ AC-037: In-flight records resume from checkpoint
-- ❌ AC-038: Processing stops on authentication failure
-- ❌ AC-039: Processing stops on schema mismatch
-- ❌ AC-040: Network errors trigger automatic retry
+### Expected Test Files (15+ total)
+- OutboxEntryTests ✅ | InboxEntryTests ❌ | ConflictPolicyTests ❌
+- OutboxBatcherTests ✅ | RetryPolicyTests ✅ | OutboxProcessorTests ❌
+- InboxProcessorTests ❌ | ConflictResolverTests ❌ | IdempotencyTests ❌
+- SyncEngineTests ✅ (partial) | SyncE2ETests ❌ | PostgresRepoTests (3x) ❌
 
 ---
 
-### POSTGRESQL REPOSITORIES (AC-041-090) - 0/50 COMPLETE (0%)
+## SECTION 2: CURRENT IMPLEMENTATION STATE (VERIFIED)
 
-**ChatRepository (AC-041-055):**
-- ❌ AC-041: PostgresChatRepository implements IChatRepository
-- ❌ AC-042: Create operation returns ChatId
-- ❌ AC-043: Read returns Chat with all fields
-- ❌ AC-044: List with pagination
-- ❌ AC-045: Delete marks deleted_at
-- ❌ AC-046: Tag queries supported
-- ❌ AC-047: Worktree filter supported
-- ❌ AC-048: Sync status tracked per chat
-- ❌ AC-049: Version tracking for conflicts
-- ❌ AC-050: Cascade operations (delete → runs → messages)
-- ❌ AC-051: Transaction handling for ACID
-- ❌ AC-052: Connection pooling used
-- ❌ AC-053: Timeout handling
-- ❌ AC-054: Error codes (ACODE-SYNC-001 through ACODE-SYNC-007)
-- ❌ AC-055: Comprehensive logging
+### ✅ COMPLETE Files (10 files)
 
-**RunRepository (AC-056-070):**
-- ❌ AC-056-070: Similar to ChatRepository but for Runs
+**OutboxEntry.cs** (228 lines)
+- All properties: Id, IdempotencyKey, EntityType, EntityId, Operation, Payload, Status, RetryCount, NextRetryAt, ProcessingStartedAt, CompletedAt, CreatedAt, LastError
+- All methods: Create(), MarkAsProcessing(), MarkAsCompleted(), MarkAsFailed(), ScheduleRetry(), MarkAsDeadLetter()
+- ULID generation working correctly
+- Tests: OutboxEntryTests.cs with 6 passing tests
 
-**MessageRepository (AC-071-090):**
-- ❌ AC-071-090: Similar to ChatRepository but for Messages
+**SyncStatus.cs** (51 lines)
+- All 8 properties: IsRunning, IsPaused, PendingOutboxCount, LastSyncAt, StartedAt, SyncLag, TotalProcessed, TotalFailed
+- Immutable record-style
+- Fully documented
 
----
+**ISyncEngine.cs** (54 lines)
+- 6 methods: StartAsync(), StopAsync(), SyncNowAsync(), GetStatusAsync(), PauseAsync(), ResumeAsync()
+- All documented
 
-### CONFLICT RESOLUTION (AC-091-120) - 0/30 COMPLETE (0%)
+**IOutboxRepository.cs** (56 lines)
+- 5 methods: AddAsync(), GetByIdAsync(), GetPendingAsync(), UpdateAsync(), DeleteAsync()
 
-**Detection (AC-091-100):**
-- ❌ AC-091: Conflict detected when versions differ
-- ❌ AC-092: Updated_at timestamp comparison
-- ❌ AC-093: Both versions loaded
-- ❌ AC-094: Conflict logged with both versions
-- ❌ AC-095: User notified of conflict
-- ❌ AC-096: Conflict details stored for audit
-- ❌ AC-097: Conflict count incremented
-- ❌ AC-098: Retry attempted after resolution
-- ❌ AC-099: Conflicts don't block sync
-- ❌ AC-100: Conflict statistics tracked
+**OutboxBatcher.cs**
+- Batching logic implemented
+- Respects size and count limits
+- Tests passing
 
-**Resolution (AC-101-120):**
-- ❌ AC-101: Last-write-wins strategy (latest updated_at)
-- ❌ AC-102: Winner's version persisted
-- ❌ AC-103: Loser's version archived (for audit)
-- ❌ AC-104: Conflict resolution logged
-- ❌ AC-105: Manual resolution available (future: user-driven)
-- ❌ AC-106: Resolution audit trail maintained
-- ❌ AC-107: Deterministic ordering (tie-breaking by ID)
-- ❌ AC-108: Concurrent conflicts handled
-- ❌ AC-109: Conflicts resolved before committing
-- ❌ AC-110: Post-resolution verification
-- ❌ AC-111: Conflict stats queryable
-- ❌ AC-112: Bulk conflict resolution supported
-- ❌ AC-113: Conflict preview before resolution
-- ❌ AC-114: Resolution rollback supported
-- ❌ AC-115: User experience clear during resolution
-- ❌ AC-116: Conflict resolution completeness verified
-- ❌ AC-117: All sync paths include conflict handling
-- ❌ AC-118: Performance targets met during conflicts
-- ❌ AC-119: Memory usage bounded during resolution
-- ❌ AC-120: Conflicts don't cause data loss
+**RetryPolicy.cs**
+- Exponential backoff (1s, 2s, 4s, 8s, 16s, 32s, 60s max)
+- Transient vs permanent error distinction
+- Tests passing
 
----
+**SqliteOutboxRepository.cs**
+- SQLite persistence for outbox entries
+- Tests passing
 
-### PERFORMANCE & RELIABILITY (AC-121-146) - 0/26 COMPLETE (0%)
+### ⚠️ INCOMPLETE Files (2 files)
 
-**Performance (AC-121-132):**
-- ❌ AC-121: Sync throughput > 100 records/second
-- ❌ AC-122: Latency < 50ms per record
-- ❌ AC-123: Memory usage < 500MB for 10k pending
-- ❌ AC-124: CPU usage < 50% during sync
-- ❌ AC-125: No blocking of main operations
-- ❌ AC-126: Batch size optimization (100-1000 records)
-- ❌ AC-127: Network usage optimized (compression)
-- ❌ AC-128: Storage overhead < 5%
-- ❌ AC-129: Query performance (< 100ms)
-- ❌ AC-130: No N+1 queries
-- ❌ AC-131: Connection reuse (no leaks)
-- ❌ AC-132: Index optimization for query paths
+**SyncEngine.cs** (218 lines - 55% complete)
+- ✅ StartAsync(), StopAsync(), SyncNowAsync(), GetStatusAsync(), PauseAsync(), ResumeAsync() - IMPLEMENTED
+- ❌ ProcessPendingEntriesAsync() - STUB (line 193-216)
+- ❌ TODO marker line 187: "TODO: Add structured logging when logger is available"
+- ❌ TODO marker line 203: "TODO: When Chat/Run/Message domain models exist:"
+- Missing:
+  - Actual batch processing
+  - OutboxBatcher integration
+  - RetryPolicy integration
+  - PostgreSQL HTTP sync
+  - Inbox processing
+  - Conflict resolution
+  - Circuit breaker
+  - Metrics collection
 
-**Reliability (AC-133-146):**
-- ❌ AC-133: No data loss on process crash
-- ❌ AC-134: State recoverable after restart
-- ❌ AC-135: Transactions atomic (all-or-nothing)
-- ❌ AC-136: Checksums verify data integrity
-- ❌ AC-137: Audit trail complete
-- ❌ AC-138: Recovery procedure documented
-- ❌ AC-139: Deadlock prevention
-- ❌ AC-140: Race condition prevention
-- ❌ AC-141: Concurrent sync operations safe
-- ❌ AC-142: Health check monitors sync
-- ❌ AC-143: Alerts on sync failures
-- ❌ AC-144: Circuit breaker pattern (stop on repeated failures)
-- ❌ AC-145: Graceful shutdown (complete in-flight)
-- ❌ AC-146: Comprehensive error handling
+**RetryPolicy.cs** (partial on AC-031-045)
+- Exponential backoff ✅
+- Jitter (±10%) - appears to be missing based on spec AC-034
+- Circuit breaker - missing based on spec AC-041-043
 
----
+### ❌ MISSING Files (32 files)
 
-## SECTION 2: WHAT EXISTS (PARTIAL - 15% COMPLETE)
+**Domain (2):**
+- InboxEntry.cs (AC-054-065)
+- ConflictPolicy.cs (AC-066-078)
 
-**Existing Sync Infrastructure:**
-- ✅ IOutboxRepository interface (outline)
-- ✅ Outbox pattern concept (domains/infrastructure plan)
-- ✅ Batching logic (outlined)
-- ✅ Retry policy (exponential backoff formula)
-- ✅ Sync status enum (SyncStatus.cs exists)
-- ✅ OutboxEntry domain model
+**Application Interfaces (3):**
+- IOutboxProcessor.cs (AC-017-030)
+- IInboxProcessor.cs (AC-054-065)
+- IConflictResolver.cs (AC-066-078)
 
-**What's Implemented But Incomplete:**
-- ⚠️ Sync infrastructure needs PostgreSQL integration
-- ⚠️ Outbox processing needs actual implementation
-- ⚠️ Conflict resolution needs design + implementation
-- ⚠️ Health checks need integration
+**Infrastructure Services (3):**
+- OutboxProcessor.cs (AC-017-030)
+- InboxProcessor.cs (AC-054-065)
+- ConflictResolver.cs (AC-066-078)
 
----
+**PostgreSQL Repositories (3):**
+- PostgresChatRepository.cs (AC-139)
+- PostgresRunRepository.cs (AC-140)
+- PostgresMessageRepository.cs (AC-141)
 
-## SECTION 3: PRODUCTION FILES NEEDED (20+ files)
+**CLI Commands (10+):**
+- SyncCommand.cs (router)
+- SyncStatusCommand.cs (AC-079-083)
+- SyncNowCommand.cs (AC-084-085)
+- SyncRetryCommand.cs (AC-086-087)
+- SyncPauseResumeCommand.cs (AC-088-089)
+- SyncFullCommand.cs (AC-090-092)
+- SyncConflictCommand.cs (AC-093-094)
+- SyncHealthCommand.cs (AC-095)
+- SyncLogsCommand.cs (AC-096)
+- SyncDlqCommand.cs (AC-097-100)
 
-**PostgreSQL Repositories (6 files):**
-- [ ] `src/Acode.Infrastructure/Persistence/PostgreSQL/PostgresChatRepository.cs`
-- [ ] `src/Acode.Infrastructure/Persistence/PostgreSQL/PostgresRunRepository.cs`
-- [ ] `src/Acode.Infrastructure/Persistence/PostgreSQL/PostgresMessageRepository.cs`
-- [ ] `src/Acode.Infrastructure/Persistence/PostgreSQL/PostgresConnectionPool.cs`
-- [ ] `src/Acode.Infrastructure/Persistence/PostgreSQL/PostgresTransaction.cs`
-- [ ] `src/Acode.Infrastructure/Persistence/PostgreSQL/PostgresMigrations.sql`
-
-**Sync Engine (6 files):**
-- [ ] `src/Acode.Infrastructure/Sync/SyncEngine.cs` - Main orchestrator
-- [ ] `src/Acode.Infrastructure/Sync/OutboxBatcher.cs` - Batch processing (partial, needs completion)
-- [ ] `src/Acode.Infrastructure/Sync/SyncWorker.cs` - Background worker
-- [ ] `src/Acode.Infrastructure/Sync/ConflictResolver.cs` - Last-write-wins
-- [ ] `src/Acode.Infrastructure/Sync/HealthChecker.cs` - Sync health monitoring
-- [ ] `src/Acode.Infrastructure/Sync/SyncLogger.cs` - Comprehensive logging
-
-**Application Layer (3 files):**
-- [ ] `src/Acode.Application/Sync/ISyncEngine.cs` - Interface (refine)
-- [ ] `src/Acode.Application/Sync/ISyncStatus.cs` - Status queries
-- [ ] `src/Acode.Application/Sync/ConflictRecord.cs` - Conflict domain
-
-**CLI Layer (2 files):**
-- [ ] `src/Acode.Cli/Commands/SyncCommand.cs` - `acode db sync` commands
-- [ ] `src/Acode.Cli/Commands/HealthCommand.cs` - `acode db health` commands
-
-**Total: ~17-20 production files (many partial, need completion)**
-
----
-
-## SECTION 4: TEST FILES NEEDED (35+ tests)
-
-**Unit Tests:**
-- PostgresChatRepositoryTests (8 tests)
-- PostgresRunRepositoryTests (6 tests)
-- PostgresMessageRepositoryTests (6 tests)
-- ConflictResolverTests (8 tests)
-- OutboxBatcherTests (5 tests)
-- SyncEngineTests (6 tests)
-
-**Integration Tests:**
-- PostgresSyncIntegrationTests (12 tests)
-- ConflictResolutionIntegrationTests (8 tests)
-- SyncFailureRecoveryTests (5 tests)
-
-**E2E Tests:**
-- FullSyncE2ETests (6 tests)
-
-**Total: 70+ test methods**
-
----
-
-## SECTION 5: EFFORT BREAKDOWN
-
-| Component | ACs | Files | Hours | Status |
-|-----------|-----|-------|-------|--------|
-| Sync Core | 40 | 2 | 8 | 🟡 Partial |
-| PostgreSQL Repos | 50 | 6 | 12 | ❌ Missing |
-| Conflict Resolution | 30 | 2 | 8 | ❌ Missing |
-| Performance/Reliability | 26 | 3 | 12 | ❌ Missing |
-| Testing | - | - | 15 | ❌ Minimal |
-| **TOTAL** | **146** | **20** | **55** | **15%** |
+**Health & Monitoring (missing):**
+- Circuit breaker implementation
+- Metrics collection (queue depth, lag, throughput, error rate)
+- Health check endpoint
+- Prometheus format export
 
 ---
 
 ## SEMANTIC COMPLETENESS
 
 ```
-Task-049f Semantic Completeness = (ACs fully implemented / Total ACs) × 100
+Task-049f Completeness = (ACs Fully Implemented / Total ACs) × 100
 
-ACs Fully Implemented: ~22 (foundational infrastructure only)
-  - Sync Core: ~10/40
-  - PostgreSQL: 0/50
-  - Conflicts: 0/30
-  - Performance: 0/26
+ACs Fully Implemented: ~23/146
+  - Outbox Entry Creation: 14/16 (AC-015-016 signing/verification incomplete)
+  - Retry Mechanism: 6/15 (missing jitter, circuit breaker)
+  - Remaining 11 domains: 0% (missing all major services)
 
-Total ACs: 146
-
-Semantic Completeness: (22 / 146) × 100 = 15%
+Semantic Completeness: 15.7% (23/146 ACs)
 ```
 
 ---
 
-## CRITICAL ANALYSIS
+## RECOMMENDED IMPLEMENTATION ORDER (10 Phases)
 
-**What's Done Well:**
-- Architecture and design documented
-- Outbox pattern concept clear
-- Retry/backoff strategy defined
-- Domain models exist
+1. **Phase 1:** Domain Entities - InboxEntry, ConflictPolicy (2-3 hrs)
+2. **Phase 2:** Application Interfaces - IOutboxProcessor, IInboxProcessor, IConflictResolver (1 hr)
+3. **Phase 3:** OutboxProcessor Implementation - batch processing (4-5 hrs)
+4. **Phase 4:** RetryPolicy Completion - jitter, circuit breaker (2-3 hrs)
+5. **Phase 5:** InboxProcessor Implementation - polling, conflict detection (4-5 hrs)
+6. **Phase 6:** ConflictResolver Implementation - policies, three-way merge (3-4 hrs)
+7. **Phase 7:** PostgreSQL Repositories - ChatRepository, RunRepository, MessageRepository (5-6 hrs)
+8. **Phase 8:** SyncEngine Completion - integration, idempotency tests (3-4 hrs)
+9. **Phase 9:** CLI Commands - 10+ sync commands (6-8 hrs)
+10. **Phase 10:** Health Monitoring & Configuration - metrics, health checks, config (4-5 hrs)
 
-**What's Missing (Critical Path):**
-1. **PostgreSQL Repository Implementations** (12 hours) - No CRUD for chat/run/message
-2. **Sync Engine Batch Coordination** (10 hours) - Processing loop not complete
-3. **Conflict Detection & Resolution** (8 hours) - Strategy clear but not implemented
-4. **Comprehensive Testing** (20+ hours) - Currently minimal test coverage
-5. **Performance Benchmarking** (5 hours) - No performance verification yet
-
-**Recommended Implementation Order:**
-1. PostgreSQL repositories (unlock sync testing)
-2. Sync engine coordination (enable end-to-end flow)
-3. Conflict resolution (complete feature set)
-4. Health checks and monitoring
-5. Performance tuning and benchmarks
+**Total Estimated Effort: 32-40 hours**
 
 ---
 
-**Status:** 🟡 PARTIALLY STARTED - Foundational work done, core implementation needed
+**Status:** ✅ GAP ANALYSIS COMPLETE - Ready for Phase 1 implementation
 
-**Blocking Dependencies:** NONE - ready to implement immediately after 049a/049c integration
-
-**Recommendation:** Create completion checklist in 5 phases (PostgreSQL → Sync Engine → Conflicts → Health → Testing) to organize remaining 50 hours.
+**Next Steps:**
+1. Create task-049f-completion-checklist.md with 10-phase detailed breakdown
+2. Execute Phase 1 (InboxEntry, ConflictPolicy domain entities)
+3. Proceed through remaining phases in order
 
 ---
 
