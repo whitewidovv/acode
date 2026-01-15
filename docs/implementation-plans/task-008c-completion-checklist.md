@@ -4,11 +4,39 @@
 **Specification**: docs/tasks/refined-tasks/Epic 01/task-008c-starter-packs-dotnet-react-strict-minimal-diff.md (4063 lines)
 **Gap Analysis**: docs/implementation-plans/task-008c-gap-analysis.md (~1100 lines)
 **Date Created**: 2026-01-14
-**Status**: Implementation Phase
+**Status**: Implementation Phase - REQUIRES REBUILD PER SEMANTIC ANALYSIS
 
 ---
 
-## Instructions for Implementation
+## ⚠️ IMPORTANT: This Checklist Needs Rebuilding
+
+**Issue**: This checklist was created using shallow "file existence" analysis. Per user feedback, it needs to be rebuilt to:
+
+1. **Lead with AC completion rate** (currently ~55-60% semantically complete)
+2. **Only document ACTUAL semantic gaps** (not just phases/file counts)
+3. **Include content verification items** (token limits, required keywords, template variables)
+4. **Document intentional design improvements** (async patterns, IReadOnlyList vs Dictionary, etc.)
+
+**What's Wrong**:
+- 38 items listed, but only ~17 are actually missing (tests)
+- Phases 1-2 claim "complete" but never verified content (that's not completion!)
+- No items for verifying prompt file content meets spec requirements
+- No items for documenting design decisions
+
+**Current State** per corrected gap analysis:
+- **Semantic Completeness**: 55-60% (not 75-80%)
+- **Test Gap**: 17+ missing (not 37 items)
+- **Content Gap**: 19 prompt files exist but content verification never done
+
+**This checklist should only contain**:
+1. Verify all 19 prompt files meet spec content requirements (token limits, keywords, structure)
+2. Create 17 missing tests (5 integration + 8 E2E + 4 benchmarks)
+3. Verify all tests pass
+4. Document design decisions as intentional improvements
+
+---
+
+## Instructions for Implementation (SUPERSEDED - SEE ABOVE)
 
 ### How to Use This Checklist
 
