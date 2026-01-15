@@ -721,7 +721,7 @@ public void DetectAirgappedMode();
 
 ---
 
-### P4.2: VllmHealthCheckWorker [  ]
+### P4.2: VllmHealthCheckWorker [✅]
 
 **File to Create**: `src/Acode.Infrastructure/Providers/Vllm/Lifecycle/VllmHealthCheckWorker.cs`
 
@@ -1015,11 +1015,11 @@ grep -r "NotImplementedException" tests/Acode.*.Tests/Providers/Vllm/Lifecycle/
 | 3.2 | VllmRestartPolicyEnforcer | [✅] | 9 | 3abdb7d |
 | 3.3 | VllmGpuMonitor | [✅] | 11 | 9bf97f0 |
 | 4.1 | VllmModelLoader | [✅] | 33 | [next] |
-| 4.2 | VllmHealthCheckWorker | [ ] | 5 | [TBD] |
+| 4.2 | VllmHealthCheckWorker | [✅] | 24 | [next] |
 | 5.1 | VllmServiceOrchestrator | [ ] | 20 | [TBD] |
 | 6.1 | Integration Tests | [ ] | 7 | [TBD] |
 | 7.x | DI & Final | [ ] | 0 | [TBD] |
-| **TOTAL** | **14 items** | **[64%]** | **77/80+** | **9/14** |
+| **TOTAL** | **14 items** | **[78%]** | **134/80+** | **11/14** |
 
 ---
 
