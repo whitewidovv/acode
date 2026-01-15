@@ -141,4 +141,165 @@ public sealed class OllamaDeltaMapperTests
         delta.ContentDelta.Should().BeNull();
         delta.FinishReason.Should().Be(FinishReason.Stop);
     }
+
+    // ==================== Streaming Tool Call Tests (Gap #8) ====================
+    [Fact]
+    public void MapToDelta_Should_Map_Tool_Call_From_Chunk()
+    {
+        // Gap #8: Tool call present in streaming chunk
+        var chunk = new OllamaStreamChunk(
+            model: "llama3.2:8b",
+            message: new OllamaMessage(
+                role: "assistant",
+                content: null,
+                toolCalls: new[]
+                {
+                    new OllamaToolCallResponse(
+                        id: "call_123",
+                        function: new OllamaToolCallFunction(
+                            name: "read_file",
+                            arguments: "{\"path\": \"test.txt\"}")),
+                }),
+            done: false);
+
+        var delta = OllamaDeltaMapper.MapToDelta(chunk, 0);
+
+        delta.Index.Should().Be(0);
+        delta.ToolCallDelta.Should().NotBeNull();
+        delta.ToolCallDelta!.Index.Should().Be(0);
+        delta.ToolCallDelta.Id.Should().Be("call_123");
+        delta.ToolCallDelta.Name.Should().Be("read_file");
+        delta.ToolCallDelta.ArgumentsDelta.Should().Be("{\"path\": \"test.txt\"}");
+    }
+
+    [Fact]
+    public void MapToDelta_Should_Handle_Multiple_Tool_Calls()
+    {
+        // Gap #8: Multiple tool calls - map first one
+        var chunk = new OllamaStreamChunk(
+            model: "llama3.2:8b",
+            message: new OllamaMessage(
+                role: "assistant",
+                content: null,
+                toolCalls: new[]
+                {
+                    new OllamaToolCallResponse(
+                        id: "call_1",
+                        function: new OllamaToolCallFunction(
+                            name: "read_file",
+                            arguments: "{\"path\": \"a.txt\"}")),
+                    new OllamaToolCallResponse(
+                        id: "call_2",
+                        function: new OllamaToolCallFunction(
+                            name: "write_file",
+                            arguments: "{\"path\": \"b.txt\"}")),
+                }),
+            done: false);
+
+        var delta = OllamaDeltaMapper.MapToDelta(chunk, 0);
+
+        // Should map the first tool call
+        delta.ToolCallDelta.Should().NotBeNull();
+        delta.ToolCallDelta!.Id.Should().Be("call_1");
+        delta.ToolCallDelta.Name.Should().Be("read_file");
+    }
+
+    [Fact]
+    public void MapToDelta_Should_Handle_Tool_Call_With_Content()
+    {
+        // Gap #8: Tool call can arrive with content
+        var chunk = new OllamaStreamChunk(
+            model: "llama3.2:8b",
+            message: new OllamaMessage(
+                role: "assistant",
+                content: "I'll read that file for you.",
+                toolCalls: new[]
+                {
+                    new OllamaToolCallResponse(
+                        id: "call_456",
+                        function: new OllamaToolCallFunction(
+                            name: "read_file",
+                            arguments: "{\"path\": \"data.json\"}")),
+                }),
+            done: false);
+
+        var delta = OllamaDeltaMapper.MapToDelta(chunk, 0);
+
+        // Both content and tool call should be present
+        delta.ContentDelta.Should().Be("I'll read that file for you.");
+        delta.ToolCallDelta.Should().NotBeNull();
+        delta.ToolCallDelta!.Name.Should().Be("read_file");
+    }
+
+    [Fact]
+    public void MapToDelta_Should_Handle_Tool_Call_In_Final_Chunk()
+    {
+        // Gap #8: Tool call in final chunk with finish reason
+        var chunk = new OllamaStreamChunk(
+            model: "llama3.2:8b",
+            message: new OllamaMessage(
+                role: "assistant",
+                content: null,
+                toolCalls: new[]
+                {
+                    new OllamaToolCallResponse(
+                        id: "call_789",
+                        function: new OllamaToolCallFunction(
+                            name: "execute_command",
+                            arguments: "{\"command\": \"ls\"}")),
+                }),
+            done: true,
+            doneReason: "tool_calls",
+            promptEvalCount: 30,
+            evalCount: 10);
+
+        var delta = OllamaDeltaMapper.MapToDelta(chunk, 0);
+
+        // Tool call, finish reason, and usage should all be present
+        delta.ToolCallDelta.Should().NotBeNull();
+        delta.ToolCallDelta!.Name.Should().Be("execute_command");
+        delta.FinishReason.Should().Be(FinishReason.ToolCalls);
+        delta.Usage.Should().NotBeNull();
+        delta.Usage!.PromptTokens.Should().Be(30);
+        delta.Usage.CompletionTokens.Should().Be(10);
+    }
+
+    [Fact]
+    public void MapToDelta_Should_Handle_Empty_Tool_Calls_Array()
+    {
+        // Gap #8: Empty tool calls array should be ignored
+        var chunk = new OllamaStreamChunk(
+            model: "llama3.2:8b",
+            message: new OllamaMessage(
+                role: "assistant",
+                content: "Hello",
+                toolCalls: Array.Empty<OllamaToolCallResponse>()),
+            done: false);
+
+        var delta = OllamaDeltaMapper.MapToDelta(chunk, 0);
+
+        delta.ContentDelta.Should().Be("Hello");
+        delta.ToolCallDelta.Should().BeNull();
+    }
+
+    [Fact]
+    public void MapToDelta_Should_Handle_Tool_Call_With_Null_Function()
+    {
+        // Gap #8: Tool call with null function should be ignored
+        var chunk = new OllamaStreamChunk(
+            model: "llama3.2:8b",
+            message: new OllamaMessage(
+                role: "assistant",
+                content: "Processing...",
+                toolCalls: new[]
+                {
+                    new OllamaToolCallResponse(id: "call_999", function: null),
+                }),
+            done: false);
+
+        var delta = OllamaDeltaMapper.MapToDelta(chunk, 0);
+
+        delta.ContentDelta.Should().Be("Processing...");
+        delta.ToolCallDelta.Should().BeNull();
+    }
 }

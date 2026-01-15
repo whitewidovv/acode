@@ -12,7 +12,7 @@ public sealed record OllamaTool
     /// </summary>
     /// <param name="type">The tool type.</param>
     /// <param name="function">The function definition.</param>
-    public OllamaTool(string type, OllamaFunction function)
+    public OllamaTool(string type, OllamaToolDefinition function)
     {
         this.Type = type;
         this.Function = function;
@@ -28,5 +28,5 @@ public sealed record OllamaTool
     /// Gets the function definition.
     /// </summary>
     [JsonPropertyName("function")]
-    public OllamaFunction Function { get; init; }
+    public OllamaToolDefinition Function { get; init; }
 }
