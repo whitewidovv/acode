@@ -4,6 +4,7 @@ using Acode.Application.Providers.Vllm;
 using Acode.Application.Tools;
 using Acode.Application.Tools.Retry;
 using Acode.Application.ToolSchemas.Retry;
+using Acode.Application.Truncation;
 using Acode.Infrastructure.Configuration;
 using Acode.Infrastructure.Ollama;
 using Acode.Infrastructure.PromptPacks;
@@ -11,6 +12,8 @@ using Acode.Infrastructure.Providers.Vllm.Lifecycle;
 using Acode.Infrastructure.Tools;
 using Acode.Infrastructure.ToolSchemas.Providers;
 using Acode.Infrastructure.ToolSchemas.Retry;
+using Acode.Infrastructure.Truncation;
+using Acode.Infrastructure.Truncation.Tools;
 using Acode.Infrastructure.Vllm;
 using Acode.Infrastructure.Vllm.Client;
 using Acode.Infrastructure.Vllm.Health;
@@ -322,6 +325,52 @@ public static class ServiceCollectionExtensions
             return new Infrastructure.ToolSchemas.Retry.RetryTracker(cfg.MaxAttempts);
         });
         services.AddSingleton<IEscalationFormatter, EscalationFormatter>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers truncation services with the DI container.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">Optional truncation configuration. Uses defaults if null.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <remarks>
+    /// Task 007c: Truncation + Artifact Attachment Rules.
+    /// Registers TruncationProcessor, FileSystemArtifactStore, and GetArtifactTool.
+    /// </remarks>
+    public static IServiceCollection AddTruncationServices(
+        this IServiceCollection services,
+        TruncationConfiguration? configuration = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var config = configuration ?? TruncationConfiguration.CreateDefault();
+
+        // Register configuration as singleton
+        services.AddSingleton(config);
+
+        // Register artifact store as a singleton (shared across the app; disposed on application shutdown)
+        services.AddSingleton<IArtifactStore>(sp =>
+        {
+            var cfg = sp.GetRequiredService<TruncationConfiguration>();
+            return new FileSystemArtifactStore(cfg.ArtifactStoragePath);
+        });
+
+        // Register truncation processor
+        services.AddSingleton<ITruncationProcessor>(sp =>
+        {
+            var cfg = sp.GetRequiredService<TruncationConfiguration>();
+            var store = sp.GetRequiredService<IArtifactStore>();
+            return new TruncationProcessor(cfg, store);
+        });
+
+        // Register GetArtifactTool for model to retrieve artifact content
+        services.AddSingleton<GetArtifactTool>(sp =>
+        {
+            var store = sp.GetRequiredService<IArtifactStore>();
+            return new GetArtifactTool(store);
+        });
 
         return services;
     }
