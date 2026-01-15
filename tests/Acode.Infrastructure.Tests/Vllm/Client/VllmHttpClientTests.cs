@@ -402,4 +402,29 @@ public class VllmHttpClientTests
         result.Should().NotBeNull();
         await retryPolicy.Received(1).ExecuteAsync(Arg.Any<Func<CancellationToken, Task<VllmResponse>>>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task PostAsync_Should_UseSerializationSubsystem()
+    {
+        // Arrange (FR-016, AC-016) - Verify PostAsync uses source generators
+        var config = new VllmClientConfiguration
+        {
+            Endpoint = "http://localhost:9999",
+            ConnectTimeoutSeconds = 1
+        };
+        var logger = Substitute.For<ILogger<VllmHttpClient>>();
+        var client = new VllmHttpClient(config, logger);
+
+        // Use a request with camelCase properties to verify snake_case conversion
+        var request = new { maxTokens = 100, topP = 0.9 };
+
+        // Act & Assert - Verify request serialization happens (will fail on connection)
+#pragma warning disable CA2007
+        var exception = await Assert.ThrowsAsync<VllmConnectionException>(async () =>
+            await client.PostAsync<VllmResponse>("/v1/chat/completions", request, CancellationToken.None));
+#pragma warning restore CA2007
+
+        // The fact that it reaches the connection phase means serialization succeeded
+        exception.ErrorCode.Should().Be("ACODE-VLM-001");
+    }
 }

@@ -190,4 +190,33 @@ public class VllmRequestSerializerTests
         json.Should().Contain("\\n");
         json.Should().Contain("\\t");
     }
+
+    [Fact]
+    public void SerializeGeneric_Should_SerializeAnonymousObject()
+    {
+        // Arrange (FR-016, AC-016) - Generic serialize for PostAsync
+        var request = new { model = "test-model", stream = true };
+
+        // Act
+        var json = VllmRequestSerializer.SerializeGeneric(request);
+
+        // Assert
+        json.Should().Contain("\"model\":");
+        json.Should().Contain("\"stream\":");
+        json.Should().Contain("true");
+    }
+
+    [Fact]
+    public void SerializeGeneric_Should_UseSnakeCasePolicy()
+    {
+        // Arrange
+        var request = new { maxTokens = 100, topP = 0.9 };
+
+        // Act
+        var json = VllmRequestSerializer.SerializeGeneric(request);
+
+        // Assert
+        json.Should().Contain("\"max_tokens\":");
+        json.Should().Contain("\"top_p\":");
+    }
 }

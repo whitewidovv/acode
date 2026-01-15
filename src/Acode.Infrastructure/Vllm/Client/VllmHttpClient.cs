@@ -101,12 +101,10 @@ public sealed class VllmHttpClient : IAsyncDisposable
                     // FR-027: Generate correlation ID for request tracing
                     var correlationId = Guid.NewGuid().ToString();
 
-                    var requestOptions = new System.Text.Json.JsonSerializerOptions
-                    {
-                        PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
-                        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-                    };
-                    var json = System.Text.Json.JsonSerializer.Serialize(request, requestOptions);
+                    // FR-016: Use VllmRequestSerializer for consistent serialization
+                    var json = request is VllmRequest vllmReq
+                        ? VllmRequestSerializer.Serialize(vllmReq)
+                        : VllmRequestSerializer.SerializeGeneric(request);
                     var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
                     // FR-027: Create request message with correlation ID header
@@ -129,6 +127,13 @@ public sealed class VllmHttpClient : IAsyncDisposable
 
                     var responseJson = await response.Content.ReadAsStringAsync(ct)
                         .ConfigureAwait(false);
+
+                    // FR-016: Use VllmResponseParser for VllmResponse, generic deserialization for others
+                    if (typeof(TResponse) == typeof(VllmResponse))
+                    {
+                        var parsed = VllmResponseParser.Parse(responseJson);
+                        return (TResponse)(object)parsed;
+                    }
 
                     var responseOptions = new System.Text.Json.JsonSerializerOptions
                     {

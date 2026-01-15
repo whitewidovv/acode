@@ -21,6 +21,14 @@ public static class VllmRequestSerializer
         WriteIndented = false
     };
 
+    // FR-016: Generic serialization options (uses reflection for unknown types)
+    private static readonly JsonSerializerOptions GenericOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = false
+    };
+
     /// <summary>
     /// Serializes a vLLM request to JSON.
     /// </summary>
@@ -29,6 +37,22 @@ public static class VllmRequestSerializer
     public static string Serialize(VllmRequest request)
     {
         return JsonSerializer.Serialize(request, Options);
+    }
+
+    /// <summary>
+    /// Serializes any object to JSON using vLLM serialization conventions.
+    /// </summary>
+    /// <typeparam name="T">The type of object to serialize.</typeparam>
+    /// <param name="request">The object to serialize.</param>
+    /// <returns>JSON string.</returns>
+    /// <remarks>
+    /// FR-016, AC-016: Uses reflection-based serialization for generic types.
+    /// Applies snake_case naming policy to match vLLM API expectations.
+    /// </remarks>
+    public static string SerializeGeneric<T>(T request)
+        where T : class
+    {
+        return JsonSerializer.Serialize(request, GenericOptions);
     }
 
     /// <summary>
