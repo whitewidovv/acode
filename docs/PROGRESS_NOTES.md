@@ -1,5 +1,45 @@
 # Progress Notes
 
+## Session 2026-01-15 (CONTINUATION) - Task-049 Fresh Gap Analysis COMPLETE ✅
+
+**Status:** ✅ Fresh semantic gap analysis completed for task-049a
+**Branch:** feature/task-049-prompt-pack-loader
+**Time Remaining:** ~85k tokens
+
+### ✅ TASK-049a FRESH GAP ANALYSIS: COMPLETE
+
+**Methodology:** CLAUDE.md Section 3.2 - Semantic completeness verification with AC-by-AC verification
+
+**Analysis Completed:**
+1. Read full implementation prompt + testing requirements
+2. Verified all 92 in-scope ACs individually with concrete evidence
+3. Identified 9 specific gaps (AppendAsync, BulkCreateAsync, error codes, migrations, performance)
+4. Calculated semantic completeness: 78/92 = **84.8%** (not 100% as previously claimed)
+5. Created comprehensive gap analysis (706 lines)
+6. Created implementation roadmap from gaps (750+ lines)
+
+**Key Finding:** Previous "100% complete" claim was based on file existence, not semantic completeness. Fresh analysis reveals:
+- ✅ 78 ACs fully implemented (Chat/Run/Message entities, SQLite repos, domain model)
+- ❌ 9 ACs missing (AppendAsync, BulkCreateAsync, error codes, migration auto-apply, CLI, benchmarks)
+- ⚠️ 5 ACs partial (connection pooling verification, prepared statements, idempotency testing)
+
+**Files Created:**
+- `docs/implementation-plans/task-049a-semantic-gap-analysis-fresh.md` (706 lines)
+- `docs/implementation-plans/task-049a-completion-checklist-fresh.md` (750+ lines)
+
+**Next Steps:**
+1. Create fresh gap analyses for 049b, 049c, 049d (user's request)
+2. Begin implementation of task-049a gaps (15-22 hours)
+3. Implement 049e and 049f gaps
+4. Full audit of task-049 suite before PR creation
+
+**Current Session Progress:**
+- ✅ 049a fresh gap analysis complete
+- ✅ 049a completion checklist complete
+- ⏳ Ready to start 049b analysis OR begin implementing 049a gaps (user decision)
+
+---
+
 ## Session 2026-01-15 - Task-011 Suite Analysis COMPLETE → Task-049 Suite Analysis STARTING
 
 ### ✅ TASK-011 SUITE ANALYSIS: 100% COMPLETE
@@ -57,12 +97,20 @@ Recommendation: Prioritize Task-050 in Epic planning to unblock downstream work.
 **Analysis Completed:**
 
 1. **Task-049a: Conversation Data Model Storage Provider**
-   - Status: ✅ **100% COMPLETE**
-   - ACs: 98 complete
-   - Implementation: 2,608 LOC production code (Chat, Run, Message entities + SQLite repos)
-   - Tests: 101 passing (71 unit, 30 integration)
-   - Deliverable: PR ready or merged
-   - File: `docs/implementation-plans/task-049-suite-analysis-summary.md`
+   - Status: 🟡 **84.8% SEMANTICALLY COMPLETE** (fresh analysis 2026-01-15)
+   - ACs: 78/92 complete (6 PostgreSQL ACs deferred to 049f)
+   - Implementation: All core entities + SQLite repos complete, 9 gaps identified
+   - Tests: 50/50 passing (21 Chat + 17 Run + 12 Message)
+   - Build: 0 errors, 0 warnings ✅
+   - Remaining Effort: 15-22 hours (Gaps 1-9)
+   - Files:
+     - `docs/implementation-plans/task-049a-semantic-gap-analysis-fresh.md` (706 lines - fresh verification)
+     - `docs/implementation-plans/task-049a-completion-checklist-fresh.md` (750+ lines - implementation roadmap)
+   - Key Gaps:
+     - Gap 1-2: AppendAsync/BulkCreateAsync methods (AC-069, AC-070)
+     - Gap 3: Error code pattern (AC-093)
+     - Gap 4-5: Migration auto-apply + CLI status (AC-083, AC-088)
+     - Gap 6-9: Performance benchmarks + verification tests
 
 2. **Task-049b: CRUSD APIs + CLI Commands**
    - Status: 🟡 **60% COMPLETE**
