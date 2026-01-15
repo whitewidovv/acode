@@ -2,10 +2,10 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using Acode.Infrastructure.Common;
 using Acode.Infrastructure.Vllm.Client.Retry;
+using Acode.Infrastructure.Vllm.Client.Serialization;
 using Acode.Infrastructure.Vllm.Client.Streaming;
 using Acode.Infrastructure.Vllm.Exceptions;
 using Acode.Infrastructure.Vllm.Models;
-using Acode.Infrastructure.Vllm.Serialization;
 using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.Vllm.Client;

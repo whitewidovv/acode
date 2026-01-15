@@ -1,8 +1,8 @@
+using Acode.Infrastructure.Vllm.Client.Serialization;
 using Acode.Infrastructure.Vllm.Models;
-using Acode.Infrastructure.Vllm.Serialization;
 using FluentAssertions;
 
-namespace Acode.Infrastructure.Tests.Vllm.Serialization;
+namespace Acode.Infrastructure.Tests.Vllm.Client.Serialization;
 
 public class VllmRequestSerializerTests
 {

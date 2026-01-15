@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 using Acode.Infrastructure.Common;
 using Acode.Infrastructure.Vllm.Models;
 
-namespace Acode.Infrastructure.Vllm.Serialization;
+namespace Acode.Infrastructure.Vllm.Client.Serialization;
 
 /// <summary>
 /// Serializer for vLLM requests and responses using System.Text.Json.
