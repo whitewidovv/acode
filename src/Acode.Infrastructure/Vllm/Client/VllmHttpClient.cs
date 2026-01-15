@@ -49,6 +49,78 @@ public sealed class VllmHttpClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Sends a generic POST request to vLLM.
+    /// </summary>
+    /// <typeparam name="TResponse">The response type to deserialize to.</typeparam>
+    /// <param name="path">The endpoint path (e.g., "/v1/chat/completions").</param>
+    /// <param name="request">The request payload.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The deserialized response.</returns>
+    /// <exception cref="VllmConnectionException">Connection failed.</exception>
+    /// <exception cref="VllmTimeoutException">Request timed out.</exception>
+    /// <exception cref="VllmRequestException">Invalid request (4xx).</exception>
+    /// <exception cref="VllmServerException">Server error (5xx).</exception>
+    public async Task<TResponse> PostAsync<TResponse>(
+        string path,
+        object request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(request);
+
+        try
+        {
+            var json = VllmRequestSerializer.Serialize(request);
+            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.PostAsync(
+                path,
+                content,
+                cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                ThrowForStatusCode(response.StatusCode, errorContent);
+            }
+
+            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            var options = new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+
+            return System.Text.Json.JsonSerializer.Deserialize<TResponse>(responseJson, options)
+                ?? throw new VllmParseException("Failed to deserialize response");
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new VllmConnectionException(
+                $"Failed to connect to vLLM at {_config.Endpoint}: {ex.Message}",
+                ex);
+        }
+        catch (TaskCanceledException ex) when (ex.CancellationToken == cancellationToken)
+        {
+            throw;
+        }
+        catch (TaskCanceledException ex) when (IsConnectionTimeout(ex))
+        {
+            throw new VllmConnectionException(
+                $"Failed to connect to vLLM at {_config.Endpoint}: connection timed out",
+                ex);
+        }
+        catch (TaskCanceledException ex)
+        {
+            throw new VllmTimeoutException(
+                $"Request to vLLM timed out after {_config.RequestTimeoutSeconds}s",
+                ex);
+        }
+    }
+
+    /// <summary>
     /// Sends a non-streaming request to vLLM.
     /// </summary>
     /// <param name="request">The request payload.</param>

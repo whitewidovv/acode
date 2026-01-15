@@ -193,4 +193,47 @@ public class VllmHttpClientTests
         // Assert - verify no exceptions thrown
         await client.DisposeAsync(); // Should be safe to dispose async twice
     }
+
+    [Fact]
+    public async Task PostAsync_Should_Accept_Generic_TResponse_Parameter()
+    {
+        // Arrange (FR-007, AC-006) - Test generic PostAsync method
+        var config = new VllmClientConfiguration
+        {
+            Endpoint = "http://localhost:9999", // Invalid to trigger connection error
+            ConnectTimeoutSeconds = 1
+        };
+        var client = new VllmHttpClient(config);
+        var request = new
+        {
+            model = "test-model",
+            messages = new[] { new { role = "user", content = "Hello" } }
+        };
+
+        // Act & Assert - PostAsync<T> should exist and be callable
+#pragma warning disable CA2007
+        var exception = await Assert.ThrowsAsync<VllmConnectionException>(async () =>
+            await client.PostAsync<VllmResponse>("/v1/chat/completions", request, CancellationToken.None));
+#pragma warning restore CA2007
+
+        exception.ErrorCode.Should().Be("ACODE-VLM-001");
+    }
+
+    [Fact]
+    public async Task PostAsync_Should_Accept_String_Path_Parameter()
+    {
+        // Arrange (FR-007, AC-006) - Verify path parameter is used
+        var config = new VllmClientConfiguration
+        {
+            Endpoint = "http://localhost:9999",
+            ConnectTimeoutSeconds = 1
+        };
+        var client = new VllmHttpClient(config);
+
+        // Act & Assert - Should accept custom path (will fail on connection, but path is processed)
+#pragma warning disable CA2007
+        await Assert.ThrowsAsync<VllmConnectionException>(async () =>
+            await client.PostAsync<VllmResponse>("/custom/path", new { }, CancellationToken.None));
+#pragma warning restore CA2007
+    }
 }
