@@ -108,3 +108,22 @@ public class VllmHealthCheckerTests
         status.CheckedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
     }
 }
+
+public class HealthStatusTests
+{
+    [Fact]
+    public void Should_Have_All_Four_States()
+    {
+        // Arrange & Act - Just verify the enum exists and has all states
+        var healthyStatus = HealthStatus.Healthy;
+        var degradedStatus = HealthStatus.Degraded;
+        var unhealthyStatus = HealthStatus.Unhealthy;
+        var unknownStatus = HealthStatus.Unknown;
+
+        // Assert
+        healthyStatus.Should().Be(HealthStatus.Healthy);
+        degradedStatus.Should().Be(HealthStatus.Degraded);
+        unhealthyStatus.Should().Be(HealthStatus.Unhealthy);
+        unknownStatus.Should().Be(HealthStatus.Unknown);
+    }
+}
