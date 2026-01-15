@@ -18,20 +18,22 @@
    - File: `docs/implementation-plans/task-011a-completion-checklist.md` (1,600+ lines)
 
 2. **Task-011b: Persistence Model (SQLite/Postgres)**
-   - Status: ⚠️ INCOMPLETE - Both gap analysis and checklist need redo
-   - Completeness: 0% (59 ACs, Phase 1 ready 8 hrs, Phases 2-7 blocked)
-   - Blockers: Task-050 + Task-011a for Phases 2-7
-   - File: `docs/implementation-plans/task-011b-gap-analysis.md` - NEEDS REDO (too brief, no AC verification)
-   - File: `docs/implementation-plans/task-011b-completion-checklist.md` - NEEDS REDO (too brief)
-   - Key Finding: Phase 1 (8 hrs) unblocked, can start immediately ✅ (but needs proper docs)
+   - Status: ✅ SEMANTIC GAP ANALYSIS COMPLETE
+   - Completeness: 0% (59 ACs, 59 hours total)
+   - Blockers: None - Phase 1 unblocked, Phases 2-7 independent of Task-050
+   - File: `docs/implementation-plans/task-011b-semantic-gap-analysis.md` (1,200+ lines) ✅
+   - File: `docs/implementation-plans/task-011b-completion-checklist.md` - READY TO CREATE FROM GAP ANALYSIS
+   - Key Finding: Full 59 hours unblocked - can start immediately
+   - Next: Create completion checklist based on gap analysis findings, then begin Phase 1
 
 3. **Task-011c: Resume Behavior + Invariants**
-   - Status: ⚠️ INCOMPLETE - Checklist done, gap analysis needs redo
+   - Status: ✅ SEMANTIC GAP ANALYSIS + CHECKLIST COMPLETE
    - Completeness: 0% (62 ACs, 68 hours needed)
    - Blockers: Task-011a + Task-050 + Task-049f - ALL WORK BLOCKED ❌
+   - File: `docs/implementation-plans/task-011c-gap-analysis-comprehensive.md` (1,100+ lines) ✅
    - File: `docs/implementation-plans/task-011c-resume-behavior-completion-checklist.md` (1,537 lines) ✅
-   - File: `docs/implementation-plans/task-011c-gap-analysis.md` - NEEDS REDO (too brief, no AC verification)
-   - Work Needed: Create proper gap analysis with semantic completeness verification of all 62 ACs
+   - Analysis: All 62 ACs verified individually, 0% present, clear implementation roadmap
+   - Status: Ready to implement once all 3 dependencies (011a, 050, 049f) complete
 
 4. **Task-011 Suite Summary**
    - File: `docs/implementation-plans/task-011-suite-summary.md`
