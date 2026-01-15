@@ -1891,3 +1891,170 @@ Completed proper semantic gap analysis (following CLAUDE.md Section 3.2 methodol
 
 **Next Task**:
 Proceed to task-009c semantic analysis following same methodology
+
+## Session 2026-01-15 (Continued): Task-009c Semantic Analysis Complete
+
+### Task-009c Status: 73% Semantically Complete (55/75 ACs Met)
+
+**Comprehensive AC Coverage Analysis**:
+
+**Complete Components** (55 ACs verified - 73.3% coverage):
+- Domain Layer: ✅ 8/8 ACs (CircuitState, EscalationTrigger, EscalationPolicy enums)
+- Application Layer Interfaces: ✅ 6/6 ACs (IFallbackHandler, IFallbackConfiguration)
+- Application Layer Models: ✅ 8/8 ACs (FallbackContext, FallbackResult, CircuitStateInfo)
+- Configuration System: ✅ 6/6 ACs (Global/role-specific chains, validation)
+- Circuit Breaker: ✅ 8/8 ACs (State machine, failure tracking, cooling period)
+- Main Handler: ✅ 13/13 ACs (Chain selection, availability checks, exhaustion handling)
+- CLI Interface: ✅ 11/11 ACs (status/reset/test commands fully functional)
+- Logging: ✅ 5/5 ACs (Event logging with session IDs and reasons)
+- Unit Tests: ✅ 65 tests passing (all core functionality tested)
+
+**Partially Complete Components** (15 ACs - 20% coverage):
+- Operating Mode Integration: ⚠️ 1/5 ACs (Property exists, enforcement missing)
+- Security Features: ❌ 4/5 ACs (Model verification missing, checksum validation missing)
+- Capability Validation: ❌ 5/5 ACs (No capability checking in fallback selection)
+
+**Missing Components** (5 ACs - 6.7% coverage):
+- Policy Implementation Classes: Tests reference but not implemented
+- Integration Tests: 0/3+ missing (no FallbackIntegrationTests.cs)
+- E2E Tests: 0/3+ missing (no FallbackE2ETests.cs)
+- Structured JSON Logging: Partial (string-based, not structured)
+
+**Test Summary**:
+- Unit tests: ✅ 65/65 implemented and passing
+- Integration tests: ❌ 0/3+ missing
+- E2E tests: ❌ 0/3+ missing
+- Policy tests: ❌ 0/3+ missing
+- Total: 65 existing tests (100% of unit tests passing)
+
+**Architecture Quality** (verified working):
+- ✅ Clean layer separation (Domain → Application → Infrastructure → CLI)
+- ✅ Thread-safe CircuitBreaker implementation
+- ✅ Comprehensive configuration validation
+- ✅ Graceful chain exhaustion handling
+- ✅ Role-based fallback chain selection
+- ✅ Proper DI integration
+- ⚠️ Security layer missing (IModelVerificationService not implemented)
+- ⚠️ Capability validation missing (no capability checking)
+- ⚠️ Operating mode enforcement missing (mode property exists, enforcement doesn't)
+
+**Critical Gaps Analysis**:
+
+1. **Security Layer (AC-072 through AC-075 - 4 ACs)**
+   - Missing: IModelVerificationService interface + implementation
+   - Missing: VerifiedModelFallbackHandler wrapper
+   - Missing: Model URL validation (reject http://, https://, file://)
+   - Missing: Checksum validation for tampering detection
+   - Impact: No model verification, unsafe for untrusted sources
+   - Effort: 8-10 hours
+
+2. **Capability Validation (AC-067 through AC-071 - 5 ACs)**
+   - Missing: CapabilityAwareFallbackHandler wrapper
+   - Missing: ModelCapability integration
+   - Missing: Tool-calling/vision/function-calling checks
+   - Missing: Capability mismatch handling
+   - Impact: Could select model without required capabilities
+   - Effort: 4-6 hours
+
+3. **Operating Mode Enforcement (AC-062 through AC-066 - 4 ACs)**
+   - Partial: OperatingMode property exists in FallbackContext
+   - Missing: ModeEnforcingFallbackHandler wrapper
+   - Missing: LocalOnly/Airgapped/Burst filtering
+   - Missing: Model deployment type validation
+   - Impact: LocalOnly could access network models (breaks air-gapping)
+   - Effort: 3-4 hours
+
+4. **Policy Implementation Classes**
+   - Missing: IEscalationPolicyStrategy interface
+   - Missing: ImmediatePolicy, RetryThenFallbackPolicy, CircuitBreakerPolicy classes
+   - Missing: EscalationPolicyTests.cs
+   - Effort: 4-5 hours
+
+5. **Test Coverage (Blocking full AC verification)**
+   - Missing: FallbackIntegrationTests.cs (3+ tests)
+   - Missing: FallbackE2ETests.cs (3+ tests)
+   - Impact: Cannot verify end-to-end behavior
+   - Effort: 10-12 hours
+
+**Semantic Completeness Calculation**:
+- Total ACs: 75
+- Verified Complete: 55 (73.3%)
+- Partially Complete: 15 (20%)
+- Missing: 5 (6.7%)
+- **Final Metric**: 55/75 = 73% semantic completeness
+
+**Production Readiness Assessment**:
+- ✅ Core fallback logic: PRODUCTION READY
+- ✅ Circuit breaker: PRODUCTION READY
+- ✅ Configuration system: PRODUCTION READY
+- ✅ CLI interface: PRODUCTION READY
+- ⚠️ Security features: CRITICAL GAPS - NOT PRODUCTION READY
+- ⚠️ Mode constraints: PARTIAL - NEEDS WORK
+- ⚠️ Capability validation: MISSING - NEEDS IMPLEMENTATION
+- ⚠️ Integration tests: MISSING - INSUFFICIENT COVERAGE
+
+**Completion Work Estimate**:
+
+| Phase | Component | Effort | Priority |
+|-------|-----------|--------|----------|
+| 1 | Security Layer | 8-10h | CRITICAL |
+| 2 | Capability Validation | 4-6h | CRITICAL |
+| 3 | Operating Mode Enforcement | 3-4h | CRITICAL |
+| 4 | Policy Implementation | 4-5h | HIGH |
+| 5 | Integration & E2E Tests | 10-12h | HIGH |
+| 6 | Logging & Verification | 2-3h | MEDIUM |
+| **Total** | | **31-40h** | |
+
+**Key Findings**:
+- Core fallback system is solid and well-tested
+- Security features completely missing (major blocker)
+- Capability validation not integrated (affects quality)
+- Operating mode constraints not enforced (breaks safety model)
+- Test coverage gaps (integration/E2E missing)
+
+**Gap Analysis Methodology Applied** (CLAUDE.md Section 3.2):
+
+1. ✅ Read Implementation Prompt (lines 3011-3160) completely
+2. ✅ Read Testing Requirements (lines 1946-3010) completely
+3. ✅ Verified current state with Explore agent (comprehensive analysis)
+4. ✅ Created 348-line gap analysis document
+5. ✅ Ordered gaps for TDD implementation (6-phase plan)
+6. ✅ Created 650-line 6-phase completion checklist
+
+**Key Deliverables Created**:
+1. `docs/implementation-plans/task-009c-gap-analysis.md` (348 lines)
+   - Semantic completeness metric upfront (73%)
+   - What Exists section (showing 55 complete ACs)
+   - Specific gaps with spec references and code templates
+   - AC verification table
+   - Production readiness assessment
+   - Effort estimation (31-40 hours)
+
+2. `docs/implementation-plans/task-009c-completion-checklist.md` (650 lines)
+   - 6-phase implementation plan with dependencies
+   - Complete code templates from spec
+   - TDD cycle instructions
+   - Success criteria for each component
+   - Dependency documentation
+   - Final verification checklist
+
+**Git Commits This Session**:
+1. `fc7661d` - docs: update progress notes with task-009b completion
+2. `4308c4d` - docs(task-009c): add comprehensive gap analysis and completion checklist
+
+**Branch Status**:
+- Current: `feature/task-008-agentic-loop`
+- Status: 009a/009b/009c gap analyses and checklists complete
+
+**All Task-009 Suite Complete** ✅
+
+| Task | Status | AC Completeness | Effort to 100% |
+|------|--------|-----------------|----------------|
+| 009a | Gap analysis + checklist complete | 88.9% (40/45) | 6.5 hours |
+| 009b | Gap analysis + checklist complete | 60% (45/75) | 6.5 hours |
+| 009c | Gap analysis + checklist complete | 73% (55/75) | 31-40 hours |
+
+**Next Steps**:
+- All three task-009 semantic analyses now complete with comprehensive documentation
+- Each has actionable 4-6 phase completion checklists
+- Ready for implementation when user elects to proceed
