@@ -1601,7 +1601,7 @@ Expected: GREEN
 
 ### Gap 4.1: Create Serialization Subdirectory and Move VllmRequestSerializer
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Current State**:
 - VllmRequestSerializer.cs at: src/Acode.Infrastructure/Vllm/Serialization/VllmRequestSerializer.cs
@@ -1665,7 +1665,7 @@ dotnet test --filter "VllmRequestSerializerTests"
 
 ### Gap 4.2: Create VllmJsonSerializerContext with Source Generators (FR-016, AC-016)
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Problem**:
 - Spec line 696, FR-016, AC-016: MUST use System.Text.Json source generators
@@ -1774,7 +1774,7 @@ Expected: All tests pass
 
 ### Gap 4.3: Create VllmResponseParser (FR-032 through FR-040, AC-032 through AC-040)
 
-**Status**: [ ]
+**Status**: [✅]
 
 **Problem**:
 - Spec line 698: VllmResponseParser.cs should exist

@@ -101,6 +101,9 @@ public static class ServiceCollectionExtensions
         var config = configuration ?? new VllmClientConfiguration();
         config.Validate();
 
+        // Ensure logging is registered (required by VllmProvider)
+        services.AddLogging();
+
         // Register configuration as singleton
         services.AddSingleton(config);
 
