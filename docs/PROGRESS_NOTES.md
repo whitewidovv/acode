@@ -1,6 +1,6 @@
 # Task 007e (formerly 006b) - Structured Outputs Enforcement Progress
 
-**Current Status**: Phase 3 COMPLETE | Overall ~45% Complete
+**Current Status**: Phase 5 COMPLETE | Overall ~65% Complete
 
 ## Completed Phases
 
@@ -36,14 +36,33 @@
 - 17 comprehensive tests (5 ResponseFormatBuilder + 12 GuidedDecodingBuilder)
 - AC-008 through AC-034 coverage
 
+### Phase 4 ✅ COMPLETE
+- Implemented Capability subsystem:
+  - ModelCapabilities data class with support flags and limits
+  - CapabilityDetector with heuristic-based detection
+  - CapabilityCache for thread-safe caching
+  - Async capability detection with age-based refresh
+- 18 comprehensive tests (11 CapabilityDetector + 7 CapabilityCache)
+- AC-035 through AC-046 coverage
+
+### Phase 5 ✅ COMPLETE
+- Implemented Fallback subsystem:
+  - FallbackContext for state tracking
+  - OutputValidator with schema-based JSON validation
+  - Graceful JSON extraction from malformed output
+  - FallbackHandler for orchestrating fallback operations
+  - FallbackReason enum for result classification
+- 17 comprehensive tests (8 OutputValidator + 9 FallbackHandler)
+- AC-047 through AC-071 coverage
+
 ## Test Summary So Far
-- Phase 0-3: 41 tests created (excluding SchemaTransformer)
-- All 54/54 tests passing in StructuredOutput namespace (100% pass rate)
+- Phase 0-5: 98 tests passing (all StructuredOutput namespace tests)
+- All 98/98 tests passing (100% pass rate)
 - 0 build errors, 0 warnings
 
 ## Remaining Phases
 
-### Phase 4 (IN PROGRESS)
+### Phase 6 (CRITICAL - PENDING)
 - Implement ResponseFormat subsystem
   - ResponseFormatBuilder.cs
   - GuidedDecodingBuilder.cs
@@ -70,6 +89,7 @@
   - Orchestrates all components: SchemaTransformer, SchemaValidator, SchemaCache, CapabilityDetector, ResponseFormatBuilder, FallbackHandler
   - ~15 comprehensive tests
 - AC-014 through AC-018, AC-054 through AC-058 coverage
+- **NOTE**: Phase 6 is the critical master orchestrator - must tie together all previous phases
 
 ### Phase 7 (PENDING)
 - Complete exception hierarchy
@@ -124,3 +144,5 @@
 - 16f939e: Phase 1 - IsEnabled and GetFallbackConfig methods (15 tests)
 - 0040786: Phase 2 - SchemaValidator implementation (9 tests)
 - 34d9c79: Phase 3 - ResponseFormat subsystem (ResponseFormatBuilder, GuidedDecodingBuilder, 17 tests)
+- c962cf5: Phase 4 - Capability subsystem (ModelCapabilities, CapabilityDetector, CapabilityCache, 18 tests)
+- f040f1b: Phase 5 - Fallback subsystem (OutputValidator, FallbackHandler, 17 tests)
