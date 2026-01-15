@@ -9,7 +9,7 @@ namespace Acode.Infrastructure.Vllm.Client;
 /// <summary>
 /// HTTP client for vLLM /v1/chat/completions endpoint with SSE streaming support.
 /// </summary>
-public sealed class VllmHttpClient : IDisposable
+public sealed class VllmHttpClient : IAsyncDisposable
 {
     private readonly VllmClientConfiguration _config;
     private readonly HttpClient _httpClient;
@@ -205,9 +205,9 @@ public sealed class VllmHttpClient : IDisposable
     }
 
     /// <summary>
-    /// Disposes the HTTP client.
+    /// Asynchronously disposes the HTTP client.
     /// </summary>
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         if (_disposed)
         {
@@ -216,6 +216,7 @@ public sealed class VllmHttpClient : IDisposable
 
         _httpClient.Dispose();
         _disposed = true;
+        await ValueTask.CompletedTask;
     }
 
     private static void ThrowForStatusCode(System.Net.HttpStatusCode statusCode, string errorContent)

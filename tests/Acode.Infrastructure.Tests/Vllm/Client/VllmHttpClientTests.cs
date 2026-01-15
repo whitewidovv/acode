@@ -161,7 +161,7 @@ public class VllmHttpClientTests
     }
 
     [Fact]
-    public void Dispose_Should_CleanupResources()
+    public async Task DisposeAsync_Should_CleanupResources()
     {
         // Arrange
         var config = new VllmClientConfiguration
@@ -171,9 +171,26 @@ public class VllmHttpClientTests
         var client = new VllmHttpClient(config);
 
         // Act
-        client.Dispose();
+        await client.DisposeAsync();
 
         // Assert - verify no exceptions thrown
-        client.Dispose(); // Should be safe to dispose twice
+        await client.DisposeAsync(); // Should be safe to dispose twice
+    }
+
+    [Fact]
+    public async Task Should_Implement_IAsyncDisposable()
+    {
+        // Arrange (FR-003, AC-003)
+        var config = new VllmClientConfiguration
+        {
+            Endpoint = "http://localhost:8000"
+        };
+        var client = new VllmHttpClient(config);
+
+        // Act
+        await client.DisposeAsync();
+
+        // Assert - verify no exceptions thrown
+        await client.DisposeAsync(); // Should be safe to dispose async twice
     }
 }
