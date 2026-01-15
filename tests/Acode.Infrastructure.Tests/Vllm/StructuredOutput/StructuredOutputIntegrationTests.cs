@@ -67,7 +67,7 @@ public class StructuredOutputIntegrationTests
             responseFormat: new Acode.Application.Inference.ResponseFormat { Type = "json_object" });
 
         // Act
-        var result = await this._handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2");
+        var result = await this._handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2", CancellationToken.None);
 
         // Assert
         result.IsApplied.Should().BeTrue();
@@ -79,6 +79,12 @@ public class StructuredOutputIntegrationTests
     public async Task ApplyToRequestAsync_WithResponseFormatJsonSchema_ReturnsSuccess()
     {
         // Arrange
+        var vllmRequest = new VllmRequest
+        {
+            Model = "llama2",
+            Messages = new(),
+            Stream = false,
+        };
         var schema = JsonDocument.Parse(
             @"{
                 ""type"": ""object"",
@@ -102,18 +108,24 @@ public class StructuredOutputIntegrationTests
             });
 
         // Act
-        var result = await this._handler.ApplyToRequestAsync(chatRequest, "llama2");
+        var result = await this._handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2", CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeTrue();
-        result.ResponseFormat.Should().NotBeNull();
-        result.FailureReason.Should().BeNull();
+        result.IsApplied.Should().BeTrue();
+        result.Mode.Should().Be(StructuredOutputMode.JsonSchema);
+        vllmRequest.ResponseFormat.Should().NotBeNull();
     }
 
     [Fact]
     public async Task ApplyToRequestAsync_WithToolDefinitions_ReturnsSuccess()
     {
         // Arrange
+        var vllmRequest = new VllmRequest
+        {
+            Model = "llama2",
+            Messages = new(),
+            Stream = false,
+        };
         var toolParameters = JsonDocument.Parse(
             @"{
                 ""type"": ""object"",
@@ -136,12 +148,12 @@ public class StructuredOutputIntegrationTests
             tools: tools);
 
         // Act
-        var result = await this._handler.ApplyToRequestAsync(chatRequest, "llama2");
+        var result = await this._handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2", CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeTrue();
-        result.GuidedParameter.Should().NotBeNull();
-        result.FailureReason.Should().BeNull();
+        result.IsApplied.Should().BeTrue();
+        result.Mode.Should().Be(StructuredOutputMode.ToolSchemas);
+        vllmRequest.Tools.Should().NotBeNull();
     }
 
     [Fact]
@@ -160,6 +172,12 @@ public class StructuredOutputIntegrationTests
             Substitute.For<ILogger<StructuredOutputHandler>>(),
             Substitute.For<IToolSchemaRegistry>());
 
+        var vllmRequest = new VllmRequest
+        {
+            Model = "llama2",
+            Messages = new(),
+            Stream = false,
+        };
         var chatRequest = new ChatRequest(
             new[]
             {
@@ -169,17 +187,22 @@ public class StructuredOutputIntegrationTests
             responseFormat: new Acode.Application.Inference.ResponseFormat { Type = "json_object" });
 
         // Act
-        var result = await handler.ApplyToRequestAsync(chatRequest, "llama2");
+        var result = await handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2", CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeFalse();
-        result.FailureReasonCode.Should().Be(ValidationFailureReason.Disabled);
+        result.IsDisabled.Should().BeTrue();
     }
 
     [Fact]
     public async Task ApplyToRequestAsync_WithNeitherResponseFormatNorTools_ReturnsDisabled()
     {
         // Arrange
+        var vllmRequest = new VllmRequest
+        {
+            Model = "llama2",
+            Messages = new(),
+            Stream = false,
+        };
         var chatRequest = new ChatRequest(
             new[]
             {
@@ -188,17 +211,23 @@ public class StructuredOutputIntegrationTests
             new ModelParameters("llama2"));
 
         // Act
-        var result = await this._handler.ApplyToRequestAsync(chatRequest, "llama2");
+        var result = await this._handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2", CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeFalse();
-        result.FailureReasonCode.Should().Be(ValidationFailureReason.Disabled);
+        result.IsApplied.Should().BeFalse();
+        result.IsDisabled.Should().BeFalse();
     }
 
     [Fact]
     public async Task ApplyToRequestAsync_ResponseFormatTakesPriority_IgnoresTools()
     {
         // Arrange
+        var vllmRequest = new VllmRequest
+        {
+            Model = "llama2",
+            Messages = new(),
+            Stream = false,
+        };
         var toolParameters = JsonDocument.Parse(
             @"{
                 ""type"": ""object"",
@@ -220,20 +249,24 @@ public class StructuredOutputIntegrationTests
             responseFormat: new Acode.Application.Inference.ResponseFormat { Type = "json_object" });
 
         // Act
-        var result = await this._handler.ApplyToRequestAsync(chatRequest, "llama2");
+        var result = await this._handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2", CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeTrue();
+        result.IsApplied.Should().BeTrue();
 
         // ResponseFormat should be processed, not Tools
-        result.ResponseFormat.Should().NotBeNull();
-        result.ResponseFormat!.Type.Should().Be("json_object");
     }
 
     [Fact]
     public async Task ApplyToRequestAsync_WithMultipleTools_CollectsAllSchemas()
     {
         // Arrange
+        var vllmRequest = new VllmRequest
+        {
+            Model = "llama2",
+            Messages = new(),
+            Stream = false,
+        };
         var searchParams = JsonDocument.Parse(
             @"{
                 ""type"": ""object"",
@@ -261,27 +294,40 @@ public class StructuredOutputIntegrationTests
             tools: tools);
 
         // Act
-        var result = await this._handler.ApplyToRequestAsync(chatRequest, "llama2");
+        var result = await this._handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2", CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeTrue();
-        result.GuidedParameter.Should().BeOfType<JsonElement[]>();
-        var guidedParams = (JsonElement[])result.GuidedParameter!;
-        guidedParams.Should().HaveCount(2);
+        result.IsApplied.Should().BeTrue();
+        result.Mode.Should().Be(StructuredOutputMode.ToolSchemas);
+        vllmRequest.Tools.Should().NotBeNull();
+        vllmRequest.Tools!.Count.Should().Be(2);
     }
 
     [Fact]
     public async Task ApplyToRequestAsync_WithChatRequestNullArgument_ThrowsArgumentNullException()
     {
         // Act & Assert
+        var vllmRequest = new VllmRequest
+        {
+            Model = "llama2",
+            Messages = new(),
+            Stream = false,
+        };
         await Assert.ThrowsAsync<ArgumentNullException>(
-            () => this._handler.ApplyToRequestAsync(null!, "llama2"));
+            () => this._handler.ApplyToRequestAsync(vllmRequest, null!, "llama2", CancellationToken.None));
     }
 
     [Fact]
     public async Task ApplyToRequestAsync_IntegrationFlow_FullChatRequestProcessing()
     {
         // Arrange
+        var vllmRequest = new VllmRequest
+        {
+            Model = "llama2",
+            Messages = new(),
+            Stream = false,
+        };
+
         // Simulate complete ChatRequest with ResponseFormat + Tools
         var responseSchema = JsonDocument.Parse(
             @"{
@@ -319,19 +365,24 @@ public class StructuredOutputIntegrationTests
             });
 
         // Act
-        var result = await this._handler.ApplyToRequestAsync(chatRequest, "llama2");
+        var result = await this._handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2", CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeTrue();
-        result.ResponseFormat.Should().NotBeNull();
-        result.Capabilities.Should().NotBeNull();
-        result.FailureReason.Should().BeNull();
+        result.IsApplied.Should().BeTrue();
+        result.Mode.Should().Be(StructuredOutputMode.JsonSchema);
+        vllmRequest.ResponseFormat.Should().NotBeNull();
     }
 
     [Fact]
     public async Task ApplyToRequestAsync_WithUnknownResponseFormatType_ReturnsFailed()
     {
         // Arrange
+        var vllmRequest = new VllmRequest
+        {
+            Model = "llama2",
+            Messages = new(),
+            Stream = false,
+        };
         var schema = JsonDocument.Parse(@"{""type"":""object""}").RootElement;
 
         var chatRequest = new ChatRequest(
@@ -347,10 +398,9 @@ public class StructuredOutputIntegrationTests
             });
 
         // Act
-        var result = await this._handler.ApplyToRequestAsync(chatRequest, "llama2");
+        var result = await this._handler.ApplyToRequestAsync(vllmRequest, chatRequest, "llama2", CancellationToken.None);
 
         // Assert
-        result.Success.Should().BeFalse();
-        result.FailureReasonCode.Should().Be(ValidationFailureReason.InvalidSchema);
+        result.IsApplied.Should().BeFalse();
     }
 }

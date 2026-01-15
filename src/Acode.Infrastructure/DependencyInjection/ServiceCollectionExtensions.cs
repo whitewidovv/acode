@@ -107,6 +107,10 @@ public static class ServiceCollectionExtensions
         var config = configuration ?? new VllmClientConfiguration();
         config.Validate();
 
+        // Register logging if not already configured
+        // This ensures ILogger<T> is available for StructuredOutputHandler
+        services.AddLogging();
+
         // Register configuration as singleton
         services.AddSingleton(config);
 
@@ -200,8 +204,33 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<OutputValidator>();
         services.AddSingleton<FallbackHandler>();
 
-        // Register main orchestrator
-        services.AddSingleton<StructuredOutputHandler>();
+        // Register Tool Schema Registry (required for StructuredOutputHandler)
+        services.AddSingleton<IToolSchemaRegistry, ToolSchemaRegistry>();
+
+        // Register main orchestrator with required dependencies
+        services.AddSingleton<StructuredOutputHandler>(sp =>
+        {
+            var config = sp.GetRequiredService<StructuredOutputConfiguration>();
+            var schemaValidator = sp.GetRequiredService<SchemaValidator>();
+            var capabilityDetector = sp.GetRequiredService<CapabilityDetector>();
+            var capabilityCache = sp.GetRequiredService<CapabilityCache>();
+            var responseFormatBuilder = sp.GetRequiredService<ResponseFormatBuilder>();
+            var guidedDecodingBuilder = sp.GetRequiredService<GuidedDecodingBuilder>();
+            var fallbackHandler = sp.GetRequiredService<FallbackHandler>();
+            var logger = sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<StructuredOutputHandler>>();
+            var schemaRegistry = sp.GetRequiredService<IToolSchemaRegistry>();
+
+            return new StructuredOutputHandler(
+                config,
+                schemaValidator,
+                capabilityDetector,
+                capabilityCache,
+                responseFormatBuilder,
+                guidedDecodingBuilder,
+                fallbackHandler,
+                logger,
+                schemaRegistry);
+        });
 
         return services;
     }
