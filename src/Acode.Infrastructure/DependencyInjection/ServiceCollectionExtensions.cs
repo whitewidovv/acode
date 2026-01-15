@@ -1,11 +1,13 @@
 using Acode.Application.Configuration;
 using Acode.Application.Inference;
+using Acode.Application.Providers.Vllm;
 using Acode.Application.Tools;
 using Acode.Application.Tools.Retry;
 using Acode.Application.ToolSchemas.Retry;
 using Acode.Infrastructure.Configuration;
 using Acode.Infrastructure.Ollama;
 using Acode.Infrastructure.PromptPacks;
+using Acode.Infrastructure.Providers.Vllm.Lifecycle;
 using Acode.Infrastructure.Tools;
 using Acode.Infrastructure.ToolSchemas.Providers;
 using Acode.Infrastructure.ToolSchemas.Retry;
@@ -236,6 +238,56 @@ public static class ServiceCollectionExtensions
 
         // Register health checker
         services.AddSingleton<VllmHealthChecker>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers vLLM lifecycle management components with the DI container.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="options">Optional lifecycle options. Uses defaults if null.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <remarks>
+    /// Task 006d: vLLM Lifecycle Management
+    /// Registers all lifecycle orchestration components for managing vLLM service.
+    /// </remarks>
+    public static IServiceCollection AddVllmLifecycleManagement(
+        this IServiceCollection services,
+        VllmLifecycleOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        // Register lifecycle options
+        var lifecycleOptions = options ?? new VllmLifecycleOptions();
+        lifecycleOptions.Validate();
+        services.AddSingleton(lifecycleOptions);
+
+        // Register lifecycle helper components
+        services.AddSingleton<VllmServiceStateTracker>();
+        services.AddSingleton<VllmRestartPolicyEnforcer>();
+        services.AddSingleton<VllmGpuMonitor>();
+        services.AddSingleton<VllmModelLoader>();
+        services.AddSingleton<VllmHealthCheckWorker>();
+
+        // Register main orchestrator implementing IVllmServiceOrchestrator
+        services.AddSingleton<IVllmServiceOrchestrator>(sp =>
+        {
+            var opts = sp.GetRequiredService<VllmLifecycleOptions>();
+            var stateTracker = sp.GetRequiredService<VllmServiceStateTracker>();
+            var restartPolicy = sp.GetRequiredService<VllmRestartPolicyEnforcer>();
+            var gpuMonitor = sp.GetRequiredService<VllmGpuMonitor>();
+            var modelLoader = sp.GetRequiredService<VllmModelLoader>();
+            var healthCheckWorker = sp.GetRequiredService<VllmHealthCheckWorker>();
+
+            return new VllmServiceOrchestrator(
+                opts,
+                stateTracker,
+                restartPolicy,
+                gpuMonitor,
+                modelLoader,
+                healthCheckWorker);
+        });
 
         return services;
     }
