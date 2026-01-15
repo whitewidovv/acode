@@ -5,6 +5,7 @@ using Acode.Domain.Models.Inference;
 using Acode.Infrastructure.Vllm.Client;
 using Acode.Infrastructure.Vllm.Health;
 using Acode.Infrastructure.Vllm.Models;
+using Acode.Infrastructure.Vllm.StructuredOutput;
 using Microsoft.Extensions.Logging;
 
 namespace Acode.Infrastructure.Vllm;
@@ -21,6 +22,7 @@ public sealed class VllmProvider : IModelProvider, IAsyncDisposable
     private readonly VllmHttpClient _client;
     private readonly VllmHealthChecker _healthChecker;
     private readonly ILogger<VllmProvider> _logger;
+    private readonly StructuredOutputHandler? _structuredOutputHandler;
     private bool _disposed;
 
     /// <summary>
@@ -28,7 +30,8 @@ public sealed class VllmProvider : IModelProvider, IAsyncDisposable
     /// </summary>
     /// <param name="config">Client configuration.</param>
     /// <param name="loggerFactory">Logger factory for creating loggers.</param>
-    public VllmProvider(VllmClientConfiguration config, ILoggerFactory loggerFactory)
+    /// <param name="structuredOutputHandler">Optional structured output handler for enforcement.</param>
+    public VllmProvider(VllmClientConfiguration config, ILoggerFactory loggerFactory, StructuredOutputHandler? structuredOutputHandler = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         ArgumentNullException.ThrowIfNull(loggerFactory);
@@ -38,6 +41,7 @@ public sealed class VllmProvider : IModelProvider, IAsyncDisposable
         var clientLogger = loggerFactory.CreateLogger<VllmHttpClient>();
         _client = new VllmHttpClient(_config, clientLogger);
         _healthChecker = new VllmHealthChecker(_config);
+        _structuredOutputHandler = structuredOutputHandler;
         _disposed = false;
     }
 
@@ -63,6 +67,20 @@ public sealed class VllmProvider : IModelProvider, IAsyncDisposable
         var stopwatch = Stopwatch.StartNew();
 
         var vllmRequest = MapToVllmRequest(request);
+
+        // Apply structured output enrichment if handler available
+        if (this._structuredOutputHandler is not null)
+        {
+            await this._structuredOutputHandler.ApplyToRequestAsync(
+                vllmRequest,
+                request,
+                vllmRequest.Model,
+                cancellationToken).ConfigureAwait(false);
+
+            // ApplyResult indicates whether structured output was applied.
+            // The vllmRequest object has been directly modified if ApplyResult.IsApplied is true.
+        }
+
         var vllmResponse = await _client.SendRequestAsync(vllmRequest, cancellationToken).ConfigureAwait(false);
 
         stopwatch.Stop();
@@ -79,6 +97,20 @@ public sealed class VllmProvider : IModelProvider, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(request);
 
         var vllmRequest = MapToVllmRequest(request);
+
+        // Apply structured output enrichment if handler available
+        if (this._structuredOutputHandler is not null)
+        {
+            await this._structuredOutputHandler.ApplyToRequestAsync(
+                vllmRequest,
+                request,
+                vllmRequest.Model,
+                cancellationToken).ConfigureAwait(false);
+
+            // ApplyResult indicates whether structured output was applied.
+            // The vllmRequest object has been directly modified if ApplyResult.IsApplied is true.
+        }
+
         var index = 0;
 
         await foreach (var chunk in _client.StreamRequestAsync(vllmRequest, cancellationToken).ConfigureAwait(false))

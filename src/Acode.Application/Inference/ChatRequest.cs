@@ -20,11 +20,13 @@ public sealed record ChatRequest
     /// <param name="modelParameters">Model inference parameters.</param>
     /// <param name="tools">Available tools for the model to call.</param>
     /// <param name="stream">Whether to stream the response.</param>
+    /// <param name="responseFormat">Response format constraints for structured output.</param>
     public ChatRequest(
         ChatMessage[] messages,
         ModelParameters? modelParameters = null,
         ToolDefinition[]? tools = null,
-        bool stream = false)
+        bool stream = false,
+        ResponseFormat? responseFormat = null)
     {
         ArgumentNullException.ThrowIfNull(messages, "Messages");
 
@@ -37,6 +39,7 @@ public sealed record ChatRequest
         this.ModelParameters = modelParameters;
         this.Tools = tools;
         this.Stream = stream;
+        this.ResponseFormat = responseFormat;
     }
 
     /// <summary>
@@ -76,4 +79,14 @@ public sealed record ChatRequest
     /// </remarks>
     [JsonPropertyName("stream")]
     public bool Stream { get; init; }
+
+    /// <summary>
+    /// Gets the response format constraints for structured output.
+    /// </summary>
+    /// <remarks>
+    /// FR-008 to FR-014: Response format support for json_object and json_schema types.
+    /// </remarks>
+    [JsonPropertyName("responseFormat")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ResponseFormat? ResponseFormat { get; init; }
 }

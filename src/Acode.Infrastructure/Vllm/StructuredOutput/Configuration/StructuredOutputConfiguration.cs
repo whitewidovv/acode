@@ -139,4 +139,46 @@ public sealed class StructuredOutputConfiguration
             Fallback = this.Fallback,
         };
     }
+
+    /// <summary>
+    /// Determines if structured output is enabled for a specific model.
+    /// </summary>
+    /// <param name="modelId">The model identifier.</param>
+    /// <returns>True if structured output is enabled, false otherwise.</returns>
+    public bool IsEnabled(string modelId)
+    {
+        if (string.IsNullOrEmpty(modelId))
+        {
+            return false;
+        }
+
+        // Check model-specific override first (takes precedence over global setting)
+        if (this.Models.TryGetValue(modelId, out var modelConfig))
+        {
+            return modelConfig.Enabled;
+        }
+
+        // Fall back to global setting
+        return this.Enabled;
+    }
+
+    /// <summary>
+    /// Gets the fallback configuration for a specific model.
+    /// </summary>
+    /// <param name="modelId">The model identifier.</param>
+    /// <returns>The fallback configuration (model-specific or global).</returns>
+    public FallbackConfiguration GetFallbackConfig(string modelId)
+    {
+        if (string.IsNullOrEmpty(modelId))
+        {
+            return this.Fallback;
+        }
+
+        if (this.Models.TryGetValue(modelId, out var modelConfig) && modelConfig.Fallback != null)
+        {
+            return modelConfig.Fallback;
+        }
+
+        return this.Fallback;
+    }
 }

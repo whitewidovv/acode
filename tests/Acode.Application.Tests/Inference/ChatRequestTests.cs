@@ -5,6 +5,7 @@ using System.Text.Json;
 using Acode.Application.Inference;
 using Acode.Domain.Models.Inference;
 using FluentAssertions;
+using Xunit;
 
 /// <summary>
 /// Tests for ChatRequest record following TDD (RED phase).
@@ -146,5 +147,49 @@ public class ChatRequestTests
 
         request.Messages.Should().HaveCount(3);
         request.Messages.Should().BeEquivalentTo(messages, options => options.WithStrictOrdering());
+    }
+
+    [Fact]
+    public void Should_Accept_ResponseFormat()
+    {
+        // Arrange
+        var messages = new[] { ChatMessage.CreateUser("Hello") };
+        var format = new ResponseFormat { Type = "json_object" };
+
+        // Act
+        var request = new ChatRequest(messages, responseFormat: format);
+
+        // Assert
+        request.ResponseFormat.Should().NotBeNull();
+        request.ResponseFormat!.Type.Should().Be("json_object");
+    }
+
+    [Fact]
+    public void Should_Accept_Null_ResponseFormat()
+    {
+        // Arrange
+        var messages = new[] { ChatMessage.CreateUser("Hello") };
+
+        // Act
+        var request = new ChatRequest(messages, responseFormat: null);
+
+        // Assert
+        request.ResponseFormat.Should().BeNull();
+    }
+
+    [Fact]
+    public void Should_Preserve_ResponseFormat_In_JsonSerialization()
+    {
+        // Arrange
+        var messages = new[] { ChatMessage.CreateUser("Hello") };
+        var format = new ResponseFormat { Type = "json_schema" };
+        var request = new ChatRequest(messages, responseFormat: format);
+
+        // Act
+        var json = JsonSerializer.Serialize(request);
+
+        // Assert
+        json.Should().Contain("\"responseFormat\"");
+        json.Should().Contain("\"json_schema\"");
     }
 }
