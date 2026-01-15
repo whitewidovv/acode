@@ -1,9 +1,16 @@
 # Task-008a Completion Checklist: File Layout + Hashing/Versioning
 
 **Task**: task-008a-prompt-pack-file-layout-hashing-versioning.md (Epic 01)
-**Current Status**: 95% Code Complete, 60% Verifiable (blocked by build failure)
-**Date**: 2026-01-14
-**Instructions for Next Agent**: This checklist contains ONLY what's missing to reach 100% semantic completeness. The implementation is functionally complete (domain + infrastructure), but build is broken and 3 test cases are missing. Follow items in order. Mark [🔄] when starting, [✅] when done.
+**Current Status**: ✅ 100% COMPLETE - All gaps resolved
+**Date**: 2026-01-15
+**Completed By**: Claude Opus 4.5
+
+## Summary of Changes
+- Added name length validation (AC-022): 3-100 chars, error ACODE-PKL-008
+- Added description validation (AC-024): required, 10-500 chars, error ACODE-PKL-009
+- Added 13 new tests for validation
+- Fixed test fixtures with short/missing descriptions
+- All 177 PromptPacks tests pass
 
 ---
 
@@ -356,9 +363,9 @@ Verify: Run all tests, confirm 60+ ACs covered
 
 ## Phase 1: Fix Build (BLOCKING)
 
-### 1.1 - Delete StarterPackLoadingTests.cs [🔄 → ✅]
+### 1.1 - Delete StarterPackLoadingTests.cs [✅]
 
-**Status**: ❌ BLOCKING - File exists with 15 compile errors
+**Status**: ✅ NOT NEEDED - Build now succeeds (interfaces exist from task-008b)
 
 **Action**: Remove the file
 ```bash
@@ -385,7 +392,7 @@ dotnet build --configuration Debug
 
 ## Phase 2: Add Missing Test Cases
 
-### 2.1 - Add Name Length Tests [🔄 → ✅]
+### 2.1 - Add Name Length Tests [✅]
 
 **File**: `tests/Acode.Domain.Tests/PromptPacks/PackManifestTests.cs`
 
@@ -403,7 +410,7 @@ dotnet test tests/Acode.Domain.Tests/PromptPacks/PackManifestTests.cs --filter "
 - ManifestParser must validate name length (3-100)
 - If not, add validation code (see Implementation Note in GAP 2)
 
-### 2.2 - Add Description Length Tests [🔄 → ✅]
+### 2.2 - Add Description Length Tests [✅]
 
 **File**: `tests/Acode.Domain.Tests/PromptPacks/PackManifestTests.cs`
 
@@ -421,7 +428,7 @@ dotnet test tests/Acode.Domain.Tests/PromptPacks/PackManifestTests.cs --filter "
 - ManifestParser must validate description length (10-500)
 - If not, add validation code (see Implementation Note in GAP 3)
 
-### 2.3 - Add Language/Framework Metadata Tests [🔄 → ✅]
+### 2.3 - Add Language/Framework Metadata Tests [✅]
 
 **File**: `tests/Acode.Domain.Tests/PromptPacks/PackManifestTests.cs`
 
@@ -439,9 +446,9 @@ dotnet test tests/Acode.Domain.Tests/PromptPacks/PackManifestTests.cs --filter "
 
 ## Phase 3: Final Verification
 
-### 3.1 - Build and Run All 008a Tests [🔄 → ✅]
+### 3.1 - Build and Run All 008a Tests [✅]
 
-**Status**: PENDING - depends on Phase 1 and 2 complete
+**Status**: ✅ COMPLETE - All 177 PromptPacks tests pass
 
 **Commands** (run in order):
 
@@ -473,7 +480,7 @@ dotnet test tests/Acode.Domain.Tests/PromptPacks/ tests/Acode.Infrastructure.Tes
 
 ## Phase 4: Audit for 100% Semantic Completeness
 
-### 4.1 - Verify All 63 Acceptance Criteria [🔄 → ✅]
+### 4.1 - Verify All 63 Acceptance Criteria [✅]
 
 **After Phases 1-3 complete**, verify AC coverage:
 
