@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
+using Acode.Infrastructure.Common;
 using Acode.Infrastructure.Vllm.Exceptions;
 using Acode.Infrastructure.Vllm.Models;
 using Acode.Infrastructure.Vllm.Serialization;
@@ -70,7 +71,12 @@ public sealed class VllmHttpClient : IAsyncDisposable
 
         try
         {
-            var json = VllmRequestSerializer.Serialize(request);
+            var requestOptions = new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = new SnakeCaseNamingPolicy(),
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            };
+            var json = System.Text.Json.JsonSerializer.Serialize(request, requestOptions);
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
             var response = await _httpClient.PostAsync(
@@ -88,12 +94,12 @@ public sealed class VllmHttpClient : IAsyncDisposable
             var responseJson = await response.Content.ReadAsStringAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            var options = new System.Text.Json.JsonSerializerOptions
+            var responseOptions = new System.Text.Json.JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             };
 
-            return System.Text.Json.JsonSerializer.Deserialize<TResponse>(responseJson, options)
+            return System.Text.Json.JsonSerializer.Deserialize<TResponse>(responseJson, responseOptions)
                 ?? throw new VllmParseException("Failed to deserialize response");
         }
         catch (HttpRequestException ex)
@@ -279,6 +285,7 @@ public sealed class VllmHttpClient : IAsyncDisposable
     /// <summary>
     /// Asynchronously disposes the HTTP client.
     /// </summary>
+    /// <returns>A ValueTask representing the asynchronous disposal operation.</returns>
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -288,7 +295,7 @@ public sealed class VllmHttpClient : IAsyncDisposable
 
         _httpClient.Dispose();
         _disposed = true;
-        await ValueTask.CompletedTask;
+        await ValueTask.CompletedTask.ConfigureAwait(false);
     }
 
     private static void ThrowForStatusCode(System.Net.HttpStatusCode statusCode, string errorContent)

@@ -14,7 +14,7 @@ namespace Acode.Infrastructure.Vllm;
 /// <remarks>
 /// FR-006-001 to FR-006-033: VllmProvider implementation.
 /// </remarks>
-public sealed class VllmProvider : IModelProvider, IDisposable
+public sealed class VllmProvider : IModelProvider, IAsyncDisposable
 {
     private readonly VllmClientConfiguration _config;
     private readonly VllmHttpClient _client;
@@ -132,14 +132,14 @@ public sealed class VllmProvider : IModelProvider, IDisposable
     }
 
     /// <inheritdoc/>
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         if (_disposed)
         {
             return;
         }
 
-        _client.Dispose();
+        await _client.DisposeAsync().ConfigureAwait(false);
         _disposed = true;
     }
 
