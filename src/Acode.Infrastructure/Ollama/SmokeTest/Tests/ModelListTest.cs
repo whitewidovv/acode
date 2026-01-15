@@ -56,7 +56,7 @@ public sealed class ModelListTest : ISmokeTest
             }
 
             var content = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            var json = JsonDocument.Parse(content);
+            using var json = JsonDocument.Parse(content);
 
             // Parse models array
             if (!json.RootElement.TryGetProperty("models", out var modelsElement))

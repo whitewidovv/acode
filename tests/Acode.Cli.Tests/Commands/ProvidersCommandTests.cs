@@ -133,7 +133,7 @@ public sealed class ProvidersCommandTests
         };
 
         // Act
-        var exitCode = await command.ExecuteAsync(context).ConfigureAwait(true);
+        await command.ExecuteAsync(context).ConfigureAwait(true);
 
         // Assert - Verbose flag causes detailed output
         var outputText = this.output.ToString();

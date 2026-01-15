@@ -217,9 +217,11 @@ public sealed class SmokeTestTests
                 throw this.exception;
             }
 
+            // Create StringContent separately to ensure proper disposal by the caller
+            var content = new StringContent(this.content!);
             var response = new HttpResponseMessage(this.statusCode!.Value)
             {
-                Content = new StringContent(this.content!)
+                Content = content
             };
 
             return Task.FromResult(response);

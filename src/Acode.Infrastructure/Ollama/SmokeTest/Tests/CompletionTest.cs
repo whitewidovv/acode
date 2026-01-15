@@ -51,7 +51,7 @@ public sealed class CompletionTest : ISmokeTest
             };
 
             var json = JsonSerializer.Serialize(requestBody);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             var response = await this.httpClient.PostAsync(endpoint, content, cts.Token).ConfigureAwait(false);
 
@@ -72,7 +72,7 @@ public sealed class CompletionTest : ISmokeTest
             }
 
             var responseContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            var responseJson = JsonDocument.Parse(responseContent);
+            using var responseJson = JsonDocument.Parse(responseContent);
 
             stopwatch.Stop();
 

@@ -125,7 +125,7 @@ Exit Codes:
         var timeoutStr = this.GetFlagValue(args, "--timeout") ?? "60";
         var skipToolTest = this.HasFlag(args, "--skip-tool-test");
 
-        if (!int.TryParse(timeoutStr, out var timeoutSeconds))
+        if (!int.TryParse(timeoutStr, out var timeoutSeconds) || timeoutSeconds <= 0)
         {
             timeoutSeconds = 60;
         }

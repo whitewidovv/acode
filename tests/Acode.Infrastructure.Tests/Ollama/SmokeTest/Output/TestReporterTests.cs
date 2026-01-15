@@ -25,7 +25,7 @@ public sealed class TestReporterTests
         };
 
         var reporter = new TextTestReporter(verbose: false);
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         // Act
         reporter.Report(results, output);
@@ -59,7 +59,7 @@ public sealed class TestReporterTests
         };
 
         var reporter = new TextTestReporter(verbose: false);
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         // Act
         reporter.Report(results, output);
@@ -89,7 +89,7 @@ public sealed class TestReporterTests
         };
 
         var reporter = new TextTestReporter(verbose: false);
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         // Act
         reporter.Report(results, output);
@@ -116,7 +116,7 @@ public sealed class TestReporterTests
         };
 
         var reporter = new TextTestReporter(verbose: true);
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         // Act
         reporter.Report(results, output);
@@ -142,7 +142,7 @@ public sealed class TestReporterTests
         };
 
         var reporter = new JsonTestReporter();
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         // Act
         reporter.Report(results, output);
@@ -182,7 +182,7 @@ public sealed class TestReporterTests
         };
 
         var reporter = new JsonTestReporter();
-        var output = new StringWriter();
+        using var output = new StringWriter();
 
         // Act
         reporter.Report(results, output);
