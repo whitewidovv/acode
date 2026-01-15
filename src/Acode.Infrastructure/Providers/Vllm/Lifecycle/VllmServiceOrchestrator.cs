@@ -9,12 +9,15 @@ namespace Acode.Infrastructure.Providers.Vllm.Lifecycle;
 /// </summary>
 public sealed class VllmServiceOrchestrator : IVllmServiceOrchestrator
 {
+    private const int StartupPollingDelayMs = 100;
+
     private readonly VllmLifecycleOptions _options;
     private readonly VllmServiceStateTracker _stateTracker;
     private readonly VllmRestartPolicyEnforcer _restartPolicy;
     private readonly VllmGpuMonitor _gpuMonitor;
     private readonly VllmModelLoader _modelLoader;
     private readonly VllmHealthCheckWorker _healthCheckWorker;
+    private readonly object _modelLock = new();
 
     private string _currentModel = string.Empty;
     private bool _disposed;
@@ -24,7 +27,13 @@ public sealed class VllmServiceOrchestrator : IVllmServiceOrchestrator
     /// with default options.
     /// </summary>
     public VllmServiceOrchestrator()
-        : this(new VllmLifecycleOptions())
+        : this(
+            new VllmLifecycleOptions(),
+            new VllmServiceStateTracker(),
+            new VllmRestartPolicyEnforcer(),
+            new VllmGpuMonitor(),
+            new VllmModelLoader(),
+            new VllmHealthCheckWorker())
     {
     }
 
@@ -34,15 +43,42 @@ public sealed class VllmServiceOrchestrator : IVllmServiceOrchestrator
     /// </summary>
     /// <param name="options">Lifecycle configuration options.</param>
     public VllmServiceOrchestrator(VllmLifecycleOptions options)
+        : this(
+            options,
+            new VllmServiceStateTracker(),
+            new VllmRestartPolicyEnforcer(),
+            new VllmGpuMonitor(),
+            new VllmModelLoader(),
+            new VllmHealthCheckWorker())
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VllmServiceOrchestrator"/> class
+    /// with full dependency injection.
+    /// </summary>
+    /// <param name="options">Lifecycle configuration options.</param>
+    /// <param name="stateTracker">State tracker instance.</param>
+    /// <param name="restartPolicy">Restart policy enforcer instance.</param>
+    /// <param name="gpuMonitor">GPU monitor instance.</param>
+    /// <param name="modelLoader">Model loader instance.</param>
+    /// <param name="healthCheckWorker">Health check worker instance.</param>
+    public VllmServiceOrchestrator(
+        VllmLifecycleOptions options,
+        VllmServiceStateTracker stateTracker,
+        VllmRestartPolicyEnforcer restartPolicy,
+        VllmGpuMonitor gpuMonitor,
+        VllmModelLoader modelLoader,
+        VllmHealthCheckWorker healthCheckWorker)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _options.Validate();
+        _stateTracker = stateTracker ?? throw new ArgumentNullException(nameof(stateTracker));
+        _restartPolicy = restartPolicy ?? throw new ArgumentNullException(nameof(restartPolicy));
+        _gpuMonitor = gpuMonitor ?? throw new ArgumentNullException(nameof(gpuMonitor));
+        _modelLoader = modelLoader ?? throw new ArgumentNullException(nameof(modelLoader));
+        _healthCheckWorker = healthCheckWorker ?? throw new ArgumentNullException(nameof(healthCheckWorker));
 
-        _stateTracker = new VllmServiceStateTracker();
-        _restartPolicy = new VllmRestartPolicyEnforcer();
-        _gpuMonitor = new VllmGpuMonitor();
-        _modelLoader = new VllmModelLoader();
-        _healthCheckWorker = new VllmHealthCheckWorker();
+        _options.Validate();
 
         // Configure health check worker from options
         _healthCheckWorker.SetHealthCheckInterval(_options.HealthCheckIntervalSeconds);
@@ -54,7 +90,11 @@ public sealed class VllmServiceOrchestrator : IVllmServiceOrchestrator
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        var modelToUse = modelIdOverride ?? _currentModel;
+        string modelToUse;
+        lock (_modelLock)
+        {
+            modelToUse = modelIdOverride ?? _currentModel;
+        }
 
         // If no model configured, need to provide one
         if (string.IsNullOrEmpty(modelToUse))
@@ -74,7 +114,13 @@ public sealed class VllmServiceOrchestrator : IVllmServiceOrchestrator
         // If running and healthy, check if we need model switch
         if (currentState == VllmServiceState.Running && _healthCheckWorker.LastHealthCheckHealthy)
         {
-            if (modelIdOverride != null && modelIdOverride != _currentModel)
+            bool needsRestart;
+            lock (_modelLock)
+            {
+                needsRestart = modelIdOverride != null && modelIdOverride != _currentModel;
+            }
+
+            if (needsRestart)
             {
                 // Need to restart with new model
                 await RestartAsync(modelIdOverride, cancellationToken).ConfigureAwait(false);
@@ -96,7 +142,7 @@ public sealed class VllmServiceOrchestrator : IVllmServiceOrchestrator
         if (currentState == VllmServiceState.Starting)
         {
             // Wait for startup to complete (simplified - real implementation would poll)
-            await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(StartupPollingDelayMs, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -118,7 +164,11 @@ public sealed class VllmServiceOrchestrator : IVllmServiceOrchestrator
 
         // Transition to Starting state
         _stateTracker.Transition(VllmServiceState.Starting);
-        _currentModel = modelId;
+
+        lock (_modelLock)
+        {
+            _currentModel = modelId;
+        }
 
         try
         {
@@ -174,7 +224,11 @@ public sealed class VllmServiceOrchestrator : IVllmServiceOrchestrator
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        var modelToUse = modelId ?? _currentModel;
+        string modelToUse;
+        lock (_modelLock)
+        {
+            modelToUse = modelId ?? _currentModel;
+        }
 
         if (string.IsNullOrEmpty(modelToUse))
         {
@@ -209,12 +263,18 @@ public sealed class VllmServiceOrchestrator : IVllmServiceOrchestrator
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
+        string currentModel;
+        lock (_modelLock)
+        {
+            currentModel = _currentModel;
+        }
+
         var status = new VllmServiceStatus
         {
             State = _stateTracker.CurrentState,
             ProcessId = _stateTracker.ProcessId,
             UpSinceUtc = _stateTracker.UpSinceUtc,
-            CurrentModel = _currentModel,
+            CurrentModel = currentModel,
             GpuDevices = [], // Would be populated from GPU monitor
             LastHealthCheckUtc = _healthCheckWorker.LastHealthCheckUtc,
             LastHealthCheckHealthy = _healthCheckWorker.LastHealthCheckHealthy,
