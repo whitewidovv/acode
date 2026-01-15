@@ -98,10 +98,10 @@ public sealed class ErrorFormatter : IErrorFormatter
 
         var hintsAdded = new HashSet<string>();
 
-        foreach (var error in errors)
+        // Map errors to hints and filter null/duplicates explicitly
+        foreach (var hint in errors.Select(GenerateHintForError).Where(h => h is not null))
         {
-            var hint = GenerateHintForError(error);
-            if (hint is not null && hintsAdded.Add(hint))
+            if (hintsAdded.Add(hint!))
             {
                 sb.AppendLine($"  - {hint}");
             }
@@ -113,8 +113,8 @@ public sealed class ErrorFormatter : IErrorFormatter
         return error.ErrorCode switch
         {
             ErrorCode.RequiredFieldMissing => $"Add the required field '{ExtractFieldName(error.FieldPath)}'",
-            ErrorCode.TypeMismatch when error.ExpectedValue is not null => $"Change {ExtractFieldName(error.FieldPath)} to type {error.ExpectedValue}",
-            ErrorCode.TypeMismatch => $"Check the type of {ExtractFieldName(error.FieldPath)}",
+            ErrorCode.TypeMismatch when error.ExpectedValue is not null => $"Change '{ExtractFieldName(error.FieldPath)}' to type {error.ExpectedValue}",
+            ErrorCode.TypeMismatch => $"Check the type of '{ExtractFieldName(error.FieldPath)}'",
             ErrorCode.InvalidEnumValue when error.ExpectedValue is not null => $"Use one of: {error.ExpectedValue}",
             ErrorCode.PatternMismatch when error.ExpectedValue is not null => $"Match pattern: {error.ExpectedValue}",
             ErrorCode.StringLengthViolation => "Adjust string length to meet constraints",

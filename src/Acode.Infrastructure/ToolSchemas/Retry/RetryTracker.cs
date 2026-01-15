@@ -53,17 +53,7 @@ public sealed class RetryTracker : IRetryTracker
         ArgumentException.ThrowIfNullOrEmpty(errorMessage);
 
         var state = this.states.GetOrAdd(toolCallId, _ => new RetryState());
-
-        lock (state.History)
-        {
-            // Limit history to prevent unbounded memory growth
-            if (state.History.Count >= MaxHistoryEntries)
-            {
-                state.History.RemoveAt(0);
-            }
-
-            state.History.Add(errorMessage);
-        }
+        state.AddToHistory(errorMessage, MaxHistoryEntries);
     }
 
     /// <inheritdoc/>
@@ -76,11 +66,7 @@ public sealed class RetryTracker : IRetryTracker
             return Array.Empty<string>();
         }
 
-        lock (state.History)
-        {
-            // Return a copy to ensure thread safety
-            return state.History.ToList();
-        }
+        return state.GetHistoryCopy();
     }
 
     /// <inheritdoc/>
@@ -104,12 +90,9 @@ public sealed class RetryTracker : IRetryTracker
     /// </summary>
     private sealed class RetryState
     {
+        private readonly object historyLock = new();
+        private readonly List<string> history = new();
         private int attemptCount;
-
-        /// <summary>
-        /// Gets the history of error messages.
-        /// </summary>
-        public List<string> History { get; } = new();
 
         /// <summary>
         /// Increments the attempt count atomically and returns the new value.
@@ -122,5 +105,35 @@ public sealed class RetryTracker : IRetryTracker
         /// </summary>
         /// <returns>The current attempt count.</returns>
         public int ReadAttemptCount() => Volatile.Read(ref this.attemptCount);
+
+        /// <summary>
+        /// Adds an error message to the history with thread-safe synchronization.
+        /// </summary>
+        /// <param name="errorMessage">The error message to add.</param>
+        /// <param name="maxEntries">Maximum number of entries to retain.</param>
+        public void AddToHistory(string errorMessage, int maxEntries)
+        {
+            lock (this.historyLock)
+            {
+                if (this.history.Count >= maxEntries)
+                {
+                    this.history.RemoveAt(0);
+                }
+
+                this.history.Add(errorMessage);
+            }
+        }
+
+        /// <summary>
+        /// Gets a thread-safe copy of the history.
+        /// </summary>
+        /// <returns>A copy of the error history.</returns>
+        public IReadOnlyList<string> GetHistoryCopy()
+        {
+            lock (this.historyLock)
+            {
+                return this.history.ToList();
+            }
+        }
     }
 }

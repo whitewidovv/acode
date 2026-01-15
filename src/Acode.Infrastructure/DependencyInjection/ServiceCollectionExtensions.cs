@@ -259,8 +259,8 @@ public static class ServiceCollectionExtensions
 
         var config = configuration ?? new Application.ToolSchemas.Retry.RetryConfiguration();
 
-        // Register configuration as singleton
-        services.AddSingleton(config);
+        // Register configuration as singleton with explicit type to avoid DI conflicts
+        services.AddSingleton<Application.ToolSchemas.Retry.RetryConfiguration>(config);
 
         // Register retry contract services
         services.AddSingleton<IErrorFormatter, ErrorFormatter>();

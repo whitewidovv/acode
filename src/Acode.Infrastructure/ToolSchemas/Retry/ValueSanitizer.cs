@@ -140,7 +140,8 @@ public sealed partial class ValueSanitizer
         }
 
         // Check for generic long alphanumeric (potential secrets)
-        if (LongAlphanumericPattern.IsMatch(value) && value.Length >= 32)
+        // Note: Regex pattern already enforces length 32-64
+        if (LongAlphanumericPattern.IsMatch(value))
         {
             return "[REDACTED: POTENTIAL_SECRET]";
         }
@@ -151,7 +152,8 @@ public sealed partial class ValueSanitizer
     private static string RelativizePath(string value)
     {
         // Handle Unix-style absolute paths
-        if (value.StartsWith('/') && value.Contains('/', StringComparison.Ordinal))
+        // Note: StartsWith('/') guarantees Contains('/') is true
+        if (value.StartsWith('/'))
         {
             var parts = value.Split('/');
             if (parts.Length > 3)

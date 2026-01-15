@@ -149,14 +149,14 @@ public sealed class RetryContractIntegrationTests
     {
         // Arrange
         const int concurrentCalls = 100;
-        var tracker = new RetryTracker(maxAttempts: 10);
+        var concurrentTracker = new RetryTracker(maxAttempts: 10);
         var tasks = new List<Task<int>>();
 
         // Act - 100 concurrent tool calls, each incrementing once
         for (int i = 0; i < concurrentCalls; i++)
         {
             var toolCallId = $"concurrent-call-{i}";
-            tasks.Add(Task.Run(() => tracker.IncrementAttempt(toolCallId)));
+            tasks.Add(Task.Run(() => concurrentTracker.IncrementAttempt(toolCallId)));
         }
 
         var results = await Task.WhenAll(tasks);
@@ -169,7 +169,7 @@ public sealed class RetryContractIntegrationTests
         for (int i = 0; i < concurrentCalls; i++)
         {
             var toolCallId = $"concurrent-call-{i}";
-            tracker.GetCurrentAttempt(toolCallId).Should().Be(1);
+            concurrentTracker.GetCurrentAttempt(toolCallId).Should().Be(1);
         }
     }
 

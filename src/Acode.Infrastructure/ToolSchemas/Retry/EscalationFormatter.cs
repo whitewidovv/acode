@@ -1,6 +1,8 @@
 using System.Text;
 using Acode.Application.ToolSchemas.Retry;
 
+#pragma warning disable SA1512 // Single-line comments should not be followed by blank line
+
 namespace Acode.Infrastructure.ToolSchemas.Retry;
 
 /// <summary>
@@ -41,13 +43,10 @@ public sealed class EscalationFormatter : IEscalationFormatter
             {
                 sb.AppendLine($"  Attempt {i + 1}:");
 
-                // Indent each line of the error message
-                foreach (var line in validationHistory[i].Split('\n'))
+                // Indent each line of the error message (filter empty lines explicitly)
+                foreach (var line in validationHistory[i].Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)))
                 {
-                    if (!string.IsNullOrWhiteSpace(line))
-                    {
-                        sb.AppendLine($"    {line.TrimEnd()}");
-                    }
+                    sb.AppendLine($"    {line.TrimEnd()}");
                 }
 
                 sb.AppendLine();
