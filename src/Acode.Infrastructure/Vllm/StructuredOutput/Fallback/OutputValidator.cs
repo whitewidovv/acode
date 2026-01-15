@@ -164,7 +164,7 @@ public sealed class OutputValidator
                 continue;
             }
 
-            if (c == '"' && !escaped)
+            if (c == '"')
             {
                 inString = !inString;
                 continue;

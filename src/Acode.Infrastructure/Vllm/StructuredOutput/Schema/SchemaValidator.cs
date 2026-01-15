@@ -116,15 +116,8 @@ public sealed class SchemaValidator
             }
         }
 
-        // Check nested elements
-        foreach (var prop in element.EnumerateObject())
-        {
-            if (this.HasExternalRefs(prop.Value))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        // Check nested elements - return true if any property has external refs
+        return element.EnumerateObject()
+            .Any(prop => this.HasExternalRefs(prop.Value));
     }
 }

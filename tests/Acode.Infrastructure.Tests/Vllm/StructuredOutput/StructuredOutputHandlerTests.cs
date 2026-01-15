@@ -75,9 +75,18 @@ public class StructuredOutputHandlerTests
     [Fact]
     public async Task EnrichRequestAsync_WithDisabledStructuredOutput_ReturnsFailed()
     {
-        // Arrange
-        this._config.Enabled = false;
-        var handler = this.CreateHandler();
+        // Arrange - Create a separate disabled config to avoid mutating shared instance
+        var disabledConfig = new StructuredOutputConfiguration { Enabled = false };
+        var handler = new StructuredOutputHandler(
+            disabledConfig,
+            this._schemaValidator,
+            this._capabilityDetector,
+            this._capabilityCache,
+            this._responseFormatBuilder,
+            this._guidedDecodingBuilder,
+            this._fallbackHandler,
+            Substitute.For<ILogger<StructuredOutputHandler>>(),
+            Substitute.For<IToolSchemaRegistry>());
         var modelId = "llama2";
         var schema = JsonDocument.Parse(@"{""type"":""object""}").RootElement;
 
@@ -108,7 +117,7 @@ public class StructuredOutputHandlerTests
             propertiesList.Append("\"prop").Append(i).Append("\":{\"type\":\"string\",\"description\":\"This is a very long description to help fill space in the schema\"}");
         }
 
-        var schemaJson = "{\"type\":\"object\",\"properties\":{" + propertiesList.ToString() + "}}";
+        var schemaJson = $"{{\"type\":\"object\",\"properties\":{{{propertiesList}}}}}";
         var schema = JsonDocument.Parse(schemaJson).RootElement;
 
         // Act

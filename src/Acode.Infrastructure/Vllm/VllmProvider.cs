@@ -74,7 +74,7 @@ public sealed class VllmProvider : IModelProvider, IDisposable
         // Apply structured output enrichment if handler available
         if (this._structuredOutputHandler is not null)
         {
-            var applyResult = await this._structuredOutputHandler.ApplyToRequestAsync(
+            await this._structuredOutputHandler.ApplyToRequestAsync(
                 vllmRequest,
                 request,
                 vllmRequest.Model,
@@ -104,7 +104,7 @@ public sealed class VllmProvider : IModelProvider, IDisposable
         // Apply structured output enrichment if handler available
         if (this._structuredOutputHandler is not null)
         {
-            var applyResult = await this._structuredOutputHandler.ApplyToRequestAsync(
+            await this._structuredOutputHandler.ApplyToRequestAsync(
                 vllmRequest,
                 request,
                 vllmRequest.Model,

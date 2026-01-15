@@ -92,14 +92,10 @@ public sealed class GuidedDecodingBuilder
         // Check for enum constraint (choice)
         if (schema.TryGetProperty("enum", out var enumProperty) && enumProperty.ValueKind == JsonValueKind.Array)
         {
-            var choices = new List<string>();
-            foreach (var item in enumProperty.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.String)
-                {
-                    choices.Add(item.GetString() ?? string.Empty);
-                }
-            }
+            var choices = enumProperty.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString() ?? string.Empty)
+                .ToList();
 
             if (choices.Count > 0)
             {

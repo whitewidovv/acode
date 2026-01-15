@@ -98,7 +98,7 @@ public class FallbackHandlerTests
         var schema = @"{""type"":""object""}";
 
         // Act
-        var result = handler.Handle(context, schema);
+        handler.Handle(context, schema);
 
         // Assert
         context.FallbackAttempts.Should().Be(1);

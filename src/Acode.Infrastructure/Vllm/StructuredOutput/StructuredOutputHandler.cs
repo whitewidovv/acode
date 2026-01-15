@@ -367,14 +367,12 @@ public sealed class StructuredOutputHandler
 
     private async Task<ModelCapabilities?> GetModelCapabilitiesAsync(string modelId, CancellationToken cancellationToken)
     {
-        // Try cache first
-        if (this._capabilityCache.TryGetCached(modelId, out var cached) && cached != null)
+        // Try cache first - return if valid and doesn't need refresh
+        if (this._capabilityCache.TryGetCached(modelId, out var cached)
+            && cached != null
+            && !this._capabilityDetector.RequiresRefresh(cached))
         {
-            // Check if refresh needed
-            if (!this._capabilityDetector.RequiresRefresh(cached))
-            {
-                return cached;
-            }
+            return cached;
         }
 
         // Detect capabilities
