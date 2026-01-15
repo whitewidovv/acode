@@ -160,7 +160,7 @@ public class VllmSseReaderTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
 #pragma warning disable CA2007
-            await foreach (var evt in reader.ReadEventsAsync(stream, cts.Token))
+            await foreach (var unused in reader.ReadEventsAsync(stream, cts.Token))
             {
                 // Would iterate events
             }

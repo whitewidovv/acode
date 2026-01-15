@@ -15,10 +15,10 @@ public class VllmProviderTests
     {
         // Arrange
         var config = new VllmClientConfiguration();
-        var logger = Substitute.For<ILogger<VllmProvider>>();
+        var loggerFactory = Substitute.For<ILoggerFactory>();
 
         // Act
-        var provider = new VllmProvider(config, logger);
+        var provider = new VllmProvider(config, loggerFactory);
 
         // Assert
         provider.ProviderName.Should().Be("vllm");
@@ -29,8 +29,8 @@ public class VllmProviderTests
     {
         // Arrange
         var config = new VllmClientConfiguration();
-        var logger = Substitute.For<ILogger<VllmProvider>>();
-        var provider = new VllmProvider(config, logger);
+        var loggerFactory = Substitute.For<ILoggerFactory>();
+        var provider = new VllmProvider(config, loggerFactory);
 
         // Act
         var capabilities = provider.Capabilities;
@@ -46,8 +46,8 @@ public class VllmProviderTests
     {
         // Arrange
         var config = new VllmClientConfiguration();
-        var logger = Substitute.For<ILogger<VllmProvider>>();
-        var provider = new VllmProvider(config, logger);
+        var loggerFactory = Substitute.For<ILoggerFactory>();
+        var provider = new VllmProvider(config, loggerFactory);
 
         // Act
         var models = provider.GetSupportedModels();
@@ -65,8 +65,8 @@ public class VllmProviderTests
         {
             Endpoint = "http://localhost:9999"
         };
-        var logger = Substitute.For<ILogger<VllmProvider>>();
-        var provider = new VllmProvider(config, logger);
+        var loggerFactory = Substitute.For<ILoggerFactory>();
+        var provider = new VllmProvider(config, loggerFactory);
 
         // Act
 #pragma warning disable CA2007
@@ -85,8 +85,8 @@ public class VllmProviderTests
         {
             Endpoint = "http://localhost:9999"
         };
-        var logger = Substitute.For<ILogger<VllmProvider>>();
-        var provider = new VllmProvider(config, logger);
+        var loggerFactory = Substitute.For<ILoggerFactory>();
+        var provider = new VllmProvider(config, loggerFactory);
 
         var request = new ChatRequest(
             messages: new[] { ChatMessage.CreateUser("Hello") },
@@ -107,8 +107,8 @@ public class VllmProviderTests
         {
             Endpoint = "http://localhost:9999"
         };
-        var logger = Substitute.For<ILogger<VllmProvider>>();
-        var provider = new VllmProvider(config, logger);
+        var loggerFactory = Substitute.For<ILoggerFactory>();
+        var provider = new VllmProvider(config, loggerFactory);
 
         var request = new ChatRequest(
             messages: new[] { ChatMessage.CreateUser("Hello") },
@@ -131,8 +131,8 @@ public class VllmProviderTests
     {
         // Arrange
         var config = new VllmClientConfiguration();
-        var logger = Substitute.For<ILogger<VllmProvider>>();
-        var provider = new VllmProvider(config, logger);
+        var loggerFactory = Substitute.For<ILoggerFactory>();
+        var provider = new VllmProvider(config, loggerFactory);
 
         // Act
         await provider.DisposeAsync();

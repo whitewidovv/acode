@@ -270,7 +270,7 @@ public class VllmHttpClientTests
         // Should throw connection error when trying to stream
         await Assert.ThrowsAsync<VllmConnectionException>(async () =>
         {
-            await foreach (var chunk in stream)
+            await foreach (var unused in stream)
             {
                 // Would process chunks here
             }
@@ -304,7 +304,7 @@ public class VllmHttpClientTests
 
         await Assert.ThrowsAsync<VllmConnectionException>(async () =>
         {
-            await foreach (var chunk in stream)
+            await foreach (var unused in stream)
             {
                 // Would process chunks here
             }

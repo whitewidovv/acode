@@ -108,7 +108,7 @@ public sealed class VllmHttpClient : IAsyncDisposable
                     var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
                     // FR-027: Create request message with correlation ID header
-                    var requestMessage = new HttpRequestMessage(HttpMethod.Post, path)
+                    using var requestMessage = new HttpRequestMessage(HttpMethod.Post, path)
                     {
                         Content = content
                     };
@@ -191,7 +191,7 @@ public sealed class VllmHttpClient : IAsyncDisposable
             var json = VllmRequestSerializer.Serialize(request);
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-            var requestMessage = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions")
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions")
             {
                 Content = content
             };
@@ -273,7 +273,7 @@ public sealed class VllmHttpClient : IAsyncDisposable
         var json = System.Text.Json.JsonSerializer.Serialize(request, requestOptions);
         var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-        var requestMessage = new HttpRequestMessage(HttpMethod.Post, path)
+        using var requestMessage = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = content
         };
@@ -336,6 +336,7 @@ public sealed class VllmHttpClient : IAsyncDisposable
         }
         finally
         {
+            stream?.Dispose();
             response?.Dispose();
         }
     }
@@ -426,6 +427,7 @@ public sealed class VllmHttpClient : IAsyncDisposable
         }
         finally
         {
+            stream?.Dispose();
             response?.Dispose();
         }
     }
@@ -434,16 +436,16 @@ public sealed class VllmHttpClient : IAsyncDisposable
     /// Asynchronously disposes the HTTP client.
     /// </summary>
     /// <returns>A ValueTask representing the asynchronous disposal operation.</returns>
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return default;
         }
 
         _httpClient.Dispose();
         _disposed = true;
-        await ValueTask.CompletedTask.ConfigureAwait(false);
+        return default;
     }
 
     private static void ThrowForStatusCode(System.Net.HttpStatusCode statusCode, string errorContent)

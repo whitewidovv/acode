@@ -27,14 +27,15 @@ public sealed class VllmProvider : IModelProvider, IAsyncDisposable
     /// Initializes a new instance of the <see cref="VllmProvider"/> class.
     /// </summary>
     /// <param name="config">Client configuration.</param>
-    /// <param name="logger">Logger for diagnostic output.</param>
-    public VllmProvider(VllmClientConfiguration config, ILogger<VllmProvider> logger)
+    /// <param name="loggerFactory">Logger factory for creating loggers.</param>
+    public VllmProvider(VllmClientConfiguration config, ILoggerFactory loggerFactory)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(loggerFactory);
         _config.Validate();
 
-        var clientLogger = Microsoft.Extensions.Logging.Abstractions.NullLogger<VllmHttpClient>.Instance;
+        _logger = loggerFactory.CreateLogger<VllmProvider>();
+        var clientLogger = loggerFactory.CreateLogger<VllmHttpClient>();
         _client = new VllmHttpClient(_config, clientLogger);
         _healthChecker = new VllmHealthChecker(_config);
         _disposed = false;
