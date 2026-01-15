@@ -58,6 +58,8 @@
 
 #### Setup docs + smoke test script
 
+#### Ollama lifecycle management (auto-start, health monitoring, crash recovery)
+
 ### Task 006: vLLM Provider Adapter
 
 #### Implement serving assumptions + client adapter
@@ -65,6 +67,8 @@
 #### Structured outputs enforcement integration
 
 #### Load/health-check endpoints + error handling
+
+#### vLLM lifecycle management (auto-start, health monitoring, GPU management)
 
 ### Task 007: Tool Schema Registry + Strict Validation
 

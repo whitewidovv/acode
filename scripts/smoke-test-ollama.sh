@@ -117,6 +117,56 @@ log_verbose() {
     fi
 }
 
+log_warn() {
+    if [[ "$QUIET" == "false" ]]; then
+        echo -e "${YELLOW}[WARN]${NC} $1"
+    fi
+}
+
+# Version checking function (FR-078 to FR-081)
+check_ollama_version() {
+    log_verbose "Checking Ollama version..."
+
+    # Try to get Ollama version
+    if command -v ollama >/dev/null 2>&1; then
+        local version_output
+        version_output=$(ollama --version 2>&1 || true)
+
+        # Parse version string (format: "ollama version is 0.1.30")
+        if [[ $version_output =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            local version="${BASH_REMATCH[1]}"
+            log_verbose "Detected Ollama version: $version"
+
+            # Parse version components
+            IFS='.' read -r major minor patch <<< "$version"
+
+            # Check minimum version (0.1.23)
+            if (( major < 0 )) || \
+               (( major == 0 && minor < 1 )) || \
+               (( major == 0 && minor == 1 && patch < 23 )); then
+                log_warn "Ollama version $version is below minimum supported version 0.1.23"
+                log_warn "Some features may not work correctly. Please upgrade Ollama."
+            # Check if above tested maximum (0.1.35)
+            elif (( major > 0 )) || \
+                 (( major == 0 && minor > 1 )) || \
+                 (( major == 0 && minor == 1 && patch > 35 )); then
+                log_warn "Ollama version $version is above tested maximum 0.1.35"
+                log_warn "This version has not been explicitly tested. Please report any issues."
+            else
+                log_verbose "Ollama version $version is within supported range (0.1.23 to 0.1.35)"
+            fi
+        else
+            log_verbose "Could not parse version from output: $version_output"
+        fi
+    else
+        log_verbose "Could not check Ollama version (command not found)"
+    fi
+
+    # FR-081: Version check failure MUST NOT block tests
+    # Always return without error
+    return 0
+}
+
 # Start time tracking
 test_start_time() {
     date +%s%N | cut -b1-13
@@ -359,6 +409,9 @@ main() {
         echo "========================================"
         echo ""
     fi
+
+    # Check Ollama version (FR-078 to FR-081)
+    check_ollama_version
 
     # Run tests in order
     # Configuration check tests (exit 2 on failure)

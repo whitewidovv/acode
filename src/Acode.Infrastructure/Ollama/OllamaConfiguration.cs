@@ -1,6 +1,7 @@
 namespace Acode.Infrastructure.Ollama;
 
 using System;
+using Acode.Infrastructure.Ollama.ToolCall.Models;
 
 /// <summary>
 /// Configuration settings for Ollama provider.
@@ -107,6 +108,25 @@ public sealed record OllamaConfiguration
     /// FR-005-022: EnableRetry defaults to true.
     /// </remarks>
     public bool EnableRetry { get; init; }
+
+    /// <summary>
+    /// Gets the configuration for tool call retry behavior.
+    /// </summary>
+    /// <remarks>
+    /// FR-053: Tool call parsing with configurable retry on malformed JSON.
+    /// Defaults to 3 retries with 100ms base delay and automatic repair enabled.
+    /// </remarks>
+    public RetryConfig ToolCallRetryConfig { get; init; } = new RetryConfig
+    {
+        MaxRetries = 3,
+        EnableAutoRepair = true,
+        RetryDelayMs = 100,
+        RepairTimeoutMs = 100,
+        StrictValidation = true,
+        MaxNestingDepth = 64,
+        MaxArgumentSize = 1_048_576, // 1MB
+        RetryPromptTemplate = RetryConfig.DefaultRetryPromptTemplate,
+    };
 
     /// <summary>
     /// Gets the request timeout as TimeSpan.
